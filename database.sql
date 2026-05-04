@@ -223,9 +223,9 @@ INSERT INTO `metodos_pago` (`nombre`) VALUES
   ('Cheque');
 
 INSERT INTO `usuarios` (`nombre`,`email`,`contrasena`,`id_rol`,`id_almacen`,`estado`) VALUES
-  ('Administrador','admin@system.local','$2y$10$7EQYq1s2f23up6x5JM1YZO.nwPdO0Q1Hw02B0yRuBWtTkQ2QpX6C9u',1,NULL,'activo'),
-  ('Encargado Sucursal','encargado@system.local','$2y$10$7EQYq1s2f23up6x5JM1YZO.nwPdO0Q1Hw02B0yRuBWtTkQ2QpX6C9u',2,2,'activo'),
-  ('Vendedor Demo','vendedor@system.local','$2y$10$7EQYq1s2f23up6x5JM1YZO.nwPdO0Q1Hw02B0yRuBWtTkQ2QpX6C9u',3,2,'activo');
+  ('Administrador','admin@system.local','$2y$10$PhPsKkdX3Tz9qh6.CtebBum33IdHlLjrJ..NOWt8ObFkvOTikSBce',1,NULL,'activo'),
+  ('Encargado Sucursal','encargado@system.local','$2y$10$PhPsKkdX3Tz9qh6.CtebBum33IdHlLjrJ..NOWt8ObFkvOTikSBce',2,2,'activo'),
+  ('Vendedor Demo','vendedor@system.local','$2y$10$PhPsKkdX3Tz9qh6.CtebBum33IdHlLjrJ..NOWt8ObFkvOTikSBce',3,2,'activo');
 
 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;
 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS;
