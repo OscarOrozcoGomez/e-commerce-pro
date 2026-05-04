@@ -34,7 +34,7 @@ include __DIR__ . '/views/includes/footer.php';
             const productsContainer = document.getElementById('products-container');
 
             function loadProducts(search = '') {
-                fetch('../api/products.php?search=' + encodeURIComponent(search))
+                fetch('<?php echo BASE_URL; ?>api/products.php?search=' + encodeURIComponent(search))
                     .then(response => response.json())
                     .then(data => {
                         productsContainer.innerHTML = '';

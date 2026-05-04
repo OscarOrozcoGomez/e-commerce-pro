@@ -15,7 +15,7 @@ const DB_PASS = '';
 const DB_CHARSET = 'utf8mb4';
 
 // Rutas y constantes del proyecto
-const BASE_URL = '/';
+const BASE_URL = '/e-commerce-pro/';
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
 

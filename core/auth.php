@@ -77,9 +77,12 @@ function getCurrentAlmacenId(): ?int
  * @param string $redirectUrl
  * @return void
  */
-function requireAuth(string $redirectUrl = 'views/login.php'): void
+function requireAuth(string $redirectUrl = ''): void
 {
     if (!isAuthenticated()) {
+        if ($redirectUrl === '') {
+            $redirectUrl = BASE_URL . 'views/login.php';
+        }
         header("Location: {$redirectUrl}");
         exit;
     }
@@ -92,9 +95,12 @@ function requireAuth(string $redirectUrl = 'views/login.php'): void
  * @param string $redirectUrl
  * @return void
  */
-function requirePermission(string $permiso, string $redirectUrl = 'index.php'): void
+function requirePermission(string $permiso, string $redirectUrl = ''): void
 {
     if (!hasPermission($permiso)) {
+        if ($redirectUrl === '') {
+            $redirectUrl = BASE_URL . 'index.php';
+        }
         header("Location: {$redirectUrl}");
         exit;
     }
@@ -143,6 +149,6 @@ function authenticate(string $email, string $password): bool
 function logout(): void
 {
     session_destroy();
-    header('Location: ../views/login.php');
+    header('Location: ' . BASE_URL . 'views/login.php');
     exit;
 }

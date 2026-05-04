@@ -3,7 +3,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 if (isAuthenticated()) {
-    header('Location: index.php');
+    header('Location: ' . BASE_URL . 'index.php');
     exit;
 }
 
@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $_POST['password'] ?? '';
 
     if (authenticate($email, $password)) {
-        header('Location: index.php');
+        header('Location: ' . BASE_URL . 'index.php');
         exit;
     } else {
         $error = 'Credenciales incorrectas.';
