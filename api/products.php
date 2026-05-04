@@ -12,12 +12,11 @@ $almacenId = getCurrentAlmacenId();
 try {
     $pdo = getPDO();
 
-    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, COALESCE(i.cantidad_actual, 0) as stock
+    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, p.precio_costo, p.categoria
             FROM productos p
-            LEFT JOIN inventario_almacen i ON p.id_producto = i.id_producto AND i.id_almacen = :almacen_id
             WHERE p.estado = 'activo'";
 
-    $params = [':almacen_id' => $almacenId];
+    $params = [];
 
     if ($search !== '') {
         $sql .= " AND (p.nombre LIKE :search OR p.sku LIKE :search)";

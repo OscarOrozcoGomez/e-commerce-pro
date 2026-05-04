@@ -25,7 +25,7 @@ include __DIR__ . '/views/includes/header.php';
     </div>
 
 <?php
-include __DIR__ . '/../views/includes/footer.php';
+include __DIR__ . '/views/includes/footer.php';
 ?>
 
     <script>
