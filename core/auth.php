@@ -11,6 +11,39 @@ function isAuthenticated(): bool
     return isset($_SESSION['usuario']) && !empty($_SESSION['usuario']);
 }
 
+/**
+ * Registra una acción en el log de auditoría.
+ */
+function logAudit(string $accion, string $tabla, ?int $id_registro, string $detalles): void
+{
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare("INSERT INTO logs_auditoria (id_usuario, accion, tabla_afectada, id_registro, detalles, ip_address) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $_SESSION['usuario']['id_usuario'] ?? null,
+            $accion,
+            $tabla,
+            $id_registro,
+            $detalles,
+            $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'
+        ]);
+    } catch (Throwable $e) {
+        // En producción, podrías loguear esto a un archivo para no detener el flujo
+        error_log("Error en auditoría: " . $e->getMessage());
+    }
+}
+
+/**
+ * Configura cabeceras de seguridad HTTP esenciales.
+ */
+function setSecurityHeaders(): void
+{
+    header("X-Frame-Options: DENY");
+    header("X-Content-Type-Options: nosniff");
+    header("Referrer-Policy: strict-origin-when-cross-origin");
+    header("Content-Security-Policy: default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;");
+}
+
 function getCsrfToken(): string
 {
     if (!isset($_SESSION['csrf_token'])) {
@@ -42,6 +75,11 @@ function hasPermission(string $permiso): bool
 {
     if (!isAuthenticated()) {
         return false;
+    }
+
+    // Si es admin, tiene todos los permisos por defecto
+    if (isAdmin()) {
+        return true;
     }
 
     $usuario = $_SESSION['usuario'];
@@ -156,6 +194,8 @@ function authenticate(string $email, string $password): bool
     if ($user && password_verify($password, $user['contrasena'])) {
         $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
         $_SESSION['usuario'] = $user;
+        
+        logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
     }
 

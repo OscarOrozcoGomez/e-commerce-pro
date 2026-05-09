@@ -65,7 +65,7 @@ include __DIR__ . '/includes/header.php';
                                             <td><?php echo esc($apt['numero_pedido']); ?></td>
                                             <td><?php echo esc($apt['cliente'] ?? 'Cliente General'); ?></td>
                                             <td><?php echo esc($apt['telefono'] ?? 'N/A'); ?></td>
-                                            <td>$<?php echo number_format($apt['total'], 2); ?></td>
+                                            <td>$<?php echo number_format((float)$apt['total'], 2); ?></td>
                                             <td><?php echo esc($apt['estado']); ?></td>
                                             <td><?php echo date('d/m/Y', strtotime($apt['fecha_creacion'])); ?></td>
                                             <td>
@@ -78,7 +78,7 @@ include __DIR__ . '/includes/header.php';
                                             <div class="modal-content">
                                                 <h4><?php echo esc($apt['numero_pedido']); ?></h4>
                                                 <p><strong>Cliente:</strong> <?php echo esc($apt['cliente'] ?? 'Cliente General'); ?></p>
-                                                <p><strong>Total:</strong> $<?php echo number_format($apt['total'], 2); ?></p>
+                                                <p><strong>Total:</strong> $<?php echo number_format((float)$apt['total'], 2); ?></p>
                                                 <p><strong>Estado:</strong> <?php echo esc($apt['estado']); ?></p>
                                             </div>
                                             <div class="modal-footer">

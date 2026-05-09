@@ -19,21 +19,23 @@ $fecha_fin = isset($_GET['fecha_fin']) ? htmlspecialchars($_GET['fecha_fin']) : 
 try {
     if (isAdmin()) {
         // Admin: todas las ventas
-        $sql = "SELECT p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen
+        $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo
                 FROM pedidos p
                 JOIN usuarios u ON p.id_usuario = u.id_usuario
                 JOIN almacenes a ON p.id_almacen = a.id_almacen
+                LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
                 WHERE DATE(p.fecha_creacion) BETWEEN :inicio AND :fin
                 AND p.estado != 'cancelado'
                 ORDER BY p.fecha_creacion DESC
                 LIMIT 100";
     } else {
         // Encargado/Vendedor: sus ventas
-        $sql = "SELECT p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen
+        $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo
                 FROM pedidos p
                 JOIN usuarios u ON p.id_usuario = u.id_usuario
                 JOIN almacenes a ON p.id_almacen = a.id_almacen
-                WHERE p.id_usuario = :usuario
+                LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
+                WHERE (p.id_usuario = :usuario OR p.id_almacen = :almacen)
                 AND DATE(p.fecha_creacion) BETWEEN :inicio AND :fin
                 AND p.estado != 'cancelado'
                 ORDER BY p.fecha_creacion DESC
@@ -47,6 +49,7 @@ try {
     } else {
         $stmt->execute([
             ':usuario' => $usuario['id_usuario'],
+            ':almacen' => $usuario['id_almacen'] ?? 0,
             ':inicio' => $fecha_inicio,
             ':fin' => $fecha_fin,
         ]);
@@ -73,7 +76,16 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4>Reportes del Sistema</h4>
+            <h4 style="display: inline-block;">Reportes del Sistema</h4>
+            <div class="right-align no-print" style="display: inline-block; float: right; margin-top: 20px;">
+                <a href="<?php echo BASE_URL; ?>api/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>" 
+                   class="btn green waves-effect waves-light">
+                    Excel <i class="material-icons right">description</i>
+                </a>
+                <button onclick="window.print()" class="btn red waves-effect waves-light">
+                    PDF <i class="material-icons right">picture_as_pdf</i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -81,7 +93,7 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <div class="col s12">
             <div class="card">
-                <div class="card-content">
+                <div class="card-content no-print">
                     <form method="GET" class="row">
                         <div class="input-field col s6 m3">
                             <input type="date" id="fecha_inicio" name="fecha_inicio" value="<?php echo esc($fecha_inicio); ?>">
@@ -147,6 +159,7 @@ include __DIR__ . '/includes/header.php';
                                         <th>Número Pedido</th>
                                         <th>Vendedor</th>
                                         <th>Almacén</th>
+                                        <th>Método</th>
                                         <th>Monto</th>
                                         <th>Fecha</th>
                                     </tr>
@@ -157,7 +170,8 @@ include __DIR__ . '/includes/header.php';
                                             <td><?php echo esc($venta['numero_pedido']); ?></td>
                                             <td><?php echo esc($venta['vendedor']); ?></td>
                                             <td><?php echo esc($venta['almacen']); ?></td>
-                                            <td>$<?php echo number_format($venta['total'], 2); ?></td>
+                                            <td><?php echo esc($venta['metodo'] ?? 'N/A'); ?></td>
+                                            <td>$<?php echo number_format((float)$venta['total'], 2); ?></td>
                                             <td><?php echo date('d/m/Y H:i', strtotime($venta['fecha_creacion'])); ?></td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -176,6 +190,17 @@ include __DIR__ . '/includes/header.php';
         font-size: 2rem;
         font-weight: bold;
         margin: 10px 0;
+    }
+    @media print {
+        .no-print, .nav-wrapper, nav, .input-field, form, .btn, footer {
+            display: none !important;
+        }
+        .container { width: 100% !important; max-width: none !important; margin: 0 !important; }
+        .card { box-shadow: none !important; border: 1px solid #ddd; }
+        .card-title { color: black !important; font-weight: bold; }
+        h4 { margin-top: 0; }
+        body { background: white !important; }
+        table { border: 1px solid #ddd; }
     }
 </style>
 

@@ -15,13 +15,10 @@ $success = '';
 
 // Obtener productos disponibles
 try {
-    $sql = "SELECT p.id_producto, p.nombre, p.precio_venta, 
-                   ia.cantidad_actual 
-            FROM productos p
-            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto 
-                AND ia.id_almacen = :almacen
-            WHERE p.estado = 'activo'
-            ORDER BY p.nombre";
+    $sql = "SELECT p.*, ia.cantidad_actual 
+            FROM productos p 
+            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :almacen
+            WHERE p.estado = 'activo' ORDER BY p.nombre ASC, p.nombre_variante ASC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':almacen' => $usuario['id_almacen']]);
     $productos = $stmt->fetchAll();
@@ -133,7 +130,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="divider"></div>
                             <p>
                                 <strong><?php echo esc($venta['numero_pedido']); ?></strong><br>
-                                $<?php echo number_format($venta['total'], 2); ?><br>
+                                $<?php echo number_format((float)$venta['total'], 2); ?><br>
                                 <small><?php echo esc($venta['estado']); ?></small>
                             </p>
                         <?php endforeach; ?>
@@ -155,7 +152,14 @@ include __DIR__ . '/includes/header.php';
                 <div class="input-field col s6 m4">
                     <select class="producto-select" name="producto_${productoIndex}" onchange="actualizarPrecio(this)">
                         <option value="">Selecciona producto</option>
-                        ${productosDisponibles.map(p => `<option value="${p.id_producto}" data-precio="${p.precio_venta}">${p.nombre}</option>`).join('')}
+                        ${productosDisponibles.map(p => {
+                            const label = p.id_padre ? `${p.nombre} - ${p.nombre_variante}` : p.nombre;
+                            return `<option value="${p.id_producto}" 
+                                            data-precio="${p.precio_venta}" 
+                                            data-imagen="${p.imagen_url || 'default-product.png'}">
+                                            ${label}
+                                    </option>`;
+                        }).join('')}
                     </select>
                 </div>
                 <div class="input-field col s4 m3">

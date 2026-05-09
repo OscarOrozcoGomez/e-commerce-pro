@@ -194,7 +194,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Ventas Hoy</span>
                         <p class="display-metric"><?php echo esc((string)($statsAdmin['ventas_hoy']['total'] ?? 0)); ?></p>
-                        <p class="text-small">$ <?php echo number_format($statsAdmin['ventas_hoy']['monto'] ?? 0, 2); ?></p>
+                        <p class="text-small">$ <?php echo number_format((float)($statsAdmin['ventas_hoy']['monto'] ?? 0), 2); ?></p>
                     </div>
                 </div>
             </div>
@@ -229,7 +229,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Ingresos Mes</span>
-                        <p class="display-metric">$ <?php echo number_format($statsAdmin['ingresos_mes']['total'] ?? 0, 2); ?></p>
+                        <p class="display-metric">$ <?php echo number_format((float)($statsAdmin['ingresos_mes']['total'] ?? 0), 2); ?></p>
                     </div>
                 </div>
             </div>
@@ -288,7 +288,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Ventas Hoy</span>
                         <p class="display-metric"><?php echo esc((string)($statsEncargado['ventas_hoy']['total'] ?? 0)); ?></p>
-                        <p class="text-small">$ <?php echo number_format($statsEncargado['ventas_hoy']['monto'] ?? 0, 2); ?></p>
+                        <p class="text-small">$ <?php echo number_format((float)($statsEncargado['ventas_hoy']['monto'] ?? 0), 2); ?></p>
                     </div>
                 </div>
             </div>
@@ -312,7 +312,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card blue lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Ingresos Mes</span>
-                        <p class="text-small">$ <?php echo number_format($statsEncargado['ingresos_mes']['total'] ?? 0, 2); ?></p>
+                        <p class="text-small">$ <?php echo number_format((float)($statsEncargado['ingresos_mes']['total'] ?? 0), 2); ?></p>
                     </div>
                 </div>
             </div>
@@ -362,7 +362,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Ventas Hoy</span>
                         <p class="display-metric"><?php echo esc((string)($statsVendedor['ventas_hoy']['total'] ?? 0)); ?></p>
-                        <p class="text-small">$ <?php echo number_format($statsVendedor['ventas_hoy']['monto'] ?? 0, 2); ?></p>
+                        <p class="text-small">$ <?php echo number_format((float)($statsVendedor['ventas_hoy']['monto'] ?? 0), 2); ?></p>
                     </div>
                 </div>
             </div>
@@ -378,7 +378,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card green lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Ingresos Mes</span>
-                        <p class="text-small">$ <?php echo number_format($statsVendedor['ingresos_mes']['total'] ?? 0, 2); ?></p>
+                        <p class="text-small">$ <?php echo number_format((float)($statsVendedor['ingresos_mes']['total'] ?? 0), 2); ?></p>
                     </div>
                 </div>
             </div>

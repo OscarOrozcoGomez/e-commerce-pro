@@ -35,10 +35,10 @@ function runImport(int $almacenId = 1): void
         'errors' => 0,
     ];
 
-    $sqlProducto = "INSERT INTO productos (nombre, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, estado) VALUES (:nombre, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, 'activo')";
+    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, estado, id_padre) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, 'activo', :id_padre)";
     $stmtInsert = $pdo->prepare($sqlProducto);
 
-    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, estado = 'activo' WHERE sku = :sku";
+    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, estado = 'activo' WHERE sku = :sku";
     $stmtUpdate = $pdo->prepare($sqlProductoUpdate);
 
     $sqlSelect = "SELECT id_producto FROM productos WHERE sku = :sku";
@@ -49,7 +49,8 @@ function runImport(int $almacenId = 1): void
     $stmtInventory = $pdo->prepare($sqlInventory);
 
     $skuIndex = array_search('Referencia interna', $columns, true);
-    $nombreIndex = array_search('Nombre en pantalla', $columns, true);
+    $nombreIndex = array_search('Nombre', $columns, true); 
+    $displayNameIndex = array_search('Nombre en pantalla', $columns, true); 
     $codigoIndex = array_search('Código de barras', $columns, true);
     $costoIndex = array_search('Costo promedio', $columns, true);
     $precioIndex = array_search('Precio de venta', $columns, true);
@@ -68,7 +69,18 @@ function runImport(int $almacenId = 1): void
             continue;
         }
 
-        $nombre = trim($row[$nombreIndex] ?? '');
+        $nombreFull = trim($row[$displayNameIndex] ?? '');
+        $nombreBase = trim($row[$nombreIndex] ?? '');
+        
+        $nombre_variante = null;
+        $nombre = $nombreBase ?: $nombreFull;
+
+        // Detectar variante de Odoo: "Creatina (60 servicios)" -> nombre: "Creatina", variante: "60 servicios"
+        if (preg_match('/^(.*)\s\((.*)\)$/', $nombreFull, $matches)) {
+            $nombre = trim($matches[1]);
+            $nombre_variante = trim($matches[2]);
+        }
+
         $codigo = trim($row[$codigoIndex] ?? '');
         $unidad = trim($row[$unidadIndex] ?? '');
         $categoria = trim($row[$categoriaIndex] ?? '');
@@ -79,15 +91,19 @@ function runImport(int $almacenId = 1): void
         try {
             $stmtSelect->execute([':sku' => $sku]);
             $producto = $stmtSelect->fetch(PDO::FETCH_ASSOC);
+            $id_padre = null; // Aquí podrías añadir lógica para buscar el ID del producto padre por nombre base
+
             if ($producto === false) {
                 $stmtInsert->execute([
                     ':nombre' => $nombre,
+                    ':nombre_variante' => $nombre_variante,
                     ':sku' => $sku,
                     ':codigo_barras' => $codigo ?: null,
                     ':unidad' => $unidad ?: null,
                     ':precio_costo' => $precioCosto,
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
+                    ':id_padre' => $id_padre
                 ]);
                 $productoId = intval($pdo->lastInsertId());
                 $summaries['inserted']++;
@@ -95,6 +111,7 @@ function runImport(int $almacenId = 1): void
                 $productoId = intval($producto['id_producto']);
                 $stmtUpdate->execute([
                     ':nombre' => $nombre,
+                    ':nombre_variante' => $nombre_variante,
                     ':codigo_barras' => $codigo ?: null,
                     ':unidad' => $unidad ?: null,
                     ':precio_costo' => $precioCosto,

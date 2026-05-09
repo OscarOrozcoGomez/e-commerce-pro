@@ -22,27 +22,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         if ($accion === 'agregar') {
             try {
                 $email = htmlspecialchars($_POST['email'] ?? '');
-            $nombre = htmlspecialchars($_POST['nombre'] ?? '');
-            $password = password_hash($_POST['password'] ?? '', PASSWORD_BCRYPT);
-            $id_rol = intval($_POST['id_rol'] ?? 0);
-            $id_almacen = intval($_POST['id_almacen'] ?? 0) ?: null;
-            
-            $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
-                    VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, 'activo')";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':nombre' => $nombre,
-                ':email' => $email,
-                ':contrasena' => $password,
-                ':id_rol' => $id_rol,
-                ':id_almacen' => $id_almacen,
-            ]);
-            $success = 'Usuario creado correctamente.';
-        } catch (PDOException $e) {
-            $error = 'Error: ' . $e->getMessage();
+                $nombre = htmlspecialchars($_POST['nombre'] ?? '');
+                $password = password_hash($_POST['password'] ?? '', PASSWORD_BCRYPT);
+                $id_rol = intval($_POST['id_rol'] ?? 0);
+                $id_almacen = intval($_POST['id_almacen'] ?? 0) ?: null;
+                
+                $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
+                        VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, 'activo')";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([
+                    ':nombre' => $nombre,
+                    ':email' => $email,
+                    ':contrasena' => $password,
+                    ':id_rol' => $id_rol,
+                    ':id_almacen' => $id_almacen,
+                ]);
+                logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
+                $success = 'Usuario creado correctamente.';
+            } catch (PDOException $e) {
+                $error = 'Error: ' . $e->getMessage();
+            }
+        } elseif ($accion === 'cambiar_estado') {
+            $id = intval($_POST['id_usuario']);
+            $nuevo_estado = $_POST['estado'] === 'activo' ? 'inactivo' : 'activo';
+            $stmt = $pdo->prepare("UPDATE usuarios SET estado = ? WHERE id_usuario = ?");
+            $stmt->execute([$nuevo_estado, $id]);
+            logAudit('USUARIO_ESTADO_CAMBIADO', 'usuarios', $id, "Nuevo estado: $nuevo_estado");
+            $success = 'Estado de usuario actualizado.';
         }
     }
-  }
 }
 
 // Obtener usuarios
@@ -171,7 +179,7 @@ include __DIR__ . '/includes/header.php';
                                     <th>Email</th>
                                     <th>Rol</th>
                                     <th>Almacén</th>
-                                    <th>Estado</th>
+                                    <th>Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -181,7 +189,17 @@ include __DIR__ . '/includes/header.php';
                                         <td><?php echo esc($user['email']); ?></td>
                                         <td><?php echo esc($user['rol']); ?></td>
                                         <td><?php echo esc($user['almacen'] ?? 'N/A'); ?></td>
-                                        <td><?php echo esc($user['estado']); ?></td>
+                                        <td>
+                                            <form method="POST" style="display:inline;">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="accion" value="cambiar_estado">
+                                                <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                                <input type="hidden" name="estado" value="<?php echo $user['estado']; ?>">
+                                                <button type="submit" class="btn-small <?php echo $user['estado'] === 'activo' ? 'orange' : 'green'; ?>">
+                                                    <?php echo $user['estado'] === 'activo' ? 'Desactivar' : 'Activar'; ?>
+                                                </button>
+                                            </form>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -192,5 +210,13 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var selects = document.querySelectorAll('select');
+        M.FormSelect.init(selects);
+        M.updateTextFields();
+    });
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

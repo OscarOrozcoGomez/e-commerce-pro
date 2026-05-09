@@ -148,6 +148,9 @@ try {
         // Confirmar transacción
         $pdo->commit();
 
+        // Registrar en auditoría
+        logAudit('VENTA_REALIZADA', 'pedidos', (int)$id_pedido, "Venta registrada: $numero_pedido. Total: $total");
+
         $response['success'] = true;
         $response['message'] = 'Venta registrada correctamente: ' . $numero_pedido;
         $response['id_pedido'] = $id_pedido;

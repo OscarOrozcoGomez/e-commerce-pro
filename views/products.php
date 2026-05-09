@@ -23,30 +23,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         
         if ($accion === 'agregar') {
             try {
-            $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, categoria, estado) 
-                    VALUES (:nombre, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :categoria, 'activo')";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':nombre' => sanitize($_POST['nombre'] ?? ''),
-                ':sku' => sanitize($_POST['sku'] ?? ''),
-                ':codigo_barras' => sanitize($_POST['codigo_barras'] ?? ''),
-                ':descripcion' => sanitize($_POST['descripcion'] ?? ''),
-                ':unidad' => sanitize($_POST['unidad'] ?? ''),
-                ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
-                ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
-                ':categoria' => sanitize($_POST['categoria'] ?? ''),
-            ]);
-            $success = 'Producto agregado correctamente.';
-        } catch (PDOException $e) {
-            $error = 'Error al agregar producto: ' . $e->getMessage();
+                $sql = "INSERT INTO productos (id_padre, nombre, nombre_variante, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, categoria, estado) 
+                        VALUES (:id_padre, :nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :categoria, 'activo')";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([
+                    ':id_padre' => !empty($_POST['id_padre']) ? intval($_POST['id_padre']) : null,
+                    ':nombre' => sanitize($_POST['nombre'] ?? ''),
+                    ':nombre_variante' => sanitize($_POST['nombre_variante'] ?? ''),
+                    ':sku' => sanitize($_POST['sku'] ?? ''),
+                    ':codigo_barras' => sanitize($_POST['codigo_barras'] ?? ''),
+                    ':descripcion' => sanitize($_POST['descripcion'] ?? ''),
+                    ':unidad' => sanitize($_POST['unidad'] ?? ''),
+                    ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
+                    ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
+                    ':categoria' => sanitize($_POST['categoria'] ?? ''),
+                ]);
+                $success = 'Producto agregado correctamente.';
+            } catch (PDOException $e) {
+                $error = 'Error al agregar producto: ' . $e->getMessage();
+            }
+        } elseif ($accion === 'eliminar') {
+            try {
+                $id = intval($_POST['id_producto']);
+                $stmt = $pdo->prepare("UPDATE productos SET estado = 'inactivo' WHERE id_producto = ?");
+                $stmt->execute([$id]);
+                logAudit('PRODUCTO_DESACTIVADO', 'productos', $id, "Producto marcado como inactivo");
+                $success = 'Producto eliminado (desactivado) correctamente.';
+            } catch (PDOException $e) {
+                $error = 'Error al eliminar producto.';
+            }
         }
     }
-  }
 }
 
 // Obtener productos
 try {
-    $sql = "SELECT id_producto, nombre, sku, precio_venta, categoria, estado FROM productos ORDER BY nombre";
+    $sql = "SELECT p.*, (SELECT nombre FROM productos p2 WHERE p2.id_producto = p.id_padre) as producto_base 
+            FROM productos p WHERE estado = 'activo' ORDER BY COALESCE(p.id_padre, p.id_producto), p.id_padre IS NOT NULL, p.nombre";
     $stmt = $pdo->prepare($sql);
     $stmt->execute();
     $productos = $stmt->fetchAll();
@@ -99,8 +112,23 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="accion" value="agregar">
                         
                         <div class="input-field">
+                            <select name="id_padre" id="select_padre" onchange="toggleNombreParent(this)">
+                                <option value="">-- Es un producto nuevo/base --</option>
+                                <?php foreach ($productos as $p): if(!$p['id_padre']): ?>
+                                    <option value="<?php echo $p['id_producto']; ?>"><?php echo esc($p['nombre']); ?></option>
+                                <?php endif; endforeach; ?>
+                            </select>
+                            <label>Variante de (Opcional)</label>
+                        </div>
+
+                        <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required>
                             <label for="nombre">Nombre del Producto</label>
+                        </div>
+
+                        <div class="input-field">
+                            <input type="text" id="nombre_variante" name="nombre_variante">
+                            <label for="nombre_variante">Presentación (Ej: 60 servicios, 1kg)</label>
                         </div>
                         
                         <div class="input-field">
@@ -157,16 +185,25 @@ include __DIR__ . '/includes/header.php';
                                     <th>Nombre</th>
                                     <th>SKU</th>
                                     <th>Precio</th>
-                                    <th>Estado</th>
+                                    <th>Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($productos as $prod): ?>
                                     <tr>
-                                        <td><?php echo esc($prod['nombre']); ?></td>
+                                        <td><?php echo esc($prod['nombre']); ?> <?php echo $prod['nombre_variante'] ? '<small class="grey-text">('.esc($prod['nombre_variante']).')</small>' : ''; ?></td>
                                         <td><?php echo esc($prod['sku']); ?></td>
-                                        <td>$<?php echo number_format($prod['precio_venta'], 2); ?></td>
-                                        <td><?php echo esc($prod['estado']); ?></td>
+                                        <td>$<?php echo number_format((float)$prod['precio_venta'], 2); ?></td>
+                                        <td>
+                                            <form method="POST" style="display:inline;">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="accion" value="eliminar">
+                                                <input type="hidden" name="id_producto" value="<?php echo $prod['id_producto']; ?>">
+                                                <button type="submit" class="btn-floating btn-small red" onclick="return confirm('¿Desactivar producto?')">
+                                                    <i class="material-icons">delete</i>
+                                                </button>
+                                            </form>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
