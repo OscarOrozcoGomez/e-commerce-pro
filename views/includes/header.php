@@ -17,11 +17,18 @@
 <body class="grey lighten-4">
     <nav class="blue darken-4">
         <div class="nav-wrapper">
-            <a href="#" class="brand-logo">POS Sistema</a>
+            <a href="<?php echo BASE_URL; ?>" class="brand-logo">POS Sistema</a>
             <ul id="nav-mobile" class="right hide-on-med-and-down">
+                <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
                 <?php if (isAuthenticated()): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/dashboard.php">Dashboard</a></li>
+                    <?php if (isAdmin()): ?>
+                        <li><a href="<?php echo BASE_URL; ?>views/users.php">Usuarios</a></li>
+                    <?php endif; ?>
+                    <li><a href="<?php echo BASE_URL; ?>logout.php">Cerrar Sesión</a></li>
                     <li><a href="#"><?php echo esc($_SESSION['usuario']['nombre']); ?></a></li>
-                    <li><a href="logout.php">Cerrar Sesión</a></li>
+                <?php else: ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/login.php">Iniciar Sesión</a></li>
                 <?php endif; ?>
             </ul>
         </div>

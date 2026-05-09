@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS `usuarios` (
   CONSTRAINT `fk_usuarios_almacen` FOREIGN KEY (`id_almacen`) REFERENCES `almacenes` (`id_almacen`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+-- Restablecimiento de contraseñas
+CREATE TABLE IF NOT EXISTS `password_resets` (
+  `id_password_reset` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `email` VARCHAR(150) NOT NULL,
+  `token_hash` VARCHAR(255) NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `usado` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_password_reset`),
+  INDEX `idx_password_resets_email` (`email`),
+  INDEX `idx_password_resets_token_hash` (`token_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Clientes
 CREATE TABLE IF NOT EXISTS `clientes` (
   `id_cliente` INT UNSIGNED NOT NULL AUTO_INCREMENT,

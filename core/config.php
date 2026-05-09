@@ -6,6 +6,7 @@ date_default_timezone_set('America/Mexico_City');
 if (!session_id()) {
     session_start();
 }
+sendSecurityHeaders();
 
 // Parámetros de conexión a la base de datos
 const DB_HOST = '127.0.0.1';
@@ -65,4 +66,18 @@ function getMySqli(): mysqli
 function esc(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function sendSecurityHeaders(): void
+{
+    if (headers_sent()) {
+        return;
+    }
+
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com 'unsafe-inline'; style-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self';");
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }

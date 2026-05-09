@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
+require_once __DIR__ . '/../core/auth.php';
 
 function runImport(int $almacenId = 1): void
 {
@@ -139,6 +140,10 @@ if (PHP_SAPI === 'cli') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        echo 'Error: Token CSRF inválido. Por favor recarga la página e inténtalo de nuevo.';
+        exit;
+    }
     $almacenId = isset($_POST['almacen_id']) ? intval($_POST['almacen_id']) : 1;
     runImport($almacenId);
     exit;
@@ -159,6 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <pre><?php echo esc(CSV_IMPORT_PATH); ?></pre>
     <p>Usa el almacén destino para stock inicial.</p>
     <form method="post">
+        <?php echo csrfInput(); ?>
         <div class="input-field">
             <input id="almacen_id" name="almacen_id" type="number" value="<?php echo esc((string)$almacenId); ?>">
             <label for="almacen_id">ID de almacén destino</label>

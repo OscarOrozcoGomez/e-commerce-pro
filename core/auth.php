@@ -11,6 +11,27 @@ function isAuthenticated(): bool
     return isset($_SESSION['usuario']) && !empty($_SESSION['usuario']);
 }
 
+function getCsrfToken(): string
+{
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function csrfInput(): string
+{
+    return '<input type="hidden" name="csrf_token" value="' . esc(getCsrfToken()) . '">';
+}
+
+function validateCsrfToken(string $token): bool
+{
+    if (empty($token) || !isset($_SESSION['csrf_token'])) {
+        return false;
+    }
+    return hash_equals($_SESSION['csrf_token'], $token);
+}
+
 /**
  * Verifica si el usuario tiene un permiso específico.
  *
@@ -151,4 +172,82 @@ function logout(): void
     session_destroy();
     header('Location: ' . BASE_URL . 'views/login.php');
     exit;
+}
+
+function generatePasswordResetToken(string $email): bool
+{
+    $pdo = getPDO();
+    $sql = "SELECT id_usuario FROM usuarios WHERE email = :email AND estado = 'activo' LIMIT 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':email' => $email]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        return false;
+    }
+
+    $token = bin2hex(random_bytes(32));
+    $tokenHash = hash('sha256', $token);
+    $expiresAt = date('Y-m-d H:i:s', time() + 3600);
+
+    $pdo->prepare('DELETE FROM password_resets WHERE email = :email')->execute([':email' => $email]);
+    $stmt = $pdo->prepare('INSERT INTO password_resets (email, token_hash, expires_at, usado, created_at) VALUES (:email, :token_hash, :expires_at, 0, NOW())');
+    $stmt->execute([
+        ':email' => $email,
+        ':token_hash' => $tokenHash,
+        ':expires_at' => $expiresAt,
+    ]);
+
+    return sendPasswordResetEmail($email, $token);
+}
+
+function getPasswordResetRecord(string $token): ?array
+{
+    $pdo = getPDO();
+    $tokenHash = hash('sha256', $token);
+    $stmt = $pdo->prepare('SELECT * FROM password_resets WHERE token_hash = :token_hash AND usado = 0 AND expires_at >= NOW() LIMIT 1');
+    $stmt->execute([':token_hash' => $tokenHash]);
+    $record = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $record !== false ? $record : null;
+}
+
+function resetPasswordWithToken(string $token, string $newPassword): bool
+{
+    $record = getPasswordResetRecord($token);
+    if (!$record) {
+        return false;
+    }
+
+    $pdo = getPDO();
+    $passwordHash = password_hash($newPassword, PASSWORD_BCRYPT);
+    $pdo->beginTransaction();
+
+    try {
+        $stmt = $pdo->prepare('UPDATE usuarios SET contrasena = :contrasena WHERE email = :email');
+        $stmt->execute([
+            ':contrasena' => $passwordHash,
+            ':email' => $record['email'],
+        ]);
+
+        $stmt = $pdo->prepare('UPDATE password_resets SET usado = 1 WHERE id_password_reset = :id');
+        $stmt->execute([':id' => $record['id_password_reset']]);
+
+        $pdo->commit();
+        return true;
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        return false;
+    }
+}
+
+function sendPasswordResetEmail(string $email, string $token): bool
+{
+    $resetUrl = BASE_URL . 'views/reset_password.php?token=' . urlencode($token);
+    $subject = 'Restablecimiento de contraseña';
+    $message = "Se ha solicitado el restablecimiento de su contraseña.\n\n" .
+               "Por favor, abra el siguiente enlace para establecer una nueva contraseña:\n" .
+               "{$resetUrl}\n\n" .
+               "Si usted no solicitó este cambio, ignore este mensaje.\n";
+    $headers = 'From: no-reply@' . ($_SERVER['SERVER_NAME'] ?? 'localhost') . "\r\n" .
+               'Content-Type: text/plain; charset=UTF-8';
+    return mail($email, $subject, $message, $headers);
 }

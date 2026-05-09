@@ -2,8 +2,6 @@
 require_once __DIR__ . '/core/config.php';
 require_once __DIR__ . '/core/auth.php';
 
-requireAuth();
-
 $pageTitle = 'Catálogo de Productos';
 include __DIR__ . '/views/includes/header.php';
 ?>
@@ -23,10 +21,6 @@ include __DIR__ . '/views/includes/header.php';
             <!-- Los productos se cargarán aquí vía AJAX -->
         </div>
     </div>
-
-<?php
-include __DIR__ . '/views/includes/footer.php';
-?>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
