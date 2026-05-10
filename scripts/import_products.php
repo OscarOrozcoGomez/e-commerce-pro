@@ -35,10 +35,10 @@ function runImport(int $almacenId = 1): void
         'errors' => 0,
     ];
 
-    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, estado, id_padre, imagen) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, 'activo', :id_padre, :imagen)";
+    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, descripcion, estado, id_padre, imagen) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, :descripcion, 'activo', :id_padre, :imagen)";
     $stmtInsert = $pdo->prepare($sqlProducto);
 
-    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, estado = 'activo', imagen = :imagen WHERE sku = :sku";
+    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, descripcion = :descripcion, estado = 'activo', imagen = COALESCE(:imagen, imagen) WHERE sku = :sku";
     $stmtUpdate = $pdo->prepare($sqlProductoUpdate);
 
     $sqlSelect = "SELECT id_producto FROM productos WHERE sku = :sku";
@@ -58,6 +58,19 @@ function runImport(int $almacenId = 1): void
     $cantidadIndex = array_search('Cantidad a la mano', $columns, true);
     $unidadIndex = array_search('Unidad', $columns, true);
     $categoriaIndex = array_search('Categoría del producto', $columns, true);
+    
+    // Buscar descripción en varias columnas posibles (Odoo varía según versión/idioma)
+    $desc_columns = ['Descripción para comercio electrónico', 'Descripción para el sitio web', 'Descripción del producto', 'Descripción de ventas', 'Descripción'];
+    $descripcionIndex = false;
+    foreach ($desc_columns as $col_name) {
+        $idx = array_search($col_name, $columns, true);
+        if ($idx !== false) {
+            $descripcionIndex = $idx;
+            // Si encontramos la de comercio electrónico, nos quedamos con esa
+            if ($col_name === 'Descripción para comercio electrónico') break;
+        }
+    }
+    
     $imagenIndex = array_search('Imagen 1024', $columns, true); // Buscar la imagen de mayor resolución
     $plantillaImagenIndex = array_search('Plantilla de producto / Imagen 1024', $columns, true); // Respaldo del producto padre
     if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Producto / Imagen 1024', $columns, true);
@@ -93,6 +106,27 @@ function runImport(int $almacenId = 1): void
         $precioVenta = floatval(str_replace(',', '.', trim($row[$precioIndex] ?? '0')));
         $cantidad = intval(trim($row[$cantidadIndex] ?? '0'));
         
+        // Extraer y limpiar descripción — Odoo exporta HTML, guardamos texto plano y quitamos redundancias
+        $descripcion = null;
+        if ($descripcionIndex !== false && !empty($row[$descripcionIndex])) {
+            // Reemplazar divs y brs por espacios para no pegar palabras
+            $html = str_replace(['</div>', '<br>', '<br/>', '<br />'], ' ', $row[$descripcionIndex]);
+            $plain = trim(strip_tags($html));
+            
+            // 1. Quitar prefijo "Ingredientes:" (ignorando mayúsculas/minúsculas)
+            $plain = preg_replace('/^ingredientes:\s*/i', '', $plain);
+            
+            // 2. Quitar la leyenda de advertencia estándar de Odoo/Suplementos
+            $leyenda = "Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.";
+            $plain = str_replace($leyenda, '', $plain);
+            
+            // 3. Limpiar caracteres especiales y espacios extra
+            $plain = str_replace(['⚠️', '??'], '', $plain);
+            $plain = preg_replace('/\s+/', ' ', $plain); // Colapsar múltiples espacios/newlines
+            
+            $descripcion = trim($plain) !== '' ? trim($plain) : null;
+        }
+
         // Extraer imagen y limpiar espacios u otros caracteres si los hay
         $imagenBase64 = null;
         if ($imagenIndex !== false && !empty(trim($row[$imagenIndex]))) {
@@ -116,6 +150,7 @@ function runImport(int $almacenId = 1): void
                     ':precio_costo' => $precioCosto,
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
+                    ':descripcion' => $descripcion,
                     ':id_padre' => $id_padre,
                     ':imagen' => $imagenBase64
                 ]);
@@ -131,6 +166,7 @@ function runImport(int $almacenId = 1): void
                     ':precio_costo' => $precioCosto,
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
+                    ':descripcion' => $descripcion,
                     ':sku' => $sku,
                     ':imagen' => $imagenBase64
                 ]);
