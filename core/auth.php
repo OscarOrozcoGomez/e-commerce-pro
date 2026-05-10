@@ -291,3 +291,68 @@ function sendPasswordResetEmail(string $email, string $token): bool
                'Content-Type: text/plain; charset=UTF-8';
     return mail($email, $subject, $message, $headers);
 }
+
+/**
+ * Crea un pedido público (Checkout) encapsulando la lógica SQL.
+ */
+function dbCreatePublicOrder(array $data): array {
+    $pdo = getPDO();
+    try {
+        $pdo->beginTransaction();
+        
+        $infoCliente = "Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | WA: {$data['cliente']['whatsapp']} | Dir: {$data['cliente']['direccion']}";
+        $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ($i['precio'] * $i['quantity']), 0);
+        $numero_pedido = 'WEB-' . strtoupper(uniqid());
+
+        $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_almacen, id_metodo_pago, estado, subtotal, total, observaciones) VALUES (?, NULL, 1, 1, 'pendiente_pago', ?, ?, ?)");
+        $stmt->execute([$numero_pedido, $subtotal, $subtotal, $infoCliente]);
+        $id_pedido = $pdo->lastInsertId();
+
+        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)");
+        $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = 1");
+
+        foreach ($data['items'] as $item) {
+            $lineTotal = $item['precio'] * $item['quantity'];
+            $stmtDetalle->execute([$id_pedido, $item['id_producto'], $item['quantity'], $item['precio'], $lineTotal]);
+            $stmtStock->execute([$item['quantity'], $item['id_producto']]);
+        }
+
+        $pdo->commit();
+        return ['success' => true, 'pedido' => $numero_pedido];
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log("Error en dbCreatePublicOrder: " . $e->getMessage());
+        return ['success' => false, 'message' => 'Error interno al procesar pedido'];
+    }
+}
+
+/**
+ * Obtiene la lista de productos para gestión (Admin/Encargado).
+ */
+function dbGetProductsManaged(): array {
+    try {
+        $pdo = getPDO();
+        $sql = "SELECT p.*, (SELECT nombre FROM productos p2 WHERE p2.id_producto = p.id_padre) as producto_base 
+                FROM productos p WHERE estado = 'activo' 
+                ORDER BY COALESCE(p.id_padre, p.id_producto), p.id_padre IS NOT NULL, p.nombre";
+        return $pdo->query($sql)->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Error en dbGetProductsManaged: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Guarda o actualiza un producto.
+ */
+function dbSaveProduct(array $data): bool {
+    try {
+        $pdo = getPDO();
+        $sql = "INSERT INTO productos (id_padre, nombre, nombre_variante, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, categoria, estado) 
+                VALUES (:id_padre, :nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :categoria, 'activo')";
+        return $pdo->prepare($sql)->execute($data);
+    } catch (PDOException $e) {
+        error_log("Error en dbSaveProduct: " . $e->getMessage());
+        return false;
+    }
+}

@@ -11,7 +11,7 @@ $almacenId = getCurrentAlmacenId();
 try {
     $pdo = getPDO();
 
-    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, p.precio_costo, p.categoria
+    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, p.precio_costo, p.categoria, p.imagen
             FROM productos p
             WHERE p.estado = 'activo'";
 
@@ -28,9 +28,19 @@ try {
     $stmt->execute($params);
     $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Agregar campo imagen (por ahora placeholder)
+    // Formatear el campo imagen
     foreach ($products as &$product) {
-        $product['imagen'] = null; // Se puede agregar campo imagen en tabla productos después
+        if (!empty($product['imagen'])) {
+            $mime = 'image/png';
+            if (strpos($product['imagen'], 'UklGR') === 0) $mime = 'image/webp';
+            elseif (strpos($product['imagen'], '/9j/') === 0) $mime = 'image/jpeg';
+            elseif (strpos($product['imagen'], 'iVBORw') === 0) $mime = 'image/png';
+            elseif (strpos($product['imagen'], 'R0lGOD') === 0) $mime = 'image/gif';
+            
+            $product['imagen'] = 'data:' . $mime . ';base64,' . $product['imagen'];
+        } else {
+            $product['imagen'] = null;
+        }
     }
 
     echo json_encode(['success' => true, 'products' => $products]);

@@ -22,6 +22,34 @@ include __DIR__ . '/views/includes/header.php';
         </div>
     </div>
 
+    <style>
+        #products-container {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .product-card {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            margin: 0.5rem 0 1rem 0;
+        }
+        .product-card .card-content {
+            flex-grow: 1;
+        }
+        .product-card .card-image {
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f5f5f5;
+        }
+        .product-card .product-image {
+            max-height: 100%;
+            width: auto;
+            object-fit: contain;
+        }
+    </style>
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const searchInput = document.getElementById('search-input');
@@ -107,9 +135,25 @@ include __DIR__ . '/views/includes/header.php';
                 return col;
             }
 
-            function addToCart(productId) {
-                // Implementar lógica del carrito aquí
-                M.toast({html: 'Producto agregado al carrito'});
+            window.addToCart = function(product) {
+                let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+                
+                // Verificar si ya existe para aumentar cantidad
+                const existing = cart.find(item => item.id_producto === product.id_producto);
+                if (existing) {
+                    existing.quantity += 1;
+                } else {
+                    cart.push({
+                        id_producto: product.id_producto,
+                        nombre: product.nombre,
+                        precio: product.precio_venta,
+                        quantity: 1
+                    });
+                }
+                
+                localStorage.setItem('cart', JSON.stringify(cart));
+                if (typeof updateCartBadge === 'function') updateCartBadge();
+                M.toast({html: '¡' + product.nombre + ' agregado!', classes: 'rounded'});
             }
 
             // Cargar productos iniciales
@@ -124,6 +168,15 @@ include __DIR__ . '/views/includes/header.php';
                 }, 300);
             });
         });
-    </script>
 
+        // Sobrescribir el botón en createProductCard para pasar el objeto
+        function createProductCard(product) {
+            // ... (mismo código de arriba, pero cambiar el onclick)
+            addButton.onclick = (e) => {
+                e.preventDefault();
+                addToCart(product);
+            };
+            // ...
+        }
+    </script>
 <?php include __DIR__ . '/views/includes/footer.php'; ?>

@@ -35,10 +35,10 @@ function runImport(int $almacenId = 1): void
         'errors' => 0,
     ];
 
-    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, estado, id_padre) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, 'activo', :id_padre)";
+    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, estado, id_padre, imagen) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, 'activo', :id_padre, :imagen)";
     $stmtInsert = $pdo->prepare($sqlProducto);
 
-    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, estado = 'activo' WHERE sku = :sku";
+    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, estado = 'activo', imagen = :imagen WHERE sku = :sku";
     $stmtUpdate = $pdo->prepare($sqlProductoUpdate);
 
     $sqlSelect = "SELECT id_producto FROM productos WHERE sku = :sku";
@@ -52,11 +52,13 @@ function runImport(int $almacenId = 1): void
     $nombreIndex = array_search('Nombre', $columns, true); 
     $displayNameIndex = array_search('Nombre en pantalla', $columns, true); 
     $codigoIndex = array_search('Código de barras', $columns, true);
-    $costoIndex = array_search('Costo promedio', $columns, true);
+    // En Odoo el Costo a veces se llama "Costo" o "Costo promedio"
+    $costoIndex = array_search('Costo promedio', $columns, true) !== false ? array_search('Costo promedio', $columns, true) : array_search('Costo', $columns, true);
     $precioIndex = array_search('Precio de venta', $columns, true);
     $cantidadIndex = array_search('Cantidad a la mano', $columns, true);
     $unidadIndex = array_search('Unidad', $columns, true);
     $categoriaIndex = array_search('Categoría del producto', $columns, true);
+    $imagenIndex = array_search('Imagen 1024', $columns, true); // Buscar la imagen de mayor resolución
 
     while (($row = fgetcsv($handle)) !== false) {
         if (count($row) === 0) {
@@ -75,7 +77,6 @@ function runImport(int $almacenId = 1): void
         $nombre_variante = null;
         $nombre = $nombreBase ?: $nombreFull;
 
-        // Detectar variante de Odoo: "Creatina (60 servicios)" -> nombre: "Creatina", variante: "60 servicios"
         if (preg_match('/^(.*)\s\((.*)\)$/', $nombreFull, $matches)) {
             $nombre = trim($matches[1]);
             $nombre_variante = trim($matches[2]);
@@ -87,11 +88,17 @@ function runImport(int $almacenId = 1): void
         $precioCosto = floatval(str_replace(',', '.', trim($row[$costoIndex] ?? '0')));
         $precioVenta = floatval(str_replace(',', '.', trim($row[$precioIndex] ?? '0')));
         $cantidad = intval(trim($row[$cantidadIndex] ?? '0'));
+        
+        // Extraer imagen y limpiar espacios u otros caracteres si los hay
+        $imagenBase64 = null;
+        if ($imagenIndex !== false && !empty($row[$imagenIndex])) {
+            $imagenBase64 = trim($row[$imagenIndex]);
+        }
 
         try {
             $stmtSelect->execute([':sku' => $sku]);
             $producto = $stmtSelect->fetch(PDO::FETCH_ASSOC);
-            $id_padre = null; // Aquí podrías añadir lógica para buscar el ID del producto padre por nombre base
+            $id_padre = null; 
 
             if ($producto === false) {
                 $stmtInsert->execute([
@@ -103,7 +110,8 @@ function runImport(int $almacenId = 1): void
                     ':precio_costo' => $precioCosto,
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
-                    ':id_padre' => $id_padre
+                    ':id_padre' => $id_padre,
+                    ':imagen' => $imagenBase64
                 ]);
                 $productoId = intval($pdo->lastInsertId());
                 $summaries['inserted']++;
@@ -118,6 +126,7 @@ function runImport(int $almacenId = 1): void
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
                     ':sku' => $sku,
+                    ':imagen' => $imagenBase64
                 ]);
                 $summaries['updated']++;
             }
