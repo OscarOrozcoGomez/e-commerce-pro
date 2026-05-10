@@ -117,8 +117,8 @@ include __DIR__ . '/views/includes/header.php';
 
                 const stockBadge = document.createElement('span');
                 stockBadge.className = `badge white-text ${product.stock > 0 ? 'green' : 'red'}`;
-                stockBadge.textContent = product.stock > 0 ? `Stock: ${product.stock}` : 'Sin stock';
-                stockBadge.style.cssText = 'position: absolute; top: 10px; right: 10px;';
+                stockBadge.textContent = product.stock > 0 ? 'Disponible' : 'Agotado';
+                stockBadge.style.cssText = 'position: absolute; top: 10px; right: 10px; border-radius: 4px;';
 
                 cardImage.appendChild(imgLink);
                 cardImage.appendChild(stockBadge);
@@ -156,8 +156,8 @@ include __DIR__ . '/views/includes/header.php';
                 const addButton = document.createElement('a');
                 addButton.href = '#';
                 addButton.className = 'btn-small blue waves-effect waves-light';
-                addButton.textContent = 'Agregar al carrito';
-                addButton.onclick = () => addToCart(product.id_producto);
+                addButton.textContent = 'Reservar Miér/Sáb';
+                addButton.onclick = () => addToCart(product);
 
                 cardAction.appendChild(addButton);
 

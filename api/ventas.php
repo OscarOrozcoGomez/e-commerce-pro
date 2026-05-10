@@ -115,13 +115,14 @@ try {
 
             // Actualizar inventario
             $sql = "UPDATE inventario_almacen 
-                    SET cantidad_actual = cantidad_actual - :cantidad
+                    SET cantidad_actual = cantidad_actual - :cantidad1
                     WHERE id_producto = :producto AND id_almacen = :almacen
-                    AND cantidad_actual >= :cantidad";
+                    AND cantidad_actual >= :cantidad2";
             
             $stmt = $pdo->prepare($sql);
             $result = $stmt->execute([
-                ':cantidad' => $prod['cantidad'],
+                ':cantidad1' => $prod['cantidad'],
+                ':cantidad2' => $prod['cantidad'],
                 ':producto' => $prod['id_producto'],
                 ':almacen' => $usuario['id_almacen'],
             ]);

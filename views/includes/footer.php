@@ -4,8 +4,17 @@
         function updateCartBadge() {
             try {
                 // Asumimos que el carrito se guarda en localStorage como un array
-                const cart = JSON.parse(localStorage.getItem('cart') || '[]');
-                const totalItems = cart.reduce((sum, item) => sum + (parseInt(item.quantity) || 1), 0);
+                let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+                
+                // Filtrar items corruptos (sin nombre o con errores previos)
+                const validItems = cart.filter(item => item.nombre && !isNaN(item.precio));
+                
+                // Si había basura, limpiamos el localStorage para que no estorbe
+                if (validItems.length !== cart.length) {
+                    localStorage.setItem('cart', JSON.stringify(validItems));
+                }
+
+                const totalItems = validItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
                 
                 const badge = document.getElementById('cart-count');
                 if (badge) {

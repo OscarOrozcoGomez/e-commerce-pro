@@ -11,8 +11,10 @@ $almacenId = getCurrentAlmacenId();
 try {
     $pdo = getPDO();
 
-    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, p.precio_costo, p.categoria, p.imagen
+    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, p.precio_costo, p.categoria, p.imagen,
+                   SUM(COALESCE(ia.cantidad_actual, 0)) as stock
             FROM productos p
+            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
             WHERE p.estado = 'activo'";
 
     $params = [];
@@ -23,7 +25,7 @@ try {
         $params[':search2'] = '%' . $search . '%';
     }
 
-    $sql .= " ORDER BY p.nombre ASC";
+    $sql .= " GROUP BY p.id_producto ORDER BY p.nombre ASC";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);

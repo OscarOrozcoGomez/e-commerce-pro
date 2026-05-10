@@ -17,7 +17,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Token CSRF inválido. Por favor recarga la página e inténtalo de nuevo.';
     } elseif (authenticate($email, $password)) {
         session_regenerate_id(true);
-        header('Location: ' . BASE_URL . 'views/dashboard.php');
+        // Redirigir según el rol
+        if (isCliente()) {
+            header('Location: ' . BASE_URL . 'index.php');
+        } else {
+            header('Location: ' . BASE_URL . 'views/dashboard.php');
+        }
         exit;
     } else {
         $error = 'Credenciales incorrectas.';

@@ -1,0 +1,136 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../core/config.php';
+require_once __DIR__ . '/../core/auth.php';
+
+requireAuth();
+requirePermission('venta', BASE_URL . 'views/dashboard.php'); // Encargados tienen 'venta'
+
+$pageTitle = 'Asignar Entregas';
+$pdo = getPDO();
+$usuario = $_SESSION['usuario'];
+$error = '';
+$success = '';
+
+// Procesar asignación
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'], $_POST['id_repartidor'])) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = 'Token CSRF inválido.';
+    } else {
+        $id_pedido = intval($_POST['id_pedido']);
+        $id_repartidor = intval($_POST['id_repartidor']);
+        $fecha = $_POST['fecha_entrega'] ?? null;
+
+        try {
+            $stmt = $pdo->prepare("UPDATE pedidos SET id_repartidor = :rep, fecha_entrega_programada = :fecha WHERE id_pedido = :pedido");
+            $stmt->execute([
+                ':rep' => $id_repartidor,
+                ':fecha' => $fecha ?: null,
+                ':pedido' => $id_pedido
+            ]);
+            logAudit('PEDIDO_ASIGNADO', 'pedidos', $id_pedido, "Pedido asignado al repartidor ID: $id_repartidor");
+            $success = 'Pedido asignado correctamente.';
+        } catch (PDOException $e) {
+            $error = 'Error al asignar: ' . $e->getMessage();
+        }
+    }
+}
+
+// Obtener pedidos pagados sin repartidor
+try {
+    $sql = "SELECT p.*, c.nombre as cliente, c.direccion 
+            FROM pedidos p 
+            LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
+            WHERE p.estado = 'pagado' AND p.id_repartidor IS NULL
+            ORDER BY p.fecha_creacion DESC";
+    $pedidos = $pdo->query($sql)->fetchAll();
+
+    // Obtener lista de repartidores
+    $sql_rep = "SELECT id_usuario, nombre FROM usuarios WHERE id_rol = (SELECT id_rol FROM roles WHERE nombre = 'repartidor') AND estado = 'activo'";
+    $repartidores = $pdo->query($sql_rep)->fetchAll();
+} catch (PDOException $e) {
+    $error = 'Error de base de datos: ' . $e->getMessage();
+    $pedidos = [];
+    $repartidores = [];
+}
+
+include __DIR__ . '/includes/header.php';
+?>
+
+<div class="container">
+    <div class="row">
+        <div class="col s12">
+            <h4>Asignar Entregas a Domicilio</h4>
+            <p class="grey-text">Selecciona un pedido pagado y asígnalo a un repartidor disponible.</p>
+        </div>
+    </div>
+
+    <?php if ($success): ?>
+        <div class="card green lighten-4 green-text text-darken-4" style="padding: 10px;">
+            <i class="material-icons left">check_circle</i> <?php echo esc($success); ?>
+        </div>
+    <?php endif; ?>
+
+    <div class="row">
+        <div class="col s12">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title">Pedidos Pendientes de Asignación</span>
+                    
+                    <?php if (empty($pedidos)): ?>
+                        <p class="center-align grey-text">No hay pedidos pendientes de asignación por ahora.</p>
+                    <?php else: ?>
+                        <table class="striped responsive-table">
+                            <thead>
+                                <tr>
+                                    <th>Pedido</th>
+                                    <th>Cliente / Dirección</th>
+                                    <th>Total</th>
+                                    <th>Asignar Repartidor</th>
+                                    <th>Fecha Entrega</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($pedidos as $p): ?>
+                                    <tr>
+                                        <form method="POST">
+                                            <?php echo csrfInput(); ?>
+                                            <input type="hidden" name="id_pedido" value="<?php echo $p['id_pedido']; ?>">
+                                            
+                                            <td><strong><?php echo esc($p['numero_pedido']); ?></strong></td>
+                                            <td>
+                                                <?php echo esc($p['cliente'] ?? 'N/A'); ?><br>
+                                                <small class="grey-text"><?php echo esc($p['direccion'] ?? 'S/D'); ?></small>
+                                            </td>
+                                            <td>$<?php echo number_format((float)$p['total'], 2); ?></td>
+                                            <td>
+                                                <select name="id_repartidor" required class="browser-default">
+                                                    <option value="">-- Seleccionar --</option>
+                                                    <?php foreach ($repartidores as $r): ?>
+                                                        <option value="<?php echo $r['id_usuario']; ?>"><?php echo esc($r['nombre']); ?></option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input type="datetime-local" name="fecha_entrega" style="font-size: 0.8rem;">
+                                            </td>
+                                            <td>
+                                                <button type="submit" class="btn-small indigo waves-effect waves-light">
+                                                    Asignar
+                                                </button>
+                                            </td>
+                                        </form>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php include __DIR__ . '/includes/footer.php'; ?>

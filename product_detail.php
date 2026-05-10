@@ -77,7 +77,10 @@ include __DIR__ . '/views/includes/header.php';
                 <span>Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.</span>
             </div>
 
-            <div id="product-price" class="price-display">$ 0.00</div>
+            <div class="price-display">
+                <span id="product-price">$ 0.00</span>
+                <span id="status-badge-container"></span>
+            </div>
 
             <div class="variant-selector" id="variant-section" style="display: none;">
                 <label>Tamaño</label>
@@ -195,6 +198,14 @@ include __DIR__ . '/views/includes/header.php';
         document.getElementById('product-desc').textContent = product.descripcion || 'Sin descripción detallada. (Puede requerir actualización en Odoo)';
         document.getElementById('product-price').textContent = `$ ${parseFloat(product.precio_venta).toFixed(2)}`;
         
+        // Stock Badge
+        const statusContainer = document.getElementById('status-badge-container');
+        if (statusContainer) {
+            statusContainer.innerHTML = product.stock > 0 
+                ? '<span class="badge green white-text" style="float:none; margin-left:15px; border-radius:4px; padding:4px 8px;">Disponible</span>' 
+                : '<span class="badge red white-text" style="float:none; margin-left:15px; border-radius:4px; padding:4px 8px;">Agotado</span>';
+        }
+        
         // Especificaciones
         document.getElementById('spec-sku').textContent = product.sku;
         document.getElementById('spec-cat').textContent = product.categoria || '-';
@@ -219,6 +230,28 @@ include __DIR__ . '/views/includes/header.php';
                 };
                 thumbContainer.appendChild(thumb);
             });
+        }
+
+        // Stock Status
+        const actionBtn = document.getElementById('btn-add-cart');
+        const qtyContainer = document.querySelector('.qty-selector');
+        const warningBox = document.querySelector('.warning-box');
+
+        if (product.stock > 0) {
+            actionBtn.disabled = false;
+            actionBtn.classList.remove('grey');
+            actionBtn.innerHTML = '<i class="material-icons">event</i> Reservar Miér/Sáb';
+            if(qtyContainer) qtyContainer.style.display = 'flex';
+            if(warningBox) warningBox.style.display = 'none';
+        } else {
+            actionBtn.disabled = true;
+            actionBtn.classList.add('grey');
+            actionBtn.innerHTML = 'Producto Agotado';
+            if(qtyContainer) qtyContainer.style.display = 'none';
+            if(warningBox) {
+                warningBox.style.display = 'flex';
+                warningBox.innerHTML = '<i class="material-icons">info</i> Temporalmente sin existencias. ¡Vuelve pronto!';
+            }
         }
 
         // Variantes

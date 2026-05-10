@@ -13,7 +13,7 @@ if (!$data || empty($data['items'])) {
 $result = dbCreatePublicOrder($data);
 
 if ($result['success']) {
-    echo json_encode(['success' => true, 'message' => "Gracias {$data['cliente']['nombre']}, tu pedido {$result['pedido']} registrado."]);
+    echo json_encode(['success' => true, 'pedido' => $result['pedido'], 'message' => "Gracias {$data['cliente']['nombre']}, tu pedido {$result['pedido']} registrado."]);
 } else {
     echo json_encode(['success' => false, 'message' => $result['message']]);
 }

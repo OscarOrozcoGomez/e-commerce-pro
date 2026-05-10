@@ -121,6 +121,26 @@ function isVendedor(): bool
 }
 
 /**
+ * Verifica si el usuario es repartidor.
+ *
+ * @return bool
+ */
+function isRepartidor(): bool
+{
+    return isAuthenticated() && ($_SESSION['usuario']['rol'] ?? '') === 'repartidor';
+}
+
+/**
+ * Verifica si el usuario es cliente.
+ *
+ * @return bool
+ */
+function isCliente(): bool
+{
+    return isAuthenticated() && ($_SESSION['usuario']['rol'] ?? '') === 'cliente';
+}
+
+/**
  * Obtiene el ID del almacén del usuario actual.
  *
  * @return int|null

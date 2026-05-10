@@ -35,8 +35,18 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12 m4">
             <div class="card">
                 <div class="card-content">
-                    <span class="card-title">Datos de Entrega</span>
-                    <p class="orange-text"><i class="material-icons tiny">info</i> Pago en efectivo contra entrega.</p>
+                    <span class="card-title">Confirmar Reserva</span>
+                    <div class="card-panel blue lighten-5">
+                        <p class="blue-text text-darken-4" style="margin-bottom: 10px;">
+                            <i class="material-icons left">account_balance</i> <strong>Datos de Transferencia:</strong><br>
+                            Banco: [Nombre del Banco]<br>
+                            Cuenta: [Tu Cuenta]<br>
+                            CLABE: [Tu CLABE]
+                        </p>
+                        <p class="orange-text text-darken-4" style="font-weight: bold;">
+                            <i class="material-icons left">report_problem</i> Importante: Envía tu comprobante de anticipo de $50 vía WhatsApp para confirmar tu lugar en la entrega.
+                        </p>
+                    </div>
                     <form id="form-checkout">
                         <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required value="<?php echo esc($usuarioLogueado['nombre'] ?? ''); ?>">
@@ -73,12 +83,19 @@ include __DIR__ . '/includes/header.php';
         tbody.innerHTML = cart.length === 0 ? '<tr><td colspan="5" class="center">El carrito está vacío</td></tr>' : '';
 
         cart.forEach((item, index) => {
-            const subtotal = item.precio * item.quantity;
+            const price = parseFloat(item.precio) || 0;
+            const subtotal = price * item.quantity;
+            
+            // Si el item es corrupto (undefined o NaN), ofrecer eliminarlo o saltarlo
+            if (!item.nombre || isNaN(subtotal)) {
+                return; // Ignorar items corruptos del error anterior
+            }
+
             total += subtotal;
             tbody.innerHTML += `
                 <tr>
                     <td>${item.nombre}</td>
-                    <td>$${parseFloat(item.precio).toFixed(2)}</td>
+                    <td>$${price.toFixed(2)}</td>
                     <td>${item.quantity}</td>
                     <td>$${subtotal.toFixed(2)}</td>
                     <td><a href="#" onclick="removeItem(${index})" class="red-text"><i class="material-icons">delete_forever</i></a></td>
@@ -124,8 +141,29 @@ include __DIR__ . '/includes/header.php';
         .then(data => {
             if (data.success) {
                 localStorage.removeItem('cart');
-                Swal.fire('¡Pedido Recibido!', data.message, 'success').then(() => {
-                    window.location.href = '<?php echo BASE_URL; ?>';
+                
+                // Construir mensaje de WhatsApp
+                let msg = `*NUEVA RESERVA #${data.pedido}*\n`;
+                msg += `Cliente: ${formData.cliente.nombre}\n`;
+                msg += `--------------------------\n`;
+                cart.forEach(item => {
+                    msg += `- ${item.quantity}x ${item.nombre} ($${(item.precio * item.quantity).toFixed(2)})\n`;
+                });
+                msg += `--------------------------\n`;
+                msg += `*Total a confirmar: $${document.getElementById('cart-total-display').textContent}*\n\n`;
+                msg += `Hola, acabo de hacer mi reserva en el sitio. ¿Me podrían dar los datos para mi anticipo de $50 y confirmar mi entrega?`;
+                
+                const whatsappNumber = '521XXXXXXXXXX'; // Reemplazar con el número real
+                const waUrl = `https://api.whatsapp.org/send?phone=${whatsappNumber}&text=${encodeURIComponent(msg)}`;
+                
+                Swal.fire({
+                    title: '¡Reserva Registrada!',
+                    text: 'Te estamos redirigiendo a WhatsApp para confirmar tu pedido con un asesor.',
+                    icon: 'success',
+                    timer: 3000,
+                    showConfirmButton: false
+                }).then(() => {
+                    window.location.href = waUrl;
                 });
             } else {
                 M.toast({html: 'Error: ' + data.message});
