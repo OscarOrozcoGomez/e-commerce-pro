@@ -18,8 +18,9 @@ try {
     $params = [];
 
     if ($search !== '') {
-        $sql .= " AND (p.nombre LIKE :search OR p.sku LIKE :search)";
-        $params[':search'] = '%' . $search . '%';
+        $sql .= " AND (p.nombre LIKE :search1 OR p.sku LIKE :search2)";
+        $params[':search1'] = '%' . $search . '%';
+        $params[':search2'] = '%' . $search . '%';
     }
 
     $sql .= " ORDER BY p.nombre ASC";

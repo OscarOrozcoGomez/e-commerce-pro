@@ -59,6 +59,10 @@ function runImport(int $almacenId = 1): void
     $unidadIndex = array_search('Unidad', $columns, true);
     $categoriaIndex = array_search('Categoría del producto', $columns, true);
     $imagenIndex = array_search('Imagen 1024', $columns, true); // Buscar la imagen de mayor resolución
+    $plantillaImagenIndex = array_search('Plantilla de producto / Imagen 1024', $columns, true); // Respaldo del producto padre
+    if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Producto / Imagen 1024', $columns, true);
+    if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Productos / Imagen 1024', $columns, true);
+    if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Productos/Imagen 1024', $columns, true);
 
     while (($row = fgetcsv($handle)) !== false) {
         if (count($row) === 0) {
@@ -91,8 +95,10 @@ function runImport(int $almacenId = 1): void
         
         // Extraer imagen y limpiar espacios u otros caracteres si los hay
         $imagenBase64 = null;
-        if ($imagenIndex !== false && !empty($row[$imagenIndex])) {
+        if ($imagenIndex !== false && !empty(trim($row[$imagenIndex]))) {
             $imagenBase64 = trim($row[$imagenIndex]);
+        } elseif ($plantillaImagenIndex !== false && !empty(trim($row[$plantillaImagenIndex]))) {
+            $imagenBase64 = trim($row[$plantillaImagenIndex]);
         }
 
         try {
