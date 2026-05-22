@@ -190,10 +190,13 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4 class="header-title">
-                <i class="material-icons medium left blue-text text-darken-4">book</i>
-                Gestión de Blogs Informativos
-            </h4>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap;">
+                <h4 class="header-title" style="margin: 0;">
+                    <i class="material-icons left blue-text text-darken-4">book</i>
+                    Gestión de Blogs
+                </h4>
+                <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+            </div>
             <p class="grey-text">Crea y administra artículos de interés general. Para ver el contenido completo de estos artículos, los visitantes del catálogo deberán iniciar sesión obligatoriamente.</p>
             
             <?php if ($error): ?>
