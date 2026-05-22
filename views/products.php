@@ -52,6 +52,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             } catch (PDOException $e) {
                 $error = 'Error al agregar producto: ' . $e->getMessage();
             }
+        } elseif ($accion === 'editar') {
+            try {
+                $id = intval($_POST['id_producto']);
+                $sql = "UPDATE productos SET nombre = :nombre, sku = :sku, codigo_barras = :codigo_barras, 
+                        descripcion = :descripcion, unidad = :unidad, precio_costo = :precio_costo, 
+                        precio_venta = :precio_venta WHERE id_producto = :id";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([
+                    ':nombre' => sanitize($_POST['nombre'] ?? ''),
+                    ':sku' => sanitize($_POST['sku'] ?? ''),
+                    ':codigo_barras' => sanitize($_POST['codigo_barras'] ?? ''),
+                    ':descripcion' => sanitize($_POST['descripcion'] ?? ''),
+                    ':unidad' => sanitize($_POST['unidad'] ?? ''),
+                    ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
+                    ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
+                    ':id' => $id
+                ]);
+                
+                dbSetProductCategories($id, $_POST['categorias'] ?? []);
+                $success = 'Producto actualizado correctamente.';
+            } catch (PDOException $e) {
+                $error = 'Error al actualizar producto: ' . $e->getMessage();
+            }
         } elseif ($accion === 'eliminar') {
             try {
                 $id = intval($_POST['id_producto']);
@@ -68,7 +91,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
 // Obtener productos
 try {
-    $sql = "SELECT * FROM productos WHERE estado = 'activo' ORDER BY nombre";
+    $sql = "SELECT p.*, GROUP_CONCAT(pc.id_categoria) as categorias_ids 
+            FROM productos p 
+            LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
+            WHERE p.estado = 'activo' 
+            GROUP BY p.id_producto
+            ORDER BY p.nombre";
     $stmt = $pdo->prepare($sql);
     $stmt->execute();
     $productos = $stmt->fetchAll();
@@ -137,9 +165,10 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Agregar Nuevo Producto</span>
-                    <form method="POST">
+                    <form method="POST" id="form-producto">
                         <?php echo csrfInput(); ?>
-                        <input type="hidden" name="accion" value="agregar">
+                        <input type="hidden" name="accion" id="accion" value="agregar">
+                        <input type="hidden" name="id_producto" id="id_producto" value="">
                         
                         <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required>
@@ -186,8 +215,11 @@ include __DIR__ . '/includes/header.php';
                             <label>Asignar Categorías</label>
                         </div>
                         
-                        <button type="submit" class="btn waves-effect waves-light green">
+                        <button type="submit" id="btn-submit" class="btn waves-effect waves-light green">
                             Agregar Producto <i class="material-icons right">add</i>
+                        </button>
+                        <button type="button" id="btn-cancel" class="btn waves-effect waves-light grey" style="display:none;" onclick="cancelarEdicion()">
+                            Cancelar
                         </button>
                     </form>
                 </div>
@@ -198,6 +230,10 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Listado de Productos</span>
+                    <div class="input-field">
+                        <i class="material-icons prefix">search</i>
+                        <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
+                    </div>
                     <div style="overflow-x: auto;">
                         <table class="striped">
                             <thead>
@@ -226,6 +262,10 @@ include __DIR__ . '/includes/header.php';
                                         <td><?php echo esc($prod['sku']); ?></td>
                                         <td>$<?php echo number_format((float)$prod['precio_venta'], 2); ?></td>
                                         <td>
+                                            <button type="button" class="btn-floating btn-small blue waves-effect waves-light" 
+                                                    onclick='abrirEditar(<?php echo json_encode($prod); ?>)'>
+                                                <i class="material-icons">edit</i>
+                                            </button>
                                             <form method="POST" style="display:inline;">
                                                 <?php echo csrfInput(); ?>
                                                 <input type="hidden" name="accion" value="eliminar">
@@ -245,5 +285,90 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+    function abrirEditar(prod) {
+        document.getElementById('accion').value = 'editar';
+        document.getElementById('id_producto').value = prod.id_producto;
+        
+        document.getElementById('nombre').value = prod.nombre;
+        document.getElementById('sku').value = prod.sku;
+        document.getElementById('codigo_barras').value = prod.codigo_barras || '';
+        document.getElementById('descripcion').value = prod.descripcion || '';
+        document.getElementById('unidad').value = prod.unidad || '';
+        document.getElementById('precio_costo').value = prod.precio_costo;
+        document.getElementById('precio_venta').value = prod.precio_venta;
+        
+        // Manejo de select múltiple
+        const selectCats = document.querySelector('select[name="categorias[]"]');
+        for (let i = 0; i < selectCats.options.length; i++) {
+            selectCats.options[i].selected = false;
+        }
+        if (prod.categorias_ids) {
+            const catIds = prod.categorias_ids.split(',');
+            for (let i = 0; i < selectCats.options.length; i++) {
+                if (catIds.includes(selectCats.options[i].value)) {
+                    selectCats.options[i].selected = true;
+                }
+            }
+        }
+        
+        M.updateTextFields();
+        M.FormSelect.init(selectCats);
+        M.textareaAutoResize(document.getElementById('descripcion'));
+        
+        const btnSubmit = document.getElementById('btn-submit');
+        btnSubmit.innerHTML = 'Guardar Cambios <i class="material-icons right">save</i>';
+        btnSubmit.classList.remove('green');
+        btnSubmit.classList.add('blue');
+        
+        document.getElementById('btn-cancel').style.display = 'inline-block';
+        
+        window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+    
+    function cancelarEdicion() {
+        document.getElementById('form-producto').reset();
+        document.getElementById('accion').value = 'agregar';
+        document.getElementById('id_producto').value = '';
+        
+        const selectCats = document.querySelector('select[name="categorias[]"]');
+        for (let i = 0; i < selectCats.options.length; i++) {
+            selectCats.options[i].selected = false;
+        }
+        
+        M.updateTextFields();
+        M.FormSelect.init(selectCats);
+        M.textareaAutoResize(document.getElementById('descripcion'));
+        
+        const btnSubmit = document.getElementById('btn-submit');
+        btnSubmit.innerHTML = 'Agregar Producto <i class="material-icons right">add</i>';
+        btnSubmit.classList.remove('blue');
+        btnSubmit.classList.add('green');
+        
+        document.getElementById('btn-cancel').style.display = 'none';
+    }
+    
+    document.getElementById('buscar_producto').addEventListener('keyup', function() {
+        const filter = this.value.toLowerCase();
+        const rows = document.querySelectorAll('table.striped tbody tr');
+        
+        rows.forEach(row => {
+            const nombre = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
+            const sku = row.cells[2] ? row.cells[2].textContent.toLowerCase() : '';
+            if (nombre.includes(filter) || sku.includes(filter)) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        <?php if ($success): ?>
+            M.toast({html: '<?php echo esc($success); ?>', classes: 'green darken-1 rounded', displayLength: 4000});
+        <?php endif; ?>
+    });
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

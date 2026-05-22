@@ -1,3 +1,10 @@
+    <!-- Botón Volver Arriba -->
+    <div id="scroll-to-top" style="display: none; position: fixed; bottom: 20px; right: 20px; z-index: 999;">
+        <a class="btn-floating btn-large blue darken-4 waves-effect waves-light z-depth-3">
+            <i class="material-icons">arrow_upward</i>
+        </a>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
         // Función global para actualizar el contador del carrito
@@ -38,6 +45,21 @@
             const dropdowns = document.querySelectorAll('.dropdown-trigger');
             M.Dropdown.init(dropdowns);
             
+            // Lógica del botón Volver Arriba
+            const scrollTopBtn = document.getElementById('scroll-to-top');
+            
+            window.addEventListener('scroll', function() {
+                if (window.pageYOffset > 400) {
+                    scrollTopBtn.style.display = "block";
+                } else {
+                    scrollTopBtn.style.display = "none";
+                }
+            });
+
+            scrollTopBtn.addEventListener('click', function() {
+                window.scrollTo({top: 0, behavior: 'smooth'});
+            });
+
             // Inicializar el contador al cargar la página
             updateCartBadge();
         });

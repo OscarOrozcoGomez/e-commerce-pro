@@ -61,7 +61,7 @@
             </a>
             <ul id="nav-mobile" class="right hide-on-med-and-down">
                 <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
-                <li><a href="<?php echo BASE_URL; ?>#blog-section">Blog</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/blog.php">Blog</a></li>
                 <li>
                     <a href="<?php echo BASE_URL; ?>views/cart.php" class="nav-cart-link">
                         <i class="material-icons">shopping_cart</i>

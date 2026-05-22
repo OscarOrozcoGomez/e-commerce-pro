@@ -75,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <i class="material-icons prefix">lock</i>
                         <input type="password" id="password" name="password" required>
                         <label for="password">Contraseña</label>
+                        <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('password', this)">visibility</i>
                     </div>
                     <div class="right-align" style="margin-bottom: 20px;">
                         <a href="<?php echo BASE_URL; ?>views/forgot_password.php">¿Olvidaste tu contraseña?</a>
@@ -91,5 +92,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <script>
+        function togglePass(inputId, iconElement) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                iconElement.innerText = 'visibility_off';
+            } else {
+                input.type = 'password';
+                iconElement.innerText = 'visibility';
+            }
+        }
+    </script>
 </body>
 </html>

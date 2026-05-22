@@ -30,6 +30,16 @@ try {
     $productos = [];
 }
 
+try {
+    $stmtBlogs = $pdo->prepare("SELECT * FROM blogs WHERE estado = 'publicado' ORDER BY fecha_creacion DESC LIMIT 5");
+    $stmtBlogs->execute();
+    $blogsRecientes = $stmtBlogs->fetchAll();
+} catch (PDOException $e) {
+    error_log("Error al cargar blogs: " . $e->getMessage());
+    $blogsRecientes = [];
+}
+
+
 $pageTitle = 'Catálogo de Productos';
 include __DIR__ . '/../views/includes/header.php';
 ?>
@@ -54,6 +64,29 @@ include __DIR__ . '/../views/includes/header.php';
                                class="collection-item <?php echo $categoriaSeleccionada === $cat['nombre'] ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>"
                                style="border-radius: 4px; margin-bottom: 5px;">
                                 <?php echo esc($cat['nombre']); ?>
+                            </a>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Sección de Blogs -->
+                <h6 class="blue-text text-darken-4" style="padding-left: 15px; margin-top: 30px; margin-bottom: 20px; font-weight: bold;">
+                    <i class="material-icons left">article</i> Información de Interés
+                </h6>
+                <div class="collection borderless" style="border: none;">
+                    <?php if (empty($blogsRecientes)): ?>
+                        <p class="grey-text center-align" style="font-size: 0.9rem; padding: 10px;">No hay artículos disponibles.</p>
+                    <?php else: ?>
+                        <?php foreach ($blogsRecientes as $blog): ?>
+                            <a href="../views/blog_detail.php?id=<?php echo $blog['id_blog']; ?>" 
+                               class="collection-item grey-text text-darken-3 hoverable-item"
+                               style="border-radius: 4px; margin-bottom: 5px;">
+                                <div style="font-weight: bold; font-size: 0.95rem; line-height: 1.2; margin-bottom: 5px;">
+                                    <?php echo esc($blog['titulo']); ?>
+                                </div>
+                                <div class="grey-text" style="font-size: 0.8rem;">
+                                    <?php echo date('d M Y', strtotime($blog['fecha_creacion'])); ?>
+                                </div>
                             </a>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -116,6 +149,8 @@ include __DIR__ . '/../views/includes/header.php';
     .border-radius-8 { border-radius: 8px; overflow: hidden; }
     .collection.borderless .collection-item { border: none; }
     .truncate-3-lines { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .hoverable-item { transition: background-color 0.2s ease; }
+    .hoverable-item:hover { background-color: #f5f5f5 !important; }
 </style>
 
 <?php include __DIR__ . '/../views/includes/footer.php'; ?>

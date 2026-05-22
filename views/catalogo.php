@@ -9,11 +9,15 @@ $categorias = dbGetCategories();
 
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
-$sql = "SELECT * FROM productos WHERE estado = 'activo'";
+$sql = "SELECT p.* FROM productos p ";
 $params = [];
 if (!empty($categoriaSeleccionada)) {
-    $sql .= " AND categoria = :cat";
+    $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
+              JOIN categorias c ON pc.id_categoria = c.id_categoria 
+              WHERE c.nombre = :cat AND p.estado = 'activo'";
     $params[':cat'] = $categoriaSeleccionada;
+} else {
+    $sql .= " WHERE p.estado = 'activo'";
 }
 $sql .= " ORDER BY nombre ASC";
 
@@ -46,10 +50,10 @@ include __DIR__ . '/includes/header.php';
                         <p class="grey-text center-align" style="font-size: 0.9rem; padding: 10px;">No se encontraron categorías.</p>
                     <?php else: ?>
                         <?php foreach ($categorias as $cat): ?>
-                            <a href="catalogo.php?categoria=<?php echo urlencode($cat); ?>" 
-                               class="collection-item <?php echo $categoriaSeleccionada === $cat ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>"
+                            <a href="catalogo.php?categoria=<?php echo urlencode($cat['nombre']); ?>" 
+                               class="collection-item <?php echo $categoriaSeleccionada === $cat['nombre'] ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>"
                                style="border-radius: 4px; margin-bottom: 5px;">
-                                <?php echo esc($cat); ?>
+                                <?php echo esc($cat['nombre']); ?>
                             </a>
                         <?php endforeach; ?>
                     <?php endif; ?>

@@ -245,8 +245,9 @@ function generatePasswordResetToken(string $email): bool
         return false;
     }
 
-    $token = bin2hex(random_bytes(32));
-    $tokenHash = hash('sha256', $token);
+    // Generar un código de 6 dígitos para mejor UX sin links
+    $code = (string)random_int(100000, 999999);
+    $tokenHash = hash('sha256', $code);
     $expiresAt = date('Y-m-d H:i:s', time() + 3600);
 
     $pdo->prepare('DELETE FROM password_resets WHERE email = :email')->execute([':email' => $email]);
@@ -257,7 +258,7 @@ function generatePasswordResetToken(string $email): bool
         ':expires_at' => $expiresAt,
     ]);
 
-    return sendPasswordResetEmail($email, $token);
+    return sendPasswordResetEmail($email, $code);
 }
 
 function getPasswordResetRecord(string $token): ?array
@@ -301,15 +302,26 @@ function resetPasswordWithToken(string $token, string $newPassword): bool
 
 function sendPasswordResetEmail(string $email, string $token): bool
 {
-    $resetUrl = BASE_URL . 'views/reset_password.php?token=' . urlencode($token);
-    $subject = 'Restablecimiento de contraseña';
-    $message = "Se ha solicitado el restablecimiento de su contraseña.\n\n" .
-               "Por favor, abra el siguiente enlace para establecer una nueva contraseña:\n" .
-               "{$resetUrl}\n\n" .
-               "Si usted no solicitó este cambio, ignore este mensaje.\n";
-    $headers = 'From: no-reply@' . ($_SERVER['SERVER_NAME'] ?? 'localhost') . "\r\n" .
-               'Content-Type: text/plain; charset=UTF-8';
-    return mail($email, $subject, $message, $headers);
+    $subject = 'Código de recuperación de contraseña';
+    $message = "Tu código de seguridad es: {$token}\n\n" .
+               "Ingrésalo en la página para restablecer tu contraseña.\n" .
+               "Si no solicitaste esto, ignora este mensaje.\n";
+
+    // SIMULACIÓN PARA XAMPP / LOCALHOST
+    // Guardamos el "email" en un archivo local para que puedas verlo sin configurar servidores
+    $logPath = __DIR__ . '/../mail_log.txt';
+    $logContent = "========================================\n" .
+                  "FECHA: " . date('Y-m-d H:i:s') . "\n" .
+                  "PARA: $email\n" .
+                  "ASUNTO: $subject\n" .
+                  "MENSAJE: $message\n" .
+                  "========================================\n\n";
+    
+    file_put_contents($logPath, $logContent, FILE_APPEND);
+
+    // En producción, aquí usarías mail() o PHPMailer. 
+    // Por ahora retornamos true para que el flujo continúe en XAMPP.
+    return true;
 }
 
 /**

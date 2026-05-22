@@ -1,0 +1,11 @@
+========================================
+FECHA: 2026-05-21 21:46:02
+PARA: allmithy@gmail.com
+ASUNTO: Código de recuperación de contraseña
+MENSAJE: Tu código de seguridad es: 315386
+
+Ingrésalo en la página para restablecer tu contraseña.
+Si no solicitaste esto, ignora este mensaje.
+
+========================================
+
