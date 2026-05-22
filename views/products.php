@@ -14,6 +14,15 @@ $usuario = $_SESSION['usuario'];
 $error = '';
 $success = '';
 
+// Procesar creación de categorías (Solo Admin)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion_categoria']) && isAdmin()) {
+    if (dbCreateCategory($_POST['nuevo_nombre_cat'] ?? '')) {
+        $success = 'Categoría creada con éxito.';
+    } else {
+        $error = 'No se pudo crear la categoría.';
+    }
+}
+
 // Procesar formulario de agregar/editar
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -23,8 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         
         if ($accion === 'agregar') {
             try {
-                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, categoria, estado) 
-                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :categoria, 'activo')";
+                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, estado) 
+                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, 'activo')";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => sanitize($_POST['nombre'] ?? ''),
@@ -34,8 +43,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     ':unidad' => sanitize($_POST['unidad'] ?? ''),
                     ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
                     ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
-                    ':categoria' => sanitize($_POST['categoria'] ?? ''),
                 ]);
+                
+                $id_nuevo = (int)$pdo->lastInsertId();
+                dbSetProductCategories($id_nuevo, $_POST['categorias'] ?? []);
+                
                 $success = 'Producto agregado correctamente.';
             } catch (PDOException $e) {
                 $error = 'Error al agregar producto: ' . $e->getMessage();
@@ -72,6 +84,7 @@ function sanitize(mixed $value): string {
     return trim(htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
 }
 
+$categoriasDisponibles = dbGetCategories();
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -98,6 +111,26 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
     </div>
+
+    <?php if (isAdmin()): ?>
+    <!-- Gestión de Categorías (Solo Admin) -->
+    <div class="row">
+        <div class="col s12">
+            <div class="card-panel blue lighten-5">
+                <form method="POST" class="row" style="margin-bottom: 0; display: flex; align-items: center;">
+                    <div class="input-field col s12 m8">
+                        <i class="material-icons prefix">label</i>
+                        <input type="text" id="nuevo_nombre_cat" name="nuevo_nombre_cat" required>
+                        <label for="nuevo_nombre_cat">Nueva Categoría Maestra</label>
+                    </div>
+                    <div class="col s12 m4">
+                        <button type="submit" name="accion_categoria" class="btn blue darken-4">CREAR CATEGORÍA</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <div class="row">
         <div class="col s12 m6">
@@ -144,8 +177,13 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         
                         <div class="input-field">
-                            <input type="text" id="categoria" name="categoria">
-                            <label for="categoria">Categoría</label>
+                            <select name="categorias[]" multiple>
+                                <option value="" disabled>Selecciona una o varias categorías</option>
+                                <?php foreach ($categoriasDisponibles as $cat): ?>
+                                    <option value="<?php echo $cat['id_categoria']; ?>"><?php echo esc($cat['nombre']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <label>Asignar Categorías</label>
                         </div>
                         
                         <button type="submit" class="btn waves-effect waves-light green">

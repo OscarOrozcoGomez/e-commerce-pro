@@ -363,16 +363,59 @@ function dbGetProductsManaged(): array {
 }
 
 /**
- * Guarda o actualiza un producto.
+ * Asocia categorías a un producto (Relación Muchos a Muchos).
  */
-function dbSaveProduct(array $data): bool {
+function dbSetProductCategories(int $id_producto, array $ids_categorias): bool {
     try {
         $pdo = getPDO();
-        $sql = "INSERT INTO productos (id_padre, nombre, nombre_variante, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, categoria, estado) 
-                VALUES (:id_padre, :nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :categoria, 'activo')";
-        return $pdo->prepare($sql)->execute($data);
-    } catch (PDOException $e) {
-        error_log("Error en dbSaveProduct: " . $e->getMessage());
+        $pdo->beginTransaction();
+        
+        // Limpiar asociaciones previas
+        $stmt = $pdo->prepare("DELETE FROM producto_categorias WHERE id_producto = ?");
+        $stmt->execute([$id_producto]);
+        
+        // Insertar nuevas
+        if (!empty($ids_categorias)) {
+            $stmtInsert = $pdo->prepare("INSERT INTO producto_categorias (id_producto, id_categoria) VALUES (?, ?)");
+            foreach ($ids_categorias as $id_cat) {
+                $stmtInsert->execute([$id_producto, (int)$id_cat]);
+            }
+        }
+        
+        $pdo->commit();
+        return true;
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log("Error en dbSetProductCategories: " . $e->getMessage());
         return false;
+    }
+}
+
+/**
+ * Crea una nueva categoría maestra (Solo Admin).
+ */
+function dbCreateCategory(string $nombre): bool {
+    if (!isAdmin()) return false;
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare("INSERT INTO categorias (nombre) VALUES (?) ON DUPLICATE KEY UPDATE estado = 'activo'");
+        return $stmt->execute([trim($nombre)]);
+    } catch (PDOException $e) {
+        error_log("Error en dbCreateCategory: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Obtiene todas las categorías activas de la tabla maestra.
+ */
+function dbGetCategories(): array {
+    try {
+        $pdo = getPDO();
+        $sql = "SELECT * FROM categorias WHERE estado = 'activo' ORDER BY nombre ASC";
+        return $pdo->query($sql)->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Error en dbGetCategories: " . $e->getMessage());
+        return [];
     }
 }

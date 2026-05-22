@@ -91,6 +91,12 @@ function getAdminStats(PDO $pdo): array
     $stmt = $pdo->prepare($sql);
     $stmt->execute();
     $stats['incompletos'] = $stmt->fetch();
+
+    // Total de blogs
+    $sql = "SELECT COUNT(*) as total FROM blogs";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute();
+    $stats['blogs'] = $stmt->fetch();
     
     return $stats;
 }
@@ -258,6 +264,18 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card blue-grey darken-1">
+                    <div class="card-content white-text">
+                        <span class="card-title">Artículos de Blog</span>
+                        <p class="display-metric"><?php echo esc((string)($statsAdmin['blogs']['total'] ?? 0)); ?></p>
+                        <p class="text-small">Publicaciones informativas en catálogo</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="white-text">Gestionar Blogs</a>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="row">
@@ -335,6 +353,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/inventario_entradas.php" class="btn waves-effect waves-light green darken-2">Surtir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Blogs</span>
+                        <p>Publicar, editar o eliminar artículos informativos en el catálogo</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="btn waves-effect waves-light blue darken-4">Blogs</a>
                     </div>
                 </div>
             </div>
@@ -456,6 +485,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Blogs</span>
+                        <p>Publicar, editar o eliminar artículos informativos en el catálogo</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="btn waves-effect waves-light blue darken-4">Blogs</a>
                     </div>
                 </div>
             </div>

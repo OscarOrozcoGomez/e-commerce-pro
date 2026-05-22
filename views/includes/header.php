@@ -61,6 +61,7 @@
             </a>
             <ul id="nav-mobile" class="right hide-on-med-and-down">
                 <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
+                <li><a href="<?php echo BASE_URL; ?>#blog-section">Blog</a></li>
                 <li>
                     <a href="<?php echo BASE_URL; ?>views/cart.php" class="nav-cart-link">
                         <i class="material-icons">shopping_cart</i>
@@ -111,6 +112,10 @@
                             <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                         <?php else: ?>
                             <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
+                        <?php endif; ?>
+                        
+                        <?php if (hasPermission('gestionar_blogs')): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/manage_blogs.php"><i class="material-icons">book</i> Gestionar Blogs</a></li>
                         <?php endif; ?>
                         
                         <?php if (isAdmin()): ?>

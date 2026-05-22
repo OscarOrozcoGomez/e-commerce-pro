@@ -17,8 +17,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Token CSRF inválido. Por favor recarga la página e inténtalo de nuevo.';
     } elseif (authenticate($email, $password)) {
         session_regenerate_id(true);
-        // Redirigir según el rol
-        if (isCliente()) {
+        
+        // Redirigir dinámicamente si hay un parámetro redirect seguro
+        $redirect = trim($_GET['redirect'] ?? '');
+        if (!empty($redirect)) {
+            // Prevenir open redirect
+            if (strpos($redirect, 'http://') === 0 || strpos($redirect, 'https://') === 0 || strpos($redirect, '//') === 0) {
+                $redirect = '';
+            }
+        }
+
+        if (!empty($redirect)) {
+            header('Location: ' . BASE_URL . ltrim($redirect, '/'));
+        } elseif (isCliente()) {
             header('Location: ' . BASE_URL . 'index.php');
         } else {
             header('Location: ' . BASE_URL . 'views/dashboard.php');
