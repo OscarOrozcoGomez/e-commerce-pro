@@ -110,7 +110,7 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     function renderCart() {
-        const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+        const cart = getCart();
         const tbody = document.getElementById('cart-table-body');
         let total = 0;
         
@@ -140,7 +140,7 @@ include __DIR__ . '/includes/header.php';
     }
 
     function removeItem(index) {
-        let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+        let cart = getCart();
         cart.splice(index, 1);
         localStorage.setItem('cart', JSON.stringify(cart));
         renderCart();
@@ -149,7 +149,7 @@ include __DIR__ . '/includes/header.php';
 
     document.getElementById('form-checkout').addEventListener('submit', function(e) {
         e.preventDefault();
-        const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+        const cart = getCart();
         if (cart.length === 0) return M.toast({html: 'Tu carrito está vacío'});
 
         // Bloquear confirmación si el usuario no ha iniciado sesión
@@ -245,7 +245,10 @@ include __DIR__ . '/includes/header.php';
         }
     });
 
-    renderCart();
+    document.addEventListener('DOMContentLoaded', () => {
+        renderCart();
+        updateCartBadge();
+    });
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

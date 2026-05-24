@@ -67,7 +67,7 @@
             <ul id="nav-mobile" class="right hide-on-med-and-down">
                 <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/blog.php">Blog</a></li>
-                <li>
+                <li class="nav-cart-container">
                     <a href="<?php echo BASE_URL; ?>views/cart.php" class="nav-cart-link">
                         <i class="material-icons">shopping_cart</i>
                         <span id="cart-count" class="new badge red" data-badge-caption="" style="display: none;">0</span>
@@ -179,7 +179,12 @@
         </li>
         <li><a href="<?php echo BASE_URL; ?>"><i class="material-icons">home</i> Catálogo</a></li>
         <li><a href="<?php echo BASE_URL; ?>views/blog.php"><i class="material-icons">book</i> Blog</a></li>
-        <li><a href="<?php echo BASE_URL; ?>views/cart.php"><i class="material-icons">shopping_cart</i> Carrito</a></li>
+        <li>
+            <a href="<?php echo BASE_URL; ?>views/cart.php">
+                <i class="material-icons">shopping_cart</i> Carrito 
+                <span class="new badge red cart-count-mobile" data-badge-caption="" style="display: none; float: none; margin-left: 5px;">0</span>
+            </a>
+        </li>
         
         <?php if (isAuthenticated()): ?>
             <li class="divider"></li>
@@ -201,6 +206,46 @@
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
+        // Función global para obtener el carrito de forma segura
+        function getCart() {
+            try {
+                let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+                if (!Array.isArray(cart)) return [];
+                
+                // LIMPIEZA Y NORMALIZACIÓN: 
+                // Filtra items corruptos y asegura que las propiedades sean las correctas
+                const cleanedCart = cart.filter(item => {
+                    return item && (item.id_producto || item.id) && (item.nombre || item.name);
+                }).map(item => ({
+                    id_producto: String(item.id_producto || item.id),
+                    nombre: item.nombre || item.name,
+                    precio: parseFloat(item.precio || item.price || 0),
+                    imagen: item.imagen || item.image || '',
+                    quantity: Math.max(1, parseInt(item.quantity) || 1)
+                }));
+
+                // Si hubo cambios por limpieza, actualizamos el almacenamiento
+                if (cart.length !== cleanedCart.length) {
+                    localStorage.setItem('cart', JSON.stringify(cleanedCart));
+                }
+                return cleanedCart;
+            } catch (e) { 
+                console.error("Error al obtener carrito:", e);
+                return []; 
+            }
+        }
+
+        // Función global para actualizar todos los numerales del carrito en la página
+        function updateCartBadge() {
+            const cart = getCart();
+            const totalItems = cart.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+            const badges = document.querySelectorAll('#cart-count, .cart-count-mobile, #mini-cart-count, .cart-badge, .nav-cart-count');
+            badges.forEach(badge => {
+                badge.textContent = totalItems;
+                badge.style.setProperty('display', totalItems > 0 ? 'inline-block' : 'none', 'important');
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Inicializar Menú Lateral
             var sidenavElems = document.querySelectorAll('.sidenav');
@@ -213,6 +258,9 @@
                 coverTrigger: false,
                 closeOnClick: true
             });
+
+            // Carga inicial del contador al entrar a cualquier página
+            updateCartBadge();
         });
     </script>
 

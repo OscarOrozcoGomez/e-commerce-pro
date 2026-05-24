@@ -148,35 +148,36 @@ include __DIR__ . '/includes/header.php';
 
 <script>
 function addToCart(id, nombre, precio, imagen = '') {
-    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
-    let item = cart.find(i => i.id_producto === id);
+    let cart = getCart();
+    // Usamos comparación de Strings para evitar fallos de tipo
+    let item = cart.find(i => String(i.id_producto) === String(id));
     
     if (item) {
-        item.quantity += 1;
+        item.quantity = (parseInt(item.quantity) || 0) + 1;
     } else {
         cart.push({
-            id_producto: id,
+            id_producto: String(id),
             nombre: nombre,
-            precio: precio,
+            precio: parseFloat(precio),
             imagen: imagen,
             quantity: 1
         });
     }
     
     localStorage.setItem('cart', JSON.stringify(cart));
-    M.toast({html: 'Producto añadido: ' + nombre, classes: 'green rounded'});
-    if (typeof updateCartBadge === 'function') updateCartBadge();
-    if (typeof renderMiniCart === 'function') renderMiniCart();
+    // Notificación visual robusta
+    M.toast({html: `🛒 <b>${nombre}</b> añadido al carrito`, classes: 'green rounded'});
+    
+    updateCartBadge();
+    renderMiniCart();
 }
 
 function renderMiniCart() {
     const container = document.getElementById('mini-cart-preview');
     const list = document.getElementById('mini-cart-list');
-    const countBadge = document.getElementById('mini-cart-count');
-    const totalDisplay = document.getElementById('mini-cart-total');
     if (!container || !list) return;
 
-    const cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    const cart = getCart();
     if (cart.length === 0) {
         container.style.display = 'none';
         return;
@@ -186,6 +187,8 @@ function renderMiniCart() {
     list.innerHTML = '';
     let totalItems = 0;
     let grandTotal = 0;
+
+    const totalDisplay = document.getElementById('mini-cart-total');
 
     cart.forEach(item => {
         totalItems += item.quantity;
@@ -204,8 +207,9 @@ function renderMiniCart() {
         list.appendChild(itemDiv);
     });
 
-    countBadge.textContent = totalItems;
-    if (totalDisplay) totalDisplay.textContent = 'Total: $' + grandTotal.toFixed(2);
+    if (totalDisplay) {
+        totalDisplay.textContent = 'Total: $' + grandTotal.toFixed(2);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', renderMiniCart);

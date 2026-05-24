@@ -873,22 +873,24 @@ function enviarProducto(p) {
 }
 
 function addToCartFromChat(id, nombre, precio, imagen) {
-    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
-    let item = cart.find(i => i.id_producto === id);
+    let cart = getCart();
+    let item = cart.find(i => String(i.id_producto) === String(id));
+    
     if (item) {
-        item.quantity += 1;
+        item.quantity = (parseInt(item.quantity) || 0) + 1;
     } else {
         cart.push({
-            id_producto: id,
+            id_producto: String(id),
             nombre: nombre,
-            precio: precio,
+            precio: parseFloat(precio),
             imagen: imagen,
             quantity: 1
         });
     }
+
     localStorage.setItem('cart', JSON.stringify(cart));
-    M.toast({html: '🛒 ' + nombre + ' añadido al carrito', classes: 'green'});
-    if (typeof updateCartBadge === 'function') updateCartBadge();
+    M.toast({html: '🛒 <b>' + nombre + '</b> añadido al carrito', classes: 'green rounded'});
+    updateCartBadge();
 }
 
 // Polling: revisar nuevos mensajes cada 5 segundos
