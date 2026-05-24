@@ -9,12 +9,12 @@
                 <h5 class="white-text">Conecta con nosotros</h5>
                 <div style="display: flex; gap: 25px; margin-top: 15px;">
                     <!-- Facebook Link -->
-                    <a href="https://www.facebook.com/bellezaybienestar80" target="_blank" class="white-text" title="Visítanos en Facebook">
-                        <i class="fab fa-facebook fa-3x"></i>
+                    <a href="https://www.facebook.com/bellezamasbienestar/" target="_blank" rel="noopener noreferrer" class="white-text social-link" title="Visítanos en Facebook">
+                        <i class="fa-brands fa-facebook fa-3x"></i>
                     </a>
                     <!-- WhatsApp Link -->
-                    <a href="https://wa.me/52334420747" target="_blank" class="white-text" title="Contáctanos por WhatsApp">
-                        <i class="fab fa-whatsapp fa-3x"></i>
+                    <a href="https://api.whatsapp.com/send?phone=5213344420747" target="_blank" rel="noopener noreferrer" class="white-text social-link" title="Contáctanos por WhatsApp">
+                        <i class="fa-brands fa-whatsapp fa-3x"></i>
                     </a>
                 </div>
             </div>
@@ -31,10 +31,10 @@
 </footer>
 
 <style>
-    .page-footer .fab {
+    .page-footer .fa-brands {
         transition: transform 0.3s ease, color 0.3s ease;
     }
-    .page-footer .fab:hover {
+    .page-footer .fa-brands:hover {
         transform: scale(1.2);
         color: #f8bbd0; /* Rosa suave del tema al pasar el mouse */
     }
