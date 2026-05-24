@@ -37,7 +37,12 @@ include __DIR__ . '/includes/header.php';
                             <!-- Se llena con JS -->
                         </tbody>
                     </table>
-                    <h5 class="right-align">Total: $<span id="cart-total-display">0.00</span></h5>
+                    <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                        <button type="button" onclick="clearCart()" class="btn-flat red-text waves-effect" id="btn-empty-cart" style="display: none; font-weight: bold;">
+                            <i class="material-icons left">delete_sweep</i> VACIAR CARRITO
+                        </button>
+                        <h5 style="margin: 0; font-weight: bold;">Total: $<span id="cart-total-display">0.00</span></h5>
+                    </div>
                 </div>
             </div>
         </div>
@@ -109,6 +114,26 @@ include __DIR__ . '/includes/header.php';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
+    function clearCart() {
+        Swal.fire({
+            title: '¿Vaciar el carrito?',
+            text: "Esta acción eliminará todos los productos que has seleccionado.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: 'Sí, vaciar',
+            cancelButtonText: 'Cancelar'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                localStorage.removeItem('cart');
+                renderCart();
+                updateCartBadge();
+                M.toast({html: 'Carrito vaciado', classes: 'grey darken-3 rounded'});
+            }
+        });
+    }
+
     function renderCart() {
         const cart = getCart();
         const tbody = document.getElementById('cart-table-body');
@@ -137,6 +162,10 @@ include __DIR__ . '/includes/header.php';
         });
 
         document.getElementById('cart-total-display').textContent = total.toFixed(2);
+
+        // Mostrar u ocultar el botón de vaciar según si hay items
+        const btnEmpty = document.getElementById('btn-empty-cart');
+        if (btnEmpty) btnEmpty.style.display = cart.length > 0 ? 'inline-block' : 'none';
     }
 
     function removeItem(index) {
