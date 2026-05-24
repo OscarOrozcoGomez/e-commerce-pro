@@ -1,5 +1,10 @@
 </main> <!-- Cierre de main definido en header.php -->
 
+<!-- Botón Ir Arriba (Scroll to Top) -->
+<button id="scroll-to-top" class="btn-floating btn-large blue darken-4 waves-effect waves-light" style="display: none; position: fixed; bottom: 30px; right: 30px; z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+    <i class="material-icons">arrow_upward</i>
+</button>
+
 <footer class="page-footer blue darken-4" style="margin-top: 50px;">
     <div class="container">
         <div class="row">
@@ -33,6 +38,20 @@
 </footer>
 
 <style>
+    /* Adaptación del botón Ir Arriba para móviles */
+    @media only screen and (max-width: 600px) {
+        #scroll-to-top {
+            bottom: 20px !important;
+            right: 20px !important;
+            width: 45px !important;
+            height: 45px !important;
+        }
+        #scroll-to-top i {
+            line-height: 45px !important;
+            font-size: 1.5rem !important;
+        }
+    }
+
     /* Estilos estilo Odoo para iconos sociales */
     .rounded-empty-circle {
         display: inline-flex !important;

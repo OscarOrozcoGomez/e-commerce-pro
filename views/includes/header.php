@@ -178,7 +178,11 @@
 
     <!-- Estructura del Menú Lateral (Móvil) -->
     <ul class="sidenav" id="mobile-nav">
-        <li class="blue darken-4 white-text center-align" style="padding: 20px 0;">
+        <li class="blue darken-4 white-text center-align" style="padding: 20px 0; position: relative;">
+            <!-- Botón de Cerrar para mejor UX en móvil -->
+            <a href="#!" class="sidenav-close white-text" style="position: absolute; right: 15px; top: 15px;">
+                <i class="material-icons">close</i>
+            </a>
             <img src="<?php echo BASE_URL; ?>assets/img/logo.png" alt="Logo" style="height: 50px;">
             <?php if (isAuthenticated()): ?>
                 <p style="margin: 10px 0 0 0; font-size: 0.9rem;"><?php echo esc($_SESSION['usuario']['nombre']); ?></p>
@@ -268,6 +272,22 @@
                 coverTrigger: false,
                 closeOnClick: true
             });
+
+            // Lógica para el botón "Ir Arriba"
+            const scrollBtn = document.getElementById('scroll-to-top');
+            if (scrollBtn) {
+                window.addEventListener('scroll', () => {
+                    if (window.scrollY > 400) {
+                        scrollBtn.style.display = 'block';
+                    } else {
+                        scrollBtn.style.display = 'none';
+                    }
+                });
+
+                scrollBtn.addEventListener('click', () => {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+            }
 
             // Carga inicial del contador al entrar a cualquier página
             updateCartBadge();
