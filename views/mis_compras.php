@@ -101,6 +101,9 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                 </div>
                             </div>
+                            <div class="card-action right-align" style="border-top: 1px solid rgba(160,160,160,0.2);">
+                                <a href="detalle_compra.php?id=<?php echo $c['id_pedido']; ?>" class="indigo-text text-darken-4 font-weight-bold">VER DETALLE COMPLETO <i class="material-icons right">chevron_right</i></a>
+                            </div>
                             <?php if ($c['estado'] === 'en_reparto'): ?>
                                 <div class="card-action orange lighten-5 orange-text text-darken-4">
                                     <i class="material-icons left">local_shipping</i> Tu pedido está en camino a tu domicilio.

@@ -340,7 +340,7 @@ function dbCreatePublicOrder(array $data): array {
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
         $entrega = $data['tipo_entrega'] ?? 'No especificado';
-        $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | WA: {$data['cliente']['whatsapp']} | Dir: {$data['cliente']['direccion']}";
+        $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | Dir: {$data['cliente']['direccion']}";
         $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ($i['precio'] * $i['quantity']), 0);
         $numero_pedido = 'WEB-' . strtoupper(uniqid());
 

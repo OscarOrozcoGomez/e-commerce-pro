@@ -80,7 +80,12 @@ include __DIR__ . '/includes/header.php';
                             
                             <div class="section-info">
                                 <p><i class="material-icons tiny indigo-text">person</i> <strong>Cliente:</strong> <?php echo esc($ent['cliente'] ?? 'N/A'); ?></p>
-                                <p><i class="material-icons tiny indigo-text">phone</i> <strong>Teléfono:</strong> <?php echo esc($ent['telefono'] ?? 'N/A'); ?></p>
+                                <p>
+                                    <i class="material-icons tiny indigo-text">phone</i> <strong>Teléfono:</strong> <?php echo esc($ent['telefono'] ?? 'N/A'); ?>
+                                    <a href="https://wa.me/52<?php echo preg_replace('/\D/', '', $ent['telefono']); ?>" target="_blank" class="green-text" style="margin-left: 10px;">
+                                        (WhatsApp <i class="material-icons tiny">chat</i>)
+                                    </a>
+                                </p>
                                 <p><i class="material-icons tiny indigo-text">place</i> <strong>Dirección:</strong> <?php echo esc($ent['direccion'] ?? 'No especificada'); ?></p>
                                 
                                 <?php if ($ent['ubicacion_mapa']): ?>

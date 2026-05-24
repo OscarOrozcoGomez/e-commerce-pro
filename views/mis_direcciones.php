@@ -156,7 +156,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Añadimos 'callback' para que Google llame a la función automáticamente al terminar de cargar -->
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAhJ3ApP1EPr_8IyZ8Unt-LlH1C8j5GZYE&libraries=places&callback=initAutocomplete" async defer></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=places&callback=initAutocomplete" async defer></script>
 
 <script>
 let map, marker;

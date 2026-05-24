@@ -59,8 +59,9 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <form id="form-checkout">
                         <?php if (!empty($direcciones)): ?>
-                        <div id="wrapper-select-direccion" class="input-field" style="margin-bottom: 20px;">
-                            <select id="select_direccion" class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto;">
+                        <div id="wrapper-select-direccion" style="margin-bottom: 25px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #333; font-size: 0.9rem;">Mis Direcciones</label>
+                            <select id="select_direccion" class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
                                 <option value="">-- Seleccionar dirección guardada --</option>
                                 <?php foreach ($direcciones as $d): ?>
                                     <option value="<?php echo esc($d['direccion']); ?>" <?php echo $d['es_default'] ? 'selected' : ''; ?>>
@@ -68,17 +69,16 @@ include __DIR__ . '/includes/header.php';
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                            <label class="active" style="position: relative; top: -10px; font-weight: bold; color: #333;">Mis Direcciones</label>
                         </div>
                         <?php endif; ?>
 
-                        <div class="input-field" style="margin-bottom: 30px;">
-                            <select id="tipo_entrega" name="tipo_entrega" required class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto;">
+                        <div style="margin-bottom: 30px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #333; font-size: 0.9rem;">¿Cómo deseas recibir tu pedido?</label>
+                            <select id="tipo_entrega" name="tipo_entrega" required class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
                                 <option value="" disabled selected>Selecciona método de entrega</option>
                                 <option value="Sucursal">Recoger en Sucursal (Gratis)</option>
                                 <option value="Domicilio">Entrega a Domicilio (Miércoles y Sábados)</option>
                             </select>
-                            <label class="active" style="position: relative; top: -10px; font-weight: bold; color: #333;">¿Cómo deseas recibir tu pedido?</label>
                         </div>
 
                         <div class="input-field">
@@ -88,10 +88,6 @@ include __DIR__ . '/includes/header.php';
                         <div class="input-field">
                             <input type="text" id="telefono" name="telefono" required>
                             <label for="telefono">Teléfono de contacto</label>
-                        </div>
-                        <div class="input-field">
-                            <input type="text" id="whatsapp" name="whatsapp" required>
-                            <label for="whatsapp">WhatsApp</label>
                         </div>
                         <div id="direccion-container">
                             <div class="input-field">
@@ -186,7 +182,6 @@ include __DIR__ . '/includes/header.php';
             cliente: {
                 nombre: document.getElementById('nombre').value,
                 telefono: document.getElementById('telefono').value,
-                whatsapp: document.getElementById('whatsapp').value,
                 direccion: document.getElementById('direccion').value
             },
             items: cart

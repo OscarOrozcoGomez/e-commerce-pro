@@ -8,12 +8,29 @@ if (!session_id()) {
 }
 sendSecurityHeaders();
 
+// Configuración de seguridad para manejo de errores
+ini_set('display_errors', '0'); // No mostrar errores al usuario
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1'); // Sí registrar los errores internamente para el programador
+error_reporting(E_ALL);
+
+set_exception_handler(function ($exception) {
+    error_log("Excepción no capturada: " . $exception->getMessage() . " en " . $exception->getFile() . " línea " . $exception->getLine());
+    if (!headers_sent()) {
+        header('Location: ' . BASE_URL . 'views/error.php');
+    }
+    exit;
+});
+
 // Parámetros de conexión a la base de datos
 const DB_HOST = '127.0.0.1';
 const DB_NAME = 'beautyandwell_prod';
 const DB_USER = 'root';
 const DB_PASS = '';
 const DB_CHARSET = 'utf8mb4';
+
+// Llaves de API (En producción, lo ideal es usar variables de entorno)
+const GOOGLE_MAPS_API_KEY = 'AIzaSyAhJ3ApP1EPr_8IyZ8Unt-LlH1C8j5GZYE';
 
 // Rutas y constantes del proyecto
 const BASE_URL = '/e-commerce-pro/';

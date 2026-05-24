@@ -71,7 +71,6 @@
                 
                 <?php if (isAuthenticated() && !isCliente()): ?>
                     <?php
-                        // Consultar alertas de stock bajo para el almacén actual (o todos si es admin)
                         $pdoHead = getPDO();
                         $sqlAlert = "SELECT COUNT(*) FROM inventario_almacen WHERE cantidad_actual <= stock_minimo";
                         $almacenId = getCurrentAlmacenId();
@@ -91,6 +90,22 @@
                 <?php endif; ?>
 
                 <?php if (isAuthenticated()): ?>
+                    <?php
+                        // Preparar notificaciones de chat para cualquier usuario logueado
+                        if (!isset($pdoHead)) $pdoHead = getPDO();
+                        $id_u = (int)$_SESSION['usuario']['id_usuario'];
+                        $col = isCliente() ? 'leido_cliente' : 'leido_staff';
+                        $sqlChat = "SELECT COUNT(*) FROM mensajes_soporte WHERE $col = 0 AND " . (isCliente() ? "id_cliente = $id_u" : "1=1");
+                        $unreadChat = (int)$pdoHead->query($sqlChat)->fetchColumn();
+                    ?>
+                    <li>
+                        <a href="<?php echo BASE_URL; ?>views/chat.php" title="Chat de Soporte">
+                            <i class="material-icons <?php echo $unreadChat > 0 ? 'green-text text-lighten-2' : ''; ?>">chat</i>
+                            <?php if ($unreadChat > 0): ?>
+                                <span class="new badge green" data-badge-caption=""><?php echo $unreadChat; ?></span>
+                            <?php endif; ?>
+                        </a>
+                    </li>
                     <!-- Dropdown Trigger -->
                     <li>
                         <a class="dropdown-trigger btn-floating blue darken-3 waves-effect waves-light" href="#!" data-target="user-dropdown" style="margin-top: 12px; margin-left: 15px;">
@@ -111,8 +126,10 @@
                         <?php if (isCliente()): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                             <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
+                            <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
                         <?php else: ?>
                             <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
+                            <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Centro de Mensajes</a></li>
                         <?php endif; ?>
                         
                         <?php if (hasPermission('gestionar_blogs')): ?>

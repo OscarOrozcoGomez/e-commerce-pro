@@ -214,8 +214,23 @@ CREATE TABLE IF NOT EXISTS `movimientos_inventario` (
   INDEX `idx_movimientos_destino` (`id_almacen_destino`),
   CONSTRAINT `fk_movimientos_producto` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_movimientos_origen` FOREIGN KEY (`id_almacen_origen`) REFERENCES `almacenes` (`id_almacen`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_movimientos_destino` FOREIGN KEY (`id_almacen_destino`) REFERENCES `almacenes` (`id_almacen`) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT `fk_movimientos_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `fk_movimientos_destino` FOREIGN KEY (`id_almacen_destino`) REFERENCES `almacenes` (`id_almacen`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Chat de Soporte Interno
+CREATE TABLE IF NOT EXISTS `mensajes_soporte` (
+  `id_mensaje` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_cliente` INT UNSIGNED NOT NULL,
+  `id_staff` INT UNSIGNED DEFAULT NULL COMMENT 'ID del admin/encargado que responde',
+  `enviado_por` ENUM('cliente','staff') NOT NULL,
+  `tipo_mensaje` ENUM('texto','producto') NOT NULL DEFAULT 'texto',
+  `mensaje` TEXT NOT NULL,
+  `fecha_envio` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `leido_cliente` TINYINT(1) NOT NULL DEFAULT 0,
+  `leido_staff` TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id_mensaje`),
+  KEY `idx_chat_cliente` (`id_cliente`),
+  CONSTRAINT `fk_chat_usu_cliente` FOREIGN KEY (`id_cliente`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- Insertar datos iniciales

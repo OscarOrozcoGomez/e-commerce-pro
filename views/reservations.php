@@ -64,7 +64,14 @@ include __DIR__ . '/includes/header.php';
                                         <tr>
                                             <td><?php echo esc($apt['numero_pedido']); ?></td>
                                             <td><?php echo esc($apt['cliente'] ?? 'Cliente General'); ?></td>
-                                            <td><?php echo esc($apt['telefono'] ?? 'N/A'); ?></td>
+                                            <td>
+                                                <?php echo esc($apt['telefono'] ?? 'N/A'); ?>
+                                                <?php if(!empty($apt['telefono'])): ?>
+                                                    <a href="https://wa.me/52<?php echo preg_replace('/\D/', '', $apt['telefono']); ?>" target="_blank" class="green-text">
+                                                        <i class="material-icons tiny">chat</i>
+                                                    </a>
+                                                <?php endif; ?>
+                                            </td>
                                             <td>$<?php echo number_format((float)$apt['total'], 2); ?></td>
                                             <td><?php echo esc($apt['estado']); ?></td>
                                             <td><?php echo date('d/m/Y', strtotime($apt['fecha_creacion'])); ?></td>
