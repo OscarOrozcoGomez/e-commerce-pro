@@ -293,11 +293,33 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
+                        <span class="card-title">Gestionar Clientes</span>
+                        <p>Administrar base de datos de clientes y sus direcciones guardadas.</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_customers.php" class="btn waves-effect waves-light blue darken-2">Clientes</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
                         <span class="card-title">Gestionar Usuarios</span>
                         <p>Crear, editar y administrar usuarios del sistema</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/users.php" class="btn waves-effect waves-light blue">Ir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Sucursales</span>
+                        <p>Crear nuevas sucursales y configurar ubicaciones.</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_branches.php" class="btn waves-effect waves-light orange darken-4">Configurar</a>
                     </div>
                 </div>
             </div>

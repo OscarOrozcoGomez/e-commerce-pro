@@ -27,6 +27,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $id_rol = intval($_POST['id_rol'] ?? 0);
                 $id_almacen = intval($_POST['id_almacen'] ?? 0) ?: null;
                 
+                // Validar que Vendedores y Encargados tengan sucursal asignada
+                $stmtRol = $pdo->prepare("SELECT nombre FROM roles WHERE id_rol = ?");
+                $stmtRol->execute([$id_rol]);
+                $rolNombre = $stmtRol->fetchColumn();
+
+                if (in_array($rolNombre, ['vendedor', 'encargado']) && !$id_almacen) {
+                    throw new Exception("Los vendedores y encargados deben tener una sucursal asignada obligatoriamente.");
+                }
+
                 $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
                         VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, 'activo')";
                 $stmt = $pdo->prepare($sql);
@@ -59,6 +68,7 @@ try {
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN almacenes a ON u.id_almacen = a.id_almacen
+            WHERE r.nombre != 'cliente'
             ORDER BY u.nombre";
     $stmt = $pdo->prepare($sql);
     $stmt->execute();

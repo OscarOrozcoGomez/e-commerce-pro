@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $hash = password_hash($password, PASSWORD_BCRYPT);
                     // id_rol = 4 es 'cliente' según vimos anteriormente
-                    $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) VALUES (?, ?, ?, 4, 1, 'activo')";
+                    $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) VALUES (?, ?, ?, 4, NULL, 'activo')";
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute([$nombre, $email, $hash]);
                     

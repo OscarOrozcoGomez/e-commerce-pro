@@ -134,7 +134,14 @@ include __DIR__ . '/../views/includes/header.php';
                                 </div>
                                 <div class="card-action center-align" style="border-top: 1px solid #eee;">
                                     <a href="#" class="btn-flat blue-text text-darken-4 waves-effect">DETALLES</a>
-                                    <a href="#" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons">add_shopping_cart</i></a>
+                                    <button class="btn blue darken-4 waves-effect waves-light" 
+                                            onclick="addToCart(
+                                                <?php echo (int)$p['id_producto']; ?>, 
+                                                '<?php echo addslashes(esc($p['nombre'])); ?>', 
+                                                <?php echo (float)$p['precio_venta']; ?>
+                                            )">
+                                        <i class="material-icons">add_shopping_cart</i>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -144,6 +151,33 @@ include __DIR__ . '/../views/includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+function addToCart(id, nombre, precio) {
+    let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+    
+    // Buscar si el producto ya está en el carrito
+    let item = cart.find(i => i.id_producto === id);
+    
+    if (item) {
+        item.quantity += 1;
+    } else {
+        cart.push({
+            id_producto: id,
+            nombre: nombre,
+            precio: precio,
+            quantity: 1
+        });
+    }
+    
+    localStorage.setItem('cart', JSON.stringify(cart));
+    M.toast({html: 'Producto añadido al carrito', classes: 'green rounded'});
+    
+    if (typeof updateCartBadge === 'function') {
+        updateCartBadge();
+    }
+}
+</script>
 
 <style>
     .border-radius-8 { border-radius: 8px; overflow: hidden; }

@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS `clientes` (
   INDEX `idx_clientes_email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+CREATE TABLE IF NOT EXISTS `cliente_direcciones` (
+  `id_direccion` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_cliente` INT UNSIGNED NOT NULL,
+  `alias` VARCHAR(50) NOT NULL COMMENT 'Ej: Casa, Oficina',
+  `direccion` TEXT NOT NULL,
+  `maps_link` TEXT NULL,
+  `es_default` TINYINT(1) NOT NULL DEFAULT 0,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_direccion`),
+  CONSTRAINT `fk_direccion_cliente_rel` FOREIGN KEY (`id_cliente`) REFERENCES `clientes` (`id_cliente`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Productos
 CREATE TABLE IF NOT EXISTS `productos` (
   `id_producto` INT UNSIGNED NOT NULL AUTO_INCREMENT,

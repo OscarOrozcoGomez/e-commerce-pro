@@ -13,6 +13,19 @@ $usuario = $_SESSION['usuario'];
 $error = '';
 $success = '';
 
+// Manejo de sucursal para Admins (pueden cambiar el contexto de venta)
+$id_almacen_actual = $usuario['id_almacen'] ?? (int)($_GET['sucursal'] ?? 0);
+
+// Si es Admin y no hay sucursal, intentamos tomar la primera disponible
+if (isAdmin() && !$id_almacen_actual) {
+    $stmtSuc = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' LIMIT 1");
+    $id_almacen_actual = (int)$stmtSuc->fetchColumn();
+}
+
+if (!$id_almacen_actual) {
+    $error = "Error: No tienes una sucursal asignada o no se seleccionó ninguna.";
+}
+
 // Obtener productos disponibles
 try {
     $sql = "SELECT p.*, ia.cantidad_actual 
@@ -20,7 +33,7 @@ try {
             LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :almacen
             WHERE p.estado = 'activo' ORDER BY p.nombre ASC, p.nombre_variante ASC";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':almacen' => $usuario['id_almacen']]);
+    $stmt->execute([':almacen' => $id_almacen_actual]);
     $productos = $stmt->fetchAll();
 } catch (PDOException $e) {
     $error = 'Error al obtener productos: ' . $e->getMessage();
@@ -268,11 +281,18 @@ include __DIR__ . '/includes/header.php';
         const context = document.getElementById(`venta-${id}`);
 
         // Inicializar pestañas y selects de Materialize para el nuevo contenido
-        M.Tabs.init(tabsUl);
+        let tabsInstance = M.Tabs.getInstance(tabsUl);
+        if (tabsInstance) {
+            tabsInstance.destroy(); // Destruir instancia previa para evitar conflictos de estado
+        }
+        tabsInstance = M.Tabs.init(tabsUl);
+        
         M.FormSelect.init(context.querySelectorAll('select'));
 
         // 4. Configurar el buscador Autocomplete
         const buscador = context.querySelector('.buscador-producto');
+        if (!buscador) return;
+
         const instance = M.Autocomplete.init(buscador, {
             data: autocompleteData,
             onAutocomplete: function(val) {
@@ -331,11 +351,13 @@ include __DIR__ . '/includes/header.php';
         context.querySelector('.formulario-venta').addEventListener('submit', (e) => procesarVenta(e, id));
 
         // Seleccionar la nueva pestaña automáticamente
-        const tabsInstance = M.Tabs.getInstance(tabsUl);
-        tabsInstance.select(`venta-${id}`);
+        if (tabsInstance) {
+            tabsInstance.select(`venta-${id}`);
+        }
+        setTimeout(() => buscador.focus(), 200); // Dar foco al buscador automáticamente
     }
 
-    function actualizarTituloTab(id, nombre) {
+    function actualizarTituloTab(id, nombre = '') {
         const tabTitle = document.querySelector(`#tab-li-${id} .tab-title`);
         if (tabTitle) {
             tabTitle.textContent = nombre.trim() !== '' ? nombre.substring(0, 15) : `Venta ${id.substring(1)}`;
@@ -348,9 +370,28 @@ include __DIR__ . '/includes/header.php';
         if (context.querySelectorAll('.producto-item').length > 0) {
             if (!confirm('Esta venta tiene productos. ¿Seguro que quieres cerrarla?')) return;
         }
-        document.getElementById(`tab-li-${id}`).remove();
-        context.remove();
-        M.Tabs.init(document.getElementById('ventas-tabs'));
+        
+        const tabLi = document.getElementById(`tab-li-${id}`);
+        if (tabLi) tabLi.remove();
+        if (context) {
+            // Limpiar instancias de Materialize antes de remover del DOM
+            const auto = M.Autocomplete.getInstance(context.querySelector('.buscador-producto'));
+            if (auto) auto.destroy();
+            context.remove();
+        }
+
+        const tabsUl = document.getElementById('ventas-tabs');
+        
+        // Destruir instancia de pestañas antes de re-inicializar
+        let tabsInstance = M.Tabs.getInstance(tabsUl);
+        if (tabsInstance) tabsInstance.destroy();
+
+        // Si era la última pestaña, crear una nueva automáticamente para no romper el flujo
+        if (tabsUl.children.length === 0) {
+            nuevaVenta();
+        } else {
+            M.Tabs.init(tabsUl);
+        }
     }
 
     function agregarProductoALista(tabId, product) {
@@ -374,7 +415,7 @@ include __DIR__ . '/includes/header.php';
         
         const html = `
             <div class="row producto-item animated fadeIn" data-id="${product.id_producto}" style="padding: 15px; margin: 10px 0; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid #4caf50;">
-                <input type="hidden" name="productos[]" value="${product.id_producto}">
+                <input type="hidden" name="producto_${productoIndex}" value="${product.id_producto}">
                 
                 <div class="col s12 m2 center-align">
                     <img src="${imgSrc}" class="responsive-img materialboxed" style="max-height: 80px; border-radius: 4px;">
@@ -386,12 +427,12 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 
                 <div class="input-field col s4 m2" style="margin: 0;">
-                    <input type="number" class="cantidad" name="cantidades[]" value="1" min="1" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; font-weight: bold; text-align: center;">
+                    <input type="number" class="cantidad" name="cantidad_${productoIndex}" value="1" min="1" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; font-weight: bold; text-align: center;">
                     <label class="active">Cant.</label>
                 </div>
                 
                 <div class="input-field col s5 m3" style="margin: 0;">
-                    <input type="number" class="precio-unitario" name="precios[]" value="${product.precio_venta}" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; color: #2e7d32; font-weight: bold;">
+                    <input type="number" class="precio-unitario" name="precio_${productoIndex}" value="${product.precio_venta}" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; color: #2e7d32; font-weight: bold;">
                     <label class="active">Precio Unit.</label>
                 </div>
                 

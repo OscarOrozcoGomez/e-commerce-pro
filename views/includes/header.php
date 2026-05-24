@@ -110,6 +110,7 @@
                         <li class="divider"></li>
                         <?php if (isCliente()): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
+                            <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
                         <?php else: ?>
                             <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
                         <?php endif; ?>

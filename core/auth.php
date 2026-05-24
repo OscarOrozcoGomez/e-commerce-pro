@@ -41,7 +41,7 @@ function setSecurityHeaders(): void
     header("X-Frame-Options: DENY");
     header("X-Content-Type-Options: nosniff");
     header("Referrer-Policy: strict-origin-when-cross-origin");
-    header("Content-Security-Policy: default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;");
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com;");
 }
 
 function getCsrfToken(): string
@@ -197,12 +197,14 @@ function authenticate(string $email, string $password): bool
     $pdo = getPDO();
 
     // Se añadió u.contrasena a la lista de columnas seleccionadas
-    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol,
-                   GROUP_CONCAT(p.clave) as permisos
+    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol, 
+                   GROUP_CONCAT(p.clave) as permisos,
+                   c.id_cliente
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
             LEFT JOIN permisos p ON rp.id_permiso = p.id_permiso
+            LEFT JOIN clientes c ON u.id_usuario = c.id_usuario
             WHERE u.email = :email AND u.estado = 'activo'
             GROUP BY u.id_usuario";
 
@@ -230,7 +232,7 @@ function authenticate(string $email, string $password): bool
 function logout(): void
 {
     session_destroy();
-    header('Location: ' . BASE_URL . 'views/login.php');
+    header('Location: ' . BASE_URL . 'views/login.php?logout=1');
     exit;
 }
 
@@ -332,21 +334,28 @@ function dbCreatePublicOrder(array $data): array {
     try {
         $pdo->beginTransaction();
         
-        $infoCliente = "Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | WA: {$data['cliente']['whatsapp']} | Dir: {$data['cliente']['direccion']}";
+        // Definir el almacén de despacho (por defecto 1, o podrías obtenerlo de la configuración)
+        $id_almacen_despacho = $data['id_almacen'] ?? 1;
+        $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
+        $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
+
+        $entrega = $data['tipo_entrega'] ?? 'No especificado';
+        $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | WA: {$data['cliente']['whatsapp']} | Dir: {$data['cliente']['direccion']}";
         $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ($i['precio'] * $i['quantity']), 0);
         $numero_pedido = 'WEB-' . strtoupper(uniqid());
 
-        $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_almacen, id_metodo_pago, estado, subtotal, total, observaciones) VALUES (?, NULL, 1, 1, 'pendiente_pago', ?, ?, ?)");
-        $stmt->execute([$numero_pedido, $subtotal, $subtotal, $infoCliente]);
+        // Corregido: id_usuario no puede ser NULL según la estructura de la tabla pedidos
+        $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_cliente, id_almacen, id_metodo_pago, estado, subtotal, total, observaciones) VALUES (?, ?, ?, ?, 1, 'pendiente_pago', ?, ?, ?)");
+        $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_despacho, $subtotal, $subtotal, $infoCliente]);
         $id_pedido = $pdo->lastInsertId();
 
-        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)");
-        $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = 1");
+        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?");
 
         foreach ($data['items'] as $item) {
             $lineTotal = $item['precio'] * $item['quantity'];
-            $stmtDetalle->execute([$id_pedido, $item['id_producto'], $item['quantity'], $item['precio'], $lineTotal]);
-            $stmtStock->execute([$item['quantity'], $item['id_producto']]);
+            $stmtDetalle->execute([$id_pedido, $item['id_producto'], $item['quantity'], $item['precio'], $item['precio'], $lineTotal]);
+            $stmtStock->execute([$item['quantity'], $item['id_producto'], $id_almacen_despacho]);
         }
 
         $pdo->commit();

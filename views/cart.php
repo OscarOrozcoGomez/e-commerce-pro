@@ -4,6 +4,16 @@ require_once __DIR__ . '/../core/auth.php';
 
 $pageTitle = 'Mi Carrito de Compras';
 $usuarioLogueado = $_SESSION['usuario'] ?? null;
+$isUserAuthenticated = isAuthenticated(); // Obtener el estado de autenticación de PHP
+
+$direcciones = [];
+if ($isUserAuthenticated && isCliente()) {
+    $pdo = getPDO();
+    $stmtDir = $pdo->prepare("SELECT * FROM cliente_direcciones WHERE id_cliente = ? ORDER BY es_default DESC");
+    $stmtDir->execute([$usuarioLogueado['id_cliente']]);
+    $direcciones = $stmtDir->fetchAll();
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -48,6 +58,29 @@ include __DIR__ . '/includes/header.php';
                         </p>
                     </div>
                     <form id="form-checkout">
+                        <?php if (!empty($direcciones)): ?>
+                        <div id="wrapper-select-direccion" class="input-field" style="margin-bottom: 20px;">
+                            <select id="select_direccion" class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto;">
+                                <option value="">-- Seleccionar dirección guardada --</option>
+                                <?php foreach ($direcciones as $d): ?>
+                                    <option value="<?php echo esc($d['direccion']); ?>" <?php echo $d['es_default'] ? 'selected' : ''; ?>>
+                                        <?php echo esc($d['alias']); ?>: <?php echo esc($d['direccion']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <label class="active" style="position: relative; top: -10px; font-weight: bold; color: #333;">Mis Direcciones</label>
+                        </div>
+                        <?php endif; ?>
+
+                        <div class="input-field" style="margin-bottom: 30px;">
+                            <select id="tipo_entrega" name="tipo_entrega" required class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto;">
+                                <option value="" disabled selected>Selecciona método de entrega</option>
+                                <option value="Sucursal">Recoger en Sucursal (Gratis)</option>
+                                <option value="Domicilio">Entrega a Domicilio (Miércoles y Sábados)</option>
+                            </select>
+                            <label class="active" style="position: relative; top: -10px; font-weight: bold; color: #333;">¿Cómo deseas recibir tu pedido?</label>
+                        </div>
+
                         <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required value="<?php echo esc($usuarioLogueado['nombre'] ?? ''); ?>">
                             <label for="nombre">Nombre Completo</label>
@@ -60,9 +93,11 @@ include __DIR__ . '/includes/header.php';
                             <input type="text" id="whatsapp" name="whatsapp" required>
                             <label for="whatsapp">WhatsApp</label>
                         </div>
-                        <div class="input-field">
-                            <textarea id="direccion" name="direccion" class="materialize-textarea" required></textarea>
-                            <label for="direccion">Dirección exacta de domicilio</label>
+                        <div id="direccion-container">
+                            <div class="input-field">
+                                <textarea id="direccion" name="direccion" class="materialize-textarea" required><?php echo esc($direcciones[0]['direccion'] ?? ''); ?></textarea>
+                                <label for="direccion">Dirección exacta de domicilio</label>
+                            </div>
                         </div>
                         <button type="submit" class="btn-large green waves-effect waves-light btn-block" style="width: 100%;">
                             Confirmar Pedido <i class="material-icons right">check</i>
@@ -73,6 +108,9 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<!-- SweetAlert2 para mensajes emergentes -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
     function renderCart() {
@@ -118,11 +156,33 @@ include __DIR__ . '/includes/header.php';
         const cart = JSON.parse(localStorage.getItem('cart') || '[]');
         if (cart.length === 0) return M.toast({html: 'Tu carrito está vacío'});
 
+        // Bloquear confirmación si el usuario no ha iniciado sesión
+        if (!<?php echo json_encode($isUserAuthenticated); ?>) {
+            Swal.fire({
+                title: '¡Identifícate primero!',
+                text: 'Para poder registrar tu pedido y que aparezca en tu historial, necesitas iniciar sesión o crear una cuenta.',
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: 'Iniciar Sesión',
+                cancelButtonText: 'Crear Cuenta',
+                confirmButtonColor: '#0d47a1',
+                cancelButtonColor: '#2e7d32'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    window.location.href = 'login.php?redirect=views/cart.php';
+                } else if (result.dismiss === Swal.DismissReason.cancel) {
+                    window.location.href = 'register.php';
+                }
+            });
+            return;
+        }
+
         const btn = this.querySelector('button');
         btn.disabled = true;
         btn.textContent = 'Procesando...';
 
         const formData = {
+            tipo_entrega: document.getElementById('tipo_entrega').value,
             cliente: {
                 nombre: document.getElementById('nombre').value,
                 telefono: document.getElementById('telefono').value,
@@ -140,37 +200,54 @@ include __DIR__ . '/includes/header.php';
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                localStorage.removeItem('cart');
-                
-                // Construir mensaje de WhatsApp
-                let msg = `*NUEVA RESERVA #${data.pedido}*\n`;
-                msg += `Cliente: ${formData.cliente.nombre}\n`;
-                msg += `--------------------------\n`;
-                cart.forEach(item => {
-                    msg += `- ${item.quantity}x ${item.nombre} ($${(item.precio * item.quantity).toFixed(2)})\n`;
-                });
-                msg += `--------------------------\n`;
-                msg += `*Total a confirmar: $${document.getElementById('cart-total-display').textContent}*\n\n`;
-                msg += `Hola, acabo de hacer mi reserva en el sitio. ¿Me podrían dar los datos para mi anticipo de $50 y confirmar mi entrega?`;
-                
-                const whatsappNumber = '521XXXXXXXXXX'; // Reemplazar con el número real
-                const waUrl = `https://api.whatsapp.org/send?phone=${whatsappNumber}&text=${encodeURIComponent(msg)}`;
-                
                 Swal.fire({
-                    title: '¡Reserva Registrada!',
-                    text: 'Te estamos redirigiendo a WhatsApp para confirmar tu pedido con un asesor.',
+                    title: '¡Pedido Confirmado!',
+                    text: 'Tu pedido ha sido registrado con éxito. Puedes consultar el estado en tu sección de compras.',
                     icon: 'success',
-                    timer: 3000,
-                    showConfirmButton: false
+                    confirmButtonText: 'Ver Mis Compras',
+                    confirmButtonColor: '#0d47a1'
                 }).then(() => {
-                    window.location.href = waUrl;
+                    localStorage.removeItem('cart');
+                    window.location.href = 'mis_compras.php';
                 });
             } else {
                 M.toast({html: 'Error: ' + data.message});
                 btn.disabled = false;
                 btn.textContent = 'Confirmar Pedido';
             }
+        })
+        .catch(err => {
+            console.error('Error en la petición:', err);
+            M.toast({html: 'Error de conexión. Inténtalo de nuevo.'});
+            btn.disabled = false;
+            btn.textContent = 'Confirmar Pedido';
         });
+    });
+
+    // Lógica para mostrar/ocultar dirección según el tipo de entrega
+    const tipoEntrega = document.getElementById('tipo_entrega');
+    const direccionContainer = document.getElementById('direccion-container');
+    const wrapperSelect = document.getElementById('wrapper-select-direccion');
+    const inputDireccion = document.getElementById('direccion');
+
+    tipoEntrega.addEventListener('change', function() {
+        if (this.value === 'Sucursal') {
+            direccionContainer.style.display = 'none';
+            inputDireccion.required = false;
+            if (wrapperSelect) wrapperSelect.style.display = 'none';
+        } else {
+            direccionContainer.style.display = 'block';
+            inputDireccion.required = true;
+            if (wrapperSelect) wrapperSelect.style.display = 'block';
+        }
+    });
+
+    document.getElementById('select_direccion')?.addEventListener('change', function() {
+        if (this.value) {
+            document.getElementById('direccion').value = this.value;
+            M.textareaAutoResize(document.getElementById('direccion'));
+            M.updateTextFields();
+        }
     });
 
     renderCart();

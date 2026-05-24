@@ -93,6 +93,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
+        // Si venimos de un logout, limpiamos el carrito local
+        if (window.location.search.includes('logout=1')) {
+            localStorage.removeItem('cart');
+        }
+
         function togglePass(inputId, iconElement) {
             const input = document.getElementById(inputId);
             if (input.type === 'password') {

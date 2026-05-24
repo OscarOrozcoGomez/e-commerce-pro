@@ -10,6 +10,13 @@ if (!$data || empty($data['items'])) {
     exit;
 }
 
+// Si el usuario está logueado, vinculamos el pedido a su cuenta automáticamente
+if (isAuthenticated()) {
+    $usuario = $_SESSION['usuario'];
+    $data['id_usuario'] = $usuario['id_usuario'];
+    $data['id_cliente'] = $usuario['id_cliente'] ?? null;
+}
+
 $result = dbCreatePublicOrder($data);
 
 if ($result['success']) {

@@ -13,9 +13,23 @@ if (!isAdmin() && !isEncargado()) {
 $pageTitle = 'Entradas de Inventario';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
-$almacenId = $usuario['id_almacen'];
+
+// Lógica de sucursal: Admin puede elegir vía GET, Encargado usa su sesión
+$almacenId = $usuario['id_almacen'] ?: (int)($_GET['id_almacen'] ?? 0);
+
 $error = '';
 $success = '';
+
+// Si es Admin y no hay ID, buscar el primero
+if (isAdmin() && !$almacenId) {
+    $res = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' LIMIT 1")->fetch();
+    $almacenId = $res ? (int)$res['id_almacen'] : 0;
+}
+
+if (!$almacenId) {
+    header('Location: ' . BASE_URL . 'views/dashboard.php');
+    exit;
+}
 
 // Procesar entrada individual
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
