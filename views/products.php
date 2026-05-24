@@ -36,8 +36,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         
         if ($accion === 'agregar') {
             try {
-                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, estado) 
-                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, 'activo')";
+                $imagenesCargadas = [];
+                if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
+                    foreach ($_FILES['imagenes']['tmp_name'] as $tmpName) {
+                        if (!empty($tmpName)) $imagenesCargadas[] = base64_encode(file_get_contents($tmpName));
+                    }
+                }
+                $imagenPrincipal = $imagenesCargadas[0] ?? null;
+
+                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, precio_comparacion, imagen, estado) 
+                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :precio_comparacion, :imagen, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => sanitize($_POST['nombre'] ?? ''),
@@ -47,10 +55,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     ':unidad' => sanitize($_POST['unidad'] ?? ''),
                     ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
                     ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
+                    ':precio_comparacion' => floatval($_POST['precio_comparacion'] ?? 0),
+                    ':estado' => (isset($_POST['visible_catalogo']) && $_POST['visible_catalogo'] === '1') ? 'activo' : 'archivado',
+                    ':imagen' => $imagenPrincipal,
                 ]);
                 
                 $id_nuevo = (int)$pdo->lastInsertId();
                 dbSetProductCategories($id_nuevo, $_POST['categorias'] ?? []);
+
+                // Guardar resto de imágenes en la galería
+                if (count($imagenesCargadas) > 1) {
+                    $stmtGal = $pdo->prepare("INSERT INTO producto_imagenes (id_producto, imagen_base64) VALUES (?, ?)");
+                    for ($i = 1; $i < count($imagenesCargadas); $i++) {
+                        $stmtGal->execute([$id_nuevo, $imagenesCargadas[$i]]);
+                    }
+                }
 
                 // Guardar reglas de abastecimiento
                 if (isAdmin()) {
@@ -66,11 +85,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         } elseif ($accion === 'editar') {
             try {
                 $id = intval($_POST['id_producto']);
+                
+                $imagenesCargadas = [];
+                if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
+                    foreach ($_FILES['imagenes']['tmp_name'] as $tmpName) {
+                        if (!empty($tmpName)) $imagenesCargadas[] = base64_encode(file_get_contents($tmpName));
+                    }
+                }
+                
+                $updateImagenSql = !empty($imagenesCargadas) ? ", imagen = :imagen" : "";
                 $sql = "UPDATE productos SET nombre = :nombre, sku = :sku, codigo_barras = :codigo_barras, 
                         descripcion = :descripcion, unidad = :unidad, precio_costo = :precio_costo, 
-                        precio_venta = :precio_venta WHERE id_producto = :id";
+                        precio_venta = :precio_venta, precio_comparacion = :precio_comparacion, estado = :estado $updateImagenSql 
+                        WHERE id_producto = :id";
+                
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([
+                $params = [
                     ':nombre' => sanitize($_POST['nombre'] ?? ''),
                     ':sku' => sanitize($_POST['sku'] ?? ''),
                     ':codigo_barras' => sanitize($_POST['codigo_barras'] ?? ''),
@@ -78,9 +108,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     ':unidad' => sanitize($_POST['unidad'] ?? ''),
                     ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
                     ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
+                    ':precio_comparacion' => floatval($_POST['precio_comparacion'] ?? 0),
+                    ':estado' => (isset($_POST['visible_catalogo']) && $_POST['visible_catalogo'] === '1') ? 'activo' : 'archivado',
                     ':id' => $id
-                ]);
+                ];
+                if (!empty($imagenesCargadas)) {
+                    $params[':imagen'] = $imagenesCargadas[0];
+                }
+                $stmt->execute($params);
                 
+                // Si se subieron nuevas imágenes, reemplazamos la galería anterior
+                if (count($imagenesCargadas) > 1) {
+                    $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
+                    $stmtGal = $pdo->prepare("INSERT INTO producto_imagenes (id_producto, imagen_base64) VALUES (?, ?)");
+                    for ($i = 1; $i < count($imagenesCargadas); $i++) {
+                        $stmtGal->execute([$id, $imagenesCargadas[$i]]);
+                    }
+                }
+
                 dbSetProductCategories($id, $_POST['categorias'] ?? []);
 
                 // Actualizar o insertar reglas en el almacén seleccionado en el formulario
@@ -116,7 +161,7 @@ try {
             FROM productos p 
             LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
             LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_alm
-            WHERE p.estado = 'activo' 
+            WHERE p.estado != 'inactivo' 
             GROUP BY p.id_producto
             ORDER BY p.nombre";
     $stmt = $pdo->prepare($sql);
@@ -138,7 +183,7 @@ $categoriasDisponibles = dbGetCategories();
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="container">
+<div class="container" style="width: 95%; max-width: 1800px;">
     <div class="row">
         <div class="col s12">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap;">
@@ -186,11 +231,11 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <div class="row">
-        <div class="col s12 m6">
+        <div class="col s12 m4">
             <div class="card">
                 <div class="card-content">
-                    <span class="card-title">Agregar Nuevo Producto</span>
-                    <form method="POST" id="form-producto">
+                    <span class="card-title" id="form-title">Agregar Nuevo Producto</span>
+                    <form method="POST" id="form-producto" enctype="multipart/form-data">
                         <?php echo csrfInput(); ?>
                         <input type="hidden" name="accion" id="accion" value="agregar">
                         <input type="hidden" name="id_producto" id="id_producto" value="">
@@ -228,6 +273,32 @@ include __DIR__ . '/includes/header.php';
                         <div class="input-field">
                             <input type="number" id="precio_venta" name="precio_venta" step="0.01" required>
                             <label for="precio_venta">Precio de Venta</label>
+                        </div>
+
+                        <div class="input-field">
+                            <input type="number" id="precio_comparacion" name="precio_comparacion" step="0.01" value="0">
+                            <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
+                        </div>
+
+                        <div class="input-field" style="margin-top: 30px; margin-bottom: 30px;">
+                            <div class="switch">
+                                <label>
+                                    Oculto en Web
+                                    <input type="checkbox" name="visible_catalogo" id="visible_catalogo" value="1" checked>
+                                    <span class="lever"></span>
+                                    Autorizado para Catálogo
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="file-field input-field">
+                            <div class="btn blue-grey darken-2">
+                                <span><i class="material-icons left">collections</i> Imágenes</span>
+                                <input type="file" name="imagenes[]" accept="image/*" multiple>
+                            </div>
+                            <div class="file-path-wrapper">
+                                <input class="file-path validate" type="text" placeholder="Máx 6. La primera será la principal">
+                            </div>
                         </div>
                         
                         <div class="input-field">
@@ -279,7 +350,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <div class="col s12 m6">
+        <div class="col s12 m8">
             <div class="card">
                 <div class="card-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
@@ -294,11 +365,20 @@ include __DIR__ . '/includes/header.php';
                             </select>
                         </div>
                     </div>
-                    <div class="input-field">
-                        <i class="material-icons prefix">search</i>
-                        <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
+                    <div class="row" style="margin-bottom: 0;">
+                        <div class="input-field col s12 m8">
+                            <i class="material-icons prefix">search</i>
+                            <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
+                        </div>
+                        <div class="input-field col s12 m4">
+                            <select id="filtro_estado" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px; height: 3rem;">
+                                <option value="activo" selected>Ver: Solo Activos</option>
+                                <option value="archivado">Ver: Solo Archivados</option>
+                                <option value="todos">Ver: Todos</option>
+                            </select>
+                        </div>
                     </div>
-                    <div style="overflow-x: auto;">
+                    <div style="overflow-x: auto; max-height: 700px; overflow-y: auto;">
                         <table class="striped">
                             <thead>
                                 <tr>
@@ -306,6 +386,7 @@ include __DIR__ . '/includes/header.php';
                                     <th>Nombre</th>
                                     <th>SKU</th>
                                     <th>Precio</th>
+                                    <th>Estado</th>
                                     <th class="center-align">Stock Actual</th>
                                     <th class="center-align">Mín/Máx</th>
                                     <th>Acciones</th>
@@ -327,7 +408,17 @@ include __DIR__ . '/includes/header.php';
                                         </td>
                                         <td><?php echo esc($prod['nombre']); ?></td>
                                         <td><?php echo esc($prod['sku']); ?></td>
-                                        <td>$<?php echo number_format((float)$prod['precio_venta'], 2); ?></td>
+                                        <td>
+                                            $<?php echo number_format((float)$prod['precio_venta'], 2); ?>
+                                            <?php if((float)$prod['precio_comparacion'] > 0): ?>
+                                                <br><small class="grey-text" style="text-decoration: line-through;">$<?php echo number_format((float)$prod['precio_comparacion'], 2); ?></small>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <span class="badge <?php echo $prod['estado'] === 'activo' ? 'blue' : 'grey darken-1'; ?> white-text" style="float: none; border-radius: 4px;">
+                                                <?php echo strtoupper($prod['estado']); ?>
+                                            </span>
+                                        </td>
                                         <td class="center-align">
                                             <?php $isLow = ($prod['cantidad_actual'] ?? 0) <= ($prod['stock_minimo'] ?? 2); ?>
                                             <span class="badge <?php echo $isLow ? 'red white-text' : 'green lighten-4 green-text text-darken-4'; ?>" style="float: none; font-weight: bold; border-radius: 4px;">
@@ -375,6 +466,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
+        document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
+
+        // Cargar estado
+        const checkVisible = document.getElementById('visible_catalogo');
+        checkVisible.checked = (prod.estado === 'activo');
         
         if (document.getElementById('stock_minimo')) {
             document.getElementById('cantidad_actual').value = prod.cantidad_actual || 0;
@@ -405,6 +501,7 @@ include __DIR__ . '/includes/header.php';
         btnSubmit.classList.remove('green');
         btnSubmit.classList.add('blue');
         
+        document.getElementById('form-title').innerText = 'Editar Producto';
         document.getElementById('btn-cancel').style.display = 'inline-block';
         
         window.scrollTo({top: 0, behavior: 'smooth'});
@@ -414,6 +511,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('form-producto').reset();
         document.getElementById('accion').value = 'agregar';
         document.getElementById('id_producto').value = '';
+        document.getElementById('precio_comparacion').value = 0;
+
+        // Resetear estado
+        const checkVisible = document.getElementById('visible_catalogo');
+        checkVisible.checked = true;
         
         const selectCats = document.querySelector('select[name="categorias[]"]');
         for (let i = 0; i < selectCats.options.length; i++) {
@@ -429,25 +531,37 @@ include __DIR__ . '/includes/header.php';
         btnSubmit.classList.remove('blue');
         btnSubmit.classList.add('green');
         
+        document.getElementById('form-title').innerText = 'Agregar Nuevo Producto';
         document.getElementById('btn-cancel').style.display = 'none';
     }
-    
-    document.getElementById('buscar_producto').addEventListener('keyup', function() {
-        const filter = this.value.toLowerCase();
+
+    function aplicarFiltros() {
+        const busqueda = document.getElementById('buscar_producto').value.toLowerCase();
+        const estadoFiltro = document.getElementById('filtro_estado').value;
         const rows = document.querySelectorAll('table.striped tbody tr');
         
         rows.forEach(row => {
             const nombre = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
             const sku = row.cells[2] ? row.cells[2].textContent.toLowerCase() : '';
-            if (nombre.includes(filter) || sku.includes(filter)) {
+            // El estado está en la celda 4 (badge)
+            const estadoActual = row.cells[4] ? row.cells[4].textContent.trim().toLowerCase() : '';
+            
+            const coincideBusqueda = nombre.includes(busqueda) || sku.includes(busqueda);
+            const coincideEstado = (estadoFiltro === 'todos') || (estadoActual === estadoFiltro);
+            
+            if (coincideBusqueda && coincideEstado) {
                 row.style.display = '';
             } else {
                 row.style.display = 'none';
             }
         });
-    });
+    }
+
+    document.getElementById('buscar_producto').addEventListener('keyup', aplicarFiltros);
+    document.getElementById('filtro_estado').addEventListener('change', aplicarFiltros);
 
     document.addEventListener('DOMContentLoaded', function() {
+        aplicarFiltros(); // Aplicar filtro por defecto (Activos) al cargar
         <?php if ($success): ?>
             M.toast({html: '<?php echo esc($success); ?>', classes: 'green darken-1 rounded', displayLength: 4000});
         <?php endif; ?>

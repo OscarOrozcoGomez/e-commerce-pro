@@ -12,187 +12,8 @@ if (isCliente()) {
     exit;
 }
 
-$pageTitle = 'Dashboard - Sistema POS';
-$pdo = getPDO();
 $usuario = $_SESSION['usuario'];
-$error = '';
-
-// Obtener estadísticas según el rol
-try {
-    if (isAdmin()) {
-        // Admin: Estadísticas globales
-        $statsAdmin = getAdminStats($pdo);
-    } elseif (isEncargado()) {
-        // Encargado: Estadísticas de su almacén
-        $statsEncargado = getEncargadoStats($pdo, $usuario['id_almacen']);
-    } elseif (isVendedor()) {
-        // Vendedor: Estadísticas personales
-        $statsVendedor = getVendedorStats($pdo, $usuario['id_usuario']);
-    }
-} catch (Exception $e) {
-    $error = 'Error al cargar estadísticas: ' . $e->getMessage();
-}
-
-/**
- * Obtiene estadísticas para Admin
- * @param PDO $pdo
- * @return array
- */
-function getAdminStats(PDO $pdo): array
-{
-    $stats = [];
-    
-    // Total de ventas del día
-    $sql = "SELECT COUNT(*) as total, SUM(total) as monto 
-            FROM pedidos 
-            WHERE DATE(fecha_creacion) = CURDATE() 
-            AND estado != 'cancelado'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['ventas_hoy'] = $stmt->fetch();
-    
-    // Total de clientes
-    $sql = "SELECT COUNT(*) as total FROM clientes WHERE estado = 'activo'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['clientes'] = $stmt->fetch();
-    
-    // Total de productos
-    $sql = "SELECT COUNT(*) as total FROM productos WHERE estado = 'activo'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['productos'] = $stmt->fetch();
-    
-    // Total de usuarios
-    $sql = "SELECT COUNT(*) as total FROM usuarios WHERE estado = 'activo'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['usuarios'] = $stmt->fetch();
-    
-    // Ingresos mensuales
-    $sql = "SELECT SUM(total) as total FROM pedidos 
-            WHERE YEAR(fecha_creacion) = YEAR(NOW()) 
-            AND MONTH(fecha_creacion) = MONTH(NOW())
-            AND estado != 'cancelado'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['ingresos_mes'] = $stmt->fetch();
-    
-    // Stock bajo (según mínimo configurado)
-    $sql = "SELECT COUNT(*) as total FROM inventario_almacen WHERE cantidad_actual <= stock_minimo";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['stock_bajo'] = $stmt->fetch();
-
-    // Productos incompletos (Sin precio, sin costo o sin registro de stock)
-    $sql = "SELECT COUNT(DISTINCT p.id_producto) as total FROM productos p 
-            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
-            WHERE p.precio_venta <= 0 OR p.precio_costo <= 0 OR ia.id_producto IS NULL OR ia.cantidad_actual <= 0";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['incompletos'] = $stmt->fetch();
-
-    // Total de blogs
-    $sql = "SELECT COUNT(*) as total FROM blogs";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
-    $stats['blogs'] = $stmt->fetch();
-    
-    return $stats;
-}
-
-/**
- * Obtiene estadísticas para Encargado
- * @param PDO $pdo
- * @param int|null $idAlmacen
- * @return array
- */
-function getEncargadoStats(PDO $pdo, ?int $idAlmacen): array
-{
-    $stats = [];
-    
-    if (!$idAlmacen) {
-        return [];
-    }
-    
-    // Ventas del día en su almacén
-    $sql = "SELECT COUNT(*) as total, SUM(total) as monto 
-            FROM pedidos 
-            WHERE id_almacen = :almacen
-            AND DATE(fecha_creacion) = CURDATE()
-            AND estado != 'cancelado'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':almacen' => $idAlmacen]);
-    $stats['ventas_hoy'] = $stmt->fetch();
-    
-    // Stock bajo en su almacén
-    $sql = "SELECT COUNT(*) as total FROM inventario_almacen 
-            WHERE id_almacen = :almacen AND cantidad_actual <= stock_minimo";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':almacen' => $idAlmacen]);
-    $stats['stock_bajo'] = $stmt->fetch();
-    
-    // Productos en su almacén
-    $sql = "SELECT COUNT(DISTINCT id_producto) as total FROM inventario_almacen 
-            WHERE id_almacen = :almacen";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':almacen' => $idAlmacen]);
-    $stats['productos'] = $stmt->fetch();
-    
-    // Ingresos mensuales de su almacén
-    $sql = "SELECT SUM(total) as total FROM pedidos 
-            WHERE id_almacen = :almacen
-            AND YEAR(fecha_creacion) = YEAR(NOW())
-            AND MONTH(fecha_creacion) = MONTH(NOW())
-            AND estado != 'cancelado'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':almacen' => $idAlmacen]);
-    $stats['ingresos_mes'] = $stmt->fetch();
-    
-    return $stats;
-}
-
-/**
- * Obtiene estadísticas para Vendedor
- * @param PDO $pdo
- * @param int $idUsuario
- * @return array
- */
-function getVendedorStats(PDO $pdo, int $idUsuario): array
-{
-    $stats = [];
-    
-    // Ventas realizadas hoy por este vendedor
-    $sql = "SELECT COUNT(*) as total, SUM(total) as monto 
-            FROM pedidos 
-            WHERE id_usuario = :usuario
-            AND DATE(fecha_creacion) = CURDATE()
-            AND estado != 'cancelado'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':usuario' => $idUsuario]);
-    $stats['ventas_hoy'] = $stmt->fetch();
-    
-    // Total de clientes atendidos este mes
-    $sql = "SELECT COUNT(DISTINCT id_cliente) as total FROM pedidos 
-            WHERE id_usuario = :usuario
-            AND MONTH(fecha_creacion) = MONTH(NOW())
-            AND YEAR(fecha_creacion) = YEAR(NOW())";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':usuario' => $idUsuario]);
-    $stats['clientes_mes'] = $stmt->fetch();
-    
-    // Ingresos totales este mes
-    $sql = "SELECT SUM(total) as total FROM pedidos 
-            WHERE id_usuario = :usuario
-            AND MONTH(fecha_creacion) = MONTH(NOW())
-            AND YEAR(fecha_creacion) = YEAR(NOW())
-            AND estado != 'cancelado'";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':usuario' => $idUsuario]);
-    $stats['ingresos_mes'] = $stmt->fetch();
-    
-    return $stats;
-}
+$pageTitle = 'Dashboard - Sistema POS';
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -212,8 +33,8 @@ include __DIR__ . '/includes/header.php';
                 <div class="card teal lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Ventas Hoy</span>
-                        <p class="display-metric"><?php echo esc((string)($statsAdmin['ventas_hoy']['total'] ?? 0)); ?></p>
-                        <p class="text-small">$ <?php echo number_format((float)($statsAdmin['ventas_hoy']['monto'] ?? 0), 2); ?></p>
+                        <p class="display-metric" id="stat-ventas-hoy-total">0</p>
+                        <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
                 </div>
             </div>
@@ -221,7 +42,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card blue lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Clientes</span>
-                        <p class="display-metric"><?php echo esc((string)($statsAdmin['clientes']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-clientes">0</p>
                     </div>
                 </div>
             </div>
@@ -229,7 +50,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card purple lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Productos</span>
-                        <p class="display-metric"><?php echo esc((string)($statsAdmin['productos']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-productos">0</p>
                     </div>
                 </div>
             </div>
@@ -237,7 +58,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card orange lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Usuarios</span>
-                        <p class="display-metric"><?php echo esc((string)($statsAdmin['usuarios']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-usuarios">0</p>
                     </div>
                 </div>
             </div>
@@ -250,7 +71,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Ingresos Mes</span>
-                        <p class="display-metric">$ <?php echo number_format((float)($statsAdmin['ingresos_mes']['total'] ?? 0), 2); ?></p>
+                        <p class="display-metric" id="stat-ingresos-mes">$ 0.00</p>
                     </div>
                 </div>
             </div>
@@ -258,7 +79,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card red darken-4">
                     <div class="card-content white-text">
                         <span class="card-title">Auditoría: Incompletos</span>
-                        <p class="display-metric"><?php echo esc((string)($statsAdmin['incompletos']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-incompletos">0</p>
                         <p class="text-small">Sin precio, costo o stock registrado</p>
                     </div>
                     <div class="card-action">
@@ -421,8 +242,8 @@ include __DIR__ . '/includes/header.php';
                 <div class="card teal lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Ventas Hoy</span>
-                        <p class="display-metric"><?php echo esc((string)($statsEncargado['ventas_hoy']['total'] ?? 0)); ?></p>
-                        <p class="text-small">$ <?php echo number_format((float)($statsEncargado['ventas_hoy']['monto'] ?? 0), 2); ?></p>
+                        <p class="display-metric" id="stat-ventas-hoy-total">0</p>
+                        <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
                 </div>
             </div>
@@ -430,7 +251,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card purple lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Productos</span>
-                        <p class="display-metric"><?php echo esc((string)($statsEncargado['productos']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-productos">0</p>
                     </div>
                 </div>
             </div>
@@ -438,7 +259,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card red lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Stock Bajo</span>
-                        <p class="display-metric"><?php echo esc((string)($statsEncargado['stock_bajo']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-stock-bajo">0</p>
                     </div>
                 </div>
             </div>
@@ -446,12 +267,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card indigo lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Por Entregar</span>
-                        <?php
-                            $stmtE = $pdo->prepare("SELECT COUNT(*) FROM pedidos WHERE id_repartidor IS NOT NULL AND estado = 'pagado' AND id_almacen = ?");
-                            $stmtE->execute([$usuario['id_almacen']]);
-                            $countE = $stmtE->fetchColumn();
-                        ?>
-                        <p class="display-metric"><?php echo $countE; ?></p>
+                        <p class="display-metric" id="stat-por-entregar">0</p>
                     </div>
                 </div>
             </div>
@@ -576,8 +392,8 @@ include __DIR__ . '/includes/header.php';
                 <div class="card teal lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Ventas Hoy</span>
-                        <p class="display-metric"><?php echo esc((string)($statsVendedor['ventas_hoy']['total'] ?? 0)); ?></p>
-                        <p class="text-small">$ <?php echo number_format((float)($statsVendedor['ventas_hoy']['monto'] ?? 0), 2); ?></p>
+                        <p class="display-metric" id="stat-ventas-hoy-total">0</p>
+                        <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
                 </div>
             </div>
@@ -585,7 +401,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card blue lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Clientes Este Mes</span>
-                        <p class="display-metric"><?php echo esc((string)($statsVendedor['clientes_mes']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-clientes">0</p>
                     </div>
                 </div>
             </div>
@@ -593,7 +409,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card green lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Ingresos Mes</span>
-                        <p class="text-small">$ <?php echo number_format((float)($statsVendedor['ingresos_mes']['total'] ?? 0), 2); ?></p>
+                        <p class="display-metric" id="stat-ingresos-mes">$ 0.00</p>
                     </div>
                 </div>
             </div>
@@ -639,6 +455,33 @@ include __DIR__ . '/includes/header.php';
 </style>
 
 <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('<?php echo BASE_URL; ?>api/dashboard_data.php')
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) throw new Error(res.message);
+                const d = res.data;
+                
+                // Mapeo dinámico de elementos
+                if (d.ventas_hoy) {
+                    document.getElementById('stat-ventas-hoy-total').textContent = d.ventas_hoy.total || 0;
+                    document.getElementById('stat-ventas-hoy-monto').textContent = '$ ' + parseFloat(d.ventas_hoy.monto || 0).toFixed(2);
+                }
+                if (d.clientes) document.getElementById('stat-clientes').textContent = d.clientes.total || 0;
+                if (d.productos) document.getElementById('stat-productos').textContent = d.productos.total || 0;
+                if (d.usuarios) document.getElementById('stat-usuarios').textContent = d.usuarios.total || 0;
+                if (d.ingresos_mes) document.getElementById('stat-ingresos-mes').textContent = '$ ' + parseFloat(d.ingresos_mes.total || 0).toFixed(2);
+                if (d.incompletos) document.getElementById('stat-incompletos').textContent = d.incompletos.total || 0;
+                if (d.stock_bajo) document.getElementById('stat-stock-bajo').textContent = d.stock_bajo.total || 0;
+                if (d.por_entregar) document.getElementById('stat-por-entregar').textContent = d.por_entregar.total || 0;
+                if (d.clientes_mes) document.getElementById('stat-clientes').textContent = d.clientes_mes.total || 0;
+            })
+            .catch(err => {
+                M.toast({html: 'Error cargando estadísticas', classes: 'red'});
+                console.error(err);
+            });
+    });
+
     function cleanupStock() {
         if(!confirm('¿Deseas liberar el stock de pedidos pendientes de más de 10 minutos?')) return;
         fetch('<?php echo BASE_URL; ?>api/cleanup_reservations.php')

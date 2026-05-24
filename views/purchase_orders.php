@@ -15,14 +15,33 @@ $usuario = $_SESSION['usuario'];
 $idAlmacen = $usuario['id_almacen'];
 
 // Obtener productos bajo el stock mínimo incluyendo el ID del almacén para el proceso
-$sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_costo, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo, a.nombre as sucursal, ia.id_almacen
+$sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_costo, p.precio_venta, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo, a.nombre as sucursal, ia.id_almacen
         FROM productos p
         JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
         JOIN almacenes a ON ia.id_almacen = a.id_almacen
-        WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'
-        ORDER BY a.nombre, p.nombre";
+        WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'";
+
+if (!isAdmin()) {
+    $sql .= " AND ia.id_almacen = " . (int)$idAlmacen;
+}
+
+$sql .= " ORDER BY a.nombre, p.nombre";
 $stmt = $pdo->query($sql);
 $listaCompra = $stmt->fetchAll();
+
+// Obtener datos para el gráfico de categorías con faltantes (Agrupado)
+$sqlChart = "SELECT COALESCE(c.nombre, 'Sin Categoría') as categoria, COUNT(DISTINCT p.id_producto) as total
+             FROM productos p
+             JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
+             LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
+             LEFT JOIN categorias c ON pc.id_categoria = c.id_categoria
+             WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'";
+
+if (!isAdmin()) {
+    $sqlChart .= " AND ia.id_almacen = " . (int)$idAlmacen;
+}
+$sqlChart .= " GROUP BY categoria ORDER BY total DESC";
+$chartData = $pdo->query($sqlChart)->fetchAll();
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -59,8 +78,9 @@ include __DIR__ . '/includes/header.php';
                                     <tr>
                                         <th>Producto</th>
                                         <th>Sucursal</th>
+                                        <th>P. Venta</th>
                                         <th class="center-align">Stock Actual</th>
-                                        <th class="center-align">Regla (Min/Max)</th>
+                                        <th class="center-align" style="width: 180px;">Ajustar Mín/Máx</th>
                                         <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad Recibida</th>
                                         <th class="right-align">Subtotal Est.</th>
                                     </tr>
@@ -79,8 +99,14 @@ include __DIR__ . '/includes/header.php';
                                                 <small class="grey-text">SKU: <?php echo esc($item['sku']); ?></small>
                                             </td>
                                             <td><?php echo esc($item['sucursal']); ?></td>
+                                            <td>$<?php echo number_format((float)$item['precio_venta'], 2); ?></td>
                                             <td class="red-text center-align"><strong><?php echo $item['cantidad_actual']; ?></strong></td>
-                                            <td class="center-align grey-text"><?php echo $item['stock_minimo']; ?> / <?php echo $item['stock_maximo']; ?></td>
+                                            <td class="center-align">
+                                                <div style="display: flex; gap: 5px;">
+                                                    <input type="number" name="items[<?php echo $index; ?>][stock_minimo]" value="<?php echo $item['stock_minimo']; ?>" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
+                                                    <input type="number" name="items[<?php echo $index; ?>][stock_maximo]" value="<?php echo $item['stock_maximo']; ?>" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
+                                                </div>
+                                            </td>
                                             <td class="blue lighten-5">
                                                 <input type="hidden" name="items[<?php echo $index; ?>][id_producto]" value="<?php echo $item['id_producto']; ?>">
                                                 <input type="hidden" name="items[<?php echo $index; ?>][id_almacen]" value="<?php echo $item['id_almacen']; ?>">
@@ -102,6 +128,11 @@ include __DIR__ . '/includes/header.php';
                                     <h5 style="margin: 0;">Total Inversión: <strong>$<?php echo number_format($totalInversion, 2); ?></strong></h5>
                                 </div>
                                 <div>
+                                    <button type="button" onclick="guardarReglasMasivas()" class="btn-large blue darken-2 waves-effect waves-light">
+                                        <i class="material-icons left">settings</i> ACTUALIZAR MÍNIMOS/MÁXIMOS
+                                    </button>
+                                </div>
+                                <div>
                                     <button type="button" onclick="confirmarEntradaMasiva()" class="btn-large green darken-2 waves-effect waves-light">
                                         <i class="material-icons left">inventory</i> CONFIRMAR RECEPCIÓN DE MERCANCÍA
                                     </button>
@@ -119,10 +150,27 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+
+    <!-- Sección del Gráfico de Faltantes -->
+    <?php if (!empty($chartData) && !empty($listaCompra)): ?>
+    <div class="row no-print" style="margin-top: 30px;">
+        <div class="col s12 m6 offset-m3">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title center-align">Distribución de Faltantes por Categoría</span>
+                    <div style="max-width: 400px; margin: 0 auto;">
+                        <canvas id="chartFaltantes" height="300"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 
-<!-- Incluimos SweetAlert2 para que el botón de confirmación funcione -->
+<!-- Incluimos librerías necesarias -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
     function confirmarEntradaMasiva() {
@@ -181,6 +229,72 @@ include __DIR__ . '/includes/header.php';
             }
         });
     }
+
+    function guardarReglasMasivas() {
+        const form = document.getElementById('form-entrada-masiva');
+        const formData = new FormData(form);
+        const data = {
+            csrf_token: formData.get('csrf_token'),
+            items: []
+        };
+
+        const itemsMap = {};
+        for (let [key, value] of formData.entries()) {
+            if (key.startsWith('items[')) {
+                const match = key.match(/items\[(\d+)\]\[(\w+)\]/);
+                if (match) {
+                    const index = match[1];
+                    const field = match[2];
+                    if (!itemsMap[index]) itemsMap[index] = {};
+                    itemsMap[index][field] = value;
+                }
+            }
+        }
+        data.items = Object.values(itemsMap);
+
+        Swal.fire({
+            title: '¿Actualizar reglas de stock?',
+            text: "Se guardarán los nuevos niveles mínimos y máximos para estos productos.",
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, actualizar'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                fetch('<?php echo BASE_URL; ?>api/update_thresholds.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                .then(r => r.json())
+                .then(res => {
+                    M.toast({html: res.message, classes: res.success ? 'green' : 'red'});
+                    if(res.success) setTimeout(() => location.reload(), 1000);
+                });
+            }
+        });
+    }
+
+    // Inicializar Gráfico de Faltantes
+    <?php if (!empty($chartData)): ?>
+    const ctx = document.getElementById('chartFaltantes').getContext('2d');
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: <?php echo json_encode(array_column($chartData, 'categoria')); ?>,
+            datasets: [{
+                data: <?php echo json_encode(array_column($chartData, 'total')); ?>,
+                backgroundColor: [
+                    '#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5',
+                    '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6'
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+    <?php endif; ?>
 </script>
 
 <style>

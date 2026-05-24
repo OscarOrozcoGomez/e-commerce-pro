@@ -58,7 +58,7 @@ try {
     $product['galeria'] = $imagenes;
 
     // 3. Obtener variantes (productos con el mismo nombre base)
-    $stmtVar = $pdo->prepare("SELECT id_producto, sku, nombre_variante, precio_venta 
+    $stmtVar = $pdo->prepare("SELECT id_producto, sku, nombre_variante, precio_venta, precio_comparacion 
                              FROM productos 
                              WHERE nombre = ? AND estado = 'activo' 
                              ORDER BY precio_venta ASC");

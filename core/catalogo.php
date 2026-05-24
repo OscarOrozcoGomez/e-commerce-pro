@@ -122,8 +122,10 @@ include __DIR__ . '/../views/includes/header.php';
                                     <?php endif; ?>
                                 </div>
                                 <div class="card-content" style="flex-grow: 1;">
-                                    <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;">
+                                    <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
+                                        <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo $p['id_producto']; ?>" class="grey-text text-darken-4">
                                         <?php echo esc($p['nombre']); ?>
+                                        </a>
                                     </span>
                                     <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
                                         $<?php echo number_format((float)$p['precio_venta'], 2); ?>
@@ -133,7 +135,7 @@ include __DIR__ . '/../views/includes/header.php';
                                     </p>
                                 </div>
                                 <div class="card-action center-align" style="border-top: 1px solid #eee;">
-                                    <a href="#" class="btn-flat blue-text text-darken-4 waves-effect">DETALLES</a>
+                                    <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo $p['id_producto']; ?>" class="btn-flat blue-text text-darken-4 waves-effect">DETALLES</a>
                                     <button class="btn blue darken-4 waves-effect waves-light" 
                                             onclick="addToCart(
                                                 <?php echo (int)$p['id_producto']; ?>, 

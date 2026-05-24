@@ -10,13 +10,81 @@ include __DIR__ . '/views/includes/header.php';
     .breadcrumb-nav { padding: 15px 0; color: #777; font-size: 0.9rem; }
     .breadcrumb-nav a { color: #f06292; } /* Rosado suave del Odoo theme */
     
-    .gallery-main { width: 100%; height: 500px; object-fit: contain; background: #fdfdfd; border-radius: 4px; border: 1px solid #eee; margin-bottom: 10px; }
-    .gallery-thumbs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; }
-    .gallery-thumbs img { width: 70px; height: 70px; object-fit: contain; border: 1px solid #ddd; cursor: pointer; border-radius: 4px; opacity: 0.6; transition: 0.2s; }
-    .gallery-thumbs img:hover, .gallery-thumbs img.active { opacity: 1; border-color: #f06292; }
+    /* Gallery & Zoom Styles */
+    .main-img-viewer {
+        position: relative;
+        width: 100%;
+        height: 650px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #eee;
+        overflow: hidden;
+        cursor: zoom-in;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 15px;
+    }
+    .main-img-viewer img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        transition: transform 0.1s ease-out;
+        transform-origin: center;
+    }
+    .main-img-viewer:hover img {
+        transform: scale(2.5);
+    }
 
-    .product-title { font-size: 2rem; font-weight: 500; margin-top: 0; color: #333; line-height: 1.2; }
-    .ingredients-text { color: #777; font-size: 0.95rem; margin-bottom: 20px; }
+    /* Navigation Arrows */
+    .nav-arrow {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: #1a237e;
+        width: 45px;
+        height: 45px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 10;
+        transition: 0.3s;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .nav-arrow:hover { background: #1a237e; color: white; transform: translateY(-50%) scale(1.1); }
+    .nav-arrow.prev { left: 15px; }
+    .nav-arrow.next { right: 15px; }
+
+    .gallery-strip {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        padding: 5px 0;
+    }
+    .gallery-strip::-webkit-scrollbar { height: 4px; }
+    .gallery-strip::-webkit-scrollbar-thumb { background: #ddd; border-radius: 10px; }
+    
+    .thumb-item {
+        width: 100px;
+        height: 100px;
+        flex-shrink: 0;
+        border: 2px solid #eee;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: 0.3s;
+        background: white;
+    }
+    .thumb-item img { width: 100%; height: 100%; object-fit: contain; padding: 5px; }
+    .thumb-item:hover, .thumb-item.active { border-color: #1a237e; opacity: 1; transform: translateY(-2px); }
+    .thumb-item { opacity: 0.6; }
+
+    .product-title { font-size: 3rem; font-weight: 600; margin-top: 0; color: #1a237e; line-height: 1.1; margin-bottom: 20px; }
+    .ingredients-text { color: #555; font-size: 1.1rem; margin-bottom: 30px; line-height: 1.6; }
     
     .warning-box { background-color: #fef0c7; color: #9c6c0e; padding: 15px; border-radius: 4px; display: flex; align-items: flex-start; gap: 10px; font-size: 0.85rem; font-weight: 500; margin-bottom: 30px; border: 1px solid #fde093; }
     .warning-box i { font-size: 1.2rem; color: #d97706; }
@@ -28,44 +96,43 @@ include __DIR__ . '/views/includes/header.php';
     .variant-select { display: block; width: 100%; max-width: 400px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; color: #333; outline: none; }
     .variant-select:focus { border-color: #f06292; }
 
-    .action-bar { border-bottom: 1px solid #eee; padding-bottom: 30px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+    .action-bar { border-bottom: 1px solid #eee; padding-bottom: 40px; margin-bottom: 30px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
     
-    .qty-selector { display: flex; align-items: center; border: 1px solid #ccc; border-radius: 20px; overflow: hidden; height: 40px; background: #fff; }
-    .qty-btn { background: none; border: none; padding: 0 15px; font-size: 1.2rem; cursor: pointer; color: #555; outline: none; }
+    .qty-selector { display: flex; align-items: center; border: 1px solid #ccc; border-radius: 30px; overflow: hidden; height: 55px; background: #fff; }
+    .qty-btn { background: none; border: none; padding: 0 20px; font-size: 1.5rem; cursor: pointer; color: #555; outline: none; }
     .qty-btn:hover { background: #f5f5f5; }
-    .qty-input { width: 40px; border: none !important; text-align: center; margin: 0 !important; height: 40px !important; font-size: 1rem; box-shadow: none !important; pointer-events: none; }
+    .qty-input { width: 50px; border: none !important; text-align: center; margin: 0 !important; height: 55px !important; font-size: 1.2rem; font-weight: bold; box-shadow: none !important; pointer-events: none; }
     
-    .btn-add-cart { background-color: #fce4ec; color: #c2185b; box-shadow: none; font-weight: 600; border-radius: 20px; text-transform: none; padding: 0 24px; height: 40px; display: flex; align-items: center; gap: 8px; border: 1px solid #f8bbd0; }
+    .btn-add-cart { background-color: #1a237e; color: #fff; box-shadow: 0 4px 15px rgba(26, 35, 126, 0.3); font-weight: 600; border-radius: 30px; text-transform: uppercase; padding: 0 40px; height: 55px; display: flex; align-items: center; gap: 10px; border: none; font-size: 1.1rem; }
     .btn-add-cart:hover { background-color: #f8bbd0; color: #c2185b; box-shadow: none; }
     
-    .btn-icon { background-color: #fff; border: 1px solid #ccc; color: #777; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
+    .btn-icon { background-color: #fff; border: 1px solid #ccc; color: #777; width: 55px; height: 55px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
     .btn-icon:hover { border-color: #f06292; color: #f06292; }
 
     .terms-link { color: #888; text-decoration: underline; font-size: 0.85rem; }
-
-    .specs-section { margin-top: 50px; padding-top: 30px; border-top: 1px solid #eee; }
-    .specs-title { font-size: 1.5rem; font-weight: 500; margin-bottom: 20px; color: #333; }
-    .specs-row { display: flex; padding: 12px 0; border-bottom: 1px solid #f5f5f5; font-size: 0.95rem; }
-    .specs-label { width: 30%; color: #666; }
-    .specs-value { width: 70%; color: #999; }
 </style>
 
-<div class="container" id="pdp-container" style="display: none;">
+<div class="container" id="pdp-container" style="display: none; width: 90%; max-width: 1600px;">
     <div class="breadcrumb-nav">
         <a href="<?php echo BASE_URL; ?>index.php">Todos los productos</a> / <span id="bread-cat">Categoria</span> / <span id="bread-name" style="color: #999;">Cargando...</span>
     </div>
 
     <div class="row">
         <!-- Columna Izquierda: Galería -->
-        <div class="col s12 m6">
-            <img id="main-image" src="https://via.placeholder.com/600x600?text=Cargando" class="gallery-main" alt="Producto">
-            <div id="thumb-container" class="gallery-thumbs">
+        <div class="col s12 m7">
+            <div class="main-img-viewer" id="zoom-container">
+                <img id="main-image" src="https://via.placeholder.com/600x600?text=Cargando" alt="Producto">
+                <div class="nav-arrow prev" onclick="moveSlide(-1, event)"><i class="material-icons">chevron_left</i></div>
+                <div class="nav-arrow next" onclick="moveSlide(1, event)"><i class="material-icons">chevron_right</i></div>
+            </div>
+            
+            <div id="thumb-container" class="gallery-strip">
                 <!-- Miniaturas dinámicas -->
             </div>
         </div>
 
         <!-- Columna Derecha: Info -->
-        <div class="col s12 m6" style="padding-left: 30px;">
+        <div class="col s12 m5" style="padding-left: 50px;">
             <h1 id="product-title" class="product-title">Cargando...</h1>
             <div class="ingredients-text">
                 <p style="margin: 0;"><strong>Ingredientes:</strong></p>
@@ -102,24 +169,7 @@ include __DIR__ . '/views/includes/header.php';
                 <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">compare_arrows</i></div>
             </div>
 
-            <a href="#" class="terms-link">Términos y condiciones</a>
-        </div>
-    </div>
-
-    <!-- Especificaciones -->
-    <div class="specs-section">
-        <h3 class="specs-title">Especificaciones</h3>
-        <div class="specs-row">
-            <div class="specs-label">Tamaño disponibles</div>
-            <div class="specs-value" id="spec-sizes">-</div>
-        </div>
-        <div class="specs-row">
-            <div class="specs-label">SKU</div>
-            <div class="specs-value" id="spec-sku">-</div>
-        </div>
-        <div class="specs-row">
-            <div class="specs-label">Categoría</div>
-            <div class="specs-value" id="spec-cat">-</div>
+            <a href="<?php echo BASE_URL; ?>views/terminos.php" class="terms-link">Términos y condiciones</a>
         </div>
     </div>
 </div>
@@ -127,6 +177,14 @@ include __DIR__ . '/views/includes/header.php';
 <script>
     let currentProduct = null;
     let qty = 1;
+    
+    // Variables para Galería
+    let galleryImages = [];
+    let currentSlide = 0;
+
+    // Variables para el Zoom
+    const zoomContainer = document.getElementById('zoom-container');
+    const mainImg = document.getElementById('main-image');
 
     document.addEventListener('DOMContentLoaded', function() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -170,6 +228,18 @@ include __DIR__ . '/views/includes/header.php';
                 M.toast({html: `¡${qty}x ${currentProduct.nombre} agregado!`, classes: 'rounded green'});
             }
         });
+
+        // Lógica de seguimiento para el zoom
+        zoomContainer.addEventListener('mousemove', (e) => {
+            const { left, top, width, height } = zoomContainer.getBoundingClientRect();
+            const x = ((e.pageX - left - window.scrollX) / width) * 100;
+            const y = ((e.pageY - top - window.scrollY) / height) * 100;
+            mainImg.style.transformOrigin = `${x}% ${y}%`;
+        });
+
+        zoomContainer.addEventListener('mouseleave', () => {
+            mainImg.style.transformOrigin = 'center';
+        });
     });
 
     function loadProductData(id) {
@@ -196,7 +266,12 @@ include __DIR__ . '/views/includes/header.php';
         document.getElementById('bread-name').textContent = fullName;
         document.getElementById('bread-cat').textContent = product.categoria || 'Catálogo';
         document.getElementById('product-desc').textContent = product.descripcion || 'Sin descripción detallada. (Puede requerir actualización en Odoo)';
-        document.getElementById('product-price').textContent = `$ ${parseFloat(product.precio_venta).toFixed(2)}`;
+        
+        let priceHtml = `$ ${parseFloat(product.precio_venta).toFixed(2)}`;
+        if (parseFloat(product.precio_comparacion) > 0) {
+            priceHtml += ` <span class="grey-text" style="text-decoration: line-through; font-size: 1.2rem; margin-left: 15px;">$ ${parseFloat(product.precio_comparacion).toFixed(2)}</span>`;
+        }
+        document.getElementById('product-price').innerHTML = priceHtml;
         
         // Stock Badge
         const statusContainer = document.getElementById('status-badge-container');
@@ -206,31 +281,26 @@ include __DIR__ . '/views/includes/header.php';
                 : '<span class="badge red white-text" style="float:none; margin-left:15px; border-radius:4px; padding:4px 8px;">Agotado</span>';
         }
         
-        // Especificaciones
-        document.getElementById('spec-sku').textContent = product.sku;
-        document.getElementById('spec-cat').textContent = product.categoria || '-';
-
         // Galería
-        const mainImg = document.getElementById('main-image');
         const thumbContainer = document.getElementById('thumb-container');
         thumbContainer.innerHTML = '';
         
-        const images = product.galeria && product.galeria.length > 0 ? product.galeria : ['https://via.placeholder.com/600x600?text=Sin+Imagen'];
-        mainImg.src = images[0];
+        galleryImages = product.galeria && product.galeria.length > 0 ? product.galeria : ['https://via.placeholder.com/600x600?text=Sin+Imagen'];
+        currentSlide = 0;
+        mainImg.src = galleryImages[0];
 
-        if (images.length > 1) {
-            images.forEach((imgSrc, index) => {
-                const thumb = document.createElement('img');
-                thumb.src = imgSrc;
-                if (index === 0) thumb.className = 'active';
-                thumb.onclick = () => {
-                    mainImg.src = imgSrc;
-                    document.querySelectorAll('.gallery-thumbs img').forEach(i => i.classList.remove('active'));
-                    thumb.classList.add('active');
-                };
-                thumbContainer.appendChild(thumb);
-            });
-        }
+        galleryImages.forEach((imgSrc, index) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'thumb-item' + (index === 0 ? ' active' : '');
+            thumb.innerHTML = `<img src="${imgSrc}">`;
+            thumb.onclick = () => {
+                currentSlide = index;
+                updateGalleryUI();
+                document.querySelectorAll('.thumb-item').forEach(t => t.classList.remove('active'));
+                thumb.classList.add('active');
+            };
+            thumbContainer.appendChild(thumb);
+        });
 
         // Stock Status
         const actionBtn = document.getElementById('btn-add-cart');
@@ -273,15 +343,33 @@ include __DIR__ . '/views/includes/header.php';
                     opt.selected = true;
                 }
                 variantSelect.appendChild(opt);
-                sizes.push(v.nombre_variante || 'Normal');
             });
-            document.getElementById('spec-sizes').textContent = sizes.join(', ');
         } else {
             variantSection.style.display = 'none';
-            document.getElementById('spec-sizes').textContent = product.nombre_variante || 'Única';
         }
     }
 
+    function moveSlide(direction, event) {
+        if(event) event.stopPropagation();
+        if(galleryImages.length <= 1) return;
+
+        currentSlide += direction;
+        if (currentSlide >= galleryImages.length) currentSlide = 0;
+        if (currentSlide < 0) currentSlide = galleryImages.length - 1;
+        
+        updateGalleryUI();
+    }
+
+    function updateGalleryUI() {
+        mainImg.src = galleryImages[currentSlide];
+        
+        // Actualizar miniaturas
+        const thumbs = document.querySelectorAll('.thumb-item');
+        thumbs.forEach((t, i) => {
+            if (i === currentSlide) t.classList.add('active');
+            else t.classList.remove('active');
+        });
+    }
     function updateQty(change) {
         const newVal = qty + change;
         if (newVal >= 1) {

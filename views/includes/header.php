@@ -6,6 +6,7 @@
     <title><?php echo $pageTitle ?? 'POS Sistema'; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .product-card { margin-bottom: 20px; }
         .search-container { margin-bottom: 30px; }
@@ -75,15 +76,17 @@
                 <?php if (isAuthenticated() && !isCliente()): ?>
                     <?php
                         $pdoHead = getPDO();
-                        $sqlAlert = "SELECT COUNT(*) FROM inventario_almacen WHERE cantidad_actual <= stock_minimo";
+                        $sqlAlert = "SELECT COUNT(*) FROM inventario_almacen ia 
+                                     JOIN productos p ON ia.id_producto = p.id_producto 
+                                     WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'";
                         $almacenId = getCurrentAlmacenId();
                         if (!isAdmin() && $almacenId) {
-                            $sqlAlert .= " AND id_almacen = " . intval($almacenId);
+                            $sqlAlert .= " AND ia.id_almacen = " . intval($almacenId);
                         }
                         $countLowStock = $pdoHead->query($sqlAlert)->fetchColumn();
                     ?>
                     <li style="position: relative;">
-                        <a href="<?php echo (isAdmin() || isEncargado()) ? BASE_URL . 'views/analytics.php' : '#'; ?>" title="Alertas de Stock" style="position: relative;">
+                        <a href="<?php echo (isAdmin() || isEncargado()) ? BASE_URL . 'views/purchase_orders.php' : '#'; ?>" title="Alertas de Stock" style="position: relative;">
                             <i class="material-icons <?php echo $countLowStock > 0 ? 'orange-text text-lighten-2 animated pulse infinite' : ''; ?>">notifications</i>
                             <?php if ($countLowStock > 0): ?>
                                 <span class="new badge orange" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;"><?php echo $countLowStock; ?></span>

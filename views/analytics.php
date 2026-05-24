@@ -10,61 +10,11 @@ if (!isAdmin()) {
     exit;
 }
 
-$pageTitle = 'Análisis y Predicciones';
-$pdo = getPDO();
-
-// 1. Ventas por Mes (Tendencia Anual)
-$sqlVentasMes = "SELECT 
-                    MONTH(fecha_creacion) as mes, 
-                    SUM(total) as total 
-                FROM pedidos 
-                WHERE estado != 'cancelado' 
-                AND YEAR(fecha_creacion) = YEAR(NOW())
-                GROUP BY mes 
-                ORDER BY mes";
-$ventasMesRaw = $pdo->query($sqlVentasMes)->fetchAll(PDO::FETCH_KEY_PAIR);
-
-// Preparar datos para Chart.js (rellenar meses vacíos)
-$labelsMeses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-$dataVentasMes = [];
-for ($i = 1; $i <= 12; $i++) {
-    $dataVentasMes[] = $ventasMesRaw[$i] ?? 0;
-}
-
-// 2. Top 10 Productos más vendidos
-$sqlTopProductos = "SELECT p.nombre, SUM(dp.cantidad) as cantidad 
-                    FROM detalle_pedidos dp 
-                    JOIN productos p ON dp.id_producto = p.id_producto 
-                    GROUP BY dp.id_producto 
-                    ORDER BY cantidad DESC 
-                    LIMIT 10";
-$topProductos = $pdo->query($sqlTopProductos)->fetchAll();
-
-// 3. Predicción de Inventario (Días de stock restantes)
-// Calculamos el promedio de ventas de los últimos 30 días para predecir
-$sqlPrediccion = "SELECT 
-                    p.nombre, 
-                    ia.cantidad_actual,
-                    COALESCE(ventas.total_30d, 0) as ventas_30d,
-                    (COALESCE(ventas.total_30d, 0) / 30) as promedio_diario
-                  FROM productos p
-                  JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
-                  LEFT JOIN (
-                      SELECT id_producto, SUM(cantidad) as total_30d 
-                      FROM detalle_pedidos dp
-                      JOIN pedidos pe ON dp.id_pedido = pe.id_pedido
-                      WHERE pe.fecha_creacion >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                      GROUP BY id_producto
-                  ) ventas ON p.id_producto = ventas.id_producto
-                  WHERE p.estado = 'activo'
-                  ORDER BY ia.cantidad_actual ASC
-                  LIMIT 15";
-$predicciones = $pdo->query($sqlPrediccion)->fetchAll();
-
+$pageTitle = 'Inteligencia de Negocio';
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="container-fluid" style="padding: 20px;">
+<div class="container-fluid" id="analytics-app" style="padding: 20px; display: none;">
     <div class="row">
         <div class="col s12">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px;">
@@ -101,42 +51,21 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title"><i class="material-icons left indigo-text">precision_manufacturing</i> Predicción de Abastecimiento</span>
-                    <p class="grey-text" style="margin-bottom: 20px;">Basado en el promedio de ventas de los últimos 30 días.</p>
+                    <p class="grey-text" style="margin-bottom: 20px;" id="prediccion-desc">Cargando estimaciones...</p>
                     
                     <table class="striped highlight">
                         <thead>
                             <tr>
                                 <th>Producto</th>
                                 <th>Stock Actual</th>
-                                <th>Ventas (30d)</th>
+                                <th>Ventas Totales</th>
                                 <th>Promedio Diario</th>
                                 <th>Días Restantes (Est.)</th>
                                 <th>Estado</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <?php foreach ($predicciones as $p): 
-                                $promedio = (float)$p['promedio_diario'];
-                                $diasRestantes = $promedio > 0 ? floor($p['cantidad_actual'] / $promedio) : '∞';
-                                
-                                $colorStatus = 'green-text';
-                                $labelStatus = 'Abastecido';
-                                if ($diasRestantes !== '∞') {
-                                    if ($diasRestantes < 7) { $colorStatus = 'red-text'; $labelStatus = 'CRÍTICO'; }
-                                    elseif ($diasRestantes < 15) { $colorStatus = 'orange-text'; $labelStatus = 'Reabastecer pronto'; }
-                                }
-                            ?>
-                                <tr>
-                                    <td><strong><?php echo esc($p['nombre']); ?></strong></td>
-                                    <td><?php echo $p['cantidad_actual']; ?></td>
-                                    <td><?php echo $p['ventas_30d']; ?></td>
-                                    <td><?php echo number_format($promedio, 2); ?></td>
-                                    <td class="center-align <?php echo $colorStatus; ?>" style="font-weight: bold; font-size: 1.2rem;">
-                                        <?php echo $diasRestantes; ?>
-                                    </td>
-                                    <td class="<?php echo $colorStatus; ?> font-weight-bold"><?php echo $labelStatus; ?></td>
-                                </tr>
-                            <?php endforeach; ?>
+                        <tbody id="table-predicciones">
+                            <!-- Llenado dinámico vía API -->
                         </tbody>
                     </table>
                 </div>
@@ -145,53 +74,102 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<div id="loader-analytics" class="center-align" style="margin-top: 100px;">
+    <div class="preloader-wrapper big active">
+        <div class="spinner-layer border-indigo">
+            <div class="circle-clipper left"><div class="circle"></div></div><div class="gap-patch"><div class="circle"></div></div><div class="circle-clipper right"><div class="circle"></div></div>
+        </div>
+    </div>
+    <p>Analizando datos históricos...</p>
+</div>
+
 <!-- Scripts para Gráficos -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // Gráfico de Ventas Mensuales
-    const ctxVentas = document.getElementById('chartVentas').getContext('2d');
-    new Chart(ctxVentas, {
-        type: 'line',
-        data: {
-            labels: <?php echo json_encode($labelsMeses); ?>,
-            datasets: [{
-                label: 'Ventas ($)',
-                data: <?php echo json_encode($dataVentasMes); ?>,
-                borderColor: '#1a237e',
-                backgroundColor: 'rgba(26, 35, 126, 0.1)',
-                tension: 0.4,
-                fill: true,
-                borderWidth: 3
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: { y: { beginAtZero: true, ticks: { callback: value => '$' + value } } }
-        }
+    document.addEventListener('DOMContentLoaded', () => {
+        fetch('<?php echo BASE_URL; ?>api/analytics_data.php')
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) throw new Error(res.message);
+                
+                document.getElementById('loader-analytics').style.display = 'none';
+                document.getElementById('analytics-app').style.display = 'block';
+                document.getElementById('prediccion-desc').textContent = `Estimación basada en la velocidad de venta histórica (Promedio desde hace ${res.total_dias_historial} días).`;
+
+                renderVentasChart(res.ventas_mensuales);
+                renderTopChart(res.top_productos);
+                renderTable(res.predicciones);
+            })
+            .catch(err => {
+                M.toast({html: 'Error: ' + err.message, classes: 'red'});
+            });
     });
 
-    // Gráfico de Top Productos
-    const ctxTop = document.getElementById('chartTop').getContext('2d');
-    new Chart(ctxTop, {
-        type: 'doughnut',
-        data: {
-            labels: <?php echo json_encode(array_column($topProductos, 'nombre')); ?>,
-            datasets: [{
-                data: <?php echo json_encode(array_column($topProductos, 'cantidad')); ?>,
-                backgroundColor: [
-                    '#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5',
-                    '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6'
-                ]
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: { 
-                legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } 
+    function renderVentasChart(data) {
+        const ctx = document.getElementById('chartVentas').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+                datasets: [{
+                    label: 'Ventas ($)',
+                    data: data,
+                    borderColor: '#1a237e',
+                    backgroundColor: 'rgba(26, 35, 126, 0.1)',
+                    tension: 0.4, fill: true, borderWidth: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { callback: v => '$' + v } } }
             }
-        }
-    });
+        });
+    }
+
+    function renderTopChart(items) {
+        const ctx = document.getElementById('chartTop').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: items.map(i => i.nombre),
+                datasets: [{
+                    data: items.map(i => i.cantidad),
+                    backgroundColor: ['#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5', '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } }
+            }
+        });
+    }
+
+    function renderTable(list) {
+        const tbody = document.getElementById('table-predicciones');
+        list.forEach(p => {
+            let color = 'green-text';
+            let label = 'Abastecido';
+            let rowClass = p.incompleto ? 'red lighten-5' : '';
+
+            if (p.incompleto) {
+                color = 'red-text text-darken-4'; label = 'INCOMPLETO';
+            } else if (p.dias_restantes !== '∞') {
+                if (p.dias_restantes < 7) { color = 'red-text'; label = 'CRÍTICO'; }
+                else if (p.dias_restantes < 15) { color = 'orange-text'; label = 'Reabastecer pronto'; }
+            }
+
+            tbody.innerHTML += `
+                <tr class="${rowClass}">
+                    <td><strong>${p.nombre}</strong>${p.incompleto ? '<br><small class="red-text">Falta configurar precio/costo</small>' : ''}</td>
+                    <td>${p.stock}</td>
+                    <td>${p.ventas}</td>
+                    <td>${p.promedio}</td>
+                    <td class="center-align ${color}" style="font-weight: bold; font-size: 1.2rem;">${p.dias_restantes}</td>
+                    <td class="${color} font-weight-bold">${label}</td>
+                </tr>`;
+        });
+    }
 </script>
 
 <style>
