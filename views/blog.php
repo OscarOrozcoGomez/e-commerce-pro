@@ -8,8 +8,8 @@ $pageTitle = 'Blog de Bienestar';
 $pdo = getPDO();
 
 try {
-    // Obtenemos los blogs publicados junto con el nombre del autor
-    $stmt = $pdo->prepare("SELECT b.*, u.nombre as autor FROM blogs b JOIN usuarios u ON b.id_usuario = u.id_usuario WHERE b.estado = 'publicado' ORDER BY b.fecha_creacion DESC");
+    // Obtenemos los blogs publicados (sin el JOIN de autor ya que la tabla blogs no tiene esa columna aún)
+    $stmt = $pdo->prepare("SELECT * FROM blogs WHERE estado = 'publicado' ORDER BY fecha_creacion DESC");
     $stmt->execute();
     $blogs = $stmt->fetchAll();
 } catch (PDOException $e) {
@@ -61,7 +61,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php echo esc($b['titulo']); ?>
                             </span>
                             <p class="grey-text" style="font-size: 0.85rem; margin-bottom: 10px;">
-                                <i class="material-icons tiny left">person</i> <?php echo esc($b['autor']); ?> | 
+                                <i class="material-icons tiny left">person</i> Redacción Belleza | 
                                 <i class="material-icons tiny">calendar_today</i> <?php echo date('d M, Y', strtotime($b['fecha_creacion'])); ?>
                             </p>
                             <p class="grey-text text-darken-2 truncate-4-lines">
@@ -69,7 +69,7 @@ include __DIR__ . '/includes/header.php';
                             </p>
                         </div>
                         <div class="card-action">
-                            <a href="blog_detail.php?id=<?php echo $b['id_blog']; ?>" class="blue-text text-darken-4 font-weight-bold">LEER MÁS</a>
+                            <a href="blog_detail.php?s=<?php echo esc($b['slug']); ?>" class="blue-text text-darken-4 font-weight-bold">LEER MÁS</a>
                         </div>
                     </div>
                 </div>

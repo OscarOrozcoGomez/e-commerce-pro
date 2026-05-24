@@ -81,15 +81,7 @@ try {
         
         if ($id_cliente <= 0) throw new Exception("ID de usuario no válido.");
 
-        $pdo->beginTransaction();
-
-        // Si cerramos el chat, liberamos la asignación para que pueda ser tomado de nuevo si el cliente vuelve a escribir
-        $sql = "UPDATE usuarios SET soporte_activo = ?";
-        if ($action === 'close') $sql .= ", asignado_a = NULL";
-        $sql .= " WHERE id_usuario = ?";
-        
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$nuevo_estado, $id_cliente]);
+        dbUpdateChatStatus($id_cliente, $action);
 
         // Insertar marcador de sistema si se inicia un nuevo chat
         if ($action === 'start') {

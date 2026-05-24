@@ -8,6 +8,7 @@ requirePermission('gestionar_blogs', BASE_URL . 'views/dashboard.php');
 
 $pageTitle = 'Gestionar Blogs';
 $pdo = getPDO();
+$usuario_id = (int)$_SESSION['usuario']['id_usuario'];
 $success = ''; $error = '';
 
 // Procesar Formulario
@@ -19,29 +20,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         $titulo = trim($_POST['titulo'] ?? '');
         $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $titulo)));
         $extracto = trim($_POST['extracto'] ?? '');
-        $contenido = $_POST['contenido'] ?? ''; // RECIBIMOS HTML PURO
+        $contenido = $_POST['contenido'] ?? ''; 
         $estado = $_POST['estado'] ?? 'publicado';
 
-        try {
-            if ($_POST['accion'] === 'guardar') {
-                if ($id > 0) {
-                    $stmt = $pdo->prepare("UPDATE blogs SET titulo = ?, slug = ?, extracto = ?, contenido = ?, estado = ? WHERE id_blog = ?");
-                    $stmt->execute([$titulo, $slug, $extracto, $contenido, $estado, $id]);
-                    $success = 'Artículo actualizado.';
-                } else {
-                    $stmt = $pdo->prepare("INSERT INTO blogs (titulo, slug, extracto, contenido, estado) VALUES (?, ?, ?, ?, ?)");
-                    $stmt->execute([$titulo, $slug, $extracto, $contenido, $estado]);
-                    $success = 'Artículo creado.';
-                }
-            } elseif ($_POST['accion'] === 'eliminar') {
-                $pdo->prepare("DELETE FROM blogs WHERE id_blog = ?")->execute([$id]);
-                $success = 'Artículo eliminado.';
-            }
-        } catch (Exception $e) { $error = 'Error: ' . $e->getMessage(); }
+        if ($_POST['accion'] === 'guardar') {
+            $res = dbSaveBlog([
+                'id' => $id, 'id_usuario' => $usuario_id, 'titulo' => $titulo,
+                'slug' => $slug, 'extracto' => $extracto, 'contenido' => $contenido, 'estado' => $estado
+            ]);
+            if ($res) $success = 'Operación exitosa.'; else $error = 'Error al guardar.';
+        } elseif ($_POST['accion'] === 'eliminar') {
+            $pdo->prepare("DELETE FROM blogs WHERE id_blog = ?")->execute([$id]); // Solo para simplificar el ejemplo
+            $success = 'Artículo eliminado.';
+        }
     }
 }
 
-$articulos = $pdo->query("SELECT * FROM blogs ORDER BY fecha_creacion DESC")->fetchAll();
+$articulos = dbGetBlogs(false);
 include __DIR__ . '/includes/header.php';
 ?>
 

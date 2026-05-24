@@ -216,6 +216,7 @@ function authenticate(string $email, string $password): bool
     if ($user && password_verify($password, $user['contrasena'])) {
         $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
         $_SESSION['usuario'] = $user;
+        session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
         
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
@@ -392,6 +393,91 @@ function dbGetProductsManaged(): array {
         error_log("Error en dbGetProductsManaged: " . $e->getMessage());
         return [];
     }
+}
+
+/**
+ * CENTRALIZACIÓN: Obtiene logs con filtros aplicados (Protección contra Inyección SQL).
+ */
+function dbGetActivityLogs(array $filters): array {
+    $pdo = getPDO();
+    $query = "SELECT l.*, u.nombre as usuario_nombre, u.email as usuario_email 
+              FROM logs_actividad l 
+              JOIN usuarios u ON l.id_usuario = u.id_usuario 
+              WHERE 1=1";
+    $params = [];
+
+    if (($filters['usuario'] ?? 0) > 0) {
+        $query .= " AND l.id_usuario = :id_u";
+        $params[':id_u'] = $filters['usuario'];
+    }
+    if (!empty($filters['tipo'])) {
+        $query .= " AND l.tipo_accion = :t";
+        $params[':t'] = $filters['tipo'];
+    }
+    if (!empty($filters['inicio'])) {
+        $query .= " AND DATE(l.fecha_creacion) >= :ini";
+        $params[':ini'] = $filters['inicio'];
+    }
+    if (!empty($filters['fin'])) {
+        $query .= " AND DATE(l.fecha_creacion) <= :fin";
+        $params[':fin'] = $filters['fin'];
+    }
+
+    $query .= " ORDER BY l.fecha_creacion DESC LIMIT 500";
+    $stmt = $pdo->prepare($query);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+/**
+ * CENTRALIZACIÓN: Gestión de Blogs (CRUD Seguro).
+ */
+function dbGetBlogs(bool $publishedOnly = true): array {
+    $pdo = getPDO();
+    $sql = "SELECT * FROM blogs " . ($publishedOnly ? "WHERE estado = 'publicado'" : "") . " ORDER BY fecha_creacion DESC";
+    return $pdo->query($sql)->fetchAll();
+}
+
+function dbGetBlogBySlug(string $slug): ?array {
+    $pdo = getPDO();
+    $stmt = $pdo->prepare("SELECT * FROM blogs WHERE slug = ? AND estado = 'publicado'");
+    $stmt->execute([$slug]);
+    $res = $stmt->fetch();
+    return $res ?: null;
+}
+
+function dbSaveBlog(array $data): bool {
+    $pdo = getPDO();
+    if ((int)($data['id'] ?? 0) > 0) {
+        $stmt = $pdo->prepare("UPDATE blogs SET titulo = ?, slug = ?, extracto = ?, contenido = ?, estado = ? WHERE id_blog = ?");
+        return $stmt->execute([$data['titulo'], $data['slug'], $data['extracto'], $data['contenido'], $data['estado'], $data['id']]);
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO blogs (id_usuario, titulo, slug, extracto, contenido, estado) VALUES (?, ?, ?, ?, ?, ?)");
+        return $stmt->execute([$data['id_usuario'], $data['titulo'], $data['slug'], $data['extracto'], $data['contenido'], $data['estado']]);
+    }
+}
+
+/**
+ * CENTRALIZACIÓN: Lógica de presencia del Chat.
+ */
+function dbUpdateChatStatus(int $id_cliente, string $action, ?int $id_staff = null): bool {
+    $pdo = getPDO();
+    $nuevo_estado = ($action === 'start') ? 1 : 0;
+    $sql = "UPDATE usuarios SET soporte_activo = ?";
+    $params = [$nuevo_estado];
+
+    if ($action === 'close') {
+        $sql .= ", asignado_a = NULL";
+    }
+    if ($id_staff !== null) {
+        $sql .= ", asignado_a = ?";
+        $params[] = $id_staff;
+    }
+
+    $sql .= " WHERE id_usuario = ?";
+    $params[] = $id_cliente;
+
+    return $pdo->prepare($sql)->execute($params);
 }
 
 /**
