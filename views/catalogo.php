@@ -43,14 +43,14 @@ include __DIR__ . '/includes/header.php';
                     <i class="material-icons left">filter_list</i> Categorías
                 </h6>
                 <div class="collection borderless" style="border: none;">
-                    <a href="catalogo.php" class="collection-item <?php echo empty($categoriaSeleccionada) ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>" style="border-radius: 4px; margin-bottom: 5px;">
+                    <a href="<?php echo BASE_URL; ?>views/catalogo.php" class="collection-item <?php echo empty($categoriaSeleccionada) ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>" style="border-radius: 4px; margin-bottom: 5px;">
                         Todas las categorías
                     </a>
                     <?php if (empty($categorias)): ?>
                         <p class="grey-text center-align" style="font-size: 0.9rem; padding: 10px;">No se encontraron categorías.</p>
                     <?php else: ?>
                         <?php foreach ($categorias as $cat): ?>
-                            <a href="catalogo.php?categoria=<?php echo urlencode($cat['nombre']); ?>" 
+                            <a href="<?php echo BASE_URL; ?>views/catalogo.php?categoria=<?php echo urlencode($cat['nombre']); ?>" 
                                class="collection-item <?php echo $categoriaSeleccionada === $cat['nombre'] ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>"
                                style="border-radius: 4px; margin-bottom: 5px;">
                                 <?php echo esc($cat['nombre']); ?>

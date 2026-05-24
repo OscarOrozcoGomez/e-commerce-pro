@@ -19,7 +19,7 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px;">
                 <h4 style="margin: 0;"><i class="material-icons left" style="font-size: 2.5rem; color: #1a237e;">analytics</i> Inteligencia de Negocio</h4>
-                <a href="dashboard.php" class="btn indigo darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+                <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn indigo darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
             </div>
             <p class="grey-text">Análisis de tendencias de venta y predicción de abastecimiento basada en datos históricos.</p>
         </div>

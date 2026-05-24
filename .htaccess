@@ -2,6 +2,6 @@
 Options -Indexes
 
 # Redirecciones de error personalizadas
-ErrorDocument 403 /e-commerce-pro/views/error.php
-ErrorDocument 404 /e-commerce-pro/views/error.php
-ErrorDocument 500 /e-commerce-pro/views/error.php
+ErrorDocument 403 /views/error.php
+ErrorDocument 404 /views/error.php
+ErrorDocument 500 /views/error.php

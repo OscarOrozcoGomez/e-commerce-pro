@@ -81,7 +81,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="card-panel green lighten-4 green-text text-darken-4">
                             <?php echo esc($success); ?>
                             <div style="margin-top: 10px;">
-                                <a href="login.php" class="btn green waves-effect waves-light">Ir a Login</a>
+                                <a href="<?php echo BASE_URL; ?>views/login.php" class="btn green waves-effect waves-light">Ir a Login</a>
                             </div>
                         </div>
                     <?php else: ?>
@@ -117,7 +117,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
                 </div>
                 <div class="card-action center-align">
-                    <p>¿Ya tienes cuenta? <a href="login.php" class="blue-text text-darken-4">Inicia Sesión</a></p>
+                    <p>¿Ya tienes cuenta? <a href="<?php echo BASE_URL; ?>views/login.php" class="blue-text text-darken-4">Inicia Sesión</a></p>
                 </div>
             </div>
         </div>

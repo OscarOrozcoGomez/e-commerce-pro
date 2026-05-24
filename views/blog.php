@@ -69,7 +69,7 @@ include __DIR__ . '/includes/header.php';
                             </p>
                         </div>
                         <div class="card-action">
-                            <a href="blog_detail.php?s=<?php echo esc($b['slug']); ?>" class="blue-text text-darken-4 font-weight-bold">LEER MÁS</a>
+                            <a href="<?php echo BASE_URL; ?>views/blog_detail.php?s=<?php echo esc($b['slug']); ?>" class="blue-text text-darken-4 font-weight-bold">LEER MÁS</a>
                         </div>
                     </div>
                 </div>

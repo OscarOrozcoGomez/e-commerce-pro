@@ -27,7 +27,7 @@
                         Nuestro equipo técnico ha sido notificado. Por seguridad, no podemos mostrar más detalles.
                     </p>
                     <div style="margin-top: 40px;">
-                        <a href="/e-commerce-pro/" class="btn-large blue darken-4 waves-effect waves-light">
+                        <a href="<?php echo BASE_URL; ?>" class="btn-large blue darken-4 waves-effect waves-light">
                             <i class="material-icons left">home</i> Volver al Inicio
                         </a>
                     </div>

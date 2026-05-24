@@ -44,7 +44,13 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
 
 // Rutas y constantes del proyecto
 if (!defined('BASE_URL')) {
-    define('BASE_URL', '/e-commerce-pro/');
+    // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+        define('BASE_URL', '/e-commerce-pro/');
+    } else {
+        define('BASE_URL', '/');
+    }
 }
 
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
