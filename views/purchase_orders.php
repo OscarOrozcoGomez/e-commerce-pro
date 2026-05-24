@@ -11,43 +11,12 @@ if (!isAdmin() && !isEncargado()) {
 
 $pageTitle = 'Lista de Compra Sugerida';
 $pdo = getPDO();
-$usuario = $_SESSION['usuario'];
-$idAlmacen = $usuario['id_almacen'];
-
-// Obtener productos bajo el stock mínimo incluyendo el ID del almacén para el proceso
-$sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_costo, p.precio_venta, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo, a.nombre as sucursal, ia.id_almacen
-        FROM productos p
-        JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
-        JOIN almacenes a ON ia.id_almacen = a.id_almacen
-        WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'";
-
-if (!isAdmin()) {
-    $sql .= " AND ia.id_almacen = " . (int)$idAlmacen;
-}
-
-$sql .= " ORDER BY a.nombre, p.nombre";
-$stmt = $pdo->query($sql);
-$listaCompra = $stmt->fetchAll();
-
-// Obtener datos para el gráfico de categorías con faltantes (Agrupado)
-$sqlChart = "SELECT COALESCE(c.nombre, 'Sin Categoría') as categoria, COUNT(DISTINCT p.id_producto) as total
-             FROM productos p
-             JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
-             LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
-             LEFT JOIN categorias c ON pc.id_categoria = c.id_categoria
-             WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'";
-
-if (!isAdmin()) {
-    $sqlChart .= " AND ia.id_almacen = " . (int)$idAlmacen;
-}
-$sqlChart .= " GROUP BY categoria ORDER BY total DESC";
-$chartData = $pdo->query($sqlChart)->fetchAll();
-
+$pageTitle = 'Lista de Compra Sugerida';
 include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="container">
-    <div class="row">
+    <div class="row" id="po-app" style="display: none;">
         <div class="col s12">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 10px;">
                 <h4 style="margin: 0;"><i class="material-icons left" style="font-size: 2.5rem; color: #1a237e;">shopping_cart</i> Lista de Compra Sugerida</h4>
@@ -64,13 +33,18 @@ include __DIR__ . '/includes/header.php';
                     <span class="card-title">Sugerencias de Resurtido y Recepción</span>
                     <p class="grey-text">Ajusta las cantidades según lo recibido y confirma para subir al inventario.</p>
 
-                    <?php if (empty($listaCompra)): ?>
+                    <div id="po-list-container">
                         <div class="center-align" style="padding: 40px;">
-                            <i class="material-icons large green-text">check_circle</i>
-                            <h5>¡Inventario saludable!</h5>
-                            <p>No hay productos que necesiten resurtido actualmente.</p>
+                            <div class="preloader-wrapper small active">
+                                <div class="spinner-layer border-blue">
+                                    <div class="circle-clipper left"><div class="circle"></div></div><div class="gap-patch"><div class="circle"></div></div><div class="circle-clipper right"><div class="circle"></div></div>
+                                </div>
+                            </div>
+                            <p>Calculando sugerencias...</p>
                         </div>
-                    <?php else: ?>
+                    </div>
+                    
+                    <div id="po-form-wrapper" style="display: none;">
                         <form id="form-entrada-masiva">
                             <?php echo csrfInput(); ?>
                             <table class="striped highlight responsive-table" style="margin-top: 20px;">
@@ -85,47 +59,12 @@ include __DIR__ . '/includes/header.php';
                                         <th class="right-align">Subtotal Est.</th>
                                     </tr>
                                 </thead>
-                                <tbody>
-                                    <?php 
-                                    $totalInversion = 0;
-                                    foreach ($listaCompra as $index => $item): 
-                                        $aComprar = max(0, $item['stock_maximo'] - $item['cantidad_actual']);
-                                        $costoFila = $aComprar * (float)$item['precio_costo'];
-                                        $totalInversion += $costoFila;
-                                    ?>
-                                        <tr>
-                                            <td>
-                                                <strong><?php echo esc($item['nombre']); ?></strong><br>
-                                                <small class="grey-text">SKU: <?php echo esc($item['sku']); ?></small>
-                                            </td>
-                                            <td><?php echo esc($item['sucursal']); ?></td>
-                                            <td>$<?php echo number_format((float)$item['precio_venta'], 2); ?></td>
-                                            <td class="red-text center-align"><strong><?php echo $item['cantidad_actual']; ?></strong></td>
-                                            <td class="center-align">
-                                                <div style="display: flex; gap: 5px;">
-                                                    <input type="number" name="items[<?php echo $index; ?>][stock_minimo]" value="<?php echo $item['stock_minimo']; ?>" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
-                                                    <input type="number" name="items[<?php echo $index; ?>][stock_maximo]" value="<?php echo $item['stock_maximo']; ?>" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
-                                                </div>
-                                            </td>
-                                            <td class="blue lighten-5">
-                                                <input type="hidden" name="items[<?php echo $index; ?>][id_producto]" value="<?php echo $item['id_producto']; ?>">
-                                                <input type="hidden" name="items[<?php echo $index; ?>][id_almacen]" value="<?php echo $item['id_almacen']; ?>">
-                                                <input type="number" 
-                                                       name="items[<?php echo $index; ?>][cantidad]" 
-                                                       value="<?php echo $aComprar; ?>" 
-                                                       min="0" 
-                                                       class="browser-default qty-input" 
-                                                       style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
-                                            </td>
-                                            <td class="right-align">$<?php echo number_format($costoFila, 2); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
+                                <tbody id="table-po-body"></tbody>
                             </table>
 
                             <div class="row" style="margin-top: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; flex-wrap: wrap;">
                                 <div class="grey-text text-darken-2">
-                                    <h5 style="margin: 0;">Total Inversión: <strong>$<?php echo number_format($totalInversion, 2); ?></strong></h5>
+                                    <h5 style="margin: 0;">Total Inversión: <strong>$<span id="total-inversion-val">0.00</span></strong></h5>
                                 </div>
                                 <div>
                                     <button type="button" onclick="guardarReglasMasivas()" class="btn-large blue darken-2 waves-effect waves-light">
@@ -139,21 +78,13 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                             </div>
                         </form>
-
-                        <div class="right-align" style="margin-top: 10px;">
-                            <button onclick="window.print()" class="btn waves-effect waves-light blue darken-4">
-                                <i class="material-icons left">print</i> Imprimir Lista de Trabajo
-                            </button>
-                        </div>
-                    <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Sección del Gráfico de Faltantes -->
-    <?php if (!empty($chartData) && !empty($listaCompra)): ?>
-    <div class="row no-print" style="margin-top: 30px;">
+    <div id="chart-po-row" class="row no-print" style="margin-top: 30px; display: none;">
         <div class="col s12 m6 offset-m3">
             <div class="card">
                 <div class="card-content">
@@ -165,7 +96,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-    <?php endif; ?>
+</div>
 </div>
 
 <!-- Incluimos librerías necesarias -->
@@ -173,6 +104,82 @@ include __DIR__ . '/includes/header.php';
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        fetch('<?php echo BASE_URL; ?>api/purchase_orders_data.php')
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) throw new Error(res.message);
+                
+                document.getElementById('po-app').style.display = 'block';
+                document.getElementById('po-list-container').style.display = 'none';
+
+                if (res.listaCompra.length === 0) {
+                    document.getElementById('po-list-container').style.display = 'block';
+                    document.getElementById('po-list-container').innerHTML = `
+                        <div class="center-align" style="padding: 40px;">
+                            <i class="material-icons large green-text">check_circle</i>
+                            <h5>¡Inventario saludable!</h5>
+                            <p>No hay productos que necesiten resurtido actualmente.</p>
+                        </div>`;
+                } else {
+                    document.getElementById('po-form-wrapper').style.display = 'block';
+                    renderTable(res.listaCompra);
+                    if (res.chartData && res.chartData.length > 0) {
+                        document.getElementById('chart-po-row').style.display = 'block';
+                        renderChart(res.chartData);
+                    }
+                }
+            })
+            .catch(err => {
+                M.toast({html: 'Error: ' + err.message, classes: 'red'});
+            });
+    });
+
+    function renderTable(items) {
+        const tbody = document.getElementById('table-po-body');
+        let totalInversion = 0;
+        items.forEach((item, index) => {
+            const aComprar = Math.max(0, parseInt(item.stock_maximo) - parseInt(item.cantidad_actual));
+            const costoFila = aComprar * parseFloat(item.precio_costo);
+            totalInversion += costoFila;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td><strong>${item.nombre}</strong><br><small class="grey-text">SKU: ${item.sku}</small></td>
+                    <td>${item.sucursal}</td>
+                    <td>$${parseFloat(item.precio_venta).toFixed(2)}</td>
+                    <td class="red-text center-align"><strong>${item.cantidad_actual}</strong></td>
+                    <td class="center-align">
+                        <div style="display: flex; gap: 5px;">
+                            <input type="number" name="items[${index}][stock_minimo]" value="${item.stock_minimo}" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
+                            <input type="number" name="items[${index}][stock_maximo]" value="${item.stock_maximo}" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
+                        </div>
+                    </td>
+                    <td class="blue lighten-5">
+                        <input type="hidden" name="items[${index}][id_producto]" value="${item.id_producto}">
+                        <input type="hidden" name="items[${index}][id_almacen]" value="${item.id_almacen}">
+                        <input type="number" name="items[${index}][cantidad]" value="${aComprar}" min="0" class="browser-default qty-input" style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
+                    </td>
+                    <td class="right-align">$${costoFila.toFixed(2)}</td>
+                </tr>`;
+        });
+        document.getElementById('total-inversion-val').textContent = totalInversion.toFixed(2);
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('chartFaltantes').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: data.map(d => d.categoria),
+                datasets: [{
+                    data: data.map(d => d.total),
+                    backgroundColor: ['#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5', '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6']
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+        });
+    }
     function confirmarEntradaMasiva() {
         const form = document.getElementById('form-entrada-masiva');
         const formData = new FormData(form);

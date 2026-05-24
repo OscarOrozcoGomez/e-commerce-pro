@@ -64,13 +64,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             $stmt->execute([$nuevo_estado, $id]);
             logAudit('USUARIO_ESTADO_CAMBIADO', 'usuarios', $id, "Nuevo estado: $nuevo_estado");
             $success = 'Estado de usuario actualizado.';
+        } elseif ($accion === 'desbloquear') {
+            $id = intval($_POST['id_usuario']);
+            $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")->execute([$id]);
+            logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, "Cuenta desbloqueada manualmente por admin");
+            $success = 'Usuario desbloqueado correctamente.';
         }
     }
 }
 
 // Obtener usuarios
 try {
-    $sql = "SELECT u.id_usuario, u.nombre, u.email, r.nombre as rol, a.nombre as almacen, u.estado
+    $sql = "SELECT u.id_usuario, u.nombre, u.email, r.nombre as rol, a.nombre as almacen, u.estado, u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN almacenes a ON u.id_almacen = a.id_almacen
@@ -214,8 +219,21 @@ include __DIR__ . '/includes/header.php';
                                                 <input type="hidden" name="accion" value="cambiar_estado">
                                                 <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
                                                 <input type="hidden" name="estado" value="<?php echo $user['estado']; ?>">
-                                                <button type="submit" class="btn-small <?php echo $user['estado'] === 'activo' ? 'orange' : 'green'; ?>">
-                                                    <?php echo $user['estado'] === 'activo' ? 'Desactivar' : 'Activar'; ?>
+                                                <button type="submit" class="btn-small <?php echo $user['estado'] === 'activo' ? 'orange' : 'green'; ?>" title="<?php echo $user['estado'] === 'activo' ? 'Desactivar' : 'Activar'; ?>">
+                                                    <i class="material-icons"><?php echo $user['estado'] === 'activo' ? 'block' : 'check'; ?></i>
+                                                </button>
+                                            </form>
+
+                                            <?php if ((int)$user['intentos_fallidos'] >= 5 || ($user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time())): ?>
+                                            <form method="POST" style="display:inline;">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="accion" value="desbloquear">
+                                                <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                                <button type="submit" class="btn-small blue waves-effect waves-light" title="Desbloquear intentos">
+                                                    <i class="material-icons">lock_open</i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
                                                 </button>
                                             </form>
                                         </td>

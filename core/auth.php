@@ -218,7 +218,7 @@ function authenticate(string $email, string $password): bool
     }
 
     // Verificar si la cuenta está bloqueada temporalmente
-    if ($user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time()) {
+    if ($user['intentos_fallidos'] >= 5 && $user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time()) {
         $minutosRestantes = ceil((strtotime($user['bloqueado_hasta']) - time()) / 60);
         throw new Exception("Cuenta bloqueada temporalmente por seguridad debido a demasiados intentos fallidos. Inténtalo de nuevo en $minutosRestantes minuto(s).");
     }
@@ -251,9 +251,14 @@ function authenticate(string $email, string $password): bool
             $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
             $msgAlerta = "⚠️ ALERTA DE SEGURIDAD: La cuenta vinculada a este chat ha sido bloqueada temporalmente tras 5 intentos fallidos de inicio de sesión. Origen IP: $ip";
             
-            // Insertar mensaje de alerta como mensaje de sistema
-            $stmtMsg = $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje, leido_staff) VALUES (?, 'staff', 'sistema', ?, 0)");
-            $stmtMsg->execute([$user['id_usuario'], $msgAlerta]);
+            // Insertar mensaje de alerta
+            // Marcamos leido_cliente = 1 para que el usuario no vea esta alerta técnica en su chat
+            $stmtMsg = $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje, leido_staff, leido_cliente) 
+                                     VALUES (?, 'staff', 'seguridad', ?, 0, 1)");
+            $stmtMsg->execute([
+                $user['id_usuario'], 
+                $msgAlerta
+            ]);
             
             // Asegurar que el Admin vea la notificación en la lista de chats
             $pdo->prepare("UPDATE usuarios SET soporte_activo = 1 WHERE id_usuario = ?")->execute([$user['id_usuario']]);

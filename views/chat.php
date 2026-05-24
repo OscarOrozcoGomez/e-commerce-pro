@@ -8,22 +8,6 @@ $pageTitle = 'Chat de Soporte';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $soyCliente = isCliente();
-
-// Si es Staff, obtenemos la lista de clientes que han iniciado chats
-$listaClientes = [];
-if (!$soyCliente) {
-    $stmtList = $pdo->prepare("SELECT DISTINCT u.id_usuario, u.nombre, u.email, u.asignado_a,
-        (SELECT COUNT(*) FROM mensajes_soporte m2 WHERE m2.id_cliente = u.id_usuario AND m2.leido_staff = 0) as pendientes,
-        (SELECT enviado_por FROM mensajes_soporte m3 WHERE m3.id_cliente = u.id_usuario ORDER BY fecha_envio DESC LIMIT 1) as ultimo_por
-        FROM usuarios u
-        JOIN mensajes_soporte m ON u.id_usuario = m.id_cliente
-        WHERE u.soporte_activo = 1 
-        AND (u.asignado_a IS NULL OR u.asignado_a = ?)
-        ORDER BY pendientes DESC, u.nombre ASC");
-    $stmtList->execute([$usuario['id_usuario']]);
-    $listaClientes = $stmtList->fetchAll();
-}
-
 // Definimos los emojis por categorías estilo WhatsApp
 $emojiCategories = [
     'Caritas' => ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','👻','💀','☠️','👽','👾','🤖','💩'],
@@ -45,20 +29,15 @@ include __DIR__ . '/includes/header.php';
         <?php if (!$soyCliente): ?>
             <!-- Sidebar para Staff -->
             <div class="col s12 m4 l3">
-                <div class="collection with-header z-depth-1" style="border-radius: 8px; overflow: hidden;">
+                <div class="collection with-header z-depth-1" id="conversations-list" style="border-radius: 8px; overflow: hidden;">
                     <div class="collection-header blue darken-4 white-text"><h6>Conversaciones</h6></div>
-                    <?php foreach ($listaClientes as $c): ?>
-                        <a href="#!" onclick="seleccionarChat(<?php echo $c['id_usuario']; ?>, '<?php echo esc($c['nombre']); ?>')" 
-                           class="collection-item black-text chat-user-item <?php echo ($c['asignado_a'] == $usuario['id_usuario']) ? 'blue lighten-5' : ''; ?>" id="user-item-<?php echo $c['id_usuario']; ?>">
-                            <?php echo esc($c['nombre']); ?>
-                            <?php if ($c['asignado_a'] == $usuario['id_usuario']): ?>
-                                <i class="material-icons tiny blue-text">push_pin</i>
-                            <?php endif; ?>
-                            <?php if ($c['pendientes'] > 0): ?>
-                                <span class="new badge red" data-badge-caption=""><?php echo $c['pendientes']; ?></span>
-                            <?php endif; ?>
-                        </a>
-                    <?php endforeach; ?>
+                    <div class="center-align grey-text" style="padding: 20px;">
+                        <div class="preloader-wrapper small active">
+                            <div class="spinner-layer border-blue">
+                                <div class="circle-clipper left"><div class="circle"></div></div><div class="gap-patch"><div class="circle"></div></div><div class="circle-clipper right"><div class="circle"></div></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         <?php endif; ?>
@@ -327,6 +306,7 @@ function formatFriendlyDate(dateStr) {
 
 document.addEventListener('DOMContentLoaded', () => {
     M.Modal.init(document.querySelectorAll('.modal'));
+    if (esStaff) cargarListaClientes();
     if (esStaff) {
         // Cargar productos para el buscador interno del chat
         fetch('<?php echo BASE_URL; ?>api/products.php')
@@ -443,6 +423,50 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+function cargarListaClientes() {
+    if (!esStaff) return;
+    fetch('<?php echo BASE_URL; ?>api/chat_handler.php?action=fetch_clients')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                renderListaClientes(data.clientes);
+            }
+        });
+}
+
+function renderListaClientes(clientes) {
+    const list = document.getElementById('conversations-list');
+    if (!list) return;
+    const header = `<div class="collection-header blue darken-4 white-text"><h6>Conversaciones</h6></div>`;
+    let html = header;
+
+    clientes.forEach(c => {
+        const isMe = c.asignado_a == currentUserId;
+        const hasAlerts = parseInt(c.alertas_sistema) > 0;
+        const activeClass = hasAlerts ? 'orange lighten-5' : (isMe ? 'blue lighten-5' : '');
+        const textStyle = hasAlerts ? 'font-weight: bold; color: #e65100;' : '';
+        const alertPrefix = hasAlerts ? '⚠️ ' : '';
+        const badge = parseInt(c.pendientes) > 0 ? `<span class="new badge red" data-badge-caption="">${c.pendientes}</span>` : '';
+        const pin = (isMe && !hasAlerts) ? `<i class="material-icons tiny blue-text right">push_pin</i>` : '';
+
+        html += `
+            <a href="#!" onclick="seleccionarChat(${c.id_usuario}, '${c.nombre.replace(/'/g, "\\'")}')" 
+               class="collection-item black-text chat-user-item ${activeClass}" id="user-item-${c.id_usuario}">
+                <span style="${textStyle}">
+                    ${alertPrefix}${c.nombre}
+                </span>
+                ${pin}
+                ${badge}
+            </a>`;
+    });
+
+    if (clientes.length === 0) {
+        html += `<div class="center-align grey-text" style="padding: 20px;">No hay chats activos.</div>`;
+    }
+
+    list.innerHTML = html;
+}
 
 function switchEmojiTab(category, pickerType) {
     const containerId = pickerType === 'main' ? 'emoji-content-main' : 'emoji-content-quick';
@@ -747,7 +771,7 @@ function cargarMensajes() {
                         lastDateStr = msgDate;
                     }
 
-                    if (m.tipo_mensaje === 'sistema') {
+                    if (m.tipo_mensaje === 'sistema' || m.tipo_mensaje === 'seguridad') {
                         const div = document.createElement('div');
                         div.className = 'system-msg';
                         div.innerHTML = `<span>${m.mensaje}</span>`;
@@ -869,6 +893,7 @@ function addToCartFromChat(id, nombre, precio, imagen) {
 
 // Polling: revisar nuevos mensajes cada 5 segundos
 setInterval(cargarMensajes, 5000);
+if (esStaff) setInterval(cargarListaClientes, 10000);
 
 // Notificar que estoy escribiendo
 document.getElementById('msg-input')?.addEventListener('input', () => {

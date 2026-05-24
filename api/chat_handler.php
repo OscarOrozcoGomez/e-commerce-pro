@@ -38,14 +38,24 @@ try {
                 // Si nadie lo atiende, el primero que lo "vea" se lo queda
                 $pdo->prepare("UPDATE usuarios SET asignado_a = ? WHERE id_usuario = ?")->execute([$id_actual, $id_cliente]);
                 $asignado_a = $id_actual;
-            } elseif ($asignado_a !== $id_actual) {
-                // Si ya lo tiene otro compañero, bloqueamos la vista según tu requerimiento
-                echo json_encode(['success' => false, 'message' => 'Este chat ya está siendo atendido por otro compañero.']);
+            } elseif ($asignado_a !== $id_actual && !isAdmin()) {
+                // Si ya lo tiene otro compañero, bloqueamos la vista (excepto para Admins)
+                echo json_encode([
+                    'success' => false, 
+                    'message' => 'Este chat ya está siendo atendido por otro compañero.'
+                ]);
                 exit;
             }
         }
         
-        $stmt = $pdo->prepare("SELECT * FROM mensajes_soporte WHERE id_cliente = ? ORDER BY fecha_envio ASC");
+        $sqlFetch = "SELECT * FROM mensajes_soporte WHERE id_cliente = ?";
+        // Los clientes no deben ver mensajes de auditoría técnica o seguridad
+        if ($soyCliente) {
+            $sqlFetch .= " AND tipo_mensaje != 'seguridad'";
+        }
+        $sqlFetch .= " ORDER BY fecha_envio ASC";
+        
+        $stmt = $pdo->prepare($sqlFetch);
         $stmt->execute([$id_cliente]);
         $mensajes = $stmt->fetchAll();
         
@@ -75,6 +85,27 @@ try {
             'asignado_a' => $asignado_a
         ]);
 
+    } elseif ($action === 'fetch_clients') {
+        if ($soyCliente) throw new Exception("No autorizado");
+
+        $sqlList = "SELECT DISTINCT u.id_usuario, u.nombre, u.email, u.asignado_a,
+            (SELECT COUNT(*) FROM mensajes_soporte m2 WHERE m2.id_cliente = u.id_usuario AND m2.leido_staff = 0) as pendientes,
+            (SELECT COUNT(*) FROM mensajes_soporte m4 WHERE m4.id_cliente = u.id_usuario AND m4.leido_staff = 0 AND m4.tipo_mensaje = 'seguridad') as alertas_sistema
+            FROM usuarios u
+            JOIN mensajes_soporte m ON u.id_usuario = m.id_cliente
+            WHERE u.soporte_activo = 1";
+
+        $params = [];
+        if (!isAdmin()) {
+            $sqlList .= " AND (u.asignado_a IS NULL OR u.asignado_a = :id_actual)";
+            $params[':id_actual'] = $id_actual;
+        }
+        $sqlList .= " ORDER BY alertas_sistema DESC, pendientes DESC, u.nombre ASC";
+
+        $stmtList = $pdo->prepare($sqlList);
+        $stmtList->execute($params);
+        echo json_encode(['success' => true, 'clientes' => $stmtList->fetchAll()]);
+
     } elseif ($action === 'start' || $action === 'close') {
         $id_cliente = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
         $nuevo_estado = ($action === 'start') ? 1 : 0;
@@ -91,7 +122,6 @@ try {
                 ->execute([$id_cliente, $msgLabel]);
         }
 
-        $pdo->commit();
         echo json_encode(['success' => true]);
 
     } elseif ($action === 'transfer') {

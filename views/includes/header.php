@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo $pageTitle ?? 'POS Sistema'; ?></title>
+    <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>assets/img/logo.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -101,21 +102,32 @@
                         if (!isset($pdoHead)) $pdoHead = getPDO();
                         $id_u = (int)$_SESSION['usuario']['id_usuario'];
                         $col = isCliente() ? 'leido_cliente' : 'leido_staff';
+                        
+                        // Contar mensajes no leídos
                         $sqlChat = "SELECT COUNT(*) FROM mensajes_soporte WHERE $col = 0 AND " . (isCliente() ? "id_cliente = $id_u" : "1=1");
                         $unreadChat = (int)$pdoHead->query($sqlChat)->fetchColumn();
+
+                        // Verificar si alguno de esos mensajes es una alerta de sistema (bloqueo)
+                        $hasSecurityAlert = false;
+                        if (!isCliente() && $unreadChat > 0) {
+                            $hasSecurityAlert = (int)$pdoHead->query("SELECT COUNT(*) FROM mensajes_soporte WHERE leido_staff = 0 AND tipo_mensaje = 'sistema'")->fetchColumn() > 0;
+                        }
                     ?>
                     <li>
                         <a href="<?php echo BASE_URL; ?>views/chat.php" title="Chat de Soporte" style="position: relative;">
-                            <i class="material-icons <?php echo $unreadChat > 0 ? 'green-text text-lighten-2' : ''; ?>">chat</i>
+                            <i class="material-icons <?php echo $unreadChat > 0 ? ($hasSecurityAlert ? 'orange-text text-darken-2' : 'green-text text-lighten-2') : ''; ?>">chat</i>
                             <?php if ($unreadChat > 0): ?>
-                                <span class="new badge green" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;"><?php echo $unreadChat; ?></span>
+                                <span class="new badge <?php echo $hasSecurityAlert ? 'orange darken-3' : 'green'; ?>" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;">
+                                    <?php echo $unreadChat; ?>
+                                </span>
                             <?php endif; ?>
                         </a>
                     </li>
                     <!-- Dropdown Trigger -->
-                    <li>
-                        <a class="dropdown-trigger btn-floating blue darken-3 waves-effect waves-light" href="#!" data-target="user-dropdown" style="margin-top: 12px; margin-left: 15px;">
-                            <i class="material-icons">person</i>
+                    <li style="height: 64px; display: flex; align-items: center;">
+                        <a class="dropdown-trigger waves-effect waves-light" href="#!" data-target="user-dropdown" 
+                           style="display: flex; align-items: center; justify-content: center; width: 60px; height: 64px; margin-left: 5px;">
+                            <i class="material-icons blue darken-3 circle white-text" style="width: 40px; height: 40px; line-height: 40px; text-align: center;">person</i>
                         </a>
                     </li>
                     
