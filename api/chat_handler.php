@@ -56,9 +56,9 @@ try {
         // Verificar si la contraparte está escribiendo (hace menos de 6 segundos)
         $isTyping = false;
         if ($soyCliente) {
-            // El cliente busca si ALGÚN staff está escribiendo para él (tecleando_para = su ID)
-            $stmtT = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_rol != 4 AND tecleando_para = ? AND ultimo_tecleo > (NOW() - INTERVAL 6 SECOND)");
-            $stmtT->execute([$id_actual]);
+            // El cliente solo ve si SU agente asignado está escribiendo
+            $stmtT = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_usuario = ? AND tecleando_para = ? AND ultimo_tecleo > (NOW() - INTERVAL 6 SECOND)");
+            $stmtT->execute([$asignado_a, $id_actual]);
             $isTyping = $stmtT->fetchColumn() > 0;
         } else {
             // El staff busca si el cliente específico está escribiendo (tecleando_para = 0 o nulo significa "a soporte")
@@ -79,15 +79,27 @@ try {
         $id_cliente = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
         $nuevo_estado = ($action === 'start') ? 1 : 0;
         
+        if ($id_cliente <= 0) throw new Exception("ID de usuario no válido.");
+
+        $pdo->beginTransaction();
+
         // Si cerramos el chat, liberamos la asignación para que pueda ser tomado de nuevo si el cliente vuelve a escribir
         $sql = "UPDATE usuarios SET soporte_activo = ?";
         if ($action === 'close') $sql .= ", asignado_a = NULL";
         $sql .= " WHERE id_usuario = ?";
-
-        if ($id_cliente <= 0) throw new Exception("ID de usuario no válido.");
         
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$nuevo_estado, $id_cliente]);
+
+        // Insertar marcador de sistema si se inicia un nuevo chat
+        if ($action === 'start') {
+            $fecha = date('d/m/Y H:i');
+            $msgLabel = "--- Sesión iniciada: $fecha ---";
+            $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje) VALUES (?, 'staff', 'sistema', ?)")
+                ->execute([$id_cliente, $msgLabel]);
+        }
+
+        $pdo->commit();
         echo json_encode(['success' => true]);
 
     } elseif ($action === 'transfer') {
@@ -95,14 +107,61 @@ try {
         $id_cliente = (int)($_GET['id_cliente'] ?? 0);
         $id_destino = (int)($_GET['id_destino'] ?? 0);
         
+        if ($id_cliente <= 0 || $id_destino <= 0) throw new Exception("Datos de transferencia incompletos.");
+
+        $pdo->beginTransaction();
+
+        // Obtener nombre del nuevo agente para el mensaje de sistema
+        $stmtN = $pdo->prepare("SELECT nombre FROM usuarios WHERE id_usuario = ?");
+        $stmtN->execute([$id_destino]);
+        $nombreDestino = $stmtN->fetchColumn();
+        if (!$nombreDestino) throw new Exception("El agente de destino no existe.");
+
         $stmt = $pdo->prepare("UPDATE usuarios SET asignado_a = ?, soporte_activo = 1 WHERE id_usuario = ?");
         $stmt->execute([$id_destino, $id_cliente]);
+
+        // Insertar mensaje de sistema para dejar constancia en el historial
+        $msgTransfer = "--- Conversación transferida a: $nombreDestino ---";
+        $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje) VALUES (?, 'staff', 'sistema', ?)")
+            ->execute([$id_cliente, $msgTransfer]);
+
+        $pdo->commit();
         echo json_encode(['success' => true]);
 
     } elseif ($action === 'get_staff') {
         // Obtener lista de staff para el dropdown de transferencia
         $stmt = $pdo->query("SELECT id_usuario, nombre FROM usuarios WHERE id_rol IN (1,2,3) AND estado = 'activo'");
         echo json_encode(['success' => true, 'staff' => $stmt->fetchAll()]);
+
+    } elseif ($action === 'fetch_quick') {
+        $stmt = $pdo->prepare("SELECT * FROM respuestas_rapidas WHERE id_usuario = ? ORDER BY titulo ASC");
+        $stmt->execute([$id_actual]);
+        echo json_encode(['success' => true, 'responses' => $stmt->fetchAll()]);
+
+    } elseif ($action === 'save_quick') {
+        $data = json_decode(file_get_contents('php://input'), true);
+        $titulo = trim($data['titulo'] ?? '');
+        $msg = trim($data['mensaje'] ?? '');
+        $id_resp = (int)($data['id_respuesta'] ?? 0);
+
+        if (empty($titulo) || empty($msg)) throw new Exception("Título y mensaje son obligatorios.");
+
+        if ($id_resp > 0) {
+            $stmt = $pdo->prepare("UPDATE respuestas_rapidas SET titulo = ?, mensaje = ? WHERE id_respuesta = ? AND id_usuario = ?");
+            $stmt->execute([$titulo, $msg, $id_resp, $id_actual]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO respuestas_rapidas (id_usuario, titulo, mensaje) VALUES (?, ?, ?)");
+            $stmt->execute([$id_actual, $titulo, $msg]);
+        }
+        echo json_encode(['success' => true]);
+
+    } elseif ($action === 'delete_quick') {
+        $id_resp = (int)($_GET['id_respuesta'] ?? 0);
+        if ($id_resp <= 0) throw new Exception("ID inválido.");
+
+        $stmt = $pdo->prepare("DELETE FROM respuestas_rapidas WHERE id_respuesta = ? AND id_usuario = ?");
+        $stmt->execute([$id_resp, $id_actual]);
+        echo json_encode(['success' => true]);
 
     } elseif ($action === 'typing') {
         $target = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : 0; // 0 para clientes escribiendo a soporte

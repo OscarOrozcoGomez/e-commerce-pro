@@ -243,6 +243,8 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
+        <!-- SECCIÓN 1: GESTIÓN COMERCIAL Y CONTENIDO -->
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">shopping_basket</i> Catálogo y Clientes</h5></div></div>
         <div class="row">
             <div class="col s12 m6 l4">
                 <div class="card">
@@ -304,58 +306,19 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Gestionar Usuarios</span>
-                        <p>Crear, editar y administrar usuarios del sistema</p>
+                        <span class="card-title">Gestionar Blogs</span>
+                        <p>Publicar, editar o eliminar artículos informativos en el catálogo</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/users.php" class="btn waves-effect waves-light blue">Ir</a>
+                        <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="btn waves-effect waves-light blue darken-4">Blogs</a>
                     </div>
                 </div>
             </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Gestionar Sucursales</span>
-                        <p>Crear nuevas sucursales y configurar ubicaciones.</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/manage_branches.php" class="btn waves-effect waves-light orange darken-4">Configurar</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Analítica Inteligente</span>
-                        <p>Predecir stock y analizar tendencias de venta mensuales</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/analytics.php" class="btn waves-effect waves-light indigo darken-4">Analizar</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Liberar Stock</span>
-                        <p>Cancelar pedidos expirados y devolver productos al inventario</p>
-                    </div>
-                    <div class="card-action">
-                        <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Auditoría y Logs</span>
-                        <p>Monitorear clics, visitas y acciones de cada usuario</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/activity_logs.php" class="btn waves-effect waves-light grey darken-3">Ver Logs</a>
-                    </div>
-                </div>
-            </div>
+        </div>
+
+        <!-- SECCIÓN 2: LOGÍSTICA E INVENTARIO -->
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">inventory</i> Operaciones y Stock</h5></div></div>
+        <div class="row">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -381,11 +344,71 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Gestionar Blogs</span>
-                        <p>Publicar, editar o eliminar artículos informativos en el catálogo</p>
+                        <span class="card-title">Analítica Inteligente</span>
+                        <p>Predecir stock y analizar tendencias de venta mensuales</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="btn waves-effect waves-light blue darken-4">Blogs</a>
+                        <a href="<?php echo BASE_URL; ?>views/analytics.php" class="btn waves-effect waves-light indigo darken-4">Analizar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Liberar Stock</span>
+                        <p>Cancelar pedidos expirados y devolver productos al inventario</p>
+                    </div>
+                    <div class="card-action">
+                        <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">settings</i> Administración y Usuarios</h5></div></div>
+        <div class="row">
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Usuarios</span>
+                        <p>Crear, editar y administrar usuarios del sistema</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/users.php" class="btn waves-effect waves-light blue">Ir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Sucursales</span>
+                        <p>Crear nuevas sucursales y configurar ubicaciones.</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_branches.php" class="btn waves-effect waves-light orange darken-4">Configurar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Chat de Soporte</span>
+                        <p>Atender dudas y consultas directas de tus clientes en tiempo real.</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/chat.php" class="btn waves-effect waves-light indigo darken-1">Centro de Mensajes</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Auditoría y Logs</span>
+                        <p>Monitorear clics, visitas y acciones de cada usuario en el sistema</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/activity_logs.php" class="btn waves-effect waves-light grey darken-3">Ver Logs</a>
                     </div>
                 </div>
             </div>

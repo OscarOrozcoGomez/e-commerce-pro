@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
@@ -8,169 +9,190 @@ if (!isAdmin() && !isEncargado()) {
     exit;
 }
 
-$pageTitle = 'Gestión de Resurtido';
+$pageTitle = 'Lista de Compra Sugerida';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $idAlmacen = $usuario['id_almacen'];
 
-// 1. Obtener productos con stock bajo (Sugerencia de pedido)
-$sqlSugerencia = "SELECT p.id_producto, p.nombre, p.sku, p.precio_costo, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo
-                  FROM productos p
-                  JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
-                  WHERE ia.id_almacen = :almacen AND ia.cantidad_actual <= ia.stock_minimo
-                  ORDER BY p.nombre ASC";
-$stmt = $pdo->prepare($sqlSugerencia);
-$stmt->execute([':almacen' => $idAlmacen]);
-$sugerencias = $stmt->fetchAll();
-
-// 2. Obtener órdenes de compra pendientes
-$sqlOrdenes = "SELECT oc.*, u.nombre as creador 
-               FROM ordenes_compra oc 
-               JOIN usuarios u ON oc.id_usuario = u.id_usuario
-               WHERE oc.id_almacen = :almacen AND oc.estado IN ('borrador', 'enviada')
-               ORDER BY oc.fecha_creacion DESC";
-$stmt = $pdo->prepare($sqlOrdenes);
-$stmt->execute([':almacen' => $idAlmacen]);
-$ordenesPendientes = $stmt->fetchAll();
+// Obtener productos bajo el stock mínimo incluyendo el ID del almacén para el proceso
+$sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_costo, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo, a.nombre as sucursal, ia.id_almacen
+        FROM productos p
+        JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
+        JOIN almacenes a ON ia.id_almacen = a.id_almacen
+        WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'
+        ORDER BY a.nombre, p.nombre";
+$stmt = $pdo->query($sql);
+$listaCompra = $stmt->fetchAll();
 
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="container" style="margin-top: 30px;">
+<div class="container">
     <div class="row">
         <div class="col s12">
-            <h3>Módulo de Resurtido y Compras</h3>
-            <p class="grey-text text-darken-1">Genera listas de pedido basadas en tu stock mínimo y gestiona la llegada de mercancía.</p>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 10px;">
+                <h4 style="margin: 0;"><i class="material-icons left" style="font-size: 2.5rem; color: #1a237e;">shopping_cart</i> Lista de Compra Sugerida</h4>
+                <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+            </div>
+            <p class="grey-text">Estos productos han alcanzado su nivel mínimo y necesitan ser resurtidos.</p>
         </div>
     </div>
 
     <div class="row">
-        <!-- SUGERENCIA DE PEDIDO -->
-        <div class="col s12 l8">
+        <div class="col s12">
             <div class="card">
                 <div class="card-content">
-                    <span class="card-title"><strong>1. Sugerencia de Resurtido</strong></span>
-                    <p class="text-small orange-text"><i class="material-icons left tiny">warning</i> Productos por debajo del mínimo.</p>
-                    
-                    <form id="form-generar-orden">
-                        <table class="striped responsive-table" style="margin-top: 20px;">
-                            <thead>
-                                <tr>
-                                    <th>Producto</th>
-                                    <th>SKU</th>
-                                    <th>Stock Actual</th>
-                                    <th>Faltante (Max)</th>
-                                    <th>A Pedir</th>
-                                    <th>Costo Est.</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (empty($sugerencias)): ?>
-                                    <tr><td colspan="6" class="center">¡Todo en orden! No hay productos con stock bajo.</td></tr>
-                                <?php else: ?>
-                                    <?php foreach ($sugerencias as $s): 
-                                        $faltante = $s['stock_maximo'] - $s['cantidad_actual'];
-                                        if ($faltante < 0) $faltante = 0;
+                    <span class="card-title">Sugerencias de Resurtido y Recepción</span>
+                    <p class="grey-text">Ajusta las cantidades según lo recibido y confirma para subir al inventario.</p>
+
+                    <?php if (empty($listaCompra)): ?>
+                        <div class="center-align" style="padding: 40px;">
+                            <i class="material-icons large green-text">check_circle</i>
+                            <h5>¡Inventario saludable!</h5>
+                            <p>No hay productos que necesiten resurtido actualmente.</p>
+                        </div>
+                    <?php else: ?>
+                        <form id="form-entrada-masiva">
+                            <?php echo csrfInput(); ?>
+                            <table class="striped highlight responsive-table" style="margin-top: 20px;">
+                                <thead>
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th>Sucursal</th>
+                                        <th class="center-align">Stock Actual</th>
+                                        <th class="center-align">Regla (Min/Max)</th>
+                                        <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad Recibida</th>
+                                        <th class="right-align">Subtotal Est.</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php 
+                                    $totalInversion = 0;
+                                    foreach ($listaCompra as $index => $item): 
+                                        $aComprar = max(0, $item['stock_maximo'] - $item['cantidad_actual']);
+                                        $costoFila = $aComprar * (float)$item['precio_costo'];
+                                        $totalInversion += $costoFila;
                                     ?>
                                         <tr>
-                                            <td><?php echo esc($s['nombre']); ?></td>
-                                            <td><?php echo esc($s['sku']); ?></td>
-                                            <td><span class="badge orange white-text" style="float:none;"><?php echo $s['cantidad_actual']; ?></span></td>
-                                            <td><?php echo $faltante; ?></td>
-                                            <td style="width: 100px;">
-                                                <input type="number" name="cant_<?php echo $s['id_producto']; ?>" value="<?php echo $faltante; ?>" min="0" class="browser-default" style="width: 60px; padding: 5px; border: 1px solid #ccc;">
+                                            <td>
+                                                <strong><?php echo esc($item['nombre']); ?></strong><br>
+                                                <small class="grey-text">SKU: <?php echo esc($item['sku']); ?></small>
                                             </td>
-                                            <td>$ <?php echo number_format($s['precio_costo'], 2); ?></td>
+                                            <td><?php echo esc($item['sucursal']); ?></td>
+                                            <td class="red-text center-align"><strong><?php echo $item['cantidad_actual']; ?></strong></td>
+                                            <td class="center-align grey-text"><?php echo $item['stock_minimo']; ?> / <?php echo $item['stock_maximo']; ?></td>
+                                            <td class="blue lighten-5">
+                                                <input type="hidden" name="items[<?php echo $index; ?>][id_producto]" value="<?php echo $item['id_producto']; ?>">
+                                                <input type="hidden" name="items[<?php echo $index; ?>][id_almacen]" value="<?php echo $item['id_almacen']; ?>">
+                                                <input type="number" 
+                                                       name="items[<?php echo $index; ?>][cantidad]" 
+                                                       value="<?php echo $aComprar; ?>" 
+                                                       min="0" 
+                                                       class="browser-default qty-input" 
+                                                       style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
+                                            </td>
+                                            <td class="right-align">$<?php echo number_format($costoFila, 2); ?></td>
                                         </tr>
                                     <?php endforeach; ?>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                                </tbody>
+                            </table>
 
-                        <?php if (!empty($sugerencias)): ?>
-                            <div class="right-align" style="margin-top: 20px;">
-                                <button type="button" onclick="exportarLista()" class="btn blue darken-2 waves-effect"><i class="material-icons left">file_download</i> Descargar Lista</button>
-                                <button type="button" onclick="crearOrdenCompra()" class="btn green darken-1 waves-effect"><i class="material-icons left">send</i> Generar Orden de Compra</button>
+                            <div class="row" style="margin-top: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; flex-wrap: wrap;">
+                                <div class="grey-text text-darken-2">
+                                    <h5 style="margin: 0;">Total Inversión: <strong>$<?php echo number_format($totalInversion, 2); ?></strong></h5>
+                                </div>
+                                <div>
+                                    <button type="button" onclick="confirmarEntradaMasiva()" class="btn-large green darken-2 waves-effect waves-light">
+                                        <i class="material-icons left">inventory</i> CONFIRMAR RECEPCIÓN DE MERCANCÍA
+                                    </button>
+                                </div>
                             </div>
-                        <?php endif; ?>
-                    </form>
-                </div>
-            </div>
-        </div>
+                        </form>
 
-        <!-- ÓRDENES PENDIENTES -->
-        <div class="col s12 l4">
-            <div class="card indigo darken-4 white-text">
-                <div class="card-content">
-                    <span class="card-title">Órdenes en Tránsito</span>
-                    <p>Mercancía solicitada pendiente de recibir.</p>
-                    
-                    <ul class="collection black-text" style="border: none;">
-                        <?php foreach ($ordenesPendientes as $oc): ?>
-                            <li class="collection-item avatar" style="border-bottom: 1px solid #eee;">
-                                <i class="material-icons circle orange">local_shipping</i>
-                                <span class="title">Ref: <?php echo $oc['referencia']; ?></span>
-                                <p><?php echo date('d/m/Y', strtotime($oc['fecha_creacion'])); ?><br>
-                                   Est: <strong>$ <?php echo number_format($oc['total_estimado'], 2); ?></strong>
-                                </p>
-                                <a href="process_inbound.php?id=<?php echo $oc['id_orden_compra']; ?>" class="secondary-content btn-small green">Recibir</a>
-                            </li>
-                        <?php endforeach; ?>
-                        <?php if (empty($ordenesPendientes)): ?>
-                            <li class="collection-item center grey-text">No hay órdenes pendientes.</li>
-                        <?php endif; ?>
-                    </ul>
+                        <div class="right-align" style="margin-top: 10px;">
+                            <button onclick="window.print()" class="btn waves-effect waves-light blue darken-4">
+                                <i class="material-icons left">print</i> Imprimir Lista de Trabajo
+                            </button>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
+<!-- Incluimos SweetAlert2 para que el botón de confirmación funcione -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <script>
-    function exportarLista() {
-        const rows = [];
-        rows.push(["Producto", "SKU", "Cantidad a Pedir", "Costo Unitario Est."]);
-        
-        document.querySelectorAll('#form-generar-orden tbody tr').forEach(tr => {
-            const cells = tr.querySelectorAll('td');
-            if (cells.length < 5) return;
-            const input = tr.querySelector('input');
-            if (input && input.value > 0) {
-                rows.push([
-                    cells[0].innerText,
-                    cells[1].innerText,
-                    input.value,
-                    cells[5].innerText.replace('$ ', '')
-                ]);
+    function confirmarEntradaMasiva() {
+        const form = document.getElementById('form-entrada-masiva');
+        const formData = new FormData(form);
+
+        // Convertir FormData a un objeto estructurado para JSON
+        const data = {
+            csrf_token: formData.get('csrf_token'),
+            items: []
+        };
+
+        // Recorrer los campos para agrupar los items
+        const itemsMap = {};
+        for (let [key, value] of formData.entries()) {
+            if (key.startsWith('items[')) {
+                const match = key.match(/items\[(\d+)\]\[(\w+)\]/);
+                if (match) {
+                    const index = match[1];
+                    const field = match[2];
+                    if (!itemsMap[index]) itemsMap[index] = {};
+                    itemsMap[index][field] = value;
+                }
             }
-        });
+        }
+        data.items = Object.values(itemsMap).filter(i => parseInt(i.cantidad) > 0);
 
-        let csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "pedido_resurtido_" + new Date().toLocaleDateString() + ".csv");
-        document.body.appendChild(link);
-        link.click();
-    }
+        if (data.items.length === 0) {
+            M.toast({html: 'No hay cantidades para ingresar', classes: 'orange'});
+            return;
+        }
 
-    function crearOrdenCompra() {
-        const formData = new FormData(document.getElementById('form-generar-orden'));
-        
-        fetch('<?php echo BASE_URL; ?>api/create_po.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                M.toast({html: 'Orden de compra generada!', classes: 'green'});
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                M.toast({html: 'Error: ' + data.error, classes: 'red'});
+        Swal.fire({
+            title: '¿Confirmar entrada?',
+            text: `Se actualizará el stock de ${data.items.length} productos en el inventario.`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#2e7d32',
+            confirmButtonText: 'Sí, ingresar productos'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                fetch('<?php echo BASE_URL; ?>api/batch_inbound.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.success) {
+                        M.toast({html: 'Inventario actualizado correctamente', classes: 'green'});
+                        setTimeout(() => location.reload(), 1500);
+                    } else {
+                        M.toast({html: 'Error: ' + res.message, classes: 'red'});
+                    }
+                });
             }
         });
     }
 </script>
 
+<style>
+    @media print {
+        .btn-flat, .btn, .nav-wrapper, .delivery-banner { display: none !important; }
+        body { background: white; }
+        .card { box-shadow: none; border: 1px solid #eee; }
+    }
+    .qty-input:focus {
+        border: 2px solid #2196f3 !important;
+        outline: none;
+        background-color: #fff;
+    }
+</style>
 <?php include __DIR__ . '/includes/footer.php'; ?>

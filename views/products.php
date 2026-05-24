@@ -11,6 +11,10 @@ requirePermission('gestionar_productos', BASE_URL . 'views/dashboard.php');
 $pageTitle = 'Gestionar Productos';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
+$almacenes = $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC")->fetchAll();
+
+// Determinar qué almacén estamos visualizando en la tabla (por defecto el del usuario o el primero)
+$id_almacen_view = (int)($_GET['almacen_view'] ?? ($usuario['id_almacen'] ?: $almacenes[0]['id_almacen'] ?? 1));
 $error = '';
 $success = '';
 
@@ -47,6 +51,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 
                 $id_nuevo = (int)$pdo->lastInsertId();
                 dbSetProductCategories($id_nuevo, $_POST['categorias'] ?? []);
+
+                // Guardar reglas de abastecimiento
+                if (isAdmin()) {
+                    $stmtRules = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo) 
+                                              VALUES (?, 1, 0, ?, ?)");
+                    $stmtRules->execute([$id_nuevo, intval($_POST['stock_minimo'] ?? 2), intval($_POST['stock_maximo'] ?? 5)]);
+                }
                 
                 $success = 'Producto agregado correctamente.';
             } catch (PDOException $e) {
@@ -71,6 +82,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 ]);
                 
                 dbSetProductCategories($id, $_POST['categorias'] ?? []);
+
+                // Actualizar o insertar reglas en el almacén seleccionado en el formulario
+                if (isAdmin()) {
+                    $id_alm_form = intval($_POST['id_almacen_stock'] ?? 1);
+                    $stmtUpdRules = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo) 
+                                                  VALUES (?, ?, ?, ?, ?) 
+                                                  ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
+                    $stmtUpdRules->execute([$id, $id_alm_form, intval($_POST['cantidad_actual'] ?? 0), intval($_POST['stock_minimo'] ?? 2), intval($_POST['stock_maximo'] ?? 5)]);
+                }
+
                 $success = 'Producto actualizado correctamente.';
             } catch (PDOException $e) {
                 $error = 'Error al actualizar producto: ' . $e->getMessage();
@@ -91,14 +112,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
 // Obtener productos
 try {
-    $sql = "SELECT p.*, GROUP_CONCAT(pc.id_categoria) as categorias_ids 
+    $sql = "SELECT p.*, GROUP_CONCAT(pc.id_categoria) as categorias_ids, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
             FROM productos p 
             LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
+            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_alm
             WHERE p.estado = 'activo' 
             GROUP BY p.id_producto
             ORDER BY p.nombre";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute();
+    $stmt->execute([':id_alm' => $id_almacen_view]);
     $productos = $stmt->fetchAll();
 } catch (PDOException $e) {
     $error = 'Error al obtener productos: ' . $e->getMessage();
@@ -217,6 +239,34 @@ include __DIR__ . '/includes/header.php';
                             </select>
                             <label>Asignar Categorías</label>
                         </div>
+
+                        <?php if (isAdmin()): ?>
+                        <div class="row grey lighten-4" style="padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                            <div class="col s12"><p style="margin:0 0 10px 0;"><strong>Control de Inventario</strong></p></div>
+                            <div class="input-field col s12">
+                                <select name="id_almacen_stock" id="id_almacen_stock" class="browser-default" style="border: 1px solid #ccc;">
+                                    <?php foreach ($almacenes as $alm): ?>
+                                        <option value="<?php echo $alm['id_almacen']; ?>" <?php echo $alm['id_almacen'] == $id_almacen_view ? 'selected' : ''; ?>>
+                                            Configurar en: <?php echo esc($alm['nombre']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="input-field col s4">
+                                <input type="number" id="cantidad_actual" name="cantidad_actual" value="0" min="0">
+                                <label for="cantidad_actual" class="active">Stock Actual</label>
+                                <span class="helper-text">Ajuste manual</span>
+                            </div>
+                            <div class="input-field col s4">
+                                <input type="number" id="stock_minimo" name="stock_minimo" value="2" min="0">
+                                <label for="stock_minimo" class="active">Stock Mínimo</label>
+                            </div>
+                            <div class="input-field col s4">
+                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="1">
+                                <label for="stock_maximo" class="active">Stock Máximo</label>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                         
                         <button type="submit" id="btn-submit" class="btn waves-effect waves-light green">
                             Agregar Producto <i class="material-icons right">add</i>
@@ -232,7 +282,18 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12 m6">
             <div class="card">
                 <div class="card-content">
-                    <span class="card-title">Listado de Productos</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                        <span class="card-title">Listado de Productos</span>
+                        <div style="width: 200px;">
+                            <select class="browser-default" onchange="window.location.href='?almacen_view=' + this.value">
+                                <?php foreach ($almacenes as $alm): ?>
+                                    <option value="<?php echo $alm['id_almacen']; ?>" <?php echo $alm['id_almacen'] == $id_almacen_view ? 'selected' : ''; ?>>
+                                        Stock en: <?php echo esc($alm['nombre']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
                     <div class="input-field">
                         <i class="material-icons prefix">search</i>
                         <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
@@ -241,9 +302,12 @@ include __DIR__ . '/includes/header.php';
                         <table class="striped">
                             <thead>
                                 <tr>
+                                    <th>Imagen</th>
                                     <th>Nombre</th>
                                     <th>SKU</th>
                                     <th>Precio</th>
+                                    <th class="center-align">Stock Actual</th>
+                                    <th class="center-align">Mín/Máx</th>
                                     <th>Acciones</th>
                                 </tr>
                             </thead>
@@ -264,6 +328,16 @@ include __DIR__ . '/includes/header.php';
                                         <td><?php echo esc($prod['nombre']); ?></td>
                                         <td><?php echo esc($prod['sku']); ?></td>
                                         <td>$<?php echo number_format((float)$prod['precio_venta'], 2); ?></td>
+                                        <td class="center-align">
+                                            <?php $isLow = ($prod['cantidad_actual'] ?? 0) <= ($prod['stock_minimo'] ?? 2); ?>
+                                            <span class="badge <?php echo $isLow ? 'red white-text' : 'green lighten-4 green-text text-darken-4'; ?>" style="float: none; font-weight: bold; border-radius: 4px;">
+                                                <?php echo $prod['cantidad_actual'] ?? 0; ?>
+                                            </span>
+                                        </td>
+                                        <td class="center-align">
+                                            <span class="orange-text text-darken-2" title="Mínimo"><strong><?php echo $prod['stock_minimo'] ?? 2; ?></strong></span> / 
+                                            <span class="blue-text text-darken-2" title="Máximo"><strong><?php echo $prod['stock_maximo'] ?? 5; ?></strong></span>
+                                        </td>
                                         <td>
                                             <button type="button" class="btn-floating btn-small blue waves-effect waves-light" 
                                                     onclick='abrirEditar(<?php echo json_encode($prod); ?>)'>
@@ -301,6 +375,12 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
+        
+        if (document.getElementById('stock_minimo')) {
+            document.getElementById('cantidad_actual').value = prod.cantidad_actual || 0;
+            document.getElementById('stock_minimo').value = prod.stock_minimo || 2;
+            document.getElementById('stock_maximo').value = prod.stock_maximo || 5;
+        }
         
         // Manejo de select múltiple
         const selectCats = document.querySelector('select[name="categorias[]"]');

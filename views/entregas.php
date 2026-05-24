@@ -53,7 +53,10 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4>Mis Entregas Asignadas</h4>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 10px;">
+                <h4 style="margin: 0;">Mis Entregas Asignadas</h4>
+                <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+            </div>
             <p class="grey-text">Aquí aparecen los pedidos que debes entregar hoy.</p>
         </div>
     </div>

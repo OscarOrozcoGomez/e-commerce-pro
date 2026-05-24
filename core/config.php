@@ -23,15 +23,24 @@ set_exception_handler(function ($exception) {
     exit;
 });
 
+// Cargar variables de entorno locales si existen (para no subirlas a GitHub)
+if (file_exists(__DIR__ . '/env.php')) {
+    require_once __DIR__ . '/env.php';
+}
+
 // Parámetros de conexión a la base de datos
-const DB_HOST = '127.0.0.1';
-const DB_NAME = 'beautyandwell_prod';
-const DB_USER = 'root';
-const DB_PASS = '';
-const DB_CHARSET = 'utf8mb4';
+if (!defined('DB_HOST')) {
+    define('DB_HOST', '127.0.0.1');
+    define('DB_NAME', 'beautyandwell_prod');
+    define('DB_USER', 'root');
+    define('DB_PASS', '');
+    define('DB_CHARSET', 'utf8mb4');
+}
 
 // Llaves de API (En producción, lo ideal es usar variables de entorno)
-const GOOGLE_MAPS_API_KEY = 'AIzaSyAhJ3ApP1EPr_8IyZ8Unt-LlH1C8j5GZYE';
+if (!defined('GOOGLE_MAPS_API_KEY')) {
+    define('GOOGLE_MAPS_API_KEY', ''); 
+}
 
 // Rutas y constantes del proyecto
 const BASE_URL = '/e-commerce-pro/';

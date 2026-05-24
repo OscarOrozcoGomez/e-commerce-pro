@@ -80,7 +80,10 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4><i class="material-icons left" style="font-size: 2.5rem; color: #2e7d32;">add_business</i> Entradas de Inventario</h4>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 10px;">
+                <h4 style="margin: 0;"><i class="material-icons left" style="font-size: 2.5rem; color: #2e7d32;">add_business</i> Entradas de Inventario</h4>
+                <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+            </div>
             <p class="grey-text">Registra la llegada de mercancía al almacén. Puedes hacerlo uno por uno o en la lista rápida.</p>
         </div>
     </div>
@@ -136,6 +139,11 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-content">
                     <span class="card-title">Carga Rápida de Inventario</span>
                     <p class="small grey-text">Escribe la cantidad que llegó y presiona el botón verde de cada fila.</p>
+
+                    <div class="input-field" style="margin-top: 20px;">
+                        <i class="material-icons prefix">search</i>
+                        <input type="text" id="filtro-lista-rapida" placeholder="Buscar por nombre o SKU en esta lista...">
+                    </div>
                     
                     <div style="max-height: 500px; overflow-y: auto; margin-top: 20px;">
                         <table class="striped condensed">
@@ -196,6 +204,18 @@ include __DIR__ . '/includes/header.php';
             onAutocomplete: function(val) {
                 document.getElementById('id_producto_inbound').value = map[val];
             }
+        });
+
+        // Lógica de búsqueda/filtro para la lista rápida
+        document.getElementById('filtro-lista-rapida').addEventListener('keyup', function() {
+            const filter = this.value.toLowerCase();
+            const table = this.closest('.card-content').querySelector('table');
+            const rows = table.querySelectorAll('tbody tr');
+            
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(filter) ? '' : 'none';
+            });
         });
     });
 

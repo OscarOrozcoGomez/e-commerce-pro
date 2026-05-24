@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS `inventario_almacen` (
   `id_almacen` INT UNSIGNED NOT NULL,
   `cantidad_actual` INT NOT NULL DEFAULT 0,
   `cantidad_reservada` INT NOT NULL DEFAULT 0,
+  `stock_minimo` INT NOT NULL DEFAULT 2,
+  `stock_maximo` INT NOT NULL DEFAULT 5,
   `fecha_ultimo_movimiento` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_inventario`),
   UNIQUE KEY `uq_inventario_producto_almacen` (`id_producto`,`id_almacen`),
@@ -235,6 +237,17 @@ CREATE TABLE IF NOT EXISTS `mensajes_soporte` (
   PRIMARY KEY (`id_mensaje`),
   KEY `idx_chat_cliente` (`id_cliente`),
   CONSTRAINT `fk_chat_usu_cliente` FOREIGN KEY (`id_cliente`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Respuestas rápidas configurables por usuario (Staff)
+CREATE TABLE IF NOT EXISTS `respuestas_rapidas` (
+  `id_respuesta` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NOT NULL,
+  `titulo` VARCHAR(50) NOT NULL,
+  `mensaje` TEXT NOT NULL,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_respuesta`),
+  CONSTRAINT `fk_respuestas_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- Insertar datos iniciales

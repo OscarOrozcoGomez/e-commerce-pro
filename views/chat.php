@@ -24,6 +24,16 @@ if (!$soyCliente) {
     $listaClientes = $stmtList->fetchAll();
 }
 
+// Definimos los emojis por categorías estilo WhatsApp
+$emojiCategories = [
+    'Caritas' => ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','👻','💀','☠️','👽','👾','🤖','💩'],
+    'Animales' => ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐽','🐸','🐵','🐒','🦍','🦧','🐕','🐩','🐺','🦝','🐈','🦁','🐅','🐆','🐴','🐎','🦄','🦓','🦌','🦬','🐂','🐃','🐄','🐖','🐗','🐏','🐑','🐐','🐪','🐫','🦙','🦒','🐘','🦣','🦏','🦛','🐁','🐀','🐿️','🦫','🦔','🦎','🐢','🐍','🐲','🐉','🦕','🦖'],
+    'Comida' => ['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🫒','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🥨','🧀','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🌮','🌯','🫔','🥙','🧆','🍲','🥣','🥗','🍿','🍱','🍘','🍙','🍚','🍛','🍜','🍝','🍢','🍣','🍤','🍥','🥮','🍡','🥟','🥠','🥡','🍦','🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍫','🍬','🍭','🍮','🍯','☕','🫖','🍵','🍶','🍾','🍷','🍸','🍹','🍺','🍻','🥂','🥃','🥤','🧋','🧃','🧉','🧊'],
+    'Actividad' => ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🏑','🥍','🏏','🪃','🥅','⛳','🪁','🏹','🎣','🤿','🥊','🥋','⛸️','🎿','🛷','🥌','🎯','🪗','🎮','🕹️','🎰','🎲','🧩','🧸','🪅','🪆','♠️','♥️','♦️','♣️','♟️','🃏','🎭','🖼️','🎨','🧵','🪡','🧶','🪢'],
+    'Objetos' => ['⌚','📱','📲','💻','⌨️','🖥️','🖨️','🖱️','🖲️','📷','📸','📹','🎥','📽️','🎞️','📞','☎️','📟','📠','📺','📻','🎙️','🎚️','🎛️','🧭','⏱️','⏲️','⏰','🕰️','⌛','⏳','📡','🔋','🔌','💡','🔦','🕯️','🪔','🧯','🛢️','💸','💵','💴','💶','💷','🪙','💰','💳','💎','⚖️','🪜','🧰','🪛','🔧','🔨','⚒️','🛠️','⛏️','🪚','🔩','⚙️','🪠','🔫','💣','🧨','🪓','🔪','🗡','⚔️','🛡️','🚬','⚰️','🪦','⚱️','🏺','🔮','📿','🧿','💈','⚗️','🔭','🔬','🕳️','🩹','🩺','💊','💉','🩸','🧬','🦠','🧫','🧪','🌡️','🧹','🧺','🧻','🚽','🚰','🚿','🛁','🛀','🧼','🪥','🪒','🧽','🪣','🧴','🛎️','🔑','🗝️','🚪','🪑','🛋️','🛏️','🛌','🛍️','🛒','🎁','🎈','🎏','🎀','🪄','🎊','🎉','🎎','🏮','🎐','🧧','✉️','📩','📨','📧','💌','📥','📤','📦','🏷️','🪧','📪','📫','📬','📭','📮','📯','📜','📃','📄','📑','🧾','📊','📈','📉','🗒️','🗓️','📆','📅','🗑️','📇','🗃️','🗳️','🗄️','📋','📁','📂','🗂️','🗞️','📰','📓','📔','📒','📕','📗','📘','📙','📚','📖','🔖','🧷','🔗','📎','🖇️','📐','📏','🧮','📌','📍'],
+    'Símbolos' => ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','⚛️','🉑','☢️','☣️','📴','📳','🈶','🈚','🈸','🈺','🈷️','✴️','🆚','💮','🉐','㊙️','㊗️','🈴','🈵','🈹','🈲','🅰️','🅱️','🆎','🆑','🅾️','❌','⭕','🛑','⛔','📛','🚫','💯','💢','♨️','🚷','🚯','🚳','🚱','🔞','📵','🚭','❗','❕','❓','❔','‼️','⁉️','🔅','🔆','〽️','⚠️','🚸','🔱','⚜️','🔰','♻️','✅','🈯','💹','❇️','✳️','🌀','💤','🏧','🚾','♿','🅿️','🛗','🈳','🈂️','🛂','🛃','🛄','🛅','🚹','🚺','🚼','⚧️','🚻','🚮','🎦','📶','🈁','🔣','ℹ️','🔤','🔡','🔠','🆖','🆗','🆙','🆒','🆕','🆓','0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟']
+];
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -94,6 +104,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="chat-input-area" style="display: <?php echo $soyCliente ? 'flex' : 'none'; ?>; gap: 10px;">
                         <?php if (!$soyCliente): ?>
                             <button class="btn-floating waves-effect waves-light green" onclick="toggleProductSearch()"><i class="material-icons">add_shopping_cart</i></button>
+                            <button class="btn-floating waves-effect waves-light purple darken-2" id="quick-msg-trigger" type="button" title="Respuestas Rápidas"><i class="material-icons">bolt</i></button>
                         <?php endif; ?>
                         <button class="btn-floating waves-effect waves-light amber darken-2" id="emoji-trigger" type="button" title="Insertar Emoji"><i class="material-icons">sentiment_satisfied</i></button>
                         <input type="text" id="msg-input" placeholder="Escribe un mensaje..." style="margin: 0;">
@@ -101,18 +112,46 @@ include __DIR__ . '/includes/header.php';
                     </div>
 
                     <!-- Contenedor de Emojis -->
-                    <div id="emoji-picker" class="z-depth-2" style="display: none; position: absolute; bottom: 80px; left: 5%; right: 5%; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px; width: 90%; max-width: 450px; z-index: 1000;">
+                    <div id="emoji-picker" class="z-depth-2" style="display: none; position: absolute; bottom: 85px; left: 5%; right: 5%; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px; width: 90%; max-width: 450px; z-index: 1000;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
                             <span style="font-weight: bold; color: #1a237e; font-size: 0.9rem;">Seleccionar Emoji</span>
                             <button type="button" class="btn-flat btn-small" onclick="document.getElementById('emoji-picker').style.display='none'" style="padding: 0 5px;"><i class="material-icons">close</i></button>
                         </div>
-                        <div style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; max-height: 320px; overflow-y: auto; padding: 5px;">
-                            <?php 
-                                $emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','👻','💀','☠️','👽','👾','🤖','💩','😺','😸','😹','😻','😼','😽','🙀','😿','😾'];
-                                foreach ($emojis as $e) echo "<span class='emoji-item' style='cursor:pointer; font-size: 1.8rem; text-align:center; padding: 5px;'>$e</span>";
-                            ?>
+                        <!-- Pestañas de categorías -->
+                        <div class="emoji-tabs-container">
+                            <button type="button" class="emoji-tab-btn active" onclick="switchEmojiTab('Caritas', 'main')">😊</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Animales', 'main')">🐶</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Comida', 'main')">🍎</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Actividad', 'main')">⚽</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Objetos', 'main')">💡</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Símbolos', 'main')">❤️</button>
+                        </div>
+                        <div id="emoji-content-main" style="max-height: 280px; overflow-y: auto; padding: 5px;">
+                            <?php foreach ($emojiCategories as $catName => $list): ?>
+                                <div id="main-cat-<?php echo $catName; ?>" class="emoji-grid" style="display: <?php echo $catName === 'Caritas' ? 'grid' : 'none'; ?>;">
+                                    <?php foreach ($list as $e): ?>
+                                        <span class='emoji-item' style='cursor:pointer; font-size: 1.8rem; text-align:center; padding: 5px;'><?php echo $e; ?></span>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
+
+                    <?php if (!$soyCliente): ?>
+                    <!-- Contenedor de Respuestas Rápidas -->
+                    <div id="quick-msg-picker" class="z-depth-2" style="display: none; position: absolute; bottom: 85px; left: 5%; right: 5%; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px; width: 90%; max-width: 400px; z-index: 1001;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                            <span style="font-weight: bold; color: #4a148c; font-size: 0.9rem;">Respuestas Rápidas</span>
+                            <div>
+                                <button type="button" class="btn-flat btn-small blue-text" onclick="abrirGestionQuick()" title="Configurar"><i class="material-icons">settings</i></button>
+                                <button type="button" class="btn-flat btn-small" onclick="document.getElementById('quick-msg-picker').style.display='none'"><i class="material-icons">close</i></button>
+                            </div>
+                        </div>
+                        <div id="quick-list-container" style="max-height: 250px; overflow-y: auto;">
+                            <!-- Cargado por JS -->
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -136,6 +175,65 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Modal de Gestión de Respuestas Rápidas -->
+<div id="modal-gestion-quick" class="modal modal-fixed-footer" style="max-width: 600px;">
+    <div class="modal-content">
+        <h5>Configurar Respuestas Rápidas</h5>
+        <div class="row">
+            <form id="form-quick-res">
+                <input type="hidden" id="quick-id" value="">
+                <div class="input-field col s12">
+                    <input type="text" id="quick-titulo" placeholder="Ej: Saludo inicial" maxlength="50">
+                    <label class="active">Título corto</label>
+                </div>
+                <div class="col s12" style="position: relative;">
+                    <div class="input-field" style="margin-bottom: 0;">
+                        <textarea id="quick-mensaje" class="materialize-textarea" placeholder="Escribe aquí el texto que se enviará..."></textarea>
+                        <label class="active">Mensaje completo</label>
+                    </div>
+                    <button type="button" class="btn-flat btn-small amber-text text-darken-2" id="quick-emoji-trigger" style="position: absolute; right: 10px; bottom: 10px;" title="Insertar Emoji">
+                        <i class="material-icons">sentiment_satisfied</i>
+                    </button>
+                    <!-- Mini Picker para el modal -->
+                    <div id="quick-emoji-picker" class="z-depth-2" style="display: none; position: absolute; bottom: 50px; right: 10px; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px; width: 280px; z-index: 1100;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 1px solid #eee;">
+                            <span style="font-size: 0.8rem; font-weight: bold; color: #1a237e;">Emojis</span>
+                            <button type="button" class="btn-flat btn-small" onclick="document.getElementById('quick-emoji-picker').style.display='none'"><i class="material-icons" style="font-size: 1.2rem;">close</i></button>
+                        </div>
+                        <!-- Pestañas de categorías Mini -->
+                        <div class="emoji-tabs-container mini">
+                            <button type="button" class="emoji-tab-btn active" onclick="switchEmojiTab('Caritas', 'quick')">😊</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Animales', 'quick')">🐶</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Comida', 'quick')">🍎</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Actividad', 'quick')">⚽</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Objetos', 'quick')">💡</button>
+                            <button type="button" class="emoji-tab-btn" onclick="switchEmojiTab('Símbolos', 'quick')">❤️</button>
+                        </div>
+                        <div id="emoji-content-quick" style="max-height: 150px; overflow-y: auto;">
+                            <?php foreach ($emojiCategories as $catName => $list): ?>
+                                <div id="quick-cat-<?php echo $catName; ?>" class="emoji-grid-mini" style="display: <?php echo $catName === 'Caritas' ? 'grid' : 'none'; ?>;">
+                                    <?php foreach ($list as $e): ?>
+                                        <span class='emoji-item-quick' style='cursor:pointer; font-size: 1.5rem; text-align:center; padding: 3px;'><?php echo $e; ?></span>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col s12 center-align" style="margin-top: 15px;">
+                    <button type="button" class="btn indigo" onclick="guardarQuickRes()">Guardar Respuesta</button>
+                    <button type="button" class="btn-flat" onclick="limpiarFormQuick()">Limpiar</button>
+                </div>
+            </form>
+        </div>
+        <div class="divider"></div>
+        <ul class="collection" id="quick-manage-list"></ul>
+    </div>
+    <div class="modal-footer">
+        <button class="modal-close btn-flat">Cerrar</button>
+    </div>
+</div>
+
 <style>
     .msg { margin-bottom: 10px; max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 1.15rem; clear: both; line-height: 1.4; }
     .msg.me { float: right; background: #e3f2fd; color: #0d47a1; border-bottom-right-radius: 2px; }
@@ -149,12 +247,49 @@ include __DIR__ . '/includes/header.php';
 
     /* Estilo para que los iconos (emojis) se vean al doble de grande en el chat */
     .msg .chat-emoji { font-size: 2.3rem; line-height: 1; vertical-align: middle; display: inline-block; margin: 2px; }
+
+    /* Estilo para mensajes de sistema (separadores) */
+    .system-msg { clear: both; text-align: center; margin: 20px 0; }
+    .system-msg span { background: #eeeeee; color: #757575; padding: 4px 15px; border-radius: 20px; font-size: 0.75rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
     
     /* Asegurar que el desplegable de búsqueda se vea sobre el chat */
     .autocomplete-content {
         z-index: 9999 !important;
     }
     .emoji-item:hover { background: #eeeeee; border-radius: 4px; }
+    .emoji-item-quick:hover { background: #eeeeee; border-radius: 4px; }
+
+    /* Agrandar botones de acción en el chat y centrar sus iconos perfectamente */
+    .chat-input-area { align-items: center !important; }
+    .chat-input-area .btn-floating {
+        width: 48px !important;
+        height: 48px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    .chat-input-area .btn-floating i {
+        font-size: 1.8rem !important;
+        line-height: 1 !important;
+    }
+    /* Ajustar altura del input y botón de enviar para que coincidan con los botones circulares */
+    .chat-input-area input#msg-input {
+        height: 48px !important;
+        margin-bottom: 0 !important;
+        padding-left: 15px !important;
+    }
+    .chat-input-area .btn:not(.btn-floating) {
+        height: 48px !important;
+        line-height: 48px !important;
+    }
+
+    .emoji-tabs-container { display: flex; justify-content: space-around; background: #f5f5f5; border-radius: 4px; margin-bottom: 10px; padding: 2px; }
+    .emoji-tab-btn { background: none; border: none; cursor: pointer; padding: 5px; font-size: 1.2rem; flex: 1; border-radius: 4px; transition: 0.2s; }
+    .emoji-tab-btn:hover { background: #e0e0e0; }
+    .emoji-tab-btn.active { background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-bottom: 2px solid #1a237e; }
+    .emoji-tabs-container.mini .emoji-tab-btn { font-size: 1rem; padding: 3px; }
+    .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+    .emoji-grid-mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
 
     .chat-product-card { background: white; border-radius: 8px; overflow: hidden; border: 1px solid #ddd; margin-top: 5px; width: 200px; }
     .chat-product-card img { width: 100%; height: 120px; object-fit: contain; background: #f9f9f9; }
@@ -174,7 +309,21 @@ let productosData = {};
 let lastTypingSent = 0;
 let miAsignacionPrevia = 0;
 let chatEstabaActivo = false; // Rastrear transición de estado
-let fechaInicioSesion = null; // Para persistir el marcador de inicio
+let diasExpandidos = new Set(); // Guardar qué días ha abierto el usuario
+let quickResponses = [];
+
+function formatFriendlyDate(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
+    const ayer = new Date(hoy);
+    ayer.setDate(hoy.getDate() - 1);
+
+    if (date.getTime() === hoy.getTime()) return 'Hoy';
+    if (date.getTime() === ayer.getTime()) return 'Ayer';
+    
+    return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     M.Modal.init(document.querySelectorAll('.modal'));
@@ -230,6 +379,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if(s.id_usuario != currentUserId) select.innerHTML += `<option value="${s.id_usuario}">${s.nombre}</option>`;
                 });
             });
+
+        loadQuickResponses();
     }
 
     // Lógica para el selector de emojis
@@ -257,7 +408,52 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Lógica para el selector de respuestas rápidas
+    const quickTrigger = document.getElementById('quick-msg-trigger');
+    const quickPicker = document.getElementById('quick-msg-picker');
+    if (quickTrigger) {
+        quickTrigger.addEventListener('click', () => {
+            quickPicker.style.display = quickPicker.style.display === 'none' ? 'block' : 'none';
+        });
+        document.addEventListener('click', (e) => {
+            if (quickPicker && !quickPicker.contains(e.target) && !quickTrigger.contains(e.target)) {
+                quickPicker.style.display = 'none';
+            }
+        });
+    }
+
+    // Lógica para el selector de emojis en Respuestas Rápidas (Modal)
+    const quickEmojiTrigger = document.getElementById('quick-emoji-trigger');
+    const quickEmojiPicker = document.getElementById('quick-emoji-picker');
+    const quickMsgInput = document.getElementById('quick-mensaje');
+
+    if (quickEmojiTrigger) {
+        quickEmojiTrigger.addEventListener('click', () => {
+            quickEmojiPicker.style.display = quickEmojiPicker.style.display === 'none' ? 'block' : 'none';
+        });
+
+        document.querySelectorAll('.emoji-item-quick').forEach(item => {
+            item.addEventListener('click', () => {
+                quickMsgInput.value += item.textContent;
+                quickMsgInput.focus();
+                M.textareaAutoResize(quickMsgInput); // Ajustar altura del textarea de Materialize
+                quickEmojiPicker.style.display = 'none';
+            });
+        });
+    }
 });
+
+function switchEmojiTab(category, pickerType) {
+    const containerId = pickerType === 'main' ? 'emoji-content-main' : 'emoji-content-quick';
+    const prefix = pickerType === 'main' ? 'main-cat-' : 'quick-cat-';
+    const tabsContainer = event.currentTarget.parentElement;
+
+    document.querySelectorAll(`#${containerId} > div`).forEach(el => el.style.display = 'none');
+    document.getElementById(prefix + category).style.display = 'grid';
+    tabsContainer.querySelectorAll('.emoji-tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+}
 
 function toggleProductSearch() {
     const div = document.getElementById('staff-product-search');
@@ -297,16 +493,107 @@ function confirmarTransferencia() {
         });
 }
 
-function iniciarChat() {
-    fechaInicioSesion = new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+function loadQuickResponses() {
+    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=fetch_quick`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                quickResponses = data.responses;
+                renderQuickPickers();
+            }
+        });
+}
 
+function renderQuickPickers() {
+    const list = document.getElementById('quick-list-container');
+    const manageList = document.getElementById('quick-manage-list');
+    if (!list) return;
+
+    list.innerHTML = quickResponses.length === 0 ? '<p class="center grey-text">No tienes respuestas guardadas.</p>' : '';
+    manageList.innerHTML = '';
+
+    quickResponses.forEach(r => {
+        // Para el picker del chat
+        const div = document.createElement('div');
+        div.className = 'collection-item';
+        div.style = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #f5f5f5;';
+        div.innerHTML = `<strong class="purple-text text-darken-4">${r.titulo}</strong><br><small class="grey-text truncate">${r.mensaje}</small>`;
+        div.onclick = () => {
+            const input = document.getElementById('msg-input');
+            input.value = r.mensaje;
+            input.focus();
+            document.getElementById('quick-msg-picker').style.display = 'none';
+        };
+        list.appendChild(div);
+
+        // Para el modal de gestión
+        const li = document.createElement('li');
+        li.className = 'collection-item';
+        li.innerHTML = `<div><strong>${r.titulo}</strong>: ${r.mensaje}
+            <div class="secondary-content">
+                <a href="#!" onclick="cargarQuickForm(${r.id_respuesta}, '${r.titulo.replace(/'/g, "\\'")}', '${r.mensaje.replace(/'/g, "\\'")}')"><i class="material-icons blue-text">edit</i></a>
+                <a href="#!" onclick="borrarQuick(${r.id_respuesta})"><i class="material-icons red-text">delete</i></a>
+            </div></div>`;
+        manageList.appendChild(li);
+    });
+}
+
+function abrirGestionQuick() {
+    document.getElementById('quick-msg-picker').style.display = 'none';
+    M.Modal.getInstance(document.getElementById('modal-gestion-quick')).open();
+}
+
+function guardarQuickRes() {
+    const id = document.getElementById('quick-id').value;
+    const titulo = document.getElementById('quick-titulo').value.trim();
+    const mensaje = document.getElementById('quick-mensaje').value.trim();
+
+    if (!titulo || !mensaje) return M.toast({html: 'Completa todos los campos'});
+
+    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=save_quick`, {
+        method: 'POST',
+        body: JSON.stringify({ id_respuesta: id, titulo, mensaje })
+    }).then(r => r.json()).then(data => {
+        if (data.success) {
+            M.toast({html: 'Guardado'});
+            limpiarFormQuick();
+            loadQuickResponses();
+        }
+    });
+}
+
+function cargarQuickForm(id, titulo, mensaje) {
+    document.getElementById('quick-id').value = id;
+    document.getElementById('quick-titulo').value = titulo;
+    document.getElementById('quick-mensaje').value = mensaje;
+    M.textareaAutoResize(document.getElementById('quick-mensaje'));
+    M.updateTextFields();
+}
+
+function limpiarFormQuick() {
+    document.getElementById('form-quick-res').reset();
+    document.getElementById('quick-id').value = '';
+}
+
+function borrarQuick(id) {
+    if (!confirm('¿Eliminar esta respuesta?')) return;
+    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=delete_quick&id_respuesta=${id}`)
+        .then(() => loadQuickResponses());
+}
+
+function iniciarChat() {
     fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=start`)
-        .then(() => {
-            chatEstabaActivo = true;
-            document.getElementById('chat-welcome').style.display = 'none';
-            document.getElementById('chat-box').style.display = 'block';
-            document.querySelector('.chat-input-area').style.display = 'flex';
-            cargarMensajes();
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                chatEstabaActivo = true;
+                document.getElementById('chat-welcome').style.display = 'none';
+                document.getElementById('chat-box').style.display = 'block';
+                document.querySelector('.chat-input-area').style.display = 'flex';
+                cargarMensajes();
+            } else {
+                M.toast({html: 'Error al iniciar: ' + data.message, classes: 'red'});
+            }
         });
 }
 
@@ -422,13 +709,52 @@ function cargarMensajes() {
                 primeraCarga = false;
 
                 box.innerHTML = '';
-                
-                // Re-insertar marcador de inicio si hay una sesión activa
-                if (!esStaff && (chatEstabaActivo || data.soporte_activo) && fechaInicioSesion) {
-                    box.innerHTML = `<div class="center-align" style="margin: 10px 0 20px 0;"><span class="grey lighten-3 grey-text text-darken-2" style="padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; font-weight: bold;">CONVERSACIÓN INICIADA: ${fechaInicioSesion}</span></div>`;
-                }
+                let lastDateStr = null;
+                let currentDayContent = null;
+                const todayStr = new Date().toISOString().split('T')[0];
 
                 data.mensajes.forEach(m => {
+                    const msgDate = m.fecha_envio.split(' ')[0]; // YYYY-MM-DD
+
+                    // Crear un nuevo grupo si cambia el día
+                    if (msgDate !== lastDateStr) {
+                        const isToday = (msgDate === todayStr);
+                        
+                        // Por defecto expandimos el día de hoy en la primera carga
+                        if (isToday && !diasExpandidos.has(msgDate)) {
+                            diasExpandidos.add(msgDate);
+                        }
+
+                        const isExpanded = diasExpandidos.has(msgDate);
+                        
+                        const header = document.createElement('div');
+                        header.className = 'chat-date-header';
+                        header.innerHTML = `<span>${formatFriendlyDate(msgDate)} <i class="material-icons tiny">${isExpanded ? 'expand_more' : 'expand_less'}</i></span>`;
+                        
+                        currentDayContent = document.createElement('div');
+                        currentDayContent.className = 'day-content';
+                        currentDayContent.style.display = isExpanded ? 'block' : 'none';
+                        
+                        header.onclick = () => {
+                            const isHidden = currentDayContent.style.display === 'none';
+                            currentDayContent.style.display = isHidden ? 'block' : 'none';
+                            header.querySelector('i').textContent = isHidden ? 'expand_more' : 'expand_less';
+                            if (isHidden) diasExpandidos.add(msgDate); else diasExpandidos.delete(msgDate);
+                        };
+
+                        box.appendChild(header);
+                        box.appendChild(currentDayContent);
+                        lastDateStr = msgDate;
+                    }
+
+                    if (m.tipo_mensaje === 'sistema') {
+                        const div = document.createElement('div');
+                        div.className = 'system-msg';
+                        div.innerHTML = `<span>${m.mensaje}</span>`;
+                        currentDayContent.appendChild(div);
+                        return;
+                    }
+
                     const isMe = (m.enviado_por === 'cliente' && !esStaff) || (m.enviado_por === 'staff' && esStaff);
                     const div = document.createElement('div');
                     div.className = `msg ${isMe ? 'me' : 'other'}`;
@@ -444,7 +770,7 @@ function cargarMensajes() {
                         
                         div.innerHTML = `${textoProcesado} <span class="time">${m.fecha_envio.substring(11,16)}</span>`;
                     }
-                    box.appendChild(div);
+                    currentDayContent.appendChild(div);
                 });
 
                 // Solo bajar el scroll si ya estaba abajo o es la primera carga
@@ -464,13 +790,18 @@ function cargarMensajes() {
 
 function renderProductCard(p, isMe) {
     const img = p.imagen || '<?php echo BASE_URL; ?>assets/img/no-product.png';
+    const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
     return `
         <div class="chat-product-card">
-            <img src="${img}">
+            <a href="${detailUrl}" target="_blank" title="Ver detalles del producto">
+                <img src="${img}" style="cursor: pointer;">
+            </a>
             <div class="info">
-                <div class="truncate" style="font-weight:bold; font-size:0.85rem;">${p.nombre}</div>
+                <a href="${detailUrl}" target="_blank" class="black-text" title="Ver detalles del producto">
+                    <div class="truncate" style="font-weight:bold; font-size:0.85rem; cursor: pointer;">${p.nombre}</div>
+                </a>
                 <div class="blue-text" style="font-weight:bold;">$${parseFloat(p.precio_venta).toFixed(2)}</div>
                 <button class="btn-small green darken-1 waves-effect" style="width:100%; margin-top:5px; height:28px; line-height:28px; font-size:0.7rem;" 
                         onclick="addToCartFromChat(${p.id_producto}, '${safeName}', ${p.precio_venta}, '${img}')">
