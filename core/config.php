@@ -43,7 +43,10 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
 }
 
 // Rutas y constantes del proyecto
-const BASE_URL = '/e-commerce-pro/';
+if (!defined('BASE_URL')) {
+    define('BASE_URL', '/e-commerce-pro/');
+}
+
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
 
