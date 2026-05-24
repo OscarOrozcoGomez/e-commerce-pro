@@ -28,7 +28,27 @@ try {
         $columnaLeido = isCliente() ? 'leido_cliente' : 'leido_staff';
         $pdo->prepare("UPDATE mensajes_soporte SET $columnaLeido = 1 WHERE id_cliente = ?")->execute([$id_cliente]);
         
-        echo json_encode(['success' => true, 'mensajes' => $mensajes]);
+        // Verificar si la contraparte está escribiendo (hace menos de 6 segundos)
+        $isTyping = false;
+        if (isCliente()) {
+            // El cliente busca si ALGÚN staff está escribiendo para él (tecleando_para = su ID)
+            $stmtT = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_rol != 4 AND tecleando_para = ? AND ultimo_tecleo > (NOW() - INTERVAL 6 SECOND)");
+            $stmtT->execute([$id_actual]);
+            $isTyping = $stmtT->fetchColumn() > 0;
+        } else {
+            // El staff busca si el cliente específico está escribiendo (tecleando_para = 0 o nulo significa "a soporte")
+            $stmtT = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_usuario = ? AND ultimo_tecleo > (NOW() - INTERVAL 6 SECOND)");
+            $stmtT->execute([$id_cliente]);
+            $isTyping = $stmtT->fetchColumn() > 0;
+        }
+        
+        echo json_encode(['success' => true, 'mensajes' => $mensajes, 'is_typing' => $isTyping]);
+
+    } elseif ($action === 'typing') {
+        $target = !isCliente() ? (int)($_GET['id_cliente'] ?? 0) : 0; // 0 para clientes escribiendo a soporte
+        $stmt = $pdo->prepare("UPDATE usuarios SET ultimo_tecleo = NOW(), tecleando_para = ? WHERE id_usuario = ?");
+        $stmt->execute([$target, $id_actual]);
+        echo json_encode(['success' => true]);
 
     } elseif ($action === 'send') {
         $data = json_decode(file_get_contents('php://input'), true);

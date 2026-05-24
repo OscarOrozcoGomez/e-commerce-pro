@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS `usuarios` (
   `id_almacen` INT UNSIGNED DEFAULT NULL,
   `estado` ENUM('activo','inactivo') NOT NULL DEFAULT 'activo',
   `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `ultimo_tecleo` TIMESTAMP NULL DEFAULT NULL,
+  `tecleando_para` INT UNSIGNED DEFAULT NULL COMMENT 'ID del usuario al que se le escribe',
   PRIMARY KEY (`id_usuario`),
   UNIQUE KEY `uq_usuarios_email` (`email`),
   INDEX `idx_usuarios_rol` (`id_rol`),

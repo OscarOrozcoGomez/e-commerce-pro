@@ -629,16 +629,5 @@ include __DIR__ . '/includes/header.php';
                 }
             });
     }
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Chat de Soporte</span>
-                        <p>Atiende dudas y consultas directas de tus clientes.</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/chat.php" class="btn waves-effect waves-light blue darken-4">Abrir Chat</a>
-                    </div>
-                </div>
-            </div>
 </script>
 <?php include __DIR__ . '/includes/footer.php'; ?>

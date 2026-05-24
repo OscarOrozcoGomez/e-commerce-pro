@@ -64,6 +64,11 @@ include __DIR__ . '/includes/header.php';
                         <?php endif; ?>
                     </div>
 
+                    <!-- Indicador de "Escribiendo..." -->
+                    <div id="typing-indicator" style="display: none; padding: 5px 15px; font-size: 0.85rem; color: #757575; font-style: italic;">
+                        <span id="typing-name">Alguien</span> está escribiendo<span class="dots">...</span>
+                    </div>
+
                     <?php if (!$soyCliente): ?>
                         <!-- Buscador de productos para Staff -->
                         <div id="staff-product-search" style="display: none; padding: 10px; background: #f1f8e9; border-radius: 4px; margin-bottom: 10px;">
@@ -78,8 +83,23 @@ include __DIR__ . '/includes/header.php';
                         <?php if (!$soyCliente): ?>
                             <button class="btn-floating waves-effect waves-light green" onclick="toggleProductSearch()"><i class="material-icons">add_shopping_cart</i></button>
                         <?php endif; ?>
+                        <button class="btn-floating waves-effect waves-light amber darken-2" id="emoji-trigger" type="button" title="Insertar Emoji"><i class="material-icons">sentiment_satisfied</i></button>
                         <input type="text" id="msg-input" placeholder="Escribe un mensaje..." style="margin: 0;">
                         <button class="btn blue darken-4" onclick="enviarMensaje()"><i class="material-icons">send</i></button>
+                    </div>
+
+                    <!-- Contenedor de Emojis -->
+                    <div id="emoji-picker" class="z-depth-2" style="display: none; position: absolute; bottom: 80px; left: 5%; right: 5%; background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px; width: 90%; max-width: 450px; z-index: 1000;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                            <span style="font-weight: bold; color: #1a237e; font-size: 0.9rem;">Seleccionar Emoji</span>
+                            <button type="button" class="btn-flat btn-small" onclick="document.getElementById('emoji-picker').style.display='none'" style="padding: 0 5px;"><i class="material-icons">close</i></button>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; max-height: 320px; overflow-y: auto; padding: 5px;">
+                            <?php 
+                                $emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','👻','💀','☠️','👽','👾','🤖','💩','😺','😸','😹','😻','😼','😽','🙀','😿','😾'];
+                                foreach ($emojis as $e) echo "<span class='emoji-item' style='cursor:pointer; font-size: 1.8rem; text-align:center; padding: 5px;'>$e</span>";
+                            ?>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -88,15 +108,24 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <style>
-    .msg { margin-bottom: 10px; max-width: 80%; padding: 10px; border-radius: 12px; font-size: 0.95rem; clear: both; }
+    .msg { margin-bottom: 10px; max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 1.15rem; clear: both; line-height: 1.4; }
     .msg.me { float: right; background: #e3f2fd; color: #0d47a1; border-bottom-right-radius: 2px; }
     .msg.other { float: left; background: #f5f5f5; color: #333; border-bottom-left-radius: 2px; }
     .msg .time { font-size: 0.7rem; display: block; margin-top: 5px; opacity: 0.7; text-align: right; }
+    
+    /* Animación de puntos suspensivos */
+    .dots { display: inline-block; width: 15px; }
+    @keyframes blink { 0% { opacity: .2; } 20% { opacity: 1; } 100% { opacity: .2; } }
+    .dots { animation: blink 1.4s infinite both; }
+
+    /* Estilo para que los iconos (emojis) se vean al doble de grande en el chat */
+    .msg .chat-emoji { font-size: 2.3rem; line-height: 1; vertical-align: middle; display: inline-block; margin: 2px; }
     
     /* Asegurar que el desplegable de búsqueda se vea sobre el chat */
     .autocomplete-content {
         z-index: 9999 !important;
     }
+    .emoji-item:hover { background: #eeeeee; border-radius: 4px; }
 
     .chat-product-card { background: white; border-radius: 8px; overflow: hidden; border: 1px solid #ddd; margin-top: 5px; width: 200px; }
     .chat-product-card img { width: 100%; height: 120px; object-fit: contain; background: #f9f9f9; }
@@ -110,6 +139,7 @@ const esStaff = <?php echo !$soyCliente ? 'true' : 'false'; ?>;
 let ultimoConteoMensajes = 0;
 let primeraCarga = true;
 let productosData = {};
+let lastTypingSent = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     if (esStaff) {
@@ -155,6 +185,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
     }
+
+    // Lógica para el selector de emojis
+    const emojiTrigger = document.getElementById('emoji-trigger');
+    const emojiPicker = document.getElementById('emoji-picker');
+    const msgInput = document.getElementById('msg-input');
+
+    if (emojiTrigger) {
+        emojiTrigger.addEventListener('click', () => {
+            emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'block' : 'none';
+        });
+
+        document.querySelectorAll('.emoji-item').forEach(item => {
+            item.addEventListener('click', () => {
+                msgInput.value += item.textContent;
+                msgInput.focus();
+                emojiPicker.style.display = 'none';
+            });
+        });
+
+        // Cerrar el selector si se hace clic fuera de él
+        document.addEventListener('click', (e) => {
+            if (emojiPicker && !emojiPicker.contains(e.target) && !emojiTrigger.contains(e.target)) {
+                emojiPicker.style.display = 'none';
+            }
+        });
+    }
 });
 
 function toggleProductSearch() {
@@ -182,6 +238,17 @@ function cargarMensajes() {
         .then(data => {
             if (data.success) {
                 const box = document.getElementById('chat-box');
+                // Detectar si el usuario está al final del chat antes de actualizar
+                const wasAtBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 100;
+
+                // Mostrar/Ocultar indicador de escritura
+                const typingDiv = document.getElementById('typing-indicator');
+                if (data.is_typing) {
+                    document.getElementById('typing-name').textContent = esStaff ? 'El cliente' : 'Soporte';
+                    typingDiv.style.display = 'block';
+                } else {
+                    typingDiv.style.display = 'none';
+                }
                 
                 // Si hay mensajes nuevos y no es la primera carga, sonar alerta
                 if (!primeraCarga && data.mensajes.length > ultimoConteoMensajes) {
@@ -207,11 +274,20 @@ function cargarMensajes() {
                         const p = JSON.parse(m.mensaje);
                         div.innerHTML = renderProductCard(p, isMe) + `<span class="time">${m.fecha_envio.substring(11,16)}</span>`;
                     } else {
-                        div.innerHTML = `${m.mensaje} <span class="time">${m.fecha_envio.substring(11,16)}</span>`;
+                        // Sanitización y wrap de emojis para duplicar su tamaño
+                        let textoEscapado = m.mensaje.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        const emojiRegex = /(\p{Emoji_Presentation}|\p{Extended_Pictographic})/gu;
+                        const textoProcesado = textoEscapado.replace(emojiRegex, '<span class="chat-emoji">$1</span>');
+                        
+                        div.innerHTML = `${textoProcesado} <span class="time">${m.fecha_envio.substring(11,16)}</span>`;
                     }
                     box.appendChild(div);
                 });
-                box.scrollTop = box.scrollHeight;
+
+                // Solo bajar el scroll si ya estaba abajo o es la primera carga
+                if (wasAtBottom || primeraCarga) {
+                    box.scrollTop = box.scrollHeight;
+                }
             }
         });
 }
@@ -292,6 +368,16 @@ function addToCartFromChat(id, nombre, precio, imagen) {
 
 // Polling: revisar nuevos mensajes cada 5 segundos
 setInterval(cargarMensajes, 5000);
+
+// Notificar que estoy escribiendo
+document.getElementById('msg-input')?.addEventListener('input', () => {
+    const now = Date.now();
+    if (now - lastTypingSent > 4000) { // Throttling: solo enviar cada 4 segundos
+        lastTypingSent = now;
+        const url = `<?php echo BASE_URL; ?>api/chat_handler.php?action=typing` + (esStaff ? `&id_cliente=${clienteActivo}` : '');
+        fetch(url);
+    }
+});
 
 document.getElementById('msg-input')?.addEventListener('keypress', (e) => {
     if(e.key === 'Enter') enviarMensaje();

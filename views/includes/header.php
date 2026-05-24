@@ -56,9 +56,12 @@
     </div>
     <nav class="blue darken-4">
         <div class="nav-wrapper">
-            <a href="<?php echo BASE_URL; ?>" class="brand-logo">
+            <a href="<?php echo BASE_URL; ?>" class="brand-logo" style="margin-left: 10px;">
                 <img src="<?php echo BASE_URL; ?>assets/img/logo.png" alt="Logo">
             </a>
+            <!-- Botón para menú móvil -->
+            <a href="#" data-target="mobile-nav" class="sidenav-trigger"><i class="material-icons">menu</i></a>
+
             <ul id="nav-mobile" class="right hide-on-med-and-down">
                 <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/blog.php">Blog</a></li>
@@ -151,10 +154,43 @@
         </div>
     </nav>
 
+    <!-- Estructura del Menú Lateral (Móvil) -->
+    <ul class="sidenav" id="mobile-nav">
+        <li class="blue darken-4 white-text center-align" style="padding: 20px 0;">
+            <img src="<?php echo BASE_URL; ?>assets/img/logo.png" alt="Logo" style="height: 50px;">
+            <?php if (isAuthenticated()): ?>
+                <p style="margin: 10px 0 0 0; font-size: 0.9rem;"><?php echo esc($_SESSION['usuario']['nombre']); ?></p>
+            <?php endif; ?>
+        </li>
+        <li><a href="<?php echo BASE_URL; ?>"><i class="material-icons">home</i> Catálogo</a></li>
+        <li><a href="<?php echo BASE_URL; ?>views/blog.php"><i class="material-icons">book</i> Blog</a></li>
+        <li><a href="<?php echo BASE_URL; ?>views/cart.php"><i class="material-icons">shopping_cart</i> Carrito</a></li>
+        
+        <?php if (isAuthenticated()): ?>
+            <li class="divider"></li>
+            <?php if (isCliente()): ?>
+                <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
+            <?php else: ?>
+                <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes</a></li>
+            <?php endif; ?>
+            <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text"><i class="material-icons red-text">exit_to_app</i> Salir</a></li>
+        <?php else: ?>
+            <li><a href="<?php echo BASE_URL; ?>views/login.php" class="blue-text"><i class="material-icons blue-text">login</i> Iniciar Sesión</a></li>
+            <li><a href="<?php echo BASE_URL; ?>views/register.php"><i class="material-icons">person_add</i> Registrarse</a></li>
+        <?php endif; ?>
+    </ul>
+
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Inicializar Menú Lateral
+            var sidenavElems = document.querySelectorAll('.sidenav');
+            M.Sidenav.init(sidenavElems);
+
             var elems = document.querySelectorAll('.dropdown-trigger');
             var instances = M.Dropdown.init(elems, {
                 alignment: 'right',
