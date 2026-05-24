@@ -1,0 +1,5 @@
+/.vscode/
+/core/env.php
+/mail_log.txt
+*.sql
+/scratch/
