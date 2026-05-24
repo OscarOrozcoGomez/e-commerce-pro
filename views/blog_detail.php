@@ -1,83 +1,52 @@
 <?php
 declare(strict_types=1);
-
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
-// Requerimos autenticación para ver el contenido completo
-requireAuth();
-
-$id = (int)($_GET['id'] ?? 0);
+$slug = $_GET['s'] ?? '';
 $pdo = getPDO();
 
-try {
-    $stmt = $pdo->prepare("SELECT b.*, u.nombre as autor FROM blogs b JOIN usuarios u ON b.id_usuario = u.id_usuario WHERE b.id_blog = ? AND b.estado = 'publicado'");
-    $stmt->execute([$id]);
-    $blog = $stmt->fetch();
+$stmt = $pdo->prepare("SELECT * FROM blogs WHERE slug = ? AND estado = 'publicado'");
+$stmt->execute([$slug]);
+$post = $stmt->fetch();
 
-    if (!$blog) {
-        header('Location: blog.php');
-        exit;
-    }
-} catch (PDOException $e) {
-    error_log("Error al cargar detalle del blog: " . $e->getMessage());
+if (!$post) {
     header('Location: blog.php');
     exit;
 }
 
-$pageTitle = $blog['titulo'];
+$pageTitle = $post['titulo'];
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="container" style="margin-top: 50px; margin-bottom: 50px;">
+<div class="container" style="margin-top: 40px; margin-bottom: 60px;">
     <div class="row">
-        <div class="col s12 l10 offset-l1">
-            <a href="blog.php" class="btn-flat waves-effect" style="margin-bottom: 20px;">
-                <i class="material-icons left">arrow_back</i> Volver al Blog
-            </a>
+        <div class="col s12 m10 offset-m1">
+            <a href="blog.php" class="btn-flat waves-effect"><i class="material-icons left">arrow_back</i> Volver al Blog</a>
             
-            <?php if (!empty($blog['imagen'])): 
-                $mime = 'image/png';
-                if (strpos($blog['imagen'], 'UklGR') === 0) $mime = 'image/webp';
-                elseif (strpos($blog['imagen'], '/9j/') === 0) $mime = 'image/jpeg';
-                elseif (strpos($blog['imagen'], 'iVBORw') === 0) $mime = 'image/png';
-            ?>
-                <div class="center-align" style="margin-bottom: 30px;">
-                    <img src="data:<?php echo $mime; ?>;base64,<?php echo $blog['imagen']; ?>" class="responsive-img z-depth-2 border-radius-8" style="max-height: 500px; width: 100%; object-fit: cover;">
-                </div>
-            <?php endif; ?>
-
-            <h2 class="blue-text text-darken-4"><?php echo esc($blog['titulo']); ?></h2>
-            
-            <div class="grey-text text-darken-1" style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
-                <span><i class="material-icons tiny left">person</i> Autor: <?php echo esc($blog['autor']); ?></span>
-                <span><i class="material-icons tiny left">calendar_today</i> Publicado: <?php echo date('d M, Y', strtotime($blog['fecha_creacion'])); ?></span>
+            <div class="blog-header" style="margin-top: 20px; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 30px;">
+                <h1 style="font-weight: bold; margin-bottom: 10px;"><?php echo esc($post['titulo']); ?></h1>
+                <p class="grey-text"><i class="material-icons tiny">calendar_today</i> Publicado el <?php echo date('d/m/Y', strtotime($post['fecha_creacion'])); ?></p>
             </div>
 
-            <div class="divider" style="margin-bottom: 30px;"></div>
-
-            <div class="blog-content" style="font-size: 1.15rem; line-height: 1.8; color: #444;">
-                <?php echo nl2br(esc($blog['contenido'])); ?>
+            <!-- CONTENIDO HTML REFLEJADO -->
+            <div class="blog-body-content" style="font-size: 1.1rem; line-height: 1.8; color: #333;">
+                <?php echo $post['contenido']; // AQUÍ SE RENDERIZA EL HTML DIRECTAMENTE ?>
             </div>
 
-            <div class="card-panel blue lighten-5" style="margin-top: 50px; border-radius: 8px;">
-                <div class="row valign-wrapper" style="margin-bottom: 0;">
-                    <div class="col s2 center-align">
-                        <i class="material-icons large blue-text">info</i>
-                    </div>
-                    <div class="col s10">
-                        <p>¿Te interesan nuestros productos? Explora nuestro catálogo completo y descubre cómo mejorar tu bienestar hoy mismo.</p>
-                        <a href="<?php echo BASE_URL; ?>" class="btn blue darken-4 waves-effect waves-light">Ir al Catálogo</a>
-                    </div>
-                </div>
+            <div class="divider" style="margin: 50px 0;"></div>
+            <div class="center-align">
+                <h5>¿Te gustó este artículo?</h5>
+                <p>Compártelo con tus amigos y ayúdanos a crecer.</p>
             </div>
         </div>
     </div>
 </div>
 
 <style>
-    .border-radius-8 { border-radius: 8px; }
-    .blog-content p { margin-bottom: 20px; }
+    .blog-body-content img { max-width: 100%; height: auto; border-radius: 8px; margin: 20px 0; }
+    .blog-body-content iframe { width: 100%; aspect-ratio: 16/9; border-radius: 8px; border: none; margin: 20px 0; }
+    .blog-body-content h2, .blog-body-content h3 { font-weight: bold; margin-top: 40px; color: #1a237e; }
 </style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

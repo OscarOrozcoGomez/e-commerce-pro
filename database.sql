@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS `mensajes_soporte` (
   `id_cliente` INT UNSIGNED NOT NULL,
   `id_staff` INT UNSIGNED DEFAULT NULL COMMENT 'ID del admin/encargado que responde',
   `enviado_por` ENUM('cliente','staff') NOT NULL,
-  `tipo_mensaje` ENUM('texto','producto') NOT NULL DEFAULT 'texto',
+  `tipo_mensaje` ENUM('texto','producto','sistema') NOT NULL DEFAULT 'texto',
   `mensaje` TEXT NOT NULL,
   `fecha_envio` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `leido_cliente` TINYINT(1) NOT NULL DEFAULT 0,
@@ -237,6 +237,31 @@ CREATE TABLE IF NOT EXISTS `mensajes_soporte` (
   PRIMARY KEY (`id_mensaje`),
   KEY `idx_chat_cliente` (`id_cliente`),
   CONSTRAINT `fk_chat_usu_cliente` FOREIGN KEY (`id_cliente`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Respuestas rápidas configurables por usuario (Staff)
+CREATE TABLE IF NOT EXISTS `respuestas_rapidas` (
+  `id_respuesta` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NOT NULL,
+  `titulo` VARCHAR(50) NOT NULL,
+  `mensaje` TEXT NOT NULL,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_respuesta`),
+  CONSTRAINT `fk_respuestas_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Artículos de Blog
+CREATE TABLE IF NOT EXISTS `blogs` (
+  `id_blog` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `titulo` VARCHAR(255) NOT NULL,
+  `slug` VARCHAR(255) NOT NULL,
+  `extracto` TEXT DEFAULT NULL,
+  `contenido` LONGTEXT NOT NULL,
+  `imagen_portada` LONGTEXT DEFAULT NULL,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `estado` ENUM('publicado','borrador') NOT NULL DEFAULT 'publicado',
+  PRIMARY KEY (`id_blog`),
+  UNIQUE KEY `uq_blogs_slug` (`slug`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- Respuestas rápidas configurables por usuario (Staff)
@@ -262,10 +287,11 @@ INSERT INTO `permisos` (`clave`,`nombre`,`descripcion`) VALUES
   ('configurar_usuarios','Configurar usuarios','Puede crear y editar usuarios y roles'),
   ('ver_reportes','Ver reportes','Puede ver reportes y dashboards'),
   ('transferir_stock','Transferir stock','Puede mover inventario entre almacenes'),
-  ('gestionar_clientes','Gestionar clientes','Puede crear y editar clientes');
+  ('gestionar_clientes','Gestionar clientes','Puede crear y editar clientes'),
+  ('gestionar_blogs','Gestionar Blogs','Puede crear y editar artículos del blog');
 
 INSERT INTO `rol_permisos` (`id_rol`,`id_permiso`) VALUES
-  (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
+  (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(1,7),
   (2,1),(2,2),(2,4),(2,5),(2,6),
   (3,1);
 
