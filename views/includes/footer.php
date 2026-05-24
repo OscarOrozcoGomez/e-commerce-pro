@@ -1,3 +1,5 @@
+</main> <!-- Cierre de main definido en header.php -->
+
 <footer class="page-footer blue darken-4" style="margin-top: 50px;">
     <div class="container">
         <div class="row">
@@ -8,13 +10,13 @@
             <div class="col l4 offset-l2 s12">
                 <h5 class="white-text">Conecta con nosotros</h5>
                 <div style="display: flex; gap: 25px; margin-top: 15px;">
-                    <!-- Facebook Link -->
-                    <a href="https://www.facebook.com/bellezamasbienestar/" target="_blank" rel="noopener noreferrer" class="white-text social-link" title="Visítanos en Facebook">
-                        <i class="fa-brands fa-facebook fa-3x"></i>
+                    <!-- Facebook -->
+                    <a href="https://www.facebook.com/bellezamasbienestar/" target="_blank" aria-label="Facebook" class="s_share_facebook white-text">
+                        <i class="fa-brands fa-facebook o_editable_media rounded-empty-circle shadow-sm fa-2x"></i>
                     </a>
-                    <!-- WhatsApp Link -->
-                    <a href="https://api.whatsapp.com/send?phone=5213344420747" target="_blank" rel="noopener noreferrer" class="white-text social-link" title="Contáctanos por WhatsApp">
-                        <i class="fa-brands fa-whatsapp fa-3x"></i>
+                    <!-- WhatsApp -->
+                    <a href="https://api.whatsapp.com/send?phone=5213344420747" target="_blank" aria-label="WhatsApp" class="s_share_whatsapp white-text">
+                        <i class="fa-brands fa-whatsapp o_editable_media rounded-empty-circle shadow-sm fa-2x"></i>
                     </a>
                 </div>
             </div>
@@ -31,12 +33,25 @@
 </footer>
 
 <style>
-    .page-footer .fa-brands {
-        transition: transform 0.3s ease, color 0.3s ease;
+    /* Estilos estilo Odoo para iconos sociales */
+    .rounded-empty-circle {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        width: 50px;
+        height: 50px;
+        border: 2px solid rgba(255,255,255,0.7);
+        border-radius: 50%;
+        transition: all 0.3s ease;
+    }
+    .shadow-sm {
+        box-shadow: 0 .125rem .25rem rgba(0,0,0,.075)!important;
     }
     .page-footer .fa-brands:hover {
-        transform: scale(1.2);
-        color: #f8bbd0; /* Rosa suave del tema al pasar el mouse */
+        transform: translateY(-3px);
+        background-color: white;
+        color: #0d47a1 !important; /* Azul oscuro al hover */
+        border-color: white;
     }
 </style>
 </body>

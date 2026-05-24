@@ -13,7 +13,14 @@
         .search-container { margin-bottom: 30px; }
         .product-image { height: 150px; object-fit: cover; }
         .stock-badge { position: absolute; top: 10px; right: 10px; }
-        body { background-color: #f5f5f5; }
+        
+        /* Estructura para Sticky Footer */
+        body { 
+            display: flex;
+            min-height: 100vh;
+            flex-direction: column;
+            background-color: #f5f5f5; 
+        }
         /* Estilos para el contador del carrito */
         .nav-cart-link {
             position: relative;
@@ -202,6 +209,9 @@
             <li><a href="<?php echo BASE_URL; ?>views/register.php"><i class="material-icons">person_add</i> Registrarse</a></li>
         <?php endif; ?>
     </ul>
+
+    <!-- Contenedor Principal para empujar el footer hacia abajo -->
+    <main style="flex: 1 0 auto;">
 
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
