@@ -12,25 +12,50 @@ if (!isAuthenticated()) {
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $id_actual = (int)$usuario['id_usuario'];
+$soyCliente = isCliente();
+$soyStaff = !isCliente();
 
 $action = $_GET['action'] ?? '';
 
 try {
     if ($action === 'fetch') {
         // Si es staff, necesita el ID del cliente específico. Si es cliente, usa su propio ID.
-        $id_cliente = !isCliente() ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
+        $id_cliente = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
+
+        // Obtener estado y asignación actual del cliente
+        $stmtStatus = $pdo->prepare("SELECT soporte_activo, asignado_a FROM usuarios WHERE id_usuario = ?");
+        $stmtStatus->execute([$id_cliente]);
+        $statusData = $stmtStatus->fetch();
+        
+        if (!$statusData) throw new Exception("Usuario no encontrado");
+
+        $soporte_activo = (bool)$statusData['soporte_activo'];
+        $asignado_a = $statusData['asignado_a'] !== null ? (int)$statusData['asignado_a'] : null;
+
+        // Regla de Asignación Automática para Staff
+        if ($soyStaff) {
+            if ($asignado_a === null && $soporte_activo && $id_cliente > 0) {
+                // Si nadie lo atiende, el primero que lo "vea" se lo queda
+                $pdo->prepare("UPDATE usuarios SET asignado_a = ? WHERE id_usuario = ?")->execute([$id_actual, $id_cliente]);
+                $asignado_a = $id_actual;
+            } elseif ($asignado_a !== $id_actual) {
+                // Si ya lo tiene otro compañero, bloqueamos la vista según tu requerimiento
+                echo json_encode(['success' => false, 'message' => 'Este chat ya está siendo atendido por otro compañero.']);
+                exit;
+            }
+        }
         
         $stmt = $pdo->prepare("SELECT * FROM mensajes_soporte WHERE id_cliente = ? ORDER BY fecha_envio ASC");
         $stmt->execute([$id_cliente]);
         $mensajes = $stmt->fetchAll();
         
         // Marcar como leídos
-        $columnaLeido = isCliente() ? 'leido_cliente' : 'leido_staff';
+        $columnaLeido = $soyCliente ? 'leido_cliente' : 'leido_staff';
         $pdo->prepare("UPDATE mensajes_soporte SET $columnaLeido = 1 WHERE id_cliente = ?")->execute([$id_cliente]);
         
         // Verificar si la contraparte está escribiendo (hace menos de 6 segundos)
         $isTyping = false;
-        if (isCliente()) {
+        if ($soyCliente) {
             // El cliente busca si ALGÚN staff está escribiendo para él (tecleando_para = su ID)
             $stmtT = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_rol != 4 AND tecleando_para = ? AND ultimo_tecleo > (NOW() - INTERVAL 6 SECOND)");
             $stmtT->execute([$id_actual]);
@@ -42,10 +67,45 @@ try {
             $isTyping = $stmtT->fetchColumn() > 0;
         }
         
-        echo json_encode(['success' => true, 'mensajes' => $mensajes, 'is_typing' => $isTyping]);
+        echo json_encode([
+            'success' => true, 
+            'mensajes' => $mensajes, 
+            'is_typing' => $isTyping,
+            'soporte_activo' => $soporte_activo,
+            'asignado_a' => $asignado_a
+        ]);
+
+    } elseif ($action === 'start' || $action === 'close') {
+        $id_cliente = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
+        $nuevo_estado = ($action === 'start') ? 1 : 0;
+        
+        // Si cerramos el chat, liberamos la asignación para que pueda ser tomado de nuevo si el cliente vuelve a escribir
+        $sql = "UPDATE usuarios SET soporte_activo = ?";
+        if ($action === 'close') $sql .= ", asignado_a = NULL";
+        $sql .= " WHERE id_usuario = ?";
+
+        if ($id_cliente <= 0) throw new Exception("ID de usuario no válido.");
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$nuevo_estado, $id_cliente]);
+        echo json_encode(['success' => true]);
+
+    } elseif ($action === 'transfer') {
+        if ($soyCliente) throw new Exception("No autorizado");
+        $id_cliente = (int)($_GET['id_cliente'] ?? 0);
+        $id_destino = (int)($_GET['id_destino'] ?? 0);
+        
+        $stmt = $pdo->prepare("UPDATE usuarios SET asignado_a = ?, soporte_activo = 1 WHERE id_usuario = ?");
+        $stmt->execute([$id_destino, $id_cliente]);
+        echo json_encode(['success' => true]);
+
+    } elseif ($action === 'get_staff') {
+        // Obtener lista de staff para el dropdown de transferencia
+        $stmt = $pdo->query("SELECT id_usuario, nombre FROM usuarios WHERE id_rol IN (1,2,3) AND estado = 'activo'");
+        echo json_encode(['success' => true, 'staff' => $stmt->fetchAll()]);
 
     } elseif ($action === 'typing') {
-        $target = !isCliente() ? (int)($_GET['id_cliente'] ?? 0) : 0; // 0 para clientes escribiendo a soporte
+        $target = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : 0; // 0 para clientes escribiendo a soporte
         $stmt = $pdo->prepare("UPDATE usuarios SET ultimo_tecleo = NOW(), tecleando_para = ? WHERE id_usuario = ?");
         $stmt->execute([$target, $id_actual]);
         echo json_encode(['success' => true]);
@@ -57,7 +117,7 @@ try {
         
         if (empty($mensaje)) throw new Exception("Mensaje vacío");
 
-        if (isCliente()) {
+        if ($soyCliente) {
             $id_cliente = $id_actual;
             $enviado_por = 'cliente';
             $id_staff = null;
@@ -69,10 +129,13 @@ try {
 
         if ($id_cliente <= 0) throw new Exception("Cliente inválido");
 
+        // Al enviar un mensaje, forzamos que el soporte esté activo
+        $pdo->prepare("UPDATE usuarios SET soporte_activo = 1 WHERE id_usuario = ?")->execute([$id_cliente]);
+
         $sql = "INSERT INTO mensajes_soporte (id_cliente, id_staff, enviado_por, tipo_mensaje, mensaje, leido_cliente, leido_staff) 
                 VALUES (?, ?, ?, ?, ?, ?, ?)";
-        $leido_cliente = (isCliente() ? 1 : 0);
-        $leido_staff = (!isCliente() ? 1 : 0);
+        $leido_cliente = ($soyCliente ? 1 : 0);
+        $leido_staff = (!$soyCliente ? 1 : 0);
         
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$id_cliente, $id_staff, $enviado_por, $tipo, $mensaje, $leido_cliente, $leido_staff]);

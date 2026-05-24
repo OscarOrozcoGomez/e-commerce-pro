@@ -102,10 +102,10 @@
                         $unreadChat = (int)$pdoHead->query($sqlChat)->fetchColumn();
                     ?>
                     <li>
-                        <a href="<?php echo BASE_URL; ?>views/chat.php" title="Chat de Soporte">
+                        <a href="<?php echo BASE_URL; ?>views/chat.php" title="Chat de Soporte" style="position: relative;">
                             <i class="material-icons <?php echo $unreadChat > 0 ? 'green-text text-lighten-2' : ''; ?>">chat</i>
                             <?php if ($unreadChat > 0): ?>
-                                <span class="new badge green" data-badge-caption=""><?php echo $unreadChat; ?></span>
+                                <span class="new badge green" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;"><?php echo $unreadChat; ?></span>
                             <?php endif; ?>
                         </a>
                     </li>

@@ -1,18 +1,19 @@
 <?php
 declare(strict_types=1);
 
-// Configuración general del sistema POS
-date_default_timezone_set('America/Mexico_City');
-if (!session_id()) {
-    session_start();
-}
-sendSecurityHeaders();
-
-// Configuración de seguridad para manejo de errores
+// Configuración de seguridad para manejo de errores - MOVER AL PRINCIPIO
 ini_set('display_errors', '0'); // No mostrar errores al usuario
 ini_set('display_startup_errors', '0');
 ini_set('log_errors', '1'); // Sí registrar los errores internamente para el programador
 error_reporting(E_ALL);
+
+// Configuración general del sistema POS
+date_default_timezone_set('America/Mexico_City');
+if (!session_id()) {
+    // Usamos @ para suprimir advertencias de archivos bloqueados temporales comunes en XAMPP/Windows
+    @session_start();
+}
+sendSecurityHeaders();
 
 set_exception_handler(function ($exception) {
     error_log("Excepción no capturada: " . $exception->getMessage() . " en " . $exception->getFile() . " línea " . $exception->getLine());

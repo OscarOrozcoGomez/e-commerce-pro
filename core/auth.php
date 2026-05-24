@@ -231,6 +231,17 @@ function authenticate(string $email, string $password): bool
  */
 function logout(): void
 {
+    // Limpiar los datos de sesión en memoria
+    $_SESSION = [];
+    // Destruir la cookie de sesión en el navegador
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    session_write_close(); // Liberar el bloqueo del archivo inmediatamente
     session_destroy();
     header('Location: ' . BASE_URL . 'views/login.php?logout=1');
     exit;

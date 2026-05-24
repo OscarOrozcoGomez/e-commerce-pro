@@ -12,11 +12,16 @@ $soyCliente = isCliente();
 // Si es Staff, obtenemos la lista de clientes que han iniciado chats
 $listaClientes = [];
 if (!$soyCliente) {
-    $listaClientes = $pdo->query("SELECT DISTINCT u.id_usuario, u.nombre, u.email, 
-        (SELECT COUNT(*) FROM mensajes_soporte m2 WHERE m2.id_cliente = u.id_usuario AND m2.leido_staff = 0) as pendientes
+    $stmtList = $pdo->prepare("SELECT DISTINCT u.id_usuario, u.nombre, u.email, u.asignado_a,
+        (SELECT COUNT(*) FROM mensajes_soporte m2 WHERE m2.id_cliente = u.id_usuario AND m2.leido_staff = 0) as pendientes,
+        (SELECT enviado_por FROM mensajes_soporte m3 WHERE m3.id_cliente = u.id_usuario ORDER BY fecha_envio DESC LIMIT 1) as ultimo_por
         FROM usuarios u
         JOIN mensajes_soporte m ON u.id_usuario = m.id_cliente
-        ORDER BY pendientes DESC, u.nombre ASC")->fetchAll();
+        WHERE u.soporte_activo = 1 
+        AND (u.asignado_a IS NULL OR u.asignado_a = ?)
+        ORDER BY pendientes DESC, u.nombre ASC");
+    $stmtList->execute([$usuario['id_usuario']]);
+    $listaClientes = $stmtList->fetchAll();
 }
 
 include __DIR__ . '/includes/header.php';
@@ -34,8 +39,11 @@ include __DIR__ . '/includes/header.php';
                     <div class="collection-header blue darken-4 white-text"><h6>Conversaciones</h6></div>
                     <?php foreach ($listaClientes as $c): ?>
                         <a href="#!" onclick="seleccionarChat(<?php echo $c['id_usuario']; ?>, '<?php echo esc($c['nombre']); ?>')" 
-                           class="collection-item black-text chat-user-item" id="user-item-<?php echo $c['id_usuario']; ?>">
+                           class="collection-item black-text chat-user-item <?php echo ($c['asignado_a'] == $usuario['id_usuario']) ? 'blue lighten-5' : ''; ?>" id="user-item-<?php echo $c['id_usuario']; ?>">
                             <?php echo esc($c['nombre']); ?>
+                            <?php if ($c['asignado_a'] == $usuario['id_usuario']): ?>
+                                <i class="material-icons tiny blue-text">push_pin</i>
+                            <?php endif; ?>
                             <?php if ($c['pendientes'] > 0): ?>
                                 <span class="new badge red" data-badge-caption=""><?php echo $c['pendientes']; ?></span>
                             <?php endif; ?>
@@ -51,7 +59,11 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-content" style="height: 500px; display: flex; flex-direction: column;">
                     <span class="card-title" id="chat-header">
                         <i class="material-icons left blue-text">chat</i>
-                        <?php echo $soyCliente ? 'Soporte Técnico' : 'Selecciona un cliente'; ?>
+                        <span id="chat-title-text"><?php echo $soyCliente ? 'Soporte Técnico' : 'Selecciona un cliente'; ?></span>
+                        <div id="staff-actions" class="right" style="display:none;">
+                            <button class="btn-flat blue-text" onclick="abrirTransferir()" title="Transferir chat"><i class="material-icons">swap_horiz</i></button>
+                            <button class="btn-flat red-text" onclick="terminarChat()" title="Finalizar"><i class="material-icons">check_circle</i></button>
+                        </div>
                     </span>
                     
                     <div id="chat-box" style="flex-grow: 1; overflow-y: auto; padding: 15px; background: #fdfdfd; border: 1px solid #eee; margin: 10px 0;">
@@ -107,6 +119,23 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Modal de Transferencia -->
+<div id="modal-transferir" class="modal" style="max-width: 400px;">
+    <div class="modal-content">
+        <h5>Transferir Conversación</h5>
+        <p>Selecciona al compañero que se hará cargo:</p>
+        <div class="input-field">
+            <select id="select-staff" class="browser-default" style="border: 1px solid #ddd; padding: 10px; border-radius: 4px; width: 100%;">
+                <!-- Cargado por JS -->
+            </select>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button class="btn blue darken-4" onclick="confirmarTransferencia()">Transferir Ahora</button>
+        <button class="modal-close btn-flat">Cancelar</button>
+    </div>
+</div>
+
 <style>
     .msg { margin-bottom: 10px; max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 1.15rem; clear: both; line-height: 1.4; }
     .msg.me { float: right; background: #e3f2fd; color: #0d47a1; border-bottom-right-radius: 2px; }
@@ -132,6 +161,9 @@ include __DIR__ . '/includes/header.php';
     .chat-product-card .info { padding: 8px; }
 </style>
 
+<!-- Incluir SweetAlert2 para los diálogos de confirmación y cierre -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <script>
 let clienteActivo = <?php echo $soyCliente ? $usuario['id_usuario'] : 'null'; ?>;
 const currentUserId = <?php echo $usuario['id_usuario']; ?>;
@@ -140,8 +172,12 @@ let ultimoConteoMensajes = 0;
 let primeraCarga = true;
 let productosData = {};
 let lastTypingSent = 0;
+let miAsignacionPrevia = 0;
+let chatEstabaActivo = false; // Rastrear transición de estado
+let fechaInicioSesion = null; // Para persistir el marcador de inicio
 
 document.addEventListener('DOMContentLoaded', () => {
+    M.Modal.init(document.querySelectorAll('.modal'));
     if (esStaff) {
         // Cargar productos para el buscador interno del chat
         fetch('<?php echo BASE_URL; ?>api/products.php')
@@ -184,6 +220,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 }
             });
+            
+        // Cargar lista de staff
+        fetch('<?php echo BASE_URL; ?>api/chat_handler.php?action=get_staff')
+            .then(r => r.json())
+            .then(data => {
+                const select = document.getElementById('select-staff');
+                data.staff.forEach(s => {
+                    if(s.id_usuario != currentUserId) select.innerHTML += `<option value="${s.id_usuario}">${s.nombre}</option>`;
+                });
+            });
     }
 
     // Lógica para el selector de emojis
@@ -225,10 +271,79 @@ function toggleProductSearch() {
 
 function seleccionarChat(id, nombre) {
     clienteActivo = id;
-    document.getElementById('chat-header').innerHTML = `<i class="material-icons left blue-text">person</i> Chat con ${nombre}`;
-    document.querySelector('.chat-input-area').style.display = 'flex';
+    document.getElementById('chat-title-text').textContent = ` Chat con ${nombre}`;
+    document.getElementById('staff-actions').style.display = 'block';
+    document.getElementById('chat-box').style.display = 'block';
     if (document.getElementById('staff-product-search')) document.getElementById('staff-product-search').style.display = 'none';
     cargarMensajes();
+}
+
+function abrirTransferir() {
+    M.Modal.getInstance(document.getElementById('modal-transferir')).open();
+}
+
+function confirmarTransferencia() {
+    const idDestino = document.getElementById('select-staff').value;
+    if(!idDestino) return;
+    
+    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=transfer&id_cliente=${clienteActivo}&id_destino=${idDestino}`)
+        .then(r => r.json())
+        .then(data => {
+            if(data.success) {
+                M.toast({html: 'Chat transferido correctamente', classes: 'blue'});
+                M.Modal.getInstance(document.getElementById('modal-transferir')).close();
+                setTimeout(() => location.reload(), 1000);
+            }
+        });
+}
+
+function iniciarChat() {
+    fechaInicioSesion = new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=start`)
+        .then(() => {
+            chatEstabaActivo = true;
+            document.getElementById('chat-welcome').style.display = 'none';
+            document.getElementById('chat-box').style.display = 'block';
+            document.querySelector('.chat-input-area').style.display = 'flex';
+            cargarMensajes();
+        });
+}
+
+function terminarChat() {
+    if (!clienteActivo) return;
+    const targetId = clienteActivo; // Asegurar el ID en el scope
+
+    Swal.fire({
+        title: '¿Finalizar consulta?',
+        text: "Se cerrará la sesión de soporte actual.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#1a237e',
+        cancelButtonColor: '#d33',
+        confirmButtonText: 'Sí, finalizar',
+        cancelButtonText: 'Cancelar'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=close&id_cliente=${targetId}`, { cache: 'no-cache' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        if (esStaff) {
+                            location.reload();
+                        } else {
+                            window.location.href = '<?php echo BASE_URL; ?>index.php';
+                        }
+                    } else {
+                        M.toast({html: 'Error al cerrar: ' + (data.message || 'Error desconocido'), classes: 'red'});
+                    }
+                })
+                .catch(err => {
+                    console.error("Error terminando chat:", err);
+                    M.toast({html: 'Error de conexión', classes: 'red'});
+                });
+        }
+    });
 }
 
 function cargarMensajes() {
@@ -243,6 +358,48 @@ function cargarMensajes() {
 
                 // Mostrar/Ocultar indicador de escritura
                 const typingDiv = document.getElementById('typing-indicator');
+                
+                // Manejo de estado del chat (para el cliente)
+                if (!esStaff) {
+                    // Detectar si el staff cerró el chat en este ciclo
+                    if (!data.soporte_activo && chatEstabaActivo) {
+                        chatEstabaActivo = false;
+                        const ahora = new Date();
+                        const fechaHora = ahora.toLocaleDateString() + ' ' + ahora.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        
+                        Swal.fire({
+                            title: 'Sesión Finalizada',
+                            html: `Soporte ha terminado la consulta.<br><small class="grey-text">Cerrado el: ${fechaHora}</small>`,
+                            icon: 'info',
+                            confirmButtonText: 'Ir al Catálogo',
+                            confirmButtonColor: '#1a237e',
+                            allowOutsideClick: false,
+                            allowEscapeKey: false
+                        }).then(() => {
+                            window.location.href = '<?php echo BASE_URL; ?>index.php';
+                        });
+                        return;
+                    }
+
+                    // Si el soporte está inactivo, siempre volver a la pantalla de bienvenida
+                    if (!data.soporte_activo) {
+                        document.getElementById('chat-welcome').style.display = 'block';
+                        document.getElementById('chat-box').style.display = 'none';
+                        document.querySelector('.chat-input-area').style.display = 'none';
+                        return;
+                    }
+                    
+                    if (data.soporte_activo) chatEstabaActivo = true;
+                } else {
+                    document.querySelector('.chat-input-area').style.display = 'flex';
+                    // Notificación si me asignaron un chat nuevo
+                    if (data.asignado_a == currentUserId && miAsignacionPrevia != currentUserId && !primeraCarga) {
+                        M.toast({html: '⚠️ Se te ha asignado un nuevo cliente', classes: 'blue darken-4'});
+                        document.getElementById('chat-notification-sound').play();
+                    }
+                    miAsignacionPrevia = data.asignado_a;
+                }
+
                 if (data.is_typing) {
                     document.getElementById('typing-name').textContent = esStaff ? 'El cliente' : 'Soporte';
                     typingDiv.style.display = 'block';
@@ -265,6 +422,12 @@ function cargarMensajes() {
                 primeraCarga = false;
 
                 box.innerHTML = '';
+                
+                // Re-insertar marcador de inicio si hay una sesión activa
+                if (!esStaff && (chatEstabaActivo || data.soporte_activo) && fechaInicioSesion) {
+                    box.innerHTML = `<div class="center-align" style="margin: 10px 0 20px 0;"><span class="grey lighten-3 grey-text text-darken-2" style="padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; font-weight: bold;">CONVERSACIÓN INICIADA: ${fechaInicioSesion}</span></div>`;
+                }
+
                 data.mensajes.forEach(m => {
                     const isMe = (m.enviado_por === 'cliente' && !esStaff) || (m.enviado_por === 'staff' && esStaff);
                     const div = document.createElement('div');
@@ -288,6 +451,13 @@ function cargarMensajes() {
                 if (wasAtBottom || primeraCarga) {
                     box.scrollTop = box.scrollHeight;
                 }
+            } else {
+                // Si el chat ya fue tomado por otro (data.success === false)
+                const box = document.getElementById('chat-box');
+                box.innerHTML = `<div class="center-align orange-text" style="margin-top:50px;"><i class="material-icons large">lock</i><p>${data.message}</p></div>`;
+                document.querySelector('.chat-input-area').style.display = 'none';
+                const actions = document.getElementById('staff-actions');
+                if (actions) actions.style.display = 'none';
             }
         });
 }
