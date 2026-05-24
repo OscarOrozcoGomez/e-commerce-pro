@@ -199,7 +199,8 @@ function authenticate(string $email, string $password): bool
     // Se añadió u.contrasena a la lista de columnas seleccionadas
     $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol, 
                    GROUP_CONCAT(p.clave) as permisos,
-                   c.id_cliente
+                   c.id_cliente,
+                   u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
@@ -212,8 +213,22 @@ function authenticate(string $email, string $password): bool
     $stmt->execute([':email' => $email]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    if (!$user) {
+        return false;
+    }
+
+    // Verificar si la cuenta está bloqueada temporalmente
+    if ($user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time()) {
+        $minutosRestantes = ceil((strtotime($user['bloqueado_hasta']) - time()) / 60);
+        throw new Exception("Cuenta bloqueada temporalmente por seguridad debido a demasiados intentos fallidos. Inténtalo de nuevo en $minutosRestantes minuto(s).");
+    }
+
     // Ahora $user['contrasena'] sí tendrá el hash que vimos en image_d12dc4.png
-    if ($user && password_verify($password, $user['contrasena'])) {
+    if (password_verify($password, $user['contrasena'])) {
+        // ÉXITO: Limpiamos los intentos fallidos y el bloqueo
+        $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
+            ->execute([$user['id_usuario']]);
+
         $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
         $_SESSION['usuario'] = $user;
         session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
@@ -221,6 +236,34 @@ function authenticate(string $email, string $password): bool
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
     }
+
+    // FALLO: Incrementamos el contador de intentos
+    $nuevosIntentos = (int)$user['intentos_fallidos'] + 1;
+    $nuevaFechaBloqueo = null;
+
+    if ($nuevosIntentos >= 5) {
+        // Bloqueamos la cuenta por 15 minutos
+        $nuevaFechaBloqueo = date('Y-m-d H:i:s', time() + (15 * 60));
+        logAudit('BLOQUEO_CUENTA', 'usuarios', (int)$user['id_usuario'], "Cuenta bloqueada por 5 intentos fallidos");
+
+        // Enviar alerta al Centro de Mensajes (Soporte) para el Admin
+        try {
+            $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+            $msgAlerta = "⚠️ ALERTA DE SEGURIDAD: La cuenta vinculada a este chat ha sido bloqueada temporalmente tras 5 intentos fallidos de inicio de sesión. Origen IP: $ip";
+            
+            // Insertar mensaje de alerta como mensaje de sistema
+            $stmtMsg = $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje, leido_staff) VALUES (?, 'staff', 'sistema', ?, 0)");
+            $stmtMsg->execute([$user['id_usuario'], $msgAlerta]);
+            
+            // Asegurar que el Admin vea la notificación en la lista de chats
+            $pdo->prepare("UPDATE usuarios SET soporte_activo = 1 WHERE id_usuario = ?")->execute([$user['id_usuario']]);
+        } catch (Throwable $e) {
+            error_log("Error al enviar alerta de bloqueo al chat: " . $e->getMessage());
+        }
+    }
+
+    $pdo->prepare("UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = ? WHERE id_usuario = ?")
+        ->execute([$nuevosIntentos, $nuevaFechaBloqueo, $user['id_usuario']]);
 
     return false;
 }
@@ -536,4 +579,19 @@ function dbGetCategories(): array {
         error_log("Error en dbGetCategories: " . $e->getMessage());
         return [];
     }
+}
+
+/**
+ * Verifica si una contraseña cumple con los estándares de seguridad.
+ * Mínimo 10 caracteres, una mayúscula, una minúscula, un número y un símbolo.
+ *
+ * @param string $password
+ * @return bool
+ */
+function isPasswordSecure(string $password): bool {
+    return strlen($password) >= 10 &&
+           preg_match('/[A-Z]/', $password) &&
+           preg_match('/[a-z]/', $password) &&
+           preg_match('/[0-9]/', $password) &&
+           preg_match('/[!@#$%^&*(),.?":{}|<>]/', $password);
 }

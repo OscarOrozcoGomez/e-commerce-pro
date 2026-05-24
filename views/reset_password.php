@@ -23,8 +23,8 @@ if (empty($token)) {
         $error = 'Ambos campos de contraseña son obligatorios.';
     } elseif ($password !== $confirmPassword) {
         $error = 'Las contraseñas no coinciden.';
-    } elseif (strlen($password) < 8 || !preg_match('/[A-Z]/', $password) || !preg_match('/[0-9]/', $password)) {
-        $error = 'La contraseña debe tener al menos 8 caracteres e incluir al menos una mayúscula y un número.';
+    } elseif (!isPasswordSecure($password)) {
+        $error = 'La nueva contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.';
     } elseif (resetPasswordWithToken($token, $password)) {
         $success = 'Contraseña restablecida correctamente. Ahora puedes iniciar sesión.';
     } else {

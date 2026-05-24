@@ -23,7 +23,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             try {
                 $email = htmlspecialchars($_POST['email'] ?? '');
                 $nombre = htmlspecialchars($_POST['nombre'] ?? '');
-                $password = password_hash($_POST['password'] ?? '', PASSWORD_BCRYPT);
+                $passwordRaw = $_POST['password'] ?? '';
+
+                if (!isPasswordSecure($passwordRaw)) {
+                    throw new Exception("La contraseña no cumple con los requisitos mínimos de seguridad (10 caracteres, mayúscula, número y símbolo).");
+                }
+
+                $password = password_hash($passwordRaw, PASSWORD_BCRYPT);
                 $id_rol = intval($_POST['id_rol'] ?? 0);
                 $id_almacen = intval($_POST['id_almacen'] ?? 0) ?: null;
                 

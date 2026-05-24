@@ -91,7 +91,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card blue-grey darken-1">
                     <div class="card-content white-text">
                         <span class="card-title">Artículos de Blog</span>
-                        <p class="display-metric"><?php echo esc((string)($statsAdmin['blogs']['total'] ?? 0)); ?></p>
+                        <p class="display-metric" id="stat-blogs">0</p>
                         <p class="text-small">Publicaciones informativas en catálogo</p>
                     </div>
                     <div class="card-action">
@@ -370,12 +370,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text center-align">
                         <i class="material-icons large">local_shipping</i>
                         <h4>Mis Entregas Hoy</h4>
-                        <?php
-                            $stmtR = $pdo->prepare("SELECT COUNT(*) FROM pedidos WHERE id_repartidor = ? AND estado = 'pagado'");
-                            $stmtR->execute([$usuario['id_usuario']]);
-                            $countR = $stmtR->fetchColumn();
-                        ?>
-                        <p style="font-size: 3rem; font-weight: bold;"><?php echo $countR; ?></p>
+                        <p style="font-size: 3rem; font-weight: bold;" id="stat-entregas-hoy">0</p>
                         <p>Pedidos pendientes por entregar</p>
                     </div>
                     <div class="card-action center-align">
@@ -461,20 +456,28 @@ include __DIR__ . '/includes/header.php';
             .then(res => {
                 if (!res.success) throw new Error(res.message);
                 const d = res.data;
+
+                // Función auxiliar para actualizar texto solo si el elemento existe
+                const updateEl = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = value;
+                };
                 
-                // Mapeo dinámico de elementos
                 if (d.ventas_hoy) {
-                    document.getElementById('stat-ventas-hoy-total').textContent = d.ventas_hoy.total || 0;
-                    document.getElementById('stat-ventas-hoy-monto').textContent = '$ ' + parseFloat(d.ventas_hoy.monto || 0).toFixed(2);
+                    updateEl('stat-ventas-hoy-total', d.ventas_hoy.total || 0);
+                    updateEl('stat-ventas-hoy-monto', '$ ' + parseFloat(d.ventas_hoy.monto || 0).toFixed(2));
                 }
-                if (d.clientes) document.getElementById('stat-clientes').textContent = d.clientes.total || 0;
-                if (d.productos) document.getElementById('stat-productos').textContent = d.productos.total || 0;
-                if (d.usuarios) document.getElementById('stat-usuarios').textContent = d.usuarios.total || 0;
-                if (d.ingresos_mes) document.getElementById('stat-ingresos-mes').textContent = '$ ' + parseFloat(d.ingresos_mes.total || 0).toFixed(2);
-                if (d.incompletos) document.getElementById('stat-incompletos').textContent = d.incompletos.total || 0;
-                if (d.stock_bajo) document.getElementById('stat-stock-bajo').textContent = d.stock_bajo.total || 0;
-                if (d.por_entregar) document.getElementById('stat-por-entregar').textContent = d.por_entregar.total || 0;
-                if (d.clientes_mes) document.getElementById('stat-clientes').textContent = d.clientes_mes.total || 0;
+                
+                if (d.clientes) updateEl('stat-clientes', d.clientes.total || 0);
+                if (d.clientes_mes) updateEl('stat-clientes', d.clientes_mes.total || 0); // Para el vendedor
+                if (d.productos) updateEl('stat-productos', d.productos.total || 0);
+                if (d.usuarios) updateEl('stat-usuarios', d.usuarios.total || 0);
+                if (d.ingresos_mes) updateEl('stat-ingresos-mes', '$ ' + parseFloat(d.ingresos_mes.total || 0).toFixed(2));
+                if (d.blogs) updateEl('stat-blogs', d.blogs.total || 0);
+                if (d.incompletos) updateEl('stat-incompletos', d.incompletos.total || 0);
+                if (d.stock_bajo) updateEl('stat-stock-bajo', d.stock_bajo.total || 0);
+                if (d.por_entregar) updateEl('stat-por-entregar', d.por_entregar.total || 0);
+                if (d.entregas_hoy) updateEl('stat-entregas-hoy', d.entregas_hoy.total || 0);
             })
             .catch(err => {
                 M.toast({html: 'Error cargando estadísticas', classes: 'red'});

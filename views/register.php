@@ -27,8 +27,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'El formato del correo electrónico no es válido.';
         } elseif ($password !== $confirm_password) {
             $error = 'Las contraseñas no coinciden.';
-        } elseif (strlen($password) < 6) {
-            $error = 'La contraseña debe tener al menos 6 caracteres.';
+        } elseif (!isPasswordSecure($password)) {
+            $error = 'Seguridad insuficiente: la contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.';
         } else {
             try {
                 $pdo = getPDO();
