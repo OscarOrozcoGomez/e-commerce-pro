@@ -2,9 +2,9 @@
 declare(strict_types=1);
 
 // Configuración de seguridad para manejo de errores - MOVER AL PRINCIPIO
-ini_set('display_errors', '0'); // No mostrar errores al usuario
+ini_set('display_errors', '1'); // Cambiamos temporalmente a 1 para ver errores en pantalla si fallara algo crítico
 ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1'); // Sí registrar los errores internamente para el programador
+ini_set('log_errors', '1'); 
 error_reporting(E_ALL);
 
 // Configuración general del sistema POS
@@ -16,7 +16,14 @@ if (!session_id()) {
 sendSecurityHeaders();
 
 set_exception_handler(function ($exception) {
-    error_log("Excepción no capturada: " . $exception->getMessage() . " en " . $exception->getFile() . " línea " . $exception->getLine());
+    $logMsg = sprintf(
+        " [EXCEPCIÓN CRÍTICA] Mensaje: %s | Archivo: %s | Línea: %d",
+        $exception->getMessage(),
+        $exception->getFile(),
+        $exception->getLine()
+    );
+    error_log($logMsg);
+    error_log("STACK TRACE: " . $exception->getTraceAsString());
     if (!headers_sent()) {
         header('Location: ' . BASE_URL . 'views/error.php');
     }

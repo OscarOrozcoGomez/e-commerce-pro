@@ -7,206 +7,18 @@ require_once __DIR__ . '/../core/auth.php';
 // Validar permisos
 requireAuth();
 requirePermission('gestionar_productos', BASE_URL . 'views/dashboard.php');
-
 $pageTitle = 'Gestionar Productos';
-$pdo = getPDO();
-$usuario = $_SESSION['usuario'];
-$almacenes = $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC")->fetchAll();
-
-// Determinar qué almacén estamos visualizando en la tabla (por defecto el del usuario o el primero)
-$id_almacen_view = (int)($_GET['almacen_view'] ?? ($usuario['id_almacen'] ?: $almacenes[0]['id_almacen'] ?? 1));
-$error = '';
-$success = '';
-
-// Procesar creación de categorías (Solo Admin)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion_categoria']) && isAdmin()) {
-    if (dbCreateCategory($_POST['nuevo_nombre_cat'] ?? '')) {
-        $success = 'Categoría creada con éxito.';
-    } else {
-        $error = 'No se pudo crear la categoría.';
-    }
-}
-
-// Procesar formulario de agregar/editar
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
-    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
-        $error = 'Token CSRF inválido. Por favor recarga la página e inténtalo de nuevo.';
-    } else {
-        $accion = sanitize($_POST['accion']);
-        
-        if ($accion === 'agregar') {
-            try {
-                $imagenesCargadas = [];
-                if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
-                    foreach ($_FILES['imagenes']['tmp_name'] as $tmpName) {
-                        if (!empty($tmpName)) $imagenesCargadas[] = base64_encode(file_get_contents($tmpName));
-                    }
-                }
-                $imagenPrincipal = $imagenesCargadas[0] ?? null;
-
-                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, precio_comparacion, imagen, estado) 
-                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :unidad, :precio_costo, :precio_venta, :precio_comparacion, :imagen, :estado)";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([
-                    ':nombre' => sanitize($_POST['nombre'] ?? ''),
-                    ':sku' => sanitize($_POST['sku'] ?? ''),
-                    ':codigo_barras' => sanitize($_POST['codigo_barras'] ?? ''),
-                    ':descripcion' => sanitize($_POST['descripcion'] ?? ''),
-                    ':unidad' => sanitize($_POST['unidad'] ?? ''),
-                    ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
-                    ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
-                    ':precio_comparacion' => floatval($_POST['precio_comparacion'] ?? 0),
-                    ':estado' => (isset($_POST['visible_catalogo']) && $_POST['visible_catalogo'] === '1') ? 'activo' : 'archivado',
-                    ':imagen' => $imagenPrincipal,
-                ]);
-                
-                $id_nuevo = (int)$pdo->lastInsertId();
-                dbSetProductCategories($id_nuevo, $_POST['categorias'] ?? []);
-
-                // Guardar resto de imágenes en la galería
-                if (count($imagenesCargadas) > 1) {
-                    $stmtGal = $pdo->prepare("INSERT INTO producto_imagenes (id_producto, imagen_base64) VALUES (?, ?)");
-                    for ($i = 1; $i < count($imagenesCargadas); $i++) {
-                        $stmtGal->execute([$id_nuevo, $imagenesCargadas[$i]]);
-                    }
-                }
-
-                // Guardar reglas de abastecimiento
-                if (isAdmin()) {
-                    $stmtRules = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo) 
-                                              VALUES (?, 1, 0, ?, ?)");
-                    $stmtRules->execute([$id_nuevo, intval($_POST['stock_minimo'] ?? 2), intval($_POST['stock_maximo'] ?? 5)]);
-                }
-                
-                $success = 'Producto agregado correctamente.';
-            } catch (PDOException $e) {
-                $error = 'Error al agregar producto: ' . $e->getMessage();
-            }
-        } elseif ($accion === 'editar') {
-            try {
-                $id = intval($_POST['id_producto']);
-                
-                $imagenesCargadas = [];
-                if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
-                    foreach ($_FILES['imagenes']['tmp_name'] as $tmpName) {
-                        if (!empty($tmpName)) $imagenesCargadas[] = base64_encode(file_get_contents($tmpName));
-                    }
-                }
-                
-                $updateImagenSql = !empty($imagenesCargadas) ? ", imagen = :imagen" : "";
-                $sql = "UPDATE productos SET nombre = :nombre, sku = :sku, codigo_barras = :codigo_barras, 
-                        descripcion = :descripcion, unidad = :unidad, precio_costo = :precio_costo, 
-                        precio_venta = :precio_venta, precio_comparacion = :precio_comparacion, estado = :estado $updateImagenSql 
-                        WHERE id_producto = :id";
-                
-                $stmt = $pdo->prepare($sql);
-                $params = [
-                    ':nombre' => sanitize($_POST['nombre'] ?? ''),
-                    ':sku' => sanitize($_POST['sku'] ?? ''),
-                    ':codigo_barras' => sanitize($_POST['codigo_barras'] ?? ''),
-                    ':descripcion' => sanitize($_POST['descripcion'] ?? ''),
-                    ':unidad' => sanitize($_POST['unidad'] ?? ''),
-                    ':precio_costo' => floatval($_POST['precio_costo'] ?? 0),
-                    ':precio_venta' => floatval($_POST['precio_venta'] ?? 0),
-                    ':precio_comparacion' => floatval($_POST['precio_comparacion'] ?? 0),
-                    ':estado' => (isset($_POST['visible_catalogo']) && $_POST['visible_catalogo'] === '1') ? 'activo' : 'archivado',
-                    ':id' => $id
-                ];
-                if (!empty($imagenesCargadas)) {
-                    $params[':imagen'] = $imagenesCargadas[0];
-                }
-                $stmt->execute($params);
-                
-                // Si se subieron nuevas imágenes, reemplazamos la galería anterior
-                if (count($imagenesCargadas) > 1) {
-                    $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
-                    $stmtGal = $pdo->prepare("INSERT INTO producto_imagenes (id_producto, imagen_base64) VALUES (?, ?)");
-                    for ($i = 1; $i < count($imagenesCargadas); $i++) {
-                        $stmtGal->execute([$id, $imagenesCargadas[$i]]);
-                    }
-                }
-
-                dbSetProductCategories($id, $_POST['categorias'] ?? []);
-
-                // Actualizar o insertar reglas en el almacén seleccionado en el formulario
-                if (isAdmin()) {
-                    $id_alm_form = intval($_POST['id_almacen_stock'] ?? 1);
-                    $stmtUpdRules = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo) 
-                                                  VALUES (?, ?, ?, ?, ?) 
-                                                  ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
-                    $stmtUpdRules->execute([$id, $id_alm_form, intval($_POST['cantidad_actual'] ?? 0), intval($_POST['stock_minimo'] ?? 2), intval($_POST['stock_maximo'] ?? 5)]);
-                }
-
-                $success = 'Producto actualizado correctamente.';
-            } catch (PDOException $e) {
-                $error = 'Error al actualizar producto: ' . $e->getMessage();
-            }
-        } elseif ($accion === 'eliminar') {
-            try {
-                $id = intval($_POST['id_producto']);
-                $stmt = $pdo->prepare("UPDATE productos SET estado = 'inactivo' WHERE id_producto = ?");
-                $stmt->execute([$id]);
-                logAudit('PRODUCTO_DESACTIVADO', 'productos', $id, "Producto marcado como inactivo");
-                $success = 'Producto eliminado (desactivado) correctamente.';
-            } catch (PDOException $e) {
-                $error = 'Error al eliminar producto.';
-            }
-        }
-    }
-}
-
-// Obtener productos
-try {
-    $sql = "SELECT p.*, GROUP_CONCAT(pc.id_categoria) as categorias_ids, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
-            FROM productos p 
-            LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
-            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_alm
-            WHERE p.estado != 'inactivo' 
-            GROUP BY p.id_producto
-            ORDER BY p.nombre";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':id_alm' => $id_almacen_view]);
-    $productos = $stmt->fetchAll();
-} catch (PDOException $e) {
-    $error = 'Error al obtener productos: ' . $e->getMessage();
-    $productos = [];
-}
-
-function sanitize(mixed $value): string {
-    if (!is_string($value)) {
-        return '';
-    }
-    return trim(htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
-}
-
-$categoriasDisponibles = dbGetCategories();
 include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="container" style="width: 95%; max-width: 1800px;">
+    <div class="row" id="alerts-container"></div>
     <div class="row">
         <div class="col s12">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap;">
                 <h4 style="margin: 0;">Gestionar Productos</h4>
                 <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
             </div>
-            
-            <?php if ($error): ?>
-                <div class="card red lighten-2">
-                    <div class="card-content white-text">
-                        <span class="card-title">Error</span>
-                        <p><?php echo esc($error); ?></p>
-                    </div>
-                </div>
-            <?php endif; ?>
-            
-            <?php if ($success): ?>
-                <div class="card green lighten-2">
-                    <div class="card-content white-text">
-                        <p><?php echo esc($success); ?></p>
-                    </div>
-                </div>
-            <?php endif; ?>
         </div>
     </div>
 
@@ -215,14 +27,14 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <div class="col s12">
             <div class="card-panel blue lighten-5">
-                <form method="POST" class="row" style="margin-bottom: 0; display: flex; align-items: center;">
+                <form id="form-category" class="row" style="margin-bottom: 0; display: flex; align-items: center;">
                     <div class="input-field col s12 m8">
                         <i class="material-icons prefix">label</i>
                         <input type="text" id="nuevo_nombre_cat" name="nuevo_nombre_cat" required>
                         <label for="nuevo_nombre_cat">Nueva Categoría Maestra</label>
                     </div>
                     <div class="col s12 m4">
-                        <button type="submit" name="accion_categoria" class="btn blue darken-4">CREAR CATEGORÍA</button>
+                        <button type="submit" class="btn blue darken-4">CREAR CATEGORÍA</button>
                     </div>
                 </form>
             </div>
@@ -235,7 +47,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title" id="form-title">Agregar Nuevo Producto</span>
-                    <form method="POST" id="form-producto" enctype="multipart/form-data">
+                    <form id="form-producto" enctype="multipart/form-data">
                         <?php echo csrfInput(); ?>
                         <input type="hidden" name="accion" id="accion" value="agregar">
                         <input type="hidden" name="id_producto" id="id_producto" value="">
@@ -302,11 +114,8 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         
                         <div class="input-field">
-                            <select name="categorias[]" multiple>
+                            <select name="categorias[]" id="select-categorias" multiple>
                                 <option value="" disabled>Selecciona una o varias categorías</option>
-                                <?php foreach ($categoriasDisponibles as $cat): ?>
-                                    <option value="<?php echo $cat['id_categoria']; ?>"><?php echo esc($cat['nombre']); ?></option>
-                                <?php endforeach; ?>
                             </select>
                             <label>Asignar Categorías</label>
                         </div>
@@ -316,11 +125,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s12"><p style="margin:0 0 10px 0;"><strong>Control de Inventario</strong></p></div>
                             <div class="input-field col s12">
                                 <select name="id_almacen_stock" id="id_almacen_stock" class="browser-default" style="border: 1px solid #ccc;">
-                                    <?php foreach ($almacenes as $alm): ?>
-                                        <option value="<?php echo $alm['id_almacen']; ?>" <?php echo $alm['id_almacen'] == $id_almacen_view ? 'selected' : ''; ?>>
-                                            Configurar en: <?php echo esc($alm['nombre']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
+                                    <!-- Almacenes vía JS -->
                                 </select>
                             </div>
                             <div class="input-field col s4">
@@ -356,12 +161,8 @@ include __DIR__ . '/includes/header.php';
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                         <span class="card-title">Listado de Productos</span>
                         <div style="width: 200px;">
-                            <select class="browser-default" onchange="window.location.href='?almacen_view=' + this.value">
-                                <?php foreach ($almacenes as $alm): ?>
-                                    <option value="<?php echo $alm['id_almacen']; ?>" <?php echo $alm['id_almacen'] == $id_almacen_view ? 'selected' : ''; ?>>
-                                        Stock en: <?php echo esc($alm['nombre']); ?>
-                                    </option>
-                                <?php endforeach; ?>
+                            <select id="almacen_view_selector" class="browser-default" onchange="cargarProductos(this.value)">
+                                <!-- Almacenes vía JS -->
                             </select>
                         </div>
                     </div>
@@ -392,59 +193,8 @@ include __DIR__ . '/includes/header.php';
                                     <th>Acciones</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                <?php foreach ($productos as $prod): ?>
-                                    <tr>
-                                        <td>
-                                            <?php if ($prod['imagen']): 
-                                                $mime = 'image/png';
-                                                if (strpos($prod['imagen'], 'UklGR') === 0) $mime = 'image/webp';
-                                                elseif (strpos($prod['imagen'], '/9j/') === 0) $mime = 'image/jpeg';
-                                                elseif (strpos($prod['imagen'], 'iVBORw') === 0) $mime = 'image/png';
-                                                elseif (strpos($prod['imagen'], 'R0lGOD') === 0) $mime = 'image/gif';
-                                            ?>
-                                                <img src="data:<?php echo $mime; ?>;base64,<?php echo $prod['imagen']; ?>" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">
-                                            <?php endif; ?>
-                                        </td>
-                                        <td><?php echo esc($prod['nombre']); ?></td>
-                                        <td><?php echo esc($prod['sku']); ?></td>
-                                        <td>
-                                            $<?php echo number_format((float)$prod['precio_venta'], 2); ?>
-                                            <?php if((float)$prod['precio_comparacion'] > 0): ?>
-                                                <br><small class="grey-text" style="text-decoration: line-through;">$<?php echo number_format((float)$prod['precio_comparacion'], 2); ?></small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <span class="badge <?php echo $prod['estado'] === 'activo' ? 'blue' : 'grey darken-1'; ?> white-text" style="float: none; border-radius: 4px;">
-                                                <?php echo strtoupper($prod['estado']); ?>
-                                            </span>
-                                        </td>
-                                        <td class="center-align">
-                                            <?php $isLow = ($prod['cantidad_actual'] ?? 0) <= ($prod['stock_minimo'] ?? 2); ?>
-                                            <span class="badge <?php echo $isLow ? 'red white-text' : 'green lighten-4 green-text text-darken-4'; ?>" style="float: none; font-weight: bold; border-radius: 4px;">
-                                                <?php echo $prod['cantidad_actual'] ?? 0; ?>
-                                            </span>
-                                        </td>
-                                        <td class="center-align">
-                                            <span class="orange-text text-darken-2" title="Mínimo"><strong><?php echo $prod['stock_minimo'] ?? 2; ?></strong></span> / 
-                                            <span class="blue-text text-darken-2" title="Máximo"><strong><?php echo $prod['stock_maximo'] ?? 5; ?></strong></span>
-                                        </td>
-                                        <td>
-                                            <button type="button" class="btn-floating btn-small blue waves-effect waves-light" 
-                                                    onclick='abrirEditar(<?php echo json_encode($prod); ?>)'>
-                                                <i class="material-icons">edit</i>
-                                            </button>
-                                            <form method="POST" style="display:inline;">
-                                                <?php echo csrfInput(); ?>
-                                                <input type="hidden" name="accion" value="eliminar">
-                                                <input type="hidden" name="id_producto" value="<?php echo $prod['id_producto']; ?>">
-                                                <button type="submit" class="btn-floating btn-small red" onclick="return confirm('¿Desactivar producto?')">
-                                                    <i class="material-icons">delete</i>
-                                                </button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
+                            <tbody id="tabla-productos-body">
+                                <tr><td colspan="8" class="center">Cargando productos...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -455,6 +205,143 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+    const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
+
+    document.addEventListener('DOMContentLoaded', () => {
+        cargarDependencias();
+        
+        // Manejar envío de formularios
+        document.getElementById('form-producto').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const action = document.getElementById('accion').value;
+            
+            fetch(`${BASE_API}?action=save`, { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(res => {
+                    if(res.success) {
+                        M.toast({html: res.message, classes: 'green'});
+                        cancelarEdicion();
+                        cargarProductos(document.getElementById('almacen_view_selector').value);
+                    } else throw new Error(res.message);
+                })
+                .catch(err => M.toast({html: err.message, classes: 'red'}));
+        });
+
+        document.getElementById('form-category')?.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+            
+            fetch(`${BASE_API}?action=add_category`, { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(res => {
+                    if(res.success) {
+                        M.toast({html: res.message, classes: 'green'});
+                        this.reset();
+                        cargarDependencias();
+                    } else throw new Error(res.message);
+                })
+                .catch(err => M.toast({html: err.message, classes: 'red'}));
+        });
+    });
+
+    function cargarDependencias() {
+        fetch(`${BASE_API}?action=get_dependencies`)
+            .then(r => r.json())
+            .then(res => {
+                if(!res.success) return;
+                
+                // Llenar selectores de almacén
+                const selectors = ['id_almacen_stock', 'almacen_view_selector'];
+                selectors.forEach(id => {
+                    const el = document.getElementById(id);
+                    if(!el) return;
+                    el.innerHTML = res.almacenes.map(a => `<option value="${a.id_almacen}">${a.nombre}</option>`).join('');
+                });
+                
+                // Llenar categorías
+                const catSelect = document.getElementById('select-categorias');
+                catSelect.innerHTML = '<option value="" disabled>Selecciona una o varias categorías</option>' + 
+                    res.categorias.map(c => `<option value="${c.id_categoria}">${c.nombre}</option>`).join('');
+                M.FormSelect.init(catSelect);
+
+                cargarProductos(res.almacenes[0].id_almacen);
+            });
+    }
+
+    function cargarProductos(almacenId) {
+        const tbody = document.getElementById('tabla-productos-body');
+        fetch(`${BASE_API}?action=list&almacen_id=${almacenId}`)
+            .then(r => r.json())
+            .then(res => {
+                if(!res.success) throw new Error(res.message);
+                tbody.innerHTML = res.data.map(p => renderRow(p)).join('');
+            })
+            .catch(err => {
+                tbody.innerHTML = `<tr><td colspan="8" class="center red-text">${err.message}</td></tr>`;
+            });
+    }
+
+    function renderRow(p) {
+        let imgSrc = p.imagen ? `data:image/jpeg;base64,${p.imagen}` : '';
+        const isLow = (parseInt(p.cantidad_actual) || 0) <= (parseInt(p.stock_minimo) || 2);
+        const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
+
+        return `
+            <tr>
+                <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
+                <td>${p.nombre}</td>
+                <td>${p.sku}</td>
+                <td>
+                    $${parseFloat(p.precio_venta).toFixed(2)}
+                    ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
+                </td>
+                <td>
+                    <span class="badge ${p.estado === 'activo' ? 'blue' : 'grey darken-1'} white-text" style="float: none; border-radius: 4px;">
+                        ${p.estado.toUpperCase()}
+                    </span>
+                </td>
+                <td class="center-align">
+                    <span class="badge ${isLow ? 'red white-text' : 'green lighten-4 green-text text-darken-4'}" style="float: none; font-weight: bold; border-radius: 4px;">
+                        ${p.cantidad_actual || 0}
+                    </span>
+                </td>
+                <td class="center-align">
+                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${p.stock_minimo || 2}</strong></span> / 
+                    <span class="blue-text text-darken-2" title="Máximo"><strong>${p.stock_maximo || 5}</strong></span>
+                </td>
+                <td>
+                    <button type="button" class="btn-floating btn-small blue waves-effect waves-light" onclick='abrirEditar(${jsonP})'>
+                        <i class="material-icons">edit</i>
+                    </button>
+                    <button type="button" class="btn-floating btn-small red waves-effect waves-light" onclick="eliminarProducto(${p.id_producto})">
+                        <i class="material-icons">delete</i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }
+
+    function eliminarProducto(id) {
+        if(!confirm('¿Desactivar producto?')) return;
+        const formData = new FormData();
+        formData.append('id_producto', id);
+        formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+        fetch(`${BASE_API}?action=delete`, { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(res => {
+                if(res.success) {
+                    M.toast({html: res.message, classes: 'green'});
+                    cargarProductos(document.getElementById('almacen_view_selector').value);
+                } else throw new Error(res.message);
+            })
+            .catch(err => M.toast({html: err.message, classes: 'red'}));
+    }
+
+    // Mantener las funciones de UI existentes pero adaptadas
+
     function abrirEditar(prod) {
         document.getElementById('accion').value = 'editar';
         document.getElementById('id_producto').value = prod.id_producto;

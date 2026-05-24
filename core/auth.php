@@ -209,22 +209,37 @@ function authenticate(string $email, string $password): bool
             WHERE u.email = :email AND u.estado = 'activo'
             GROUP BY u.id_usuario";
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':email' => $email]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$user) {
+    try {
+        error_log("DEBUG LOGIN: Intentando autenticar a: " . $email);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':email' => $email]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("DEBUG LOGIN ERROR SQL: " . $e->getMessage());
         return false;
     }
+
+    if (!$user) {
+        error_log("DEBUG LOGIN: Usuario no encontrado o inactivo en la BD para: " . $email);
+        return false;
+    }
+
+    error_log("DEBUG LOGIN: Usuario encontrado. ID: " . $user['id_usuario'] . " | Rol: " . $user['rol']);
 
     // Verificar si la cuenta está bloqueada temporalmente
     if ($user['intentos_fallidos'] >= 5 && $user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time()) {
         $minutosRestantes = ceil((strtotime($user['bloqueado_hasta']) - time()) / 60);
+        error_log("DEBUG LOGIN: Cuenta bloqueada para el ID: " . $user['id_usuario']);
         throw new Exception("Cuenta bloqueada temporalmente por seguridad debido a demasiados intentos fallidos. Inténtalo de nuevo en $minutosRestantes minuto(s).");
     }
 
-    // Ahora $user['contrasena'] sí tendrá el hash que vimos en image_d12dc4.png
     if (password_verify($password, $user['contrasena'])) {
+        error_log("DEBUG LOGIN: Contraseña CORRECTA para ID " . $user['id_usuario']);
+        
+        if (empty($user['rol'])) {
+            error_log("DEBUG LOGIN ADVERTENCIA: El usuario no tiene un rol asignado.");
+        }
+
         // ÉXITO: Limpiamos los intentos fallidos y el bloqueo
         $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
             ->execute([$user['id_usuario']]);
@@ -236,6 +251,8 @@ function authenticate(string $email, string $password): bool
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
     }
+
+    error_log("DEBUG LOGIN: Contraseña INCORRECTA para ID " . $user['id_usuario']);
 
     // FALLO: Incrementamos el contador de intentos
     $nuevosIntentos = (int)$user['intentos_fallidos'] + 1;
