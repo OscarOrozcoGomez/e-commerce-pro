@@ -102,7 +102,7 @@ try {
                                 ->execute([$dbPath, $id]);
                         } else {
                             // Insertar en la tabla de galería
-                            $pdo->prepare("INSERT INTO producto_imagenes (id_producto, imagen_base64, orden) VALUES (?, ?, ?)")
+                            $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
                                 ->execute([$id, $dbPath, $i]);
                         }
                     }

@@ -35,10 +35,10 @@ function runImport(int $almacenId = 1): void
         'errors' => 0,
     ];
 
-    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, descripcion, estado, id_padre, imagen) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, :descripcion, 'activo', :id_padre, :imagen)";
+    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, descripcion, estado, id_padre) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, :descripcion, 'activo', :id_padre)";
     $stmtInsert = $pdo->prepare($sqlProducto);
 
-    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, descripcion = :descripcion, estado = 'activo', imagen = COALESCE(:imagen, imagen) WHERE sku = :sku";
+    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, descripcion = :descripcion, estado = 'activo' WHERE sku = :sku";
     $stmtUpdate = $pdo->prepare($sqlProductoUpdate);
 
     $sqlSelect = "SELECT id_producto FROM productos WHERE sku = :sku";
@@ -71,12 +71,6 @@ function runImport(int $almacenId = 1): void
         }
     }
     
-    $imagenIndex = array_search('Imagen 1024', $columns, true); // Buscar la imagen de mayor resolución
-    $plantillaImagenIndex = array_search('Plantilla de producto / Imagen 1024', $columns, true); // Respaldo del producto padre
-    if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Producto / Imagen 1024', $columns, true);
-    if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Productos / Imagen 1024', $columns, true);
-    if ($plantillaImagenIndex === false) $plantillaImagenIndex = array_search('Productos/Imagen 1024', $columns, true);
-
     while (($row = fgetcsv($handle)) !== false) {
         if (count($row) === 0) {
             continue;
@@ -127,14 +121,6 @@ function runImport(int $almacenId = 1): void
             $descripcion = trim($plain) !== '' ? trim($plain) : null;
         }
 
-        // Extraer imagen y limpiar espacios u otros caracteres si los hay
-        $imagenBase64 = null;
-        if ($imagenIndex !== false && !empty(trim($row[$imagenIndex]))) {
-            $imagenBase64 = trim($row[$imagenIndex]);
-        } elseif ($plantillaImagenIndex !== false && !empty(trim($row[$plantillaImagenIndex]))) {
-            $imagenBase64 = trim($row[$plantillaImagenIndex]);
-        }
-
         try {
             $stmtSelect->execute([':sku' => $sku]);
             $producto = $stmtSelect->fetch(PDO::FETCH_ASSOC);
@@ -151,8 +137,7 @@ function runImport(int $almacenId = 1): void
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
                     ':descripcion' => $descripcion,
-                    ':id_padre' => $id_padre,
-                    ':imagen' => $imagenBase64
+                    ':id_padre' => $id_padre
                 ]);
                 $productoId = intval($pdo->lastInsertId());
                 $summaries['inserted']++;
@@ -167,8 +152,7 @@ function runImport(int $almacenId = 1): void
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
                     ':descripcion' => $descripcion,
-                    ':sku' => $sku,
-                    ':imagen' => $imagenBase64
+                    ':sku' => $sku
                 ]);
                 $summaries['updated']++;
             }

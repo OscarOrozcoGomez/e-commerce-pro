@@ -86,6 +86,23 @@ include __DIR__ . '/views/includes/header.php';
     .product-title { font-size: 3rem; font-weight: 600; margin-top: 0; color: #1a237e; line-height: 1.1; margin-bottom: 20px; }
     .ingredients-text { color: #555; font-size: 1.1rem; margin-bottom: 30px; line-height: 1.6; }
     
+    /* Nuevo Estilo para la Leyenda Legal (Amarillo Llamativo) */
+    .legal-box {
+        background-color: #fff9c4; /* Amarillo claro */
+        color: #e65100; /* Naranja oscuro para contraste */
+        padding: 20px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        font-size: 1rem;
+        font-weight: bold;
+        margin-bottom: 25px;
+        border: 2px solid #fbc02d;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+    .legal-box i { font-size: 2.5rem; color: #fbc02d; }
+
     .warning-box { background-color: #fef0c7; color: #9c6c0e; padding: 15px; border-radius: 4px; display: flex; align-items: flex-start; gap: 10px; font-size: 0.85rem; font-weight: 500; margin-bottom: 30px; border: 1px solid #fde093; }
     .warning-box i { font-size: 1.2rem; color: #d97706; }
 
@@ -139,9 +156,15 @@ include __DIR__ . '/views/includes/header.php';
                 <p style="margin: 5px 0 0 0;" id="product-desc">No especificados.</p>
             </div>
 
-            <div class="warning-box">
-                <i class="material-icons">warning</i>
+            <!-- Leyenda Legal Estática (Siempre visible) -->
+            <div class="legal-box">
+                <i class="material-icons">report_problem</i>
                 <span>Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.</span>
+            </div>
+
+            <!-- Recuadro para avisos dinámicos (Stock/Estado) -->
+            <div class="warning-box" id="stock-warning-box" style="display: none;">
+                <!-- Se llena vía JS -->
             </div>
 
             <div class="price-display">
@@ -305,7 +328,7 @@ include __DIR__ . '/views/includes/header.php';
         // Stock Status
         const actionBtn = document.getElementById('btn-add-cart');
         const qtyContainer = document.querySelector('.qty-selector');
-        const warningBox = document.querySelector('.warning-box');
+        const warningBox = document.getElementById('stock-warning-box');
 
         if (product.stock > 0) {
             actionBtn.disabled = false;

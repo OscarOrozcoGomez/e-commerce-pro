@@ -32,7 +32,7 @@ try {
     $product['imagen'] = getProductImageUrl($product['imagen']);
 
     // 2. Obtener galería de imágenes
-    $stmtGal = $pdo->prepare("SELECT imagen_base64 FROM producto_imagenes WHERE id_producto = ? ORDER BY orden ASC");
+    $stmtGal = $pdo->prepare("SELECT ruta_archivo FROM producto_imagenes WHERE id_producto = ? ORDER BY orden ASC");
     $stmtGal->execute([$id]);
     $galeria = $stmtGal->fetchAll(PDO::FETCH_COLUMN);
     

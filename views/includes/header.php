@@ -51,6 +51,13 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         .banner-content { display: flex; align-items: center; justify-content: center; gap: 10px; }
+
+        /* Estilo para Leyendas Legales / Advertencias */
+        .legal-disclaimer {
+            border: 2px solid #fbc02d !important;
+            border-radius: 12px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+        }
     </style>
 </head>
 <body class="grey lighten-4">

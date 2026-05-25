@@ -43,7 +43,7 @@ function runGalleryImport(): void
     $sqlSelect = "SELECT id_producto FROM productos WHERE sku = :sku";
     $stmtSelect = $pdo->prepare($sqlSelect);
 
-    $sqlInsert = "INSERT INTO producto_imagenes (id_producto, imagen_base64) VALUES (:id_producto, :imagen)";
+    $sqlInsert = "INSERT INTO producto_imagenes (id_producto, ruta_archivo) VALUES (:id_producto, :imagen)";
     $stmtInsert = $pdo->prepare($sqlInsert);
 
     // En la exportación de medios, el SKU puede llamarse así dependiendo de qué se seleccionó
