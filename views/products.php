@@ -10,6 +10,8 @@ requirePermission('gestionar_productos', BASE_URL . 'views/dashboard.php');
 $pageTitle = 'Gestionar Productos';
 include __DIR__ . '/includes/header.php';
 ?>
+<!-- Librería para Arrastrar y Soltar -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 <div class="container" style="width: 95%; max-width: 1800px;">
     <div class="row" id="alerts-container"></div>
@@ -106,12 +108,13 @@ include __DIR__ . '/includes/header.php';
                         <div class="file-field input-field">
                             <div class="btn blue-grey darken-2">
                                 <span><i class="material-icons left">collections</i> Imágenes</span>
-                                <input type="file" name="imagenes[]" accept="image/*" multiple>
+                                <input type="file" name="imagenes[]" id="input-imagenes" accept="image/*" multiple>
                             </div>
                             <div class="file-path-wrapper">
                                 <input class="file-path validate" type="text" placeholder="Máx 6. La primera será la principal">
                             </div>
                         </div>
+                        <div id="preview-container" class="row sortable-preview" style="margin-top: -10px; margin-bottom: 20px;"></div>
                         
                         <div class="input-field">
                             <select name="categorias[]" id="select-categorias" multiple>
@@ -206,15 +209,110 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
+    let archivosSeleccionados = []; // Acumulador global de archivos
 
     document.addEventListener('DOMContentLoaded', () => {
         cargarDependencias();
+
+        // Inicializar el Drag and Drop en el contenedor de previsualización
+        const previewContainer = document.getElementById('preview-container');
+        new Sortable(previewContainer, {
+            animation: 150,
+            ghostClass: 'blue-lighten-5',
+            onEnd: function() {
+                // Reordenar el array archivosSeleccionados basado en el nuevo orden visual
+                const nuevoOrden = [];
+                previewContainer.querySelectorAll('.preview-item').forEach(el => {
+                    const indexOriginal = el.getAttribute('data-index');
+                    nuevoOrden.push(archivosSeleccionados[indexOriginal]);
+                });
+                archivosSeleccionados = nuevoOrden;
+                renderPreviews(); // Re-renderizar para actualizar etiquetas (Principal/Galería)
+            }
+        });
+
+        // Previsualización de imágenes seleccionadas
+        document.getElementById('input-imagenes').addEventListener('change', function(e) {
+            const nuevosArchivos = Array.from(this.files);
+            
+            // Añadir nuevos archivos al acumulador sin borrar los anteriores
+            // Limitamos a un total de 6
+            nuevosArchivos.forEach(file => {
+                if (archivosSeleccionados.length < 6) {
+                    archivosSeleccionados.push(file);
+                }
+            });
+
+            // Limpiar el input para permitir volver a seleccionar los mismos archivos si se desea
+            this.value = '';
+            renderPreviews();
+        });
+        
+        function renderPreviews() {
+            const container = document.getElementById('preview-container');
+            container.innerHTML = '';
+
+            archivosSeleccionados.forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const div = document.createElement('div');
+                    div.className = 'col s4 m2 preview-item';
+                    div.style.position = 'relative';
+                    div.setAttribute('data-index', index);
+                    div.innerHTML = `
+                        <div class="card" style="margin: 5px 0;">
+                            <div class="card-image">
+                                <img src="${event.target.result}" style="height: 60px; object-fit: cover;">
+                                <span style="
+                                    position: absolute; 
+                                    top: 0; 
+                                    left: 0; 
+                                    background: ${index === 0 ? '#2e7d32' : '#546e7a'}; 
+                                    color: white; 
+                                    font-size: 9px; 
+                                    padding: 2px 5px; 
+                                    width: 100%; 
+                                    text-align: center;">
+                                    ${index === 0 ? 'PRINCIPAL' : 'GALERÍA'}
+                                </span>
+                                <button type="button" onclick="quitarImagen(${index})" class="btn-floating btn-small red" style="position: absolute; top: -10px; right: -10px; width: 24px; height: 24px;">
+                                    <i class="material-icons" style="line-height: 24px; font-size: 14px;">close</i>
+                                </button>
+                                ${index > 0 ? `
+                                <button type="button" onclick="hacerPrincipal(${index})" class="btn-flat white-text" style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.5); font-size: 8px; padding: 0; height: 18px; line-height: 18px;">
+                                    SUBIR A PRINCIPAL
+                                </button>` : ''}
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                }
+                reader.readAsDataURL(file);
+            });
+        }
+
+        window.quitarImagen = function(index) {
+            archivosSeleccionados.splice(index, 1);
+            renderPreviews();
+        };
+
+        window.hacerPrincipal = function(index) {
+            const item = archivosSeleccionados.splice(index, 1)[0];
+            archivosSeleccionados.unshift(item); // Mover al principio
+            renderPreviews();
+        };
         
         // Manejar envío de formularios
         document.getElementById('form-producto').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
-            const action = document.getElementById('accion').value;
+            
+            // Limpiar las imágenes del formData original (las del input vacío)
+            formData.delete('imagenes[]');
+            // Añadir los archivos desde nuestro acumulador controlado
+            archivosSeleccionados.forEach(file => {
+                formData.append('imagenes[]', file);
+            });
             
             fetch(`${BASE_API}?action=save`, { method: 'POST', body: formData })
                 .then(r => r.json())
@@ -414,6 +512,8 @@ include __DIR__ . '/includes/header.php';
     
     function cancelarEdicion() {
         document.getElementById('form-producto').reset();
+        archivosSeleccionados = []; // Limpiar acumulador
+        document.getElementById('preview-container').innerHTML = '';
         document.getElementById('accion').value = 'agregar';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;

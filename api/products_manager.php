@@ -72,24 +72,40 @@ try {
                 $id = (int)$pdo->lastInsertId();
             }
 
-            // PROCESAR IMÁGENES (Solo la primera como principal para simplificar)
+            // PROCESAR IMÁGENES (Máximo 6: 1 Principal + 5 Galería)
             if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
-                $file = $_FILES['imagenes'];
-                $ext = pathinfo($file['name'][0], PATHINFO_EXTENSION);
-                
-                // Crear carpeta: nombre-del-producto-ID
+                $files = $_FILES['imagenes'];
                 $folderName = slugify($data['nombre']) . '-' . $id;
                 $targetDir = PRODUCTS_IMG_DIR . $folderName . '/';
                 
                 if (!is_dir($targetDir)) mkdir($targetDir, 0755, true);
                 
-                $fileName = 'principal.' . $ext;
-                $targetFile = $targetDir . $fileName;
-                
-                if (move_uploaded_file($file['tmp_name'][0], $targetFile)) {
-                    // Guardar ruta relativa en DB
+                // Si es una actualización/carga de nuevas fotos, limpiamos la galería actual en DB
+                $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
+
+                $totalFiles = count($files['name']);
+                for ($i = 0; $i < min($totalFiles, 6); $i++) {
+                    if ($files['error'][$i] !== UPLOAD_ERR_OK) continue;
+
+                    // Normalizar extensión a minúsculas
+                    $ext = strtolower(pathinfo($files['name'][$i], PATHINFO_EXTENSION));
+                    
+                    // Definir nombre de archivo: principal para el primero, gal_X para el resto
+                    $fileName = ($i === 0) ? "principal.{$ext}" : "gal_{$i}_" . time() . ".{$ext}";
+                    $targetFile = $targetDir . $fileName;
                     $dbPath = $folderName . '/' . $fileName;
-                    $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$dbPath, $id]);
+
+                    if (move_uploaded_file($files['tmp_name'][$i], $targetFile)) {
+                        if ($i === 0) {
+                            // Actualizar imagen principal del producto
+                            $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")
+                                ->execute([$dbPath, $id]);
+                        } else {
+                            // Insertar en la tabla de galería
+                            $pdo->prepare("INSERT INTO producto_imagenes (id_producto, imagen_base64, orden) VALUES (?, ?, ?)")
+                                ->execute([$id, $dbPath, $i]);
+                        }
+                    }
                 }
             }
 

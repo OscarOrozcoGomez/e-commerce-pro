@@ -33,17 +33,7 @@ try {
 
     // Formatear el campo imagen
     foreach ($products as &$product) {
-        if (!empty($product['imagen'])) {
-            $mime = 'image/png';
-            if (strpos($product['imagen'], 'UklGR') === 0) $mime = 'image/webp';
-            elseif (strpos($product['imagen'], '/9j/') === 0) $mime = 'image/jpeg';
-            elseif (strpos($product['imagen'], 'iVBORw') === 0) $mime = 'image/png';
-            elseif (strpos($product['imagen'], 'R0lGOD') === 0) $mime = 'image/gif';
-            
-            $product['imagen'] = 'data:' . $mime . ';base64,' . $product['imagen'];
-        } else {
-            $product['imagen'] = null;
-        }
+        $product['imagen'] = getProductImageUrl($product['imagen']);
     }
 
     echo json_encode(['success' => true, 'products' => $products]);

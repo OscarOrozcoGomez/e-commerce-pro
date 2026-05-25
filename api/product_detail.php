@@ -29,18 +29,7 @@ try {
         exit;
     }
 
-    // Función auxiliar para detectar MIME
-    function formatBase64Image($base64String) {
-        if (empty($base64String)) return null;
-        $mime = 'image/png';
-        if (strpos($base64String, 'UklGR') === 0) $mime = 'image/webp';
-        elseif (strpos($base64String, '/9j/') === 0) $mime = 'image/jpeg';
-        elseif (strpos($base64String, 'iVBORw') === 0) $mime = 'image/png';
-        elseif (strpos($base64String, 'R0lGOD') === 0) $mime = 'image/gif';
-        return 'data:' . $mime . ';base64,' . $base64String;
-    }
-
-    $product['imagen'] = formatBase64Image($product['imagen']);
+    $product['imagen'] = getProductImageUrl($product['imagen']);
 
     // 2. Obtener galería de imágenes
     $stmtGal = $pdo->prepare("SELECT imagen_base64 FROM producto_imagenes WHERE id_producto = ? ORDER BY orden ASC");
@@ -48,12 +37,12 @@ try {
     $galeria = $stmtGal->fetchAll(PDO::FETCH_COLUMN);
     
     $imagenes = [];
-    if ($product['imagen']) {
+    if (!empty($product['imagen'])) {
         $imagenes[] = $product['imagen']; // La imagen principal siempre va primero
     }
     foreach ($galeria as $img) {
-        $fmt = formatBase64Image($img);
-        if ($fmt) $imagenes[] = $fmt;
+        $fmt = getProductImageUrl($img);
+        if ($fmt && !empty($img)) $imagenes[] = $fmt;
     }
     $product['galeria'] = $imagenes;
 
