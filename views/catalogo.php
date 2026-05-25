@@ -79,25 +79,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="card hoverable" style="height: 420px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;">
                                 <div class="card-image" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                                     <?php 
-                                        $imgSrc = '';
-                                        if (!empty($p['imagen'])) {
-                                            $mime = 'image/jpeg';
-                                            if (strpos($p['imagen'], 'iVBORw') === 0) $mime = 'image/png';
-                                            elseif (strpos($p['imagen'], 'UklGR') === 0) $mime = 'image/webp';
-                                            $imgSrc = "data:$mime;base64," . $p['imagen'];
-                                            echo '<img src="'.$imgSrc.'" style="max-height: 100%; width: auto; object-fit: contain;">';
-                                        } else {
-                                            echo '<i class="material-icons grey-text" style="font-size: 5rem;">broken_image</i>';
-                                        }
-                                    ?>
-                                </div>
-                                <div class="card-content" style="flex-grow: 1;">
-                                    <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
-                                        <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo $p['id_producto']; ?>" class="grey-text text-darken-4">
-                                        <?php echo esc($p['nombre']); ?>
-                                        </a>
-                                    </span>
-                                    <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
+                                        $imgSrc = -text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
                                         $<?php echo number_format((float)$p['precio_venta'], 2); ?>
                                         <?php if ((float)($p['precio_comparacion'] ?? 0) > 0): ?>
                                             <span class="grey-text text-darken-1" style="text-decoration: line-through; font-size: 0.9rem; margin-left: 8px;">

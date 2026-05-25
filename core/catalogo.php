@@ -111,15 +111,8 @@ include __DIR__ . '/../views/includes/header.php';
                         <div class="col s12 m6 l4">
                             <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
                                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                                    <?php if (!empty($p['imagen'])): 
-                                        $mime = 'image/jpeg';
-                                        if (strpos($p['imagen'], 'iVBORw') === 0) $mime = 'image/png';
-                                        elseif (strpos($p['imagen'], 'UklGR') === 0) $mime = 'image/webp';
-                                    ?>
-                                        <img src="data:<?php echo $mime; ?>;base64,<?php echo $p['imagen']; ?>" style="max-height: 100%; width: auto; object-fit: contain;">
-                                    <?php else: ?>
-                                        <i class="material-icons grey-text" style="font-size: 5rem;">broken_image</i>
-                                    <?php endif; ?>
+                                    <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
+                                    <img src="<?php echo $imgSrc; ?>" loading="lazy" style="max-height: 100%; width: auto; object-fit: contain;">
                                 </div>
                                 <div class="card-content" style="flex-grow: 1;">
                                     <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">

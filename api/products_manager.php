@@ -46,40 +46,51 @@ try {
 
         if ($action === 'save') {
             $id = (int)($data['id_producto'] ?? 0);
-            $imagenesCargadas = [];
-            if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
-                foreach ($_FILES['imagenes']['tmp_name'] as $tmpName) {
-                    if (!empty($tmpName)) $imagenesCargadas[] = base64_encode(file_get_contents($tmpName));
-                }
-            }
-
             $estado = ($data['visible_catalogo'] ?? '0') === '1' ? 'activo' : 'archivado';
             
             if ($id > 0) {
                 // EDITAR
-                $updateImagenSql = !empty($imagenesCargadas) ? ", imagen = :imagen" : "";
                 $sql = "UPDATE productos SET nombre = :nombre, sku = :sku, codigo_barras = :codigo_barras, 
                         descripcion = :descripcion, unidad = :unidad, precio_costo = :precio_costo, 
-                        precio_venta = :precio_venta, precio_comparacion = :precio_comparacion, estado = :estado $updateImagenSql 
+                        precio_venta = :precio_venta, precio_comparacion = :precio_comparacion, estado = :estado 
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
-                $params = [
+                $stmt->execute([
                     ':nombre' => $data['nombre'], ':sku' => $data['sku'], ':codigo_barras' => $data['codigo_barras'],
                     ':descripcion' => $data['descripcion'], ':unidad' => $data['unidad'], ':precio_costo' => $data['precio_costo'],
                     ':precio_venta' => $data['precio_venta'], ':precio_comparacion' => $data['precio_comparacion'],
                     ':estado' => $estado, ':id' => $id
-                ];
-                if (!empty($imagenesCargadas)) $params[':imagen'] = $imagenesCargadas[0];
-                $stmt->execute($params);
+                ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, precio_comparacion, imagen, estado) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, precio_comparacion, estado) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $pdo->prepare($sql)->execute([
                     $data['nombre'], $data['sku'], $data['codigo_barras'], $data['descripcion'], $data['unidad'],
-                    $data['precio_costo'], $data['precio_venta'], $data['precio_comparacion'], $imagenesCargadas[0] ?? null, $estado
+                    $data['precio_costo'], $data['precio_venta'], $data['precio_comparacion'], $estado
                 ]);
                 $id = (int)$pdo->lastInsertId();
+            }
+
+            // PROCESAR IMÁGENES (Solo la primera como principal para simplificar)
+            if (isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0])) {
+                $file = $_FILES['imagenes'];
+                $ext = pathinfo($file['name'][0], PATHINFO_EXTENSION);
+                
+                // Crear carpeta: nombre-del-producto-ID
+                $folderName = slugify($data['nombre']) . '-' . $id;
+                $targetDir = PRODUCTS_IMG_DIR . $folderName . '/';
+                
+                if (!is_dir($targetDir)) mkdir($targetDir, 0755, true);
+                
+                $fileName = 'principal.' . $ext;
+                $targetFile = $targetDir . $fileName;
+                
+                if (move_uploaded_file($file['tmp_name'][0], $targetFile)) {
+                    // Guardar ruta relativa en DB
+                    $dbPath = $folderName . '/' . $fileName;
+                    $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$dbPath, $id]);
+                }
             }
 
             dbSetProductCategories($id, $data['categorias'] ?? []);

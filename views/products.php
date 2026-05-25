@@ -283,8 +283,26 @@ include __DIR__ . '/includes/header.php';
             });
     }
 
+    // Ayudante JS para resolver la URL de la imagen similar a la función de PHP
+    function getProductImgUrl(imgData) {
+        const baseUrl = '<?php echo BASE_URL; ?>';
+        if (!imgData || imgData === 'NULL') return baseUrl + 'assets/img/no-product.png';
+        
+        // Si es una ruta de archivo (formato corto con extensión)
+        if (imgData.length < 255 && /\.(jpg|jpeg|png|webp)$/i.test(imgData)) {
+            return baseUrl + 'assets/img/products/' + imgData;
+        }
+        
+        // Si es Base64
+        if (imgData.includes('data:image') || imgData.length > 500) {
+            return imgData.includes('data:image') ? imgData : `data:image/jpeg;base64,${imgData}`;
+        }
+        
+        return baseUrl + 'assets/img/no-product.png';
+    }
+
     function renderRow(p) {
-        let imgSrc = p.imagen ? `data:image/jpeg;base64,${p.imagen}` : '';
+        let imgSrc = getProductImgUrl(p.imagen);
         const isLow = (parseInt(p.cantidad_actual) || 0) <= (parseInt(p.stock_minimo) || 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
@@ -449,7 +467,7 @@ include __DIR__ . '/includes/header.php';
 
     document.addEventListener('DOMContentLoaded', function() {
         aplicarFiltros(); // Aplicar filtro por defecto (Activos) al cargar
-        <?php if ($success): ?>
+        <?php if (isset($success) && $success): ?>
             M.toast({html: '<?php echo esc($success); ?>', classes: 'green darken-1 rounded', displayLength: 4000});
         <?php endif; ?>
     });

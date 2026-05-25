@@ -41,7 +41,7 @@ function setSecurityHeaders(): void
     header("X-Frame-Options: DENY");
     header("X-Content-Type-Options: nosniff");
     header("Referrer-Policy: strict-origin-when-cross-origin");
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com;");
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com;");
 }
 
 function getCsrfToken(): string
@@ -616,4 +616,38 @@ function isPasswordSecure(string $password): bool {
            preg_match('/[a-z]/', $password) &&
            preg_match('/[0-9]/', $password) &&
            preg_match('/[!@#$%^&*(),.?":{}|<>]/', $password);
+}
+
+/**
+ * Genera un nombre de carpeta amigable (slug) para el producto
+ */
+function slugify(string $text): string {
+    $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $text), '-'));
+    return empty($slug) ? 'producto' : $slug;
+}
+
+/**
+ * Resuelve la URL de la imagen de un producto de forma robusta.
+ */
+function getProductImageUrl(?string $imgData): string {
+    $default = BASE_URL . 'assets/img/no-product.png';
+    if (empty($imgData)) return $default;
+
+    // Si es una ruta de archivo (formato: carpeta-ID/archivo.jpg)
+    if (strlen($imgData) < 255 && preg_match('/\.(jpg|jpeg|png|webp)$/i', $imgData)) {
+        return BASE_URL . 'assets/img/products/' . $imgData;
+    }
+
+    // Si es Base64 (compatibilidad con datos antiguos)
+    if (strpos($imgData, 'iVBORw') !== false || strpos($imgData, '/9j/') !== false || strpos($imgData, 'data:image') !== false) {
+        // Si ya tiene el prefijo data:image, devolver tal cual
+        if (strpos($imgData, 'data:image') === 0) return $imgData;
+        
+        $mime = (strpos($imgData, 'iVBORw') === 0) ? 'image/png' : 'image/jpeg';
+        // Limpiar el contenido si trae el encabezado
+        $clean = (strpos($imgData, ',') !== false) ? explode(',', $imgData)[1] : $imgData;
+        return "data:$mime;base64," . trim($clean);
+    }
+
+    return $default;
 }

@@ -62,6 +62,7 @@ if (!defined('BASE_URL')) {
 
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
+const PRODUCTS_IMG_DIR = __DIR__ . '/../assets/img/products/';
 
 if (!is_dir(UPLOAD_DIR)) {
     @mkdir(UPLOAD_DIR, 0755, true);
@@ -121,6 +122,6 @@ function sendSecurityHeaders(): void
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://via.placeholder.com https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com; frame-ancestors 'self';");
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https://via.placeholder.com https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }
