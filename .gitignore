@@ -1,5 +1,6 @@
-/.vscode/
-/core/env.php
-/mail_log.txt
-*.sql
-/scratch/
+# Ignorar carpetas de imágenes de productos (migradas y subidas)
+/assets/img/products/
+/core/uploads/
+
+# Ignorar archivos de registro y temporales
+mail_log.txt
