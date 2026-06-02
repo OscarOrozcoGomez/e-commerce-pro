@@ -70,8 +70,24 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         
                         <div class="input-field">
-                            <textarea id="descripcion" name="descripcion" class="materialize-textarea"></textarea>
+                            <textarea id="descripcion" name="descripcion" class="materialize-textarea" placeholder="Breve resumen comercial..."></textarea>
                             <label for="descripcion">Descripción</label>
+                        </div>
+
+                        <div class="input-field">
+                            <textarea id="modo_uso" name="modo_uso" class="materialize-textarea"></textarea>
+                            <label for="modo_uso">Modo de Uso</label>
+                        </div>
+
+                        <div class="input-field">
+                            <textarea id="ingredientes" name="ingredientes" class="materialize-textarea"></textarea>
+                            <label for="ingredientes">Ingredientes (Lista detallada)</label>
+                        </div>
+
+                        <div class="input-field">
+                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]'></textarea>
+                            <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
+                            <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
                         </div>
                         
                         <div class="input-field">
@@ -466,6 +482,9 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('sku').value = prod.sku;
         document.getElementById('codigo_barras').value = prod.codigo_barras || '';
         document.getElementById('descripcion').value = prod.descripcion || '';
+        document.getElementById('modo_uso').value = prod.modo_uso || '';
+        document.getElementById('ingredientes').value = prod.ingredientes || '';
+        document.getElementById('tabla_nutrimental').value = prod.tabla_nutrimental || '';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
@@ -498,6 +517,9 @@ include __DIR__ . '/includes/header.php';
         M.updateTextFields();
         M.FormSelect.init(selectCats);
         M.textareaAutoResize(document.getElementById('descripcion'));
+        M.textareaAutoResize(document.getElementById('modo_uso'));
+        M.textareaAutoResize(document.getElementById('ingredientes'));
+        M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
         
         const btnSubmit = document.getElementById('btn-submit');
         btnSubmit.innerHTML = 'Guardar Cambios <i class="material-icons right">save</i>';
@@ -530,6 +552,9 @@ include __DIR__ . '/includes/header.php';
         M.updateTextFields();
         M.FormSelect.init(selectCats);
         M.textareaAutoResize(document.getElementById('descripcion'));
+        M.textareaAutoResize(document.getElementById('modo_uso'));
+        M.textareaAutoResize(document.getElementById('ingredientes'));
+        M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
         
         const btnSubmit = document.getElementById('btn-submit');
         btnSubmit.innerHTML = 'Agregar Producto <i class="material-icons right">add</i>';

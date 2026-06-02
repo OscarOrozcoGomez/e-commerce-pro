@@ -86,6 +86,20 @@ include __DIR__ . '/views/includes/header.php';
     .product-title { font-size: 3rem; font-weight: 600; margin-top: 0; color: #1a237e; line-height: 1.1; margin-bottom: 20px; }
     .ingredients-text { color: #555; font-size: 1.1rem; margin-bottom: 30px; line-height: 1.6; }
     
+    /* Estilos para Pestañas e Información Nutrimental */
+    .tabs .tab a { font-weight: bold; transition: color 0.3s; }
+    .tabs .indicator { background-color: #1a237e; }
+    .tab-content-box { padding: 30px 15px; font-size: 1.1rem; color: #444; line-height: 1.7; background: #fff; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px; }
+
+    .nutritional-title { font-weight: 700; color: #1a237e; margin-top: 50px; margin-bottom: 20px; border-left: 5px solid #8a9a5b; padding-left: 15px; }
+    .nutritional-table { width: 100%; border-collapse: collapse; background: #fff; margin-bottom: 10px; }
+    .nutritional-table thead th { background-color: #f1f8e9; color: #558b2f; padding: 15px; border-bottom: 2px solid #dcedc8; text-transform: uppercase; font-size: 0.9rem; letter-spacing: 0.5px; }
+    .nutritional-table tbody td { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; color: #333; }
+    .nutritional-table tbody tr:last-child td { border-bottom: none; }
+    .nutritional-table .row-label { font-weight: bold; color: #2c3e50; }
+    
+    .legal-disclaimer-sub { text-align: center; color: #9e9e9e; font-size: 0.8rem; margin-top: 15px; font-style: italic; }
+
     /* Nuevo Estilo para la Leyenda Legal (Amarillo Llamativo) */
     .legal-box {
         background-color: #fff9c4; /* Amarillo claro */
@@ -195,6 +209,45 @@ include __DIR__ . '/views/includes/header.php';
             <a href="<?php echo BASE_URL; ?>views/terminos.php" class="terms-link">Términos y condiciones</a>
         </div>
     </div>
+
+    <!-- SECCIÓN INFERIOR: DETALLES Y TABLA NUTRIMENTAL -->
+    <div class="row" style="margin-top: 40px;">
+        <div class="col s12">
+            <ul class="tabs tabs-fixed-width z-depth-1" style="border-radius: 8px 8px 0 0; overflow: hidden;">
+                <li class="tab"><a class="active blue-text text-darken-4" href="#tab-uso">MODO DE USO</a></li>
+                <li class="tab"><a class="blue-text text-darken-4" href="#tab-ingredientes">INGREDIENTES</a></li>
+            </ul>
+            <div id="tab-uso" class="tab-content-box">
+                <!-- Se llena vía JS -->
+                Cargando modo de uso...
+            </div>
+            <div id="tab-ingredientes" class="tab-content-box">
+                <!-- Se llena vía JS -->
+                Cargando ingredientes...
+            </div>
+        </div>
+
+        <div class="col s12">
+            <h5 class="nutritional-title">Información Nutrimental</h5>
+            <div class="card-panel z-depth-1" style="padding: 0; border-radius: 8px; overflow: hidden;">
+                <table class="nutritional-table highlight">
+                    <thead>
+                        <tr>
+                            <th>Cantidades</th>
+                            <th>Por porción (0.5 g)</th>
+                            <th>Por 100 g</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nutritional-body">
+                        <!-- Se genera dinámicamente con JS -->
+                    </tbody>
+                </table>
+            </div>
+            <p class="legal-disclaimer-sub">
+                Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.
+            </p>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -274,6 +327,9 @@ include __DIR__ . '/views/includes/header.php';
             .then(data => {
                 currentProduct = data;
                 renderProduct(data);
+                // Inicializar tabs de Materialize después de renderizar el contenido
+                var tabs = document.querySelectorAll('.tabs');
+                M.Tabs.init(tabs);
                 document.getElementById('pdp-container').style.display = 'block';
             })
             .catch(err => {
@@ -288,7 +344,40 @@ include __DIR__ . '/views/includes/header.php';
         document.getElementById('product-title').textContent = fullName;
         document.getElementById('bread-name').textContent = fullName;
         document.getElementById('bread-cat').textContent = product.categoria || 'Catálogo';
-        document.getElementById('product-desc').textContent = product.descripcion || 'Sin descripción detallada. (Puede requerir actualización en Odoo)';
+        
+        // Contenido de Pestañas (innerHTML para soportar saltos de línea de la DB)
+        document.getElementById('tab-uso').innerHTML = (product.modo_uso || 'Consultar el empaque para instrucciones de uso.').replace(/\n/g, '<br>');
+        document.getElementById('tab-ingredientes').innerHTML = (product.ingredientes || product.descripcion || 'No especificados.').replace(/\n/g, '<br>');
+
+        // Renderizar Tabla Nutrimental Dinámica
+        const nutBody = document.getElementById('nutritional-body');
+        nutBody.innerHTML = '';
+        
+        try {
+            const nutData = typeof product.tabla_nutrimental === 'string' 
+                ? JSON.parse(product.tabla_nutrimental) 
+                : product.tabla_nutrimental;
+
+            if (nutData && Array.isArray(nutData)) {
+                nutData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="row-label">${row.label}</td>
+                        <td>${row.porcion || row.portion || '-'}</td>
+                        <td>${row.total || '-'}</td>
+                    `;
+                    nutBody.appendChild(tr);
+                });
+                document.querySelector('.nutritional-title').parentElement.style.display = 'block';
+            } else {
+                document.querySelector('.nutritional-title').parentElement.style.display = 'none';
+            }
+        } catch (e) {
+            console.error("Error procesando tabla nutrimental", e);
+        }
+
+        // Descripción corta en la cabecera
+        document.getElementById('product-desc').textContent = product.descripcion || 'Sin descripción detallada.';
         
         let priceHtml = `$ ${parseFloat(product.precio_venta).toFixed(2)}`;
         if (parseFloat(product.precio_comparacion) > 0) {

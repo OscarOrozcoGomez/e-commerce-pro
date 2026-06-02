@@ -51,22 +51,26 @@ try {
             if ($id > 0) {
                 // EDITAR
                 $sql = "UPDATE productos SET nombre = :nombre, sku = :sku, codigo_barras = :codigo_barras, 
-                        descripcion = :descripcion, unidad = :unidad, precio_costo = :precio_costo, 
+                        descripcion = :descripcion, ingredientes = :ingredientes, modo_uso = :modo_uso,
+                        tabla_nutrimental = :tabla, unidad = :unidad, precio_costo = :precio_costo, 
                         precio_venta = :precio_venta, precio_comparacion = :precio_comparacion, estado = :estado 
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'], ':sku' => $data['sku'], ':codigo_barras' => $data['codigo_barras'],
-                    ':descripcion' => $data['descripcion'], ':unidad' => $data['unidad'], ':precio_costo' => $data['precio_costo'],
+                    ':descripcion' => $data['descripcion'], ':ingredientes' => $data['ingredientes'],
+                    ':modo_uso' => $data['modo_uso'], ':tabla' => $data['tabla_nutrimental'],
+                    ':unidad' => $data['unidad'], ':precio_costo' => $data['precio_costo'],
                     ':precio_venta' => $data['precio_venta'], ':precio_comparacion' => $data['precio_comparacion'],
                     ':estado' => $estado, ':id' => $id
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, unidad, precio_costo, precio_venta, precio_comparacion, estado) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, ingredientes, modo_uso, tabla_nutrimental, unidad, precio_costo, precio_venta, precio_comparacion, estado) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $pdo->prepare($sql)->execute([
-                    $data['nombre'], $data['sku'], $data['codigo_barras'], $data['descripcion'], $data['unidad'],
+                    $data['nombre'], $data['sku'], $data['codigo_barras'], $data['descripcion'], 
+                    $data['ingredientes'], $data['modo_uso'], $data['tabla_nutrimental'], $data['unidad'],
                     $data['precio_costo'], $data['precio_venta'], $data['precio_comparacion'], $estado
                 ]);
                 $id = (int)$pdo->lastInsertId();

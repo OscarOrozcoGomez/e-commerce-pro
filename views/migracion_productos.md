@@ -8,7 +8,11 @@ Antes de comenzar, es necesario asegurar que la columna de imagen en la tabla `p
 
 Ejecutar en la consola SQL de phpMyAdmin:
 ```sql
-ALTER TABLE productos MODIFY imagen LONGTEXT;
+ALTER TABLE productos 
+MODIFY imagen LONGTEXT,
+ADD COLUMN modo_uso TEXT NULL AFTER descripcion,
+ADD COLUMN ingredientes TEXT NULL AFTER modo_uso,
+ADD COLUMN tabla_nutrimental TEXT NULL AFTER ingredientes;
 ```
 
 ## 2. Creación de la Tabla Temporal de Importación
