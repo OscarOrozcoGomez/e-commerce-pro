@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // Configuración de seguridad para manejo de errores - MOVER AL PRINCIPIO
-ini_set('display_errors', '1'); // Cambiamos temporalmente a 1 para ver errores en pantalla si fallara algo crítico
+ini_set('display_errors', '0'); 
 ini_set('display_startup_errors', '0');
 ini_set('log_errors', '1'); 
 error_reporting(E_ALL);
@@ -31,18 +31,14 @@ set_exception_handler(function ($exception) {
 });
 
 // Cargar variables de entorno locales si existen (para no subirlas a GitHub)
-if (file_exists(__DIR__ . '/env.php')) {
-    require_once __DIR__ . '/env.php';
-}
+// El archivo env.php ha sido eliminado para evitar conflictos de configuración.
 
 // Parámetros de conexión a la base de datos
-if (!defined('DB_HOST')) {
-    define('DB_HOST', '127.0.0.1');
-    define('DB_NAME', 'beautyandwell_prod');
-    define('DB_USER', 'root');
-    define('DB_PASS', '');
-    define('DB_CHARSET', 'utf8mb4');
-}
+define('DB_HOST', '127.0.0.1');
+define('DB_NAME', 'beautyandwell_prod'); 
+define('DB_USER', 'root');
+define('DB_PASS', '');
+define('DB_CHARSET', 'utf8mb4');
 
 // Llaves de API (En producción, lo ideal es usar variables de entorno)
 if (!defined('GOOGLE_MAPS_API_KEY')) {

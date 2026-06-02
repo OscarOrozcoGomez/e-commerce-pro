@@ -37,6 +37,32 @@ try {
                 'categorias' => dbGetCategories()
             ]);
         }
+        elseif ($action === 'fetch_blife_info') {
+            $variant_id = $_GET['variant_id'] ?? '';
+            if (empty($variant_id)) throw new Exception("ID de variante requerido");
+
+            $url = "https://backend.blife-mx.com/nutritional-information/get-by-variant-id/" . $variant_id;
+            
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Útil en entornos locales como XAMPP
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Content-Type: application/json',
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+                'Referer: https://blife.mx/',
+                'Cookie: connect.sid=s%3Ae5ccf23c-c139-4165-82cf-ca226e77832b.AeGgR1Hq8dlTZimdmSSWC4Cm0cggyYIzbZe0GNdFWE0; session_uid=e5ccf23c-c139-4165-82cf-ca226e77832b'
+            ]);
+
+            $response_curl = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($http_code !== 200) throw new Exception("Error consultando API externa ($http_code)");
+            echo json_encode(['success' => true, 'blife_data' => json_decode($response_curl, true)]);
+            exit;
+        }
     } 
     elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = $_POST;
@@ -50,10 +76,10 @@ try {
             
             if ($id > 0) {
                 // EDITAR
-                $sql = "UPDATE productos SET nombre = :nombre, sku = :sku, codigo_barras = :codigo_barras, 
-                        descripcion = :descripcion, ingredientes = :ingredientes, modo_uso = :modo_uso,
-                        tabla_nutrimental = :tabla, unidad = :unidad, precio_costo = :precio_costo, 
-                        precio_venta = :precio_venta, precio_comparacion = :precio_comparacion, estado = :estado 
+                $sql = "UPDATE productos SET `nombre` = :nombre, `sku` = :sku, `codigo_barras` = :codigo_barras, 
+                        `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
+                        `tabla_nutrimental` = :tabla, `unidad` = :unidad, `precio_costo` = :precio_costo, 
+                        `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado 
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
@@ -66,12 +92,22 @@ try {
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (nombre, sku, codigo_barras, descripcion, ingredientes, modo_uso, tabla_nutrimental, unidad, precio_costo, precio_venta, precio_comparacion, estado) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                $pdo->prepare($sql)->execute([
-                    $data['nombre'], $data['sku'], $data['codigo_barras'], $data['descripcion'], 
-                    $data['ingredientes'], $data['modo_uso'], $data['tabla_nutrimental'], $data['unidad'],
-                    $data['precio_costo'], $data['precio_venta'], $data['precio_comparacion'], $estado
+                $sql = "INSERT INTO productos (`nombre`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `unidad`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
+                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :unidad, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([
+                    ':nombre' => $data['nombre'],
+                    ':sku' => $data['sku'],
+                    ':codigo_barras' => $data['codigo_barras'],
+                    ':descripcion' => $data['descripcion'],
+                    ':ingredientes' => $data['ingredientes'],
+                    ':modo_uso' => $data['modo_uso'],
+                    ':tabla' => $data['tabla_nutrimental'],
+                    ':unidad' => $data['unidad'],
+                    ':precio_costo' => $data['precio_costo'],
+                    ':precio_venta' => $data['precio_venta'],
+                    ':precio_comparacion' => $data['precio_comparacion'],
+                    ':estado' => $estado
                 ]);
                 $id = (int)$pdo->lastInsertId();
             }
@@ -141,5 +177,6 @@ try {
     }
 } catch (Exception $e) {
     http_response_code(400);
+    error_log("Error en products_manager: " . $e->getMessage());
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }

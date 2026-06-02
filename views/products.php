@@ -84,11 +84,22 @@ include __DIR__ . '/includes/header.php';
                             <label for="ingredientes">Ingredientes (Lista detallada)</label>
                         </div>
 
+                        <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
+                            <div class="input-field col s8" style="margin: 0;">
+                                <input type="text" id="blife_id" placeholder="ID B-Life">
+                                <label for="blife_id" class="active">Sync con B-Life (Variant ID)</label>
+                            </div>
+                            <div class="col s4">
+                                <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SYNC</button>
+                            </div>
+                        </div>
+
                         <div class="input-field">
-                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]'></textarea>
+                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
                             <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
                             <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
                         </div>
+                        <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
                         
                         <div class="input-field">
                             <input type="text" id="unidad" name="unidad">
@@ -226,6 +237,109 @@ include __DIR__ . '/includes/header.php';
 <script>
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
     let archivosSeleccionados = []; // Acumulador global de archivos
+
+    window.fetchBlifeData = function(e) {
+        const btn = e.currentTarget;
+        const variantId = document.getElementById('blife_id').value.trim();
+        if (!variantId) {
+            M.toast({html: 'Ingresa un ID de B-Life', classes: 'orange'});
+            return;
+        }
+        btn.disabled = true;
+        const originalText = btn.innerText;
+        btn.innerText = '...';
+
+        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${variantId}`)
+            .then(r => r.json())
+            .then(res => {
+                if(!res.success) throw new Error(res.message);
+                
+                const fullData = res.blife_data;
+                
+                // 1. Llenar Ingredientes y Modo de Uso si vienen en la API
+                if (fullData.producto) {
+                    if (fullData.producto.ingredients) document.getElementById('ingredientes').value = fullData.producto.ingredients;
+                    if (fullData.producto.mode_use) document.getElementById('modo_uso').value = fullData.producto.mode_use;
+                }
+
+                // 2. Intentar extraer la lista de nutrientes
+                let list = [];
+                if (fullData.rows && Array.isArray(fullData.rows)) {
+                    // Estructura de "rows" detectada en la respuesta de B-Life
+                    list = fullData.rows.map(r => ({
+                        label: (r[0]?.value || '-').replace(/\n/g, ' '),
+                        porcion: (r[1]?.value || '-').replace(/\n/g, ' '),
+                        total: (r[2]?.value || '-').replace(/\n/g, ' ')
+                    }));
+                } else {
+                    let data = fullData?.data || fullData;
+                    let rawList = Array.isArray(data) ? data : (data.nutritional_information || []);
+                    
+                    list = rawList.map(n => ({
+                        label: n.name || n.nutrient || n.label || 'Desconocido',
+                        porcion: n.amount_per_serving || n.serving || n.porcion || '0',
+                        total: n.amount_per_100g || n.total || '0'
+                    }));
+                }
+                
+                if (list.length > 0) {
+                    document.getElementById('tabla_nutrimental').value = JSON.stringify(list);
+                } else {
+                    document.getElementById('tabla_nutrimental').value = JSON.stringify(fullData);
+                }
+                
+                M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
+                M.textareaAutoResize(document.getElementById('ingredientes'));
+                M.textareaAutoResize(document.getElementById('modo_uso'));
+                M.updateTextFields();
+                renderNutritionalPreview();
+                M.toast({html: 'Información importada de B-Life', classes: 'green'});
+            })
+            .catch(err => M.toast({html: 'Error: ' + err.message, classes: 'red'}))
+            .finally(() => { btn.disabled = false; btn.innerText = originalText; });
+    };
+
+    window.renderNutritionalPreview = function() {
+        const raw = document.getElementById('tabla_nutrimental').value.trim();
+        const container = document.getElementById('nutritional-preview-container');
+        if (!raw) {
+            container.innerHTML = '';
+            return;
+        }
+        try {
+            const data = JSON.parse(raw);
+            let list = [];
+            
+            if (Array.isArray(data)) {
+                list = data;
+            } else if (data && data.rows && Array.isArray(data.rows)) {
+                // Manejo de estructura raw de B-Life
+                list = data.rows.map(r => ({
+                    label: (r[0]?.value || '-').replace(/\n/g, ' '),
+                    porcion: (r[1]?.value || '-').replace(/\n/g, ' '),
+                    total: (r[2]?.value || '-').replace(/\n/g, ' ')
+                }));
+            } else {
+                const rawList = data.nutritional_information || data.data || [];
+                list = rawList.map(item => ({
+                    label: item.label || item.name || item.nutrient || '-',
+                    porcion: item.porcion || item.amount_per_serving || item.serving || '-',
+                    total: item.total || item.amount_per_100g || '-'
+                }));
+            }
+            
+            if (list.length === 0) throw new Error("No data");
+
+            let html = '<table class="striped centered centered-table-preview"><thead><tr><th>Nutriente</th><th>Porción</th><th>100g</th></tr></thead><tbody>';
+            list.forEach(item => {
+                html += `<tr><td>${item.label}</td><td>${item.porcion}</td><td>${item.total}</td></tr>`;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = '<p class="red-text" style="font-size:0.8rem;">⚠️ Datos inválidos o formato no reconocido. La tabla no se generará.</p>';
+        }
+    };
 
     document.addEventListener('DOMContentLoaded', () => {
         cargarDependencias();
@@ -520,6 +634,7 @@ include __DIR__ . '/includes/header.php';
         M.textareaAutoResize(document.getElementById('modo_uso'));
         M.textareaAutoResize(document.getElementById('ingredientes'));
         M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
+        renderNutritionalPreview();
         
         const btnSubmit = document.getElementById('btn-submit');
         btnSubmit.innerHTML = 'Guardar Cambios <i class="material-icons right">save</i>';
@@ -536,6 +651,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('form-producto').reset();
         archivosSeleccionados = []; // Limpiar acumulador
         document.getElementById('preview-container').innerHTML = '';
+        document.getElementById('blife_id').value = '';
         document.getElementById('accion').value = 'agregar';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
@@ -555,6 +671,7 @@ include __DIR__ . '/includes/header.php';
         M.textareaAutoResize(document.getElementById('modo_uso'));
         M.textareaAutoResize(document.getElementById('ingredientes'));
         M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
+        renderNutritionalPreview();
         
         const btnSubmit = document.getElementById('btn-submit');
         btnSubmit.innerHTML = 'Agregar Producto <i class="material-icons right">add</i>';
@@ -598,4 +715,13 @@ include __DIR__ . '/includes/header.php';
     });
 </script>
 
+<style>
+    .centered-table-preview {
+        font-size: 0.8rem;
+        border: 1px solid #e0e0e0;
+    }
+    .centered-table-preview th, .centered-table-preview td {
+        padding: 5px;
+    }
+</style>
 <?php include __DIR__ . '/includes/footer.php'; ?>

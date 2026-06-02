@@ -33,17 +33,6 @@ function logAudit(string $accion, string $tabla, ?int $id_registro, string $deta
     }
 }
 
-/**
- * Configura cabeceras de seguridad HTTP esenciales.
- */
-function setSecurityHeaders(): void
-{
-    header("X-Frame-Options: DENY");
-    header("X-Content-Type-Options: nosniff");
-    header("Referrer-Policy: strict-origin-when-cross-origin");
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https://maps.gstatic.com https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com;");
-}
-
 function getCsrfToken(): string
 {
     if (!isset($_SESSION['csrf_token'])) {

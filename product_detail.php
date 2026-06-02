@@ -354,12 +354,24 @@ include __DIR__ . '/views/includes/header.php';
         nutBody.innerHTML = '';
         
         try {
-            const nutData = typeof product.tabla_nutrimental === 'string' 
+            let nutData = typeof product.tabla_nutrimental === 'string' 
                 ? JSON.parse(product.tabla_nutrimental) 
                 : product.tabla_nutrimental;
 
-            if (nutData && Array.isArray(nutData)) {
-                nutData.forEach(row => {
+            let list = [];
+            if (Array.isArray(nutData)) {
+                list = nutData;
+            } else if (nutData && nutData.rows && Array.isArray(nutData.rows)) {
+                // Manejo de estructura raw de B-Life guardada previamente
+                list = nutData.rows.map(r => ({
+                    label: (r[0]?.value || '-').replace(/\n/g, '<br>'),
+                    porcion: (r[1]?.value || '-').replace(/\n/g, '<br>'),
+                    total: (r[2]?.value || '-').replace(/\n/g, '<br>')
+                }));
+            }
+
+            if (list.length > 0) {
+                list.forEach(row => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td class="row-label">${row.label}</td>
