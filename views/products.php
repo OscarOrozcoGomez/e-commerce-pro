@@ -92,10 +92,11 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s4">
                                 <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SYNC</button>
                             </div>
+                            <div id="blife-external-images" class="col s12" style="margin-top: 10px; display: none;"></div>
                         </div>
 
                         <div class="input-field">
-                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
+                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea json-textarea-constrained" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
                             <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
                             <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
                         </div>
@@ -260,6 +261,10 @@ include __DIR__ . '/includes/header.php';
                 if (fullData.producto) {
                     if (fullData.producto.ingredients) document.getElementById('ingredientes').value = fullData.producto.ingredients;
                     if (fullData.producto.mode_use) document.getElementById('modo_uso').value = fullData.producto.mode_use;
+                    
+                    // 2. Usar el título de la variante como Unidad (ej: 60 Caps | 550 mg)
+                    if (fullData.producto.variante && fullData.producto.variante.title) 
+                        document.getElementById('unidad').value = fullData.producto.variante.title;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
@@ -282,10 +287,12 @@ include __DIR__ . '/includes/header.php';
                     }));
                 }
                 
-                if (list.length > 0) {
-                    document.getElementById('tabla_nutrimental').value = JSON.stringify(list);
-                } else {
-                    document.getElementById('tabla_nutrimental').value = JSON.stringify(fullData);
+                // 3. Guardar solo lo necesario (filtrado)
+                document.getElementById('tabla_nutrimental').value = list.length > 0 ? JSON.stringify(list) : '[]';
+
+                // 4. Mostrar previsualización de imágenes externas (opcional para referencia)
+                if (fullData.producto?.variante) {
+                    renderBlifeImageSuggestions(fullData.producto.variante);
                 }
                 
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
@@ -297,6 +304,22 @@ include __DIR__ . '/includes/header.php';
             })
             .catch(err => M.toast({html: 'Error: ' + err.message, classes: 'red'}))
             .finally(() => { btn.disabled = false; btn.innerText = originalText; });
+    };
+
+    window.renderBlifeImageSuggestions = function(variante) {
+        const container = document.getElementById('blife-external-images');
+        const imgs = [variante.featuredImage, variante.secondaryImage, ...(variante.gallery || [])].filter(Boolean);
+        
+        if (imgs.length > 0) {
+            container.style.display = 'block';
+            container.innerHTML = '<p style="font-size: 0.8rem; margin: 0 0 5px 0;">Imágenes encontradas en B-Life:</p>';
+            imgs.forEach(url => {
+                container.innerHTML += `
+                    <a href="${url}" target="_blank" style="display:inline-block; margin-right:5px;">
+                        <img src="${url}" style="width: 40px; height: 40px; border: 1px solid #ddd; object-fit: cover; border-radius: 4px;">
+                    </a>`;
+            });
+        }
     };
 
     window.renderNutritionalPreview = function() {
@@ -652,6 +675,7 @@ include __DIR__ . '/includes/header.php';
         archivosSeleccionados = []; // Limpiar acumulador
         document.getElementById('preview-container').innerHTML = '';
         document.getElementById('blife_id').value = '';
+        document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('accion').value = 'agregar';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
@@ -723,5 +747,15 @@ include __DIR__ . '/includes/header.php';
     .centered-table-preview th, .centered-table-preview td {
         padding: 5px;
     }
+        /* Limitar el crecimiento del textarea de JSON y permitir scroll interno */
+        .json-textarea-constrained {
+            max-height: 180px !important;
+            overflow-y: auto !important;
+            padding: 10px !important;
+            border: 1px solid #ddd !important;
+            box-sizing: border-box !important;
+            font-family: monospace;
+            font-size: 0.85rem !important;
+        }
 </style>
 <?php include __DIR__ . '/includes/footer.php'; ?>
