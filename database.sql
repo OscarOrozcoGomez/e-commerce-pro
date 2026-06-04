@@ -113,18 +113,19 @@ CREATE TABLE IF NOT EXISTS `cliente_direcciones` (
 -- Productos
 CREATE TABLE IF NOT EXISTS `productos` (
   `id_producto` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_padre` INT UNSIGNED NULL,
   `nombre` VARCHAR(255) NOT NULL,
-  `sku` VARCHAR(120) NOT NULL,
-  `codigo_barras` VARCHAR(120) DEFAULT NULL,
+  `codigo_barras` VARCHAR(120) NOT NULL,
   `descripcion` TEXT DEFAULT NULL,
   `unidad` VARCHAR(80) DEFAULT NULL,
+  `nombre_variante` VARCHAR(255) NULL,
   `precio_costo` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `precio_venta` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `categoria` VARCHAR(120) DEFAULT NULL,
   `estado` ENUM('activo','inactivo','archivado') NOT NULL DEFAULT 'activo',
   `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_producto`),
-  UNIQUE KEY `uq_productos_sku` (`sku`),
+  CONSTRAINT `fk_productos_padre` FOREIGN KEY (`id_padre`) REFERENCES `productos` (`id_producto`) ON DELETE SET NULL,
   UNIQUE KEY `uq_productos_codigo_barras` (`codigo_barras`),
   INDEX `idx_productos_categoria` (`categoria`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;

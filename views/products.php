@@ -55,18 +55,13 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="id_producto" id="id_producto" value="">
                         
                         <div class="input-field">
-                            <input type="text" id="nombre_variante" name="nombre_variante">
-                            <label for="nombre_variante">Presentación de la Variante (ej: 90 Caps)</label>
-                        </div>
-
-                        <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required>
                             <label for="nombre">Nombre del Producto</label>
                         </div>
-                        
+
                         <div class="input-field">
-                            <input type="text" id="sku" name="sku" required>
-                            <label for="sku">SKU</label>
+                            <input type="text" id="nombre_variante" name="nombre_variante" placeholder="Ej: 240 Caps, 500mg, Sabor Fresa">
+                            <label for="nombre_variante" class="active">Valor de la Variante (Lo que lo hace único)</label>
                         </div>
                         
                         <div class="input-field">
@@ -109,8 +104,18 @@ include __DIR__ . '/includes/header.php';
                         <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
                         
                         <div class="input-field">
-                            <input type="text" id="unidad" name="unidad">
-                            <label for="unidad">Unidad de Medida</label>
+                            <select id="unidad" name="unidad" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px;">
+                                <option value="" disabled selected>Presentación / Unidad (Elegir)</option>
+                            </select>
+                            <span class="helper-text">Ej: Cápsulas, Gramos (g), Mililitros (ml)...</span>
+                        </div>
+
+                        <div class="input-field">
+                            <select id="id_padre" name="id_padre" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px;">
+                                <option value="">Es Producto Principal (Sin Padre)</option>
+                                <!-- Se llena vía JS -->
+                            </select>
+                            <span class="helper-text">Si este producto es una variante, selecciona el producto "Padre" aquí.</span>
                         </div>
                         
                         <div class="input-field">
@@ -222,7 +227,6 @@ include __DIR__ . '/includes/header.php';
                                 <tr>
                                     <th>Imagen</th>
                                     <th>Nombre</th>
-                                    <th>SKU</th>
                                     <th>Precio</th>
                                     <th>Estado</th>
                                     <th class="center-align">Stock Actual</th>
@@ -244,6 +248,14 @@ include __DIR__ . '/includes/header.php';
 <script>
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
     let archivosSeleccionados = []; // Acumulador global de archivos
+
+    // Función para expandir/colapsar variantes
+    window.toggleVariants = function(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const isHidden = el.style.display === 'none';
+        el.style.display = isHidden ? 'block' : 'none';
+    };
 
     window.fetchBlifeData = function(e) {
         const btn = e.currentTarget;
@@ -300,7 +312,6 @@ include __DIR__ . '/includes/header.php';
                     
                     // 2. Extraer presentación de la variante (ej: 90 Caps)
                     if (fullData.producto.variante && fullData.producto.variante.title) {
-                        document.getElementById('nombre_variante').value = fullData.producto.variante.title;
                         document.getElementById('unidad').value = fullData.producto.variante.title;
                     }
 
@@ -571,6 +582,20 @@ include __DIR__ . '/includes/header.php';
                     res.categorias.map(c => `<option value="${c.id_categoria}">${c.nombre}</option>`).join('');
                 M.FormSelect.init(catSelect);
 
+                // Llenar Presentaciones
+                const presSelect = document.getElementById('unidad');
+                if(presSelect && res.presentaciones) {
+                    presSelect.innerHTML = '<option value="" disabled selected>Tipo de Presentación</option>' + 
+                        res.presentaciones.map(p => `<option value="${p}">${p}</option>`).join('');
+                }
+                
+                // Llenar lista de productos padre para asociación
+                const parentSelect = document.getElementById('id_padre');
+                if(parentSelect && res.productos_padre) {
+                    parentSelect.innerHTML = '<option value="">Es Producto Principal (Sin Padre)</option>' + 
+                        res.productos_padre.map(p => `<option value="${p.id_producto}">${p.nombre}</option>`).join('');
+                }
+
                 cargarProductos(res.almacenes[0].id_almacen);
             });
     }
@@ -632,10 +657,9 @@ include __DIR__ . '/includes/header.php';
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
-            <tr>
+            <tr data-codes="${(p.codigo_barras || '').toLowerCase()}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
-                <td>${p.nombre}</td>
-                <td>${p.sku}</td>
+                <td>${p.nombre} <br><small class="blue-text">(${p.nombre_variante || 'Sin etiqueta'})</small></td>
                 <td>
                     $${parseFloat(p.precio_venta).toFixed(2)}
                     ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
@@ -672,33 +696,39 @@ include __DIR__ . '/includes/header.php';
         const minP = Math.min(...variants.map(v => parseFloat(v.precio_venta)));
         const maxP = Math.max(...variants.map(v => parseFloat(v.precio_venta)));
         const priceRange = minP === maxP ? `$${minP.toFixed(2)}` : `$${minP.toFixed(2)} - $${maxP.toFixed(2)}`;
+        const groupId = 'variants-list-' + p.id_producto;
         
         let imgSrc = getProductImgUrl(p.imagen);
         
         // Lista de botones para cada variante
-        let variantsHtml = '<div style="max-height: 120px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 5px; background: white; min-width: 180px;">';
+        let variantsHtml = `<div id="${groupId}" style="display:none; max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; padding: 8px; background: #f1f8ff; min-width: 220px; margin-top:8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">`;
         variants.forEach(v => {
             const jsonV = JSON.stringify(v).replace(/'/g, "&apos;");
             const label = v.nombre_variante || v.unidad || v.sku;
             variantsHtml += `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding-bottom:2px; border-bottom:1px dashed #eee;">
                     <span style="font-size:0.75rem; color:#444;">${label} (${v.cantidad_actual})</span>
-                    <button type="button" class="btn-flat btn-small blue-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='abrirEditar(${jsonV})'>EDITAR</button>
+                    <div>
+                        <button type="button" class="btn-flat btn-small blue-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='abrirEditar(${jsonV})'>EDITAR</button>
+                        <button type="button" class="btn-flat btn-small red-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='eliminarProducto(${v.id_producto})'>BORRAR</button>
+                    </div>
                 </div>`;
         });
         variantsHtml += '</div>';
 
-        // Juntar todos los SKUs para que el buscador funcione
-        const allSkus = variants.map(v => v.sku).join(' ');
+        // Juntar todos los códigos para que el buscador funcione
+        const allCodes = variants.map(v => v.codigo_barras).join(' ');
 
         return `
-            <tr class="product-group-row" data-skus="${allSkus.toLowerCase()}">
+            <tr class="product-group-row" data-codes="${allCodes.toLowerCase()}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
                 <td>
                     <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong><br>
-                    <span class="badge blue white-text" style="float:none; margin:0; font-size:0.7rem; border-radius:4px;">${variants.length} PRESENTACIONES</span>
+                    <button type="button" class="btn-small blue darken-2 waves-effect waves-light" style="font-size:0.65rem; height:24px; line-height:24px; padding:0 8px; border-radius:4px; margin-top:4px;" onclick="toggleVariants('${groupId}')">
+                        <i class="material-icons left" style="font-size:1rem; margin-right:4px;">unfold_more</i>
+                        ${variants.length} PRESENTACIONES
+                    </button>
                 </td>
-            <td class="grey-text" style="font-size:0.8rem;">${variants[0].sku} ...</td>
                 <td class="green-text text-darken-3" style="font-weight:bold;">${priceRange}</td>
             <td><span class="badge blue white-text" style="float:none; border-radius:4px;">ACTIVO</span></td>
                 <td class="center-align">
@@ -735,7 +765,6 @@ include __DIR__ . '/includes/header.php';
         
         document.getElementById('nombre').value = prod.nombre;
         document.getElementById('nombre_variante').value = prod.nombre_variante || '';
-        document.getElementById('sku').value = prod.sku;
         document.getElementById('codigo_barras').value = prod.codigo_barras || '';
         document.getElementById('descripcion').value = prod.descripcion || '';
         document.getElementById('modo_uso').value = prod.modo_uso || '';
@@ -743,6 +772,8 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('tabla_nutrimental').value = prod.tabla_nutrimental || '';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('precio_costo').value = prod.precio_costo;
+        document.getElementById('id_padre').value = prod.id_padre || '';
+        document.getElementById('id_padre').value = prod.id_padre || '';
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
 
@@ -797,6 +828,8 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('accion').value = 'agregar';
+        document.getElementById('nombre_variante').value = '';
+        document.getElementById('id_padre').value = '';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
 
@@ -833,13 +866,12 @@ include __DIR__ . '/includes/header.php';
         
         rows.forEach(row => {
             const nombre = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
-            // Buscar SKU en la celda o en el atributo data-skus (para grupos)
-            const sku = (row.cells[2] ? row.cells[2].textContent.toLowerCase() : '') + ' ' + (row.getAttribute('data-skus') || '');
+            const codigo = (row.getAttribute('data-codes') || '');
             
-            // El estado está en la celda 4 (badge)
-            const estadoActual = row.cells[4] ? row.cells[4].textContent.trim().toLowerCase() : '';
+            // El estado ahora está en la celda 3 tras quitar la de Código de Barras
+            const estadoActual = row.cells[3] ? row.cells[3].textContent.trim().toLowerCase() : '';
             
-            const coincideBusqueda = nombre.includes(busqueda) || sku.includes(busqueda);
+            const coincideBusqueda = nombre.includes(busqueda) || codigo.includes(busqueda);
             const coincideEstado = (estadoFiltro === 'todos') || (estadoActual === estadoFiltro);
             
             if (coincideBusqueda && coincideEstado) {

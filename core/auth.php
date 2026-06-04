@@ -450,6 +450,50 @@ function dbGetProductsManaged(): array {
 }
 
 /**
+ * Obtiene productos para el catálogo público.
+ * Filtra para mostrar solo productos principales (sin padre) o variantes únicas.
+ */
+function dbGetCatalogProducts(?int $id_categoria = null): array {
+    try {
+        $pdo = getPDO();
+        $sql = "SELECT p.*, 
+                (SELECT COUNT(*) FROM productos p2 WHERE p2.id_padre = p.id_producto) as total_presentaciones,
+                (SELECT MIN(precio_venta) FROM productos p3 WHERE p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto) as precio_desde
+                FROM productos p 
+                WHERE p.estado = 'activo' AND p.id_padre IS NULL";
+        
+        $params = [];
+        if ($id_categoria) {
+            $sql .= " AND p.id_producto IN (SELECT id_producto FROM producto_categorias WHERE id_categoria = ?)";
+            $params[] = $id_categoria;
+        }
+
+        $sql .= " ORDER BY p.nombre ASC";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Error en dbGetCatalogProducts: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Obtiene todas las presentaciones (variantes) de un producto específico.
+ */
+function dbGetProductPresentations(int $id_producto_padre): array {
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare("SELECT * FROM productos WHERE (id_padre = ? OR id_producto = ?) AND estado = 'activo' ORDER BY precio_venta ASC");
+        $stmt->execute([$id_producto_padre, $id_producto_padre]);
+        return $stmt->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Error en dbGetProductPresentations: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
  * CENTRALIZACIÓN: Obtiene logs con filtros aplicados (Protección contra Inyección SQL).
  */
 function dbGetActivityLogs(array $filters): array {
@@ -588,6 +632,34 @@ function dbGetCategories(): array {
         return $pdo->query($sql)->fetchAll();
     } catch (PDOException $e) {
         error_log("Error en dbGetCategories: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Obtiene todos los tipos de presentación (variantes) de la tabla maestra.
+ */
+function dbGetPresentationTypes(): array {
+    try {
+        $pdo = getPDO();
+        $sql = "SELECT * FROM tipos_presentacion ORDER BY nombre ASC";
+        return $pdo->query($sql)->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Error en dbGetPresentationTypes: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Obtiene los productos base (que no son variantes de otros) para ser usados como padres.
+ */
+function dbGetParentProducts(): array {
+    try {
+        $pdo = getPDO();
+        $sql = "SELECT id_producto, nombre FROM productos WHERE id_padre IS NULL AND estado = 'activo' ORDER BY nombre ASC";
+        return $pdo->query($sql)->fetchAll();
+    } catch (PDOException $e) {
+        error_log("Error en dbGetParentProducts: " . $e->getMessage());
         return [];
     }
 }

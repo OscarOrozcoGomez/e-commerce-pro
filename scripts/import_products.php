@@ -35,20 +35,19 @@ function runImport(int $almacenId = 1): void
         'errors' => 0,
     ];
 
-    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, sku, codigo_barras, unidad, precio_costo, precio_venta, categoria, descripcion, estado, id_padre) VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, :descripcion, 'activo', :id_padre)";
+    $sqlProducto = "INSERT INTO productos (nombre, nombre_variante, codigo_barras, unidad, precio_costo, precio_venta, categoria, descripcion, estado, id_padre) VALUES (:nombre, :nombre_variante, :codigo_barras, :unidad, :precio_costo, :precio_venta, :categoria, :descripcion, 'activo', :id_padre)";
     $stmtInsert = $pdo->prepare($sqlProducto);
 
-    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, codigo_barras = :codigo_barras, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, descripcion = :descripcion, estado = 'activo' WHERE sku = :sku";
+    $sqlProductoUpdate = "UPDATE productos SET nombre = :nombre, nombre_variante = :nombre_variante, unidad = :unidad, precio_costo = :precio_costo, precio_venta = :precio_venta, categoria = :categoria, descripcion = :descripcion, estado = 'activo' WHERE codigo_barras = :codigo_barras";
     $stmtUpdate = $pdo->prepare($sqlProductoUpdate);
 
-    $sqlSelect = "SELECT id_producto FROM productos WHERE sku = :sku";
+    $sqlSelect = "SELECT id_producto FROM productos WHERE codigo_barras = :codigo_barras";
     $stmtSelect = $pdo->prepare($sqlSelect);
 
     $sqlInventory = "INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, cantidad_reservada) VALUES (:id_producto, :id_almacen, :cantidad_actual, 0)
         ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual)";
     $stmtInventory = $pdo->prepare($sqlInventory);
-
-    $skuIndex = array_search('Referencia interna', $columns, true);
+    
     $nombreIndex = array_search('Nombre', $columns, true); 
     $displayNameIndex = array_search('Nombre en pantalla', $columns, true); 
     $codigoIndex = array_search('Código de barras', $columns, true);
@@ -76,8 +75,8 @@ function runImport(int $almacenId = 1): void
             continue;
         }
 
-        $sku = trim($row[$skuIndex] ?? '');
-        if ($sku === '') {
+        $codigo = trim($row[$codigoIndex] ?? '');
+        if ($codigo === '') {
             $summaries['skipped']++;
             continue;
         }
@@ -146,13 +145,12 @@ function runImport(int $almacenId = 1): void
                 $stmtUpdate->execute([
                     ':nombre' => $nombre,
                     ':nombre_variante' => $nombre_variante,
-                    ':codigo_barras' => $codigo ?: null,
+                    ':codigo_barras' => $codigo,
                     ':unidad' => $unidad ?: null,
                     ':precio_costo' => $precioCosto,
                     ':precio_venta' => $precioVenta,
                     ':categoria' => $categoria ?: null,
                     ':descripcion' => $descripcion,
-                    ':sku' => $sku
                 ]);
                 $summaries['updated']++;
             }

@@ -99,7 +99,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">search</i>
                                 <input type="text" class="buscador-producto autocomplete" placeholder="Escribe el nombre o escanea código de barras..." autocomplete="off">
-                                <label class="active">Buscar Producto (Nombre o SKU)</label>
+                                <label class="active">Buscar Producto</label>
                                 <span class="helper-text">Presiona Enter para agregar por código de barras</span>
                             </div>
                         </div>
@@ -236,8 +236,8 @@ include __DIR__ . '/includes/header.php';
                 : null;
 
             let label = p.nombre;
-            if (p.sku && !p.nombre.includes(`[${p.sku}]`)) {
-                label = `[${p.sku}] ${p.nombre}`;
+            if (p.codigo_barras && !p.nombre.includes(`[${p.codigo_barras}]`)) {
+                label = `[${p.codigo_barras}] ${p.nombre}`;
             }
             if (p.nombre_variante) {
                 label += ` ${p.nombre_variante}`;
@@ -315,10 +315,8 @@ include __DIR__ . '/includes/header.php';
 
                 const valueLower = value.toLowerCase();
 
-                // 1. Intentar coincidencia exacta por SKU o Código de Barras (Escáner)
-                // Buscamos ignorando mayúsculas/minúsculas en el SKU
+                // 1. Intentar coincidencia exacta por Código de Barras (Escáner)
                 let prod = productosDisponibles.find(p => 
-                    (p.sku && p.sku.toLowerCase() === valueLower) || 
                     (p.codigo_barras && p.codigo_barras.toLowerCase() === valueLower)
                 );
                 
@@ -423,7 +421,7 @@ include __DIR__ . '/includes/header.php';
 
                 <div class="col s12 m3">
                     <p style="margin: 0; font-weight: bold; font-size: 1.1rem;">${label}</p>
-                    <small class="grey-text">SKU: ${product.sku}</small>
+                    <small class="grey-text">Cod: ${product.codigo_barras}</small>
                 </div>
                 
                 <div class="input-field col s4 m2" style="margin: 0;">

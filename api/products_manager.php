@@ -34,7 +34,8 @@ try {
             echo json_encode([
                 'success' => true,
                 'almacenes' => $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC")->fetchAll(),
-                'categorias' => dbGetCategories()
+                'categorias' => dbGetCategories(),
+                'presentaciones' => $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC")->fetchAll(PDO::FETCH_COLUMN)
             ]);
         }
         elseif ($action === 'fetch_blife_info') {
