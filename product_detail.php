@@ -122,10 +122,16 @@ include __DIR__ . '/views/includes/header.php';
 
     .price-display { font-size: 2.2rem; font-weight: 400; color: #212121; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
     
-    .variant-selector { margin-bottom: 30px; }
-    .variant-selector label { font-size: 0.9rem; color: #555; display: block; margin-bottom: 5px; }
-    .variant-select { display: block; width: 100%; max-width: 400px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; color: #333; outline: none; }
-    .variant-select:focus { border-color: #f06292; }
+    /* Estilo Odoo para Variantes (Pills) */
+    .variant-selector { margin-bottom: 35px; }
+    .variant-selector label { font-size: 0.95rem; color: #1a237e; font-weight: bold; display: block; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .variant-pills { display: flex; gap: 12px; flex-wrap: wrap; }
+    .variant-pill { 
+        padding: 10px 20px; border: 2px solid #e0e0e0; border-radius: 8px; cursor: pointer; 
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); font-weight: 500; background: #fff; color: #555; font-size: 0.95rem;
+    }
+    .variant-pill:hover { border-color: #1a237e; color: #1a237e; background-color: #f5f5f5; }
+    .variant-pill.active { background: #1a237e; color: #fff; border-color: #1a237e; box-shadow: 0 4px 12px rgba(26, 35, 126, 0.2); }
 
     .action-bar { border-bottom: 1px solid #eee; padding-bottom: 40px; margin-bottom: 30px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
     
@@ -183,10 +189,8 @@ include __DIR__ . '/views/includes/header.php';
             </div>
 
             <div class="variant-selector" id="variant-section" style="display: none;">
-                <label>Tamaño</label>
-                <select id="variant-select" class="variant-select browser-default">
-                    <!-- Opciones dinámicas -->
-                </select>
+                <label id="variant-label">Presentación</label>
+                <div id="variant-pills-container" class="variant-pills"></div>
             </div>
 
             <div class="action-bar">
@@ -265,16 +269,6 @@ include __DIR__ . '/views/includes/header.php';
             M.toast({html: 'Producto no especificado'});
             setTimeout(() => window.location.href = 'index.php', 2000);
         }
-
-        document.getElementById('variant-select').addEventListener('change', function() {
-            const newId = this.value;
-            // Cambiar URL sin recargar
-            const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?id=' + newId;
-            window.history.pushState({path:newUrl}, '', newUrl);
-            loadProductData(newId);
-            qty = 1;
-            updateQtyDisplay();
-        });
 
         document.getElementById('btn-add-cart').addEventListener('click', function(e) {
             e.preventDefault();
@@ -443,23 +437,46 @@ include __DIR__ . '/views/includes/header.php';
 
         // Variantes
         const variantSection = document.getElementById('variant-section');
-        const variantSelect = document.getElementById('variant-select');
+        const pillsContainer = document.getElementById('variant-pills-container');
         
         if (product.variantes && product.variantes.length > 1) {
             variantSection.style.display = 'block';
-            variantSelect.innerHTML = '';
+            pillsContainer.innerHTML = '';
             
-            let sizes = [];
             product.variantes.forEach(v => {
-                const opt = document.createElement('option');
-                opt.value = v.id_producto;
-                // Si este es el producto actual, calcular diferencia de precio
-                let priceText = `$ ${parseFloat(v.precio_venta).toFixed(2)}`;
-                opt.textContent = `${v.nombre_variante || v.sku} (${priceText})`;
+                const pill = document.createElement('button');
+                pill.type = 'button';
+                pill.className = 'variant-pill' + (v.id_producto == product.id_producto ? ' active' : '');
+                pill.textContent = v.nombre_variante || v.unidad || v.sku;
+                
+                pill.onclick = () => {
+                    if (pill.classList.contains('active')) return;
+
+                    // 1. Cambio visual inmediato (Pills)
+                    document.querySelectorAll('.variant-pill').forEach(p => p.classList.remove('active'));
+                    pill.classList.add('active');
+
+                    // 2. Actualización de precio inmediata (sin esperar al server)
+                    let priceHtml = `$ ${parseFloat(v.precio_venta).toFixed(2)}`;
+                    if (parseFloat(v.precio_comparacion) > 0) {
+                        priceHtml += ` <span class="grey-text" style="text-decoration: line-through; font-size: 1.2rem; margin-left: 15px;">$ ${parseFloat(v.precio_comparacion).toFixed(2)}</span>`;
+                    }
+                    document.getElementById('product-price').innerHTML = priceHtml;
+                    document.getElementById('product-title').textContent = `${product.nombre} | ${v.nombre_variante}`;
+
+                    // 3. Cambiar URL y cargar datos pesados (stock, galería, tabla)
+                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?id=' + v.id_producto;
+                    window.history.pushState({path:newUrl}, '', newUrl);
+                    
+                    loadProductData(v.id_producto);
+                    qty = 1;
+                    updateQtyDisplay();
+                };
+
                 if (v.id_producto == product.id_producto) {
-                    opt.selected = true;
+                    pill.classList.add('active');
                 }
-                variantSelect.appendChild(opt);
+                pillsContainer.appendChild(pill);
             });
         } else {
             variantSection.style.display = 'none';

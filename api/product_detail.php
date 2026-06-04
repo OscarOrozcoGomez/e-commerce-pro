@@ -49,7 +49,7 @@ try {
     // 3. Obtener variantes (productos con el mismo nombre base)
     $stmtVar = $pdo->prepare("SELECT id_producto, sku, nombre_variante, precio_venta, precio_comparacion 
                              FROM productos 
-                             WHERE nombre = ? AND estado = 'activo' 
+                             WHERE TRIM(nombre) = TRIM(?) AND estado = 'activo' 
                              ORDER BY precio_venta ASC");
     $stmtVar->execute([$product['nombre']]);
     $variantes = $stmtVar->fetchAll(PDO::FETCH_ASSOC);

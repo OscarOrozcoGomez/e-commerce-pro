@@ -5,21 +5,29 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/auth.php';
 
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
+$busqueda = $_GET['search'] ?? '';
 $categorias = dbGetCategories();
 
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
 $sql = "SELECT p.* FROM productos p ";
 $params = [];
+$whereClauses = ["p.estado = 'activo'"];
+
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
-              JOIN categorias c ON pc.id_categoria = c.id_categoria 
-              WHERE c.nombre = :cat AND p.estado = 'activo'";
+              JOIN categorias c ON pc.id_categoria = c.id_categoria ";
+    $whereClauses[] = "c.nombre = :cat";
     $params[':cat'] = $categoriaSeleccionada;
-} else {
-    $sql .= " WHERE p.estado = 'activo'";
 }
-$sql .= " ORDER BY nombre ASC";
+
+if (!empty($busqueda)) {
+    $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.descripcion LIKE :search)";
+    $params[':search'] = '%' . $busqueda . '%';
+}
+
+$sql .= " WHERE " . implode(" AND ", $whereClauses);
+$sql .= " ORDER BY p.nombre ASC";
 
 try {
     $stmt = $pdo->prepare($sql);
@@ -96,11 +104,26 @@ include __DIR__ . '/../views/includes/header.php';
 
         <!-- Contenido Principal: Listado de Productos -->
         <div class="col s12 m9">
-            <h4 class="header-title grey-text text-darken-3" style="font-weight: 300; margin-bottom: 30px;">
-                <?php echo empty($categoriaSeleccionada) ? 'Nuestros Productos' : esc($categoriaSeleccionada); ?>
+            <!-- Barra de Búsqueda Moderna -->
+            <div class="row">
+                <div class="col s12">
+                    <form method="GET" action="catalogo.php" class="row valign-wrapper" style="background: #fff; padding: 5px 15px; border-radius: 30px; margin-bottom: 30px; border: 1px solid #ddd; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                        <?php if(!empty($categoriaSeleccionada)): ?>
+                            <input type="hidden" name="categoria" value="<?php echo esc($categoriaSeleccionada); ?>">
+                        <?php endif; ?>
+                        <div class="input-field col s12" style="margin: 0; border: none;">
+                            <i class="material-icons prefix blue-text text-darken-4" style="top: 11px;">search</i>
+                            <input type="text" name="search" id="search-input" value="<?php echo esc($busqueda); ?>" placeholder="¿Qué estás buscando hoy?" style="border-bottom: none !important; box-shadow: none !important; margin: 0; height: 45px; padding-left: 3.5rem !important;">
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <h4 class="grey-text text-darken-3" style="font-weight: 300; margin-bottom: 30px;">
+                <?php echo empty($categoriaSeleccionada) ? 'Explorar Catálogo' : 'Categoría: ' . esc($categoriaSeleccionada); ?>
             </h4>
             
-            <div class="row">
+            <div class="row row-products">
                 <?php if (empty($productos)): ?>
                     <div class="col s12 center-align" style="padding: 50px;">
                         <i class="material-icons large grey-text lighten-2">inventory_2</i>
@@ -108,7 +131,7 @@ include __DIR__ . '/../views/includes/header.php';
                     </div>
                 <?php else: ?>
                     <?php foreach ($productos as $p): ?>
-                        <div class="col s12 m6 l4">
+                        <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
                             <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
                                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                                     <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
@@ -148,6 +171,42 @@ include __DIR__ . '/../views/includes/header.php';
 </div>
 
 <script>
+// Filtrado dinámico en tiempo real (Estilo "desaparecer poco a poco")
+document.getElementById('search-input')?.addEventListener('input', function() {
+    const term = this.value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.product-card-container');
+    let foundCount = 0;
+
+    cards.forEach(card => {
+        const name = card.getAttribute('data-name') || '';
+        const sku = card.getAttribute('data-sku') || '';
+        const desc = card.querySelector('.card-content p.grey-text')?.textContent.toLowerCase() || '';
+
+        // Si el término está en el nombre, SKU o descripción, lo mostramos
+        if (name.includes(term) || sku.includes(term) || desc.includes(term)) {
+            card.style.display = '';
+            foundCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+
+    // Si no hay resultados dinámicos, mostrar un mensaje amigable
+    let dynamicMsg = document.getElementById('no-results-dynamic');
+    if (foundCount === 0 && cards.length > 0) {
+        if (!dynamicMsg) {
+            dynamicMsg = document.createElement('div');
+            dynamicMsg.id = 'no-results-dynamic';
+            dynamicMsg.className = 'col s12 center-align grey-text';
+            dynamicMsg.style.padding = '50px';
+            dynamicMsg.innerHTML = '<i class="material-icons large">search_off</i><p>No hay coincidencias en esta página.</p>';
+            document.querySelector('.row-products').appendChild(dynamicMsg);
+        }
+    } else if (dynamicMsg) {
+        dynamicMsg.remove();
+    }
+});
+
 function addToCart(id, nombre, precio) {
     let cart = JSON.parse(localStorage.getItem('cart') || '[]');
     

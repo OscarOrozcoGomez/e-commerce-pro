@@ -5,21 +5,29 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
+$busqueda = $_GET['search'] ?? '';
 $categorias = dbGetCategories();
 
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
 $sql = "SELECT p.* FROM productos p ";
 $params = [];
+$whereClauses = ["p.estado = 'activo'"];
+
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
-              JOIN categorias c ON pc.id_categoria = c.id_categoria 
-              WHERE c.nombre = :cat AND p.estado = 'activo'";
+              JOIN categorias c ON pc.id_categoria = c.id_categoria ";
+    $whereClauses[] = "c.nombre = :cat";
     $params[':cat'] = $categoriaSeleccionada;
-} else {
-    $sql .= " WHERE p.estado = 'activo'";
 }
-$sql .= " ORDER BY nombre ASC";
+
+if (!empty($busqueda)) {
+    $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.descripcion LIKE :search)";
+    $params[':search'] = '%' . $busqueda . '%';
+}
+
+$sql .= " WHERE " . implode(" AND ", $whereClauses);
+$sql .= " ORDER BY p.nombre ASC";
 
 try {
     $stmt = $pdo->prepare($sql);
@@ -63,6 +71,26 @@ include __DIR__ . '/includes/header.php';
 
         <!-- Contenido Principal: Listado de Productos -->
         <div class="col s12 m9">
+            <!-- Barra de Búsqueda Moderna -->
+            <div class="row">
+                <div class="col s12">
+                    <form method="GET" action="catalogo.php" class="row valign-wrapper" style="background: #fff; padding: 5px 15px; border-radius: 30px; margin-bottom: 30px; border: 1px solid #ddd; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                        <?php if(!empty($categoriaSeleccionada)): ?>
+                            <input type="hidden" name="categoria" value="<?php echo esc($categoriaSeleccionada); ?>">
+                        <?php endif; ?>
+                        <div class="input-field col s10 m11" style="margin: 0; border: none;">
+                            <i class="material-icons prefix blue-text text-darken-4" style="top: 10px;">search</i>
+                            <input type="text" name="search" id="search-input" value="<?php echo esc($busqueda); ?>" placeholder="¿Qué estás buscando hoy?" style="border-bottom: none !important; box-shadow: none !important; margin: 0; height: 45px;">
+                        </div>
+                        <div class="col s2 m1 center-align">
+                            <button type="submit" class="btn-flat waves-effect waves-circle" style="padding: 0; width: 40px; height: 40px; line-height: 40px;">
+                                <i class="material-icons blue-text text-darken-4">send</i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             <h4 class="grey-text text-darken-3" style="font-weight: 300; margin-bottom: 30px;">
                 <?php echo empty($categoriaSeleccionada) ? 'Explorar Catálogo' : 'Categoría: ' . esc($categoriaSeleccionada); ?>
             </h4>
@@ -78,8 +106,14 @@ include __DIR__ . '/includes/header.php';
                         <div class="col s12 m6 l4">
                             <div class="card hoverable" style="height: 420px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;">
                                 <div class="card-image" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                                    <?php 
-                                        $imgSrc = -text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
+                                    <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
+                                    <img src="<?php echo $imgSrc; ?>" style="max-height: 180px; width: auto; object-fit: contain;">
+                                </div>
+                                <div class="card-content" style="flex-grow: 1; padding: 15px;">
+                                    <span class="card-title truncate" style="font-size: 1.1rem; font-weight: bold; margin-bottom: 5px;">
+                                        <?php echo esc($p['nombre']); ?>
+                                    </span>
+                                    <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
                                         $<?php echo number_format((float)$p['precio_venta'], 2); ?>
                                         <?php if ((float)($p['precio_comparacion'] ?? 0) > 0): ?>
                                             <span class="grey-text text-darken-1" style="text-decoration: line-through; font-size: 0.9rem; margin-left: 8px;">
@@ -94,7 +128,7 @@ include __DIR__ . '/includes/header.php';
                                 <div class="card-action center-align" style="border-top: 1px solid #eee; background: white;">
                                     <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo $p['id_producto']; ?>" class="btn-flat blue-text text-darken-4 waves-effect">VER</a>
                                     <button class="btn blue darken-4 waves-effect waves-light" 
-                                            data-img="<?php echo $imgSrc; ?>"
+                                            data-img="<?php echo esc($imgSrc); ?>"
                                             onclick="addToCart(
                                                 <?php echo (int)$p['id_producto']; ?>, 
                                                 '<?php echo addslashes(esc($p['nombre'])); ?>', 
