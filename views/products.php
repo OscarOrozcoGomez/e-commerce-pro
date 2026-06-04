@@ -92,6 +92,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s4">
                                 <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SYNC</button>
                             </div>
+                            <input type="hidden" name="remote_images_urls" id="remote_images_urls">
                             <div id="blife-external-images" class="col s12" style="margin-top: 10px; display: none;"></div>
                         </div>
 
@@ -259,8 +260,38 @@ include __DIR__ . '/includes/header.php';
                 
                 // 1. Llenar Ingredientes y Modo de Uso si vienen en la API
                 if (fullData.producto) {
-                    if (fullData.producto.ingredients) document.getElementById('ingredientes').value = fullData.producto.ingredients;
-                    if (fullData.producto.mode_use) document.getElementById('modo_uso').value = fullData.producto.mode_use;
+                    // Extraer ingredientes: puede venir en .ingredients o como una fila en la tabla
+                    let rawIng = fullData.producto.ingredients || '';
+                    if (!rawIng && fullData.rows) {
+                        const found = fullData.rows.find(r => r[0]?.value?.toLowerCase().includes('ingredientes'));
+                        if (found) rawIng = found[1]?.value || found[2]?.value || '';
+                    }
+
+                    if (rawIng) {
+                        // Limpiar, separar por comas y formatear con bullets
+                        const listIng = rawIng.replace(/^ingredientes:?\s*/i, '')
+                            .split(',')
+                            .map(i => i.trim())
+                            .filter(i => i.length > 1)
+                            .map(i => '• ' + i.charAt(0).toUpperCase() + i.slice(1))
+                            .join('\n');
+                        document.getElementById('ingredientes').value = listIng;
+                    }
+
+                    // Extraer Modo de Uso: puede venir en .mode_use o como una fila en la tabla
+                    let rawUso = fullData.producto.mode_use || '';
+                    if (!rawUso && fullData.rows) {
+                        const foundUso = fullData.rows.find(r => 
+                            r[0]?.value?.toLowerCase().includes('modo de uso') || 
+                            r[0]?.value?.toLowerCase().includes('instrucciones') ||
+                            r[0]?.value?.toLowerCase().includes('modo de empleo')
+                        );
+                        if (foundUso) rawUso = foundUso[1]?.value || foundUso[2]?.value || '';
+                    }
+                    if (rawUso) {
+                        const cleanUso = rawUso.replace(/^(modo de uso|instrucciones|modo de empleo):?\s*/i, '');
+                        document.getElementById('modo_uso').value = cleanUso.charAt(0).toUpperCase() + cleanUso.slice(1);
+                    }
                     
                     // 2. Usar el título de la variante como Unidad (ej: 60 Caps | 550 mg)
                     if (fullData.producto.variante && fullData.producto.variante.title) 
@@ -275,7 +306,14 @@ include __DIR__ . '/includes/header.php';
                         label: (r[0]?.value || '-').replace(/\n/g, ' '),
                         porcion: (r[1]?.value || '-').replace(/\n/g, ' '),
                         total: (r[2]?.value || '-').replace(/\n/g, ' ')
-                    }));
+                    })).filter(item => {
+                        // Excluir filas que ya extrajimos a campos de texto para evitar duplicidad en el JSON
+                        const lbl = item.label.toLowerCase();
+                        return !lbl.includes('ingredientes') && 
+                               !lbl.includes('modo de uso') && 
+                               !lbl.includes('instrucciones') && 
+                               !lbl.includes('modo de empleo');
+                    });
                 } else {
                     let data = fullData?.data || fullData;
                     let rawList = Array.isArray(data) ? data : (data.nutritional_information || []);
@@ -290,9 +328,13 @@ include __DIR__ . '/includes/header.php';
                 // 3. Guardar solo lo necesario (filtrado)
                 document.getElementById('tabla_nutrimental').value = list.length > 0 ? JSON.stringify(list) : '[]';
 
-                // 4. Mostrar previsualización de imágenes externas (opcional para referencia)
+                // 4. Capturar y mostrar previsualización de imágenes externas para importación automática
                 if (fullData.producto?.variante) {
-                    renderBlifeImageSuggestions(fullData.producto.variante);
+                    const v = fullData.producto.variante;
+                    const allUrls = [v.featuredImage, v.secondaryImage, ...(v.gallery || [])].filter(Boolean);
+                    // Guardamos el JSON de URLs para que el backend las descargue al guardar
+                    document.getElementById('remote_images_urls').value = JSON.stringify(allUrls);
+                    renderBlifeImageSuggestions(v);
                 }
                 
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
@@ -312,10 +354,11 @@ include __DIR__ . '/includes/header.php';
         
         if (imgs.length > 0) {
             container.style.display = 'block';
-            container.innerHTML = '<p style="font-size: 0.8rem; margin: 0 0 5px 0;">Imágenes encontradas en B-Life:</p>';
+            container.innerHTML = '<p style="font-size: 0.8rem; margin: 0 0 5px 0; color: #2e7d32; font-weight: bold;"><i class="material-icons tiny">check_circle</i> Imágenes B-Life listas para importar:</p>';
             imgs.forEach(url => {
                 container.innerHTML += `
-                    <a href="${url}" target="_blank" style="display:inline-block; margin-right:5px;">
+                    <a href="${url}" target="_blank" style="display:inline-block; margin-right:5px; position:relative;">
+                        <span style="position:absolute; bottom:0; right:0; background:rgba(46,125,50,0.8); color:white; font-size:8px; padding:0 2px;">AUTO</span>
                         <img src="${url}" style="width: 40px; height: 40px; border: 1px solid #ddd; object-fit: cover; border-radius: 4px;">
                     </a>`;
             });
@@ -675,6 +718,7 @@ include __DIR__ . '/includes/header.php';
         archivosSeleccionados = []; // Limpiar acumulador
         document.getElementById('preview-container').innerHTML = '';
         document.getElementById('blife_id').value = '';
+        document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('accion').value = 'agregar';
         document.getElementById('id_producto').value = '';

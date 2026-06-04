@@ -165,10 +165,6 @@ include __DIR__ . '/views/includes/header.php';
         <!-- Columna Derecha: Info -->
         <div class="col s12 m5" style="padding-left: 50px;">
             <h1 id="product-title" class="product-title">Cargando...</h1>
-            <div class="ingredients-text">
-                <p style="margin: 0;"><strong>Ingredientes:</strong></p>
-                <p style="margin: 5px 0 0 0;" id="product-desc">No especificados.</p>
-            </div>
 
             <!-- Leyenda Legal Estática (Siempre visible) -->
             <div class="legal-box">
@@ -243,9 +239,6 @@ include __DIR__ . '/views/includes/header.php';
                     </tbody>
                 </table>
             </div>
-            <p class="legal-disclaimer-sub">
-                Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.
-            </p>
         </div>
     </div>
 </div>
@@ -347,7 +340,7 @@ include __DIR__ . '/views/includes/header.php';
         
         // Contenido de Pestañas (innerHTML para soportar saltos de línea de la DB)
         document.getElementById('tab-uso').innerHTML = (product.modo_uso || 'Consultar el empaque para instrucciones de uso.').replace(/\n/g, '<br>');
-        document.getElementById('tab-ingredientes').innerHTML = (product.ingredientes || product.descripcion || 'No especificados.').replace(/\n/g, '<br>');
+        document.getElementById('tab-ingredientes').innerHTML = (product.ingredientes || 'No especificados en la ficha técnica.').replace(/\n/g, '<br>');
 
         // Renderizar Tabla Nutrimental Dinámica
         const nutBody = document.getElementById('nutritional-body');
@@ -372,6 +365,9 @@ include __DIR__ . '/views/includes/header.php';
 
             if (list.length > 0) {
                 list.forEach(row => {
+                    // Evitar repetir la lista de ingredientes dentro de la tabla nutrimental
+                    if (row.label && row.label.toLowerCase().includes('ingredientes')) return;
+
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td class="row-label">${row.label}</td>
@@ -388,9 +384,6 @@ include __DIR__ . '/views/includes/header.php';
             console.error("Error procesando tabla nutrimental", e);
         }
 
-        // Descripción corta en la cabecera
-        document.getElementById('product-desc').textContent = product.descripcion || 'Sin descripción detallada.';
-        
         let priceHtml = `$ ${parseFloat(product.precio_venta).toFixed(2)}`;
         if (parseFloat(product.precio_comparacion) > 0) {
             priceHtml += ` <span class="grey-text" style="text-decoration: line-through; font-size: 1.2rem; margin-left: 15px;">$ ${parseFloat(product.precio_comparacion).toFixed(2)}</span>`;
