@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS `productos` (
   `precio_costo` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `precio_venta` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `categoria` VARCHAR(120) DEFAULT NULL,
-  `estado` ENUM('activo','inactivo') NOT NULL DEFAULT 'activo',
+  `estado` ENUM('activo','inactivo','archivado') NOT NULL DEFAULT 'activo',
   `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_producto`),
   UNIQUE KEY `uq_productos_sku` (`sku`),

@@ -55,6 +55,11 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="id_producto" id="id_producto" value="">
                         
                         <div class="input-field">
+                            <input type="text" id="nombre_variante" name="nombre_variante">
+                            <label for="nombre_variante">Presentación de la Variante (ej: 90 Caps)</label>
+                        </div>
+
+                        <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required>
                             <label for="nombre">Nombre del Producto</label>
                         </div>
@@ -293,9 +298,15 @@ include __DIR__ . '/includes/header.php';
                         document.getElementById('modo_uso').value = cleanUso.charAt(0).toUpperCase() + cleanUso.slice(1);
                     }
                     
-                    // 2. Usar el título de la variante como Unidad (ej: 60 Caps | 550 mg)
-                    if (fullData.producto.variante && fullData.producto.variante.title) 
+                    // 2. Extraer presentación de la variante (ej: 90 Caps)
+                    if (fullData.producto.variante && fullData.producto.variante.title) {
+                        document.getElementById('nombre_variante').value = fullData.producto.variante.title;
                         document.getElementById('unidad').value = fullData.producto.variante.title;
+                    }
+
+                    // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
+                    if (fullData.producto.title)
+                        document.getElementById('nombre').value = fullData.producto.title;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
@@ -570,7 +581,27 @@ include __DIR__ . '/includes/header.php';
             .then(r => r.json())
             .then(res => {
                 if(!res.success) throw new Error(res.message);
-                tbody.innerHTML = res.data.map(p => renderRow(p)).join('');
+                
+                // Agrupar productos por nombre base para visualización limpia estilo Odoo
+                const grouped = res.data.reduce((acc, p) => {
+                    const key = p.nombre.trim();
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(p);
+                    return acc;
+                }, {});
+
+                let html = '';
+                // Ordenar alfabéticamente por nombre de producto
+                Object.keys(grouped).sort().forEach(name => {
+                    const variants = grouped[name];
+                    if (variants.length === 1) {
+                        html += renderRow(variants[0]);
+                    } else {
+                        html += renderGroupedRow(variants);
+                    }
+                });
+                tbody.innerHTML = html;
+                aplicarFiltros();
             })
             .catch(err => {
                 tbody.innerHTML = `<tr><td colspan="8" class="center red-text">${err.message}</td></tr>`;
@@ -635,6 +666,50 @@ include __DIR__ . '/includes/header.php';
         `;
     }
 
+    function renderGroupedRow(variants) {
+        const p = variants[0]; // Producto base para datos genéricos
+        const totalStock = variants.reduce((sum, v) => sum + (parseInt(v.cantidad_actual) || 0), 0);
+        const minP = Math.min(...variants.map(v => parseFloat(v.precio_venta)));
+        const maxP = Math.max(...variants.map(v => parseFloat(v.precio_venta)));
+        const priceRange = minP === maxP ? `$${minP.toFixed(2)}` : `$${minP.toFixed(2)} - $${maxP.toFixed(2)}`;
+        
+        let imgSrc = getProductImgUrl(p.imagen);
+        
+        // Lista de botones para cada variante
+        let variantsHtml = '<div style="max-height: 120px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 5px; background: white; min-width: 180px;">';
+        variants.forEach(v => {
+            const jsonV = JSON.stringify(v).replace(/'/g, "&apos;");
+            const label = v.nombre_variante || v.unidad || v.sku;
+            variantsHtml += `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding-bottom:2px; border-bottom:1px dashed #eee;">
+                    <span style="font-size:0.75rem; color:#444;">${label} (${v.cantidad_actual})</span>
+                    <button type="button" class="btn-flat btn-small blue-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='abrirEditar(${jsonV})'>EDITAR</button>
+                </div>`;
+        });
+        variantsHtml += '</div>';
+
+        // Juntar todos los SKUs para que el buscador funcione
+        const allSkus = variants.map(v => v.sku).join(' ');
+
+        return `
+            <tr class="product-group-row" data-skus="${allSkus.toLowerCase()}">
+                <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
+                <td>
+                    <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong><br>
+                    <span class="badge blue white-text" style="float:none; margin:0; font-size:0.7rem; border-radius:4px;">${variants.length} PRESENTACIONES</span>
+                </td>
+            <td class="grey-text" style="font-size:0.8rem;">${variants[0].sku} ...</td>
+                <td class="green-text text-darken-3" style="font-weight:bold;">${priceRange}</td>
+            <td><span class="badge blue white-text" style="float:none; border-radius:4px;">ACTIVO</span></td>
+                <td class="center-align">
+                    <span class="badge blue white-text" style="float: none; font-weight: bold; border-radius: 4px;">${totalStock}</span>
+                </td>
+                <td class="center-align grey-text">--</td>
+                <td>${variantsHtml}</td>
+            </tr>
+        `;
+    }
+
     function eliminarProducto(id) {
         if(!confirm('¿Desactivar producto?')) return;
         const formData = new FormData();
@@ -659,6 +734,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('id_producto').value = prod.id_producto;
         
         document.getElementById('nombre').value = prod.nombre;
+        document.getElementById('nombre_variante').value = prod.nombre_variante || '';
         document.getElementById('sku').value = prod.sku;
         document.getElementById('codigo_barras').value = prod.codigo_barras || '';
         document.getElementById('descripcion').value = prod.descripcion || '';
@@ -757,7 +833,9 @@ include __DIR__ . '/includes/header.php';
         
         rows.forEach(row => {
             const nombre = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
-            const sku = row.cells[2] ? row.cells[2].textContent.toLowerCase() : '';
+            // Buscar SKU en la celda o en el atributo data-skus (para grupos)
+            const sku = (row.cells[2] ? row.cells[2].textContent.toLowerCase() : '') + ' ' + (row.getAttribute('data-skus') || '');
+            
             // El estado está en la celda 4 (badge)
             const estadoActual = row.cells[4] ? row.cells[4].textContent.trim().toLowerCase() : '';
             

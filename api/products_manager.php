@@ -76,14 +76,15 @@ try {
             
             if ($id > 0) {
                 // EDITAR
-                $sql = "UPDATE productos SET `nombre` = :nombre, `sku` = :sku, `codigo_barras` = :codigo_barras, 
+                $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras, 
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
                         `tabla_nutrimental` = :tabla, `unidad` = :unidad, `precio_costo` = :precio_costo, 
                         `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado 
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
-                    ':nombre' => $data['nombre'], ':sku' => $data['sku'], ':codigo_barras' => $data['codigo_barras'],
+                    ':nombre' => $data['nombre'], ':nombre_variante' => $data['nombre_variante'] ?? null,
+                    ':sku' => $data['sku'], ':codigo_barras' => $data['codigo_barras'],
                     ':descripcion' => $data['descripcion'], ':ingredientes' => $data['ingredientes'],
                     ':modo_uso' => $data['modo_uso'], ':tabla' => $data['tabla_nutrimental'],
                     ':unidad' => $data['unidad'], ':precio_costo' => $data['precio_costo'],
@@ -92,11 +93,12 @@ try {
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `unidad`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
-                        VALUES (:nombre, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :unidad, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `unidad`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
+                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :unidad, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'],
+                    ':nombre_variante' => $data['nombre_variante'] ?? null,
                     ':sku' => $data['sku'],
                     ':codigo_barras' => $data['codigo_barras'],
                     ':descripcion' => $data['descripcion'],

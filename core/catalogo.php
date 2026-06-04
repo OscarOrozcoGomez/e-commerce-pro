@@ -10,7 +10,9 @@ $categorias = dbGetCategories();
 
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
-$sql = "SELECT p.* FROM productos p ";
+$sql = "SELECT p.*, MIN(p.precio_venta) as precio_desde, COUNT(p2.id_producto) as total_variantes 
+        FROM productos p 
+        LEFT JOIN productos p2 ON TRIM(p.nombre) = TRIM(p2.nombre) AND p2.estado = 'activo'";
 $params = [];
 $whereClauses = ["p.estado = 'activo'"];
 
@@ -22,12 +24,14 @@ if (!empty($categoriaSeleccionada)) {
 }
 
 if (!empty($busqueda)) {
-    $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.descripcion LIKE :search)";
+    $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.nombre_variante LIKE :search)";
     $params[':search'] = '%' . $busqueda . '%';
 }
 
 $sql .= " WHERE " . implode(" AND ", $whereClauses);
-$sql .= " ORDER BY p.nombre ASC";
+// Agrupamos por nombre y ordenamos para que el producto base sea el de menor precio
+$sql .= " GROUP BY TRIM(p.nombre)";
+$sql .= " ORDER BY p.nombre ASC, p.precio_venta ASC";
 
 try {
     $stmt = $pdo->prepare($sql);
@@ -145,6 +149,11 @@ include __DIR__ . '/../views/includes/header.php';
                                     </span>
                                     <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
                                         $<?php echo number_format((float)$p['precio_venta'], 2); ?>
+                                        <?php if ($p['total_variantes'] > 1): ?>
+                                            <span style="font-size: 0.8rem; display: block; color: #757575;">
+                                                (<?php echo $p['total_variantes']; ?> presentaciones disponibles)
+                                            </span>
+                                        <?php endif; ?>
                                     </p>
                                     <p class="grey-text truncate-3-lines" style="font-size: 0.9rem;">
                                         <?php echo esc($p['descripcion'] ?? 'Sin descripción disponible.'); ?>
