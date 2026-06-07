@@ -107,6 +107,18 @@ include __DIR__ . '/includes/header.php';
                             <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
                             <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
                         </div>
+
+                        <div class="input-field" style="margin-bottom: 20px;">
+                            <div class="switch">
+                                <label>
+                                    Ocultar Tabla
+                                    <input type="checkbox" name="mostrar_tabla" id="mostrar_tabla" value="1" checked>
+                                    <span class="lever"></span>
+                                    Mostrar Información Nutrimental
+                                </label>
+                            </div>
+                        </div>
+
                         <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
                         
                         <div class="input-field">
@@ -357,13 +369,50 @@ include __DIR__ . '/includes/header.php';
                 document.getElementById('tabla_nutrimental').value = list.length > 0 ? JSON.stringify(list) : '[]';
 
                 // 4. Capturar y mostrar previsualización de imágenes externas para importación automática
+                console.log("Datos de Variante B-Life recibidos:", fullData.producto?.variante);
+
                 if (fullData.producto?.variante) {
                     const v = fullData.producto.variante;
-                    let urls = [...new Set([v.featuredImage, v.secondaryImage, ...(v.gallery || [])])].filter(Boolean);
-                    urls.forEach(url => {
+                    
+                    // Función para extraer la URL real de forma segura
+                    const limpiarUrl = (img) => {
+                        if (!img) return null;
+                        // Si es un objeto, intentar sacar la propiedad de imagen
+                        let url = (typeof img === 'object' && img !== null) ? (img.src || img.url || img.image_url || null) : img;
+                        
+                        if (typeof url !== 'string' || url === '') return null;
+                        
+                        url = url.trim();
+                        const basura = ['null', 'undefined', '[object object]', 'false', 'true', 'none', 'nan'];
+                        if (basura.includes(url.toLowerCase())) return null;
+                        
                         if (url.startsWith('//')) url = 'https:' + url;
-                        // Solo agregar si no está ya en la cola para evitar duplicados en re-syncs
-                        if (!colaImagenes.find(item => item.path === url)) {
+                        
+                        // Validar que sea una URL absoluta, que tenga extensión de imagen y no sea un placeholder
+                        const esValida = url.startsWith('http') && 
+                                         /\.(jpg|jpeg|png|webp|gif)/i.test(url) && 
+                                         !url.includes('no-image') &&
+                                         !url.includes('no-product') && 
+                                         !url.includes('placeholder');
+                        
+                        return esValida ? url : null;
+                    };
+
+                    // Procesar todas las fuentes posibles y eliminar nulos/duplicados
+                    let urls = [v.featuredImage, v.secondaryImage, ...(v.gallery || [])]
+                        .map(limpiarUrl)
+                        .filter(Boolean);
+                    
+                    urls = [...new Set(urls)]; // Eliminar duplicados después de normalizar el protocolo
+
+                    urls.forEach(url => {
+                        // Evitar duplicados: Si la URL ya está (como remote) o si el nombre del archivo ya existe en la cola
+                        const nombreArchivo = url.split('/').pop().split('?')[0];
+                        const existe = colaImagenes.some(item => 
+                            item.path === url || (item.path && item.path.includes(nombreArchivo))
+                        );
+
+                        if (!existe) {
                             colaImagenes.push({ type: 'remote', path: url, preview: url });
                         }
                     });
@@ -384,7 +433,9 @@ include __DIR__ . '/includes/header.php';
     window.renderNutritionalPreview = function() {
         const raw = document.getElementById('tabla_nutrimental').value.trim();
         const container = document.getElementById('nutritional-preview-container');
-        if (!raw) {
+        const toggle = document.getElementById('mostrar_tabla');
+
+        if (!raw || (toggle && !toggle.checked)) {
             container.innerHTML = '';
             return;
         }
@@ -464,6 +515,9 @@ include __DIR__ . '/includes/header.php';
 
     document.addEventListener('DOMContentLoaded', () => {
         cargarDependencias();
+
+        // Actualizar previsualización cuando se mueva el toggle de mostrar/ocultar
+        document.getElementById('mostrar_tabla')?.addEventListener('change', renderNutritionalPreview);
 
         // Inicializar el Drag and Drop en el contenedor de previsualización
         const previewContainer = document.getElementById('preview-container');
@@ -624,10 +678,15 @@ include __DIR__ . '/includes/header.php';
     // Ayudante JS para resolver la URL de la imagen similar a la función de PHP
     function getProductImgUrl(imgData) {
         const baseUrl = '<?php echo BASE_URL; ?>';
-        if (!imgData || imgData === 'NULL') return baseUrl + 'assets/img/no-product.png';
+        if (!imgData || imgData === 'NULL' || imgData === '' || imgData === 'undefined') {
+            return '';
+        }
+        
+        // Si ya es una URL completa, devolverla tal cual para evitar rutas deformes
+        if (imgData.startsWith('http')) return imgData;
         
         // Si es una ruta de archivo (formato corto con extensión)
-        if (imgData.length < 255 && /\.(jpg|jpeg|png|webp)$/i.test(imgData)) {
+        if (imgData.length < 255 && /\.(jpg|jpeg|png|webp|gif)$/i.test(imgData)) {
             return baseUrl + 'assets/img/products/' + imgData;
         }
         
@@ -636,7 +695,7 @@ include __DIR__ . '/includes/header.php';
             return imgData.includes('data:image') ? imgData : `data:image/jpeg;base64,${imgData}`;
         }
         
-        return baseUrl + 'assets/img/no-product.png';
+        return '';
     }
 
     function renderRow(p) {
@@ -769,6 +828,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('ingredientes').value = prod.ingredientes || '';
         document.getElementById('tabla_nutrimental').value = prod.tabla_nutrimental || '';
         document.getElementById('unidad').value = prod.unidad || '';
+        document.getElementById('mostrar_tabla').checked = (prod.mostrar_tabla == 1);
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('id_padre').value = prod.id_padre || '';
         document.getElementById('precio_venta').value = prod.precio_venta;
@@ -776,12 +836,19 @@ include __DIR__ . '/includes/header.php';
 
         // Cargar imágenes actuales a la cola
         colaImagenes = [];
-        if (prod.imagen && prod.imagen !== 'NULL') {
+        const rutasVistas = new Set();
+
+        if (prod.imagen && prod.imagen !== 'NULL' && prod.imagen !== '') {
             colaImagenes.push({ type: 'server', path: prod.imagen, preview: getProductImgUrl(prod.imagen) });
+            rutasVistas.add(prod.imagen);
         }
+
         if (prod.galeria_paths) {
             prod.galeria_paths.split(',').forEach(p => {
-                colaImagenes.push({ type: 'server', path: p, preview: getProductImgUrl(p) });
+                if (p && p !== 'NULL' && !rutasVistas.has(p)) {
+                    colaImagenes.push({ type: 'server', path: p, preview: getProductImgUrl(p) });
+                    rutasVistas.add(p);
+                }
             });
         }
         renderPreviews();
@@ -836,6 +903,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('blife_id').value = '';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
+        document.getElementById('mostrar_tabla').checked = true;
         document.getElementById('accion').value = 'agregar';
         document.getElementById('sku').value = '';
         document.getElementById('nombre_variante').value = '';

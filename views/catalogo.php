@@ -15,7 +15,7 @@ $sql = "SELECT p.*,
         (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto OR TRIM(p2.nombre) = TRIM(p.nombre)) AND p2.estado = 'activo') as total_variantes 
         FROM productos p ";
 $params = [];
-$whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
+$whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0 OR p.id_padre = p.id_producto)"];
 
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 

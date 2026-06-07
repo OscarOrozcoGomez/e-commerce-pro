@@ -233,8 +233,8 @@ include __DIR__ . '/views/includes/header.php';
                 <table class="nutritional-table highlight">
                     <thead>
                         <tr>
-                            <th>Cantidades</th>
-                            <th>Por porción (0.5 g)</th>
+                            <th>Nutriente / Información</th>
+                            <th>Contenido por Porción</th>
                             <th>Por 100 g</th>
                         </tr>
                     </thead>
@@ -338,44 +338,60 @@ include __DIR__ . '/views/includes/header.php';
 
         // Renderizar Tabla Nutrimental Dinámica
         const nutBody = document.getElementById('nutritional-body');
-        nutBody.innerHTML = '';
+        const nutTitle = document.querySelector('.nutritional-title');
+        const nutContainer = nutBody ? nutBody.closest('.col.s12') : null;
         
-        try {
-            let nutData = typeof product.tabla_nutrimental === 'string' 
-                ? JSON.parse(product.tabla_nutrimental) 
-                : product.tabla_nutrimental;
+        if (nutBody) nutBody.innerHTML = '';
 
-            let list = [];
-            if (Array.isArray(nutData)) {
-                list = nutData;
-            } else if (nutData && nutData.rows && Array.isArray(nutData.rows)) {
-                // Manejo de estructura raw de B-Life guardada previamente
-                list = nutData.rows.map(r => ({
-                    label: (r[0]?.value || '-').replace(/\n/g, '<br>'),
-                    porcion: (r[1]?.value || '-').replace(/\n/g, '<br>'),
-                    total: (r[2]?.value || '-').replace(/\n/g, '<br>')
-                }));
+        if (product.mostrar_tabla == 1) {
+            try {
+                let nutData = typeof product.tabla_nutrimental === 'string' 
+                    ? JSON.parse(product.tabla_nutrimental) 
+                    : product.tabla_nutrimental;
+
+                let list = [];
+                // Normalizador inteligente de datos
+                if (Array.isArray(nutData)) {
+                    list = nutData.map(item => ({
+                        label: item.label || item.name || item.nutrient || item.nutrient_name || '-',
+                        porcion: item.porcion || item.portion || item.amount_per_serving || item.serving || '-',
+                        total: item.total || item.amount_per_100g || '-'
+                    }));
+                } else if (nutData && nutData.rows && Array.isArray(nutData.rows)) {
+                    // Caso para datos raw de la API de B-Life
+                    list = nutData.rows.map(r => ({
+                        label: (r[0]?.value || '-').replace(/\n/g, '<br>'),
+                        porcion: (r[1]?.value || '-').replace(/\n/g, '<br>'),
+                        total: (r[2]?.value || '-').replace(/\n/g, '<br>')
+                    }));
+                }
+
+                if (list.length > 0 && nutBody) {
+                    list.forEach(row => {
+                        // Limpieza: No repetir ingredientes en la tabla si ya están arriba
+                        const lbl = String(row.label).toLowerCase();
+                        if (lbl.includes('ingredientes') || lbl.includes('modo de uso')) return;
+                        
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td class="row-label">${row.label}</td>
+                            <td>${row.porcion}</td>
+                            <td>${row.total || '-'}</td>
+                        `;
+                        nutBody.appendChild(tr);
+                    });
+                    if (nutTitle) nutTitle.style.display = 'block';
+                    if (nutContainer) nutContainer.style.display = 'block';
+                } else {
+                    if (nutTitle) nutTitle.style.display = 'none';
+                    if (nutContainer) nutContainer.style.display = 'none';
+                }
+            } catch (e) {
+                console.error("Error procesando tabla nutrimental", e);
             }
-
-            if (list.length > 0) {
-                list.forEach(row => {
-                    // Evitar repetir la lista de ingredientes dentro de la tabla nutrimental
-                    if (row.label && row.label.toLowerCase().includes('ingredientes')) return;
-
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td class="row-label">${row.label}</td>
-                        <td>${row.porcion || row.portion || '-'}</td>
-                        <td>${row.total || '-'}</td>
-                    `;
-                    nutBody.appendChild(tr);
-                });
-                document.querySelector('.nutritional-title').parentElement.style.display = 'block';
-            } else {
-                document.querySelector('.nutritional-title').parentElement.style.display = 'none';
-            }
-        } catch (e) {
-            console.error("Error procesando tabla nutrimental", e);
+        } else {
+            if (nutTitle) nutTitle.style.display = 'none';
+            if (nutContainer) nutContainer.style.display = 'none';
         }
 
         let priceHtml = `$ ${parseFloat(product.precio_venta).toFixed(2)}`;

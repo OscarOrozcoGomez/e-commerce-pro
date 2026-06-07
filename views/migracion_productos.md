@@ -12,7 +12,10 @@ ALTER TABLE productos
 MODIFY imagen LONGTEXT,
 ADD COLUMN IF NOT EXISTS modo_uso TEXT NULL AFTER descripcion,
 ADD COLUMN IF NOT EXISTS ingredientes TEXT NULL AFTER modo_uso,
-ADD COLUMN IF NOT EXISTS tabla_nutrimental TEXT NULL AFTER ingredientes;
+ADD COLUMN IF NOT EXISTS tabla_nutrimental TEXT NULL AFTER ingredientes,
+ADD COLUMN IF NOT EXISTS mostrar_tabla TINYINT(1) DEFAULT 1 AFTER tabla_nutrimental;
+/* Asegurar que el valor por defecto sea siempre visible (1) */
+UPDATE productos SET mostrar_tabla = 1 WHERE mostrar_tabla IS NULL;
 ```
 
 ## 2. Creación de la Tabla Temporal de Importación

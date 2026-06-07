@@ -76,12 +76,13 @@ try {
         if ($action === 'save') {
             $id = (int)($data['id_producto'] ?? 0);
             $estado = ($data['visible_catalogo'] ?? '0') === '1' ? 'activo' : 'archivado';
+            $mostrar_tabla = ($data['mostrar_tabla'] ?? '0') === '1' ? 1 : 0;
             
             if ($id > 0) {
                 // EDITAR
                 $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras, 
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
-                        `tabla_nutrimental` = :tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo, 
+                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo, 
                         `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
@@ -90,6 +91,7 @@ try {
                     ':sku' => $data['sku'] ?? null, ':codigo_barras' => $data['codigo_barras'] ?? null,
                     ':descripcion' => $data['descripcion'] ?? '', ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '', ':tabla' => $data['tabla_nutrimental'] ?? '[]',
+                    ':mostrar_tabla' => $mostrar_tabla,
                     ':unidad' => $data['unidad'] ?? null, ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0, ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
@@ -97,8 +99,8 @@ try {
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `unidad`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
-                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :unidad, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
+                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '',
@@ -109,6 +111,7 @@ try {
                     ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '',
                     ':tabla' => $data['tabla_nutrimental'] ?? '[]',
+                    ':mostrar_tabla' => $mostrar_tabla,
                     ':unidad' => $data['unidad'] ?? null,
                     ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
@@ -125,8 +128,14 @@ try {
             $hasOrden = !empty($data['imagenes_orden_json']);
 
             if ($hasLocal || $hasRemote || $hasOrden) {
+                // Generar nombre de carpeta único para el producto
                 $folderName = slugify($data['nombre'] ?? 'producto') . '-' . $id;
-                $targetDir = PRODUCTS_IMG_DIR . $folderName . '/';
+                
+                // FORZAR RUTA ABSOLUTA: Independiente de si PRODUCTS_IMG_DIR es relativo o absoluto
+                // Buscamos la carpeta assets desde la raíz del proyecto (un nivel arriba de api/)
+                $baseDir = dirname(__DIR__) . '/assets/img/products/';
+                $targetDir = $baseDir . $folderName . '/';
+                
                 if (!is_dir($targetDir)) {
                     if (!mkdir($targetDir, 0755, true)) throw new Exception("Error al crear carpeta de imágenes. Revisa permisos en assets/img/products/");
                 }
@@ -139,8 +148,11 @@ try {
                         $ext = strtolower(pathinfo($files['name'][$i], PATHINFO_EXTENSION));
                         $fileName = "upd_" . $i . "_" . time() . "." . $ext;
                         $targetFile = $targetDir . $fileName;
+                        
                         if (move_uploaded_file($files['tmp_name'][$i], $targetFile)) {
-                            $uploadedPaths[] = $folderName . '/' . $fileName;
+                            $uploadedPaths[$i] = $folderName . '/' . $fileName;
+                        } else {
+                            throw new Exception("Error al mover el archivo subido al servidor. Revisa permisos de escritura en: " . $targetDir);
                         }
                     }
                 }
@@ -158,16 +170,27 @@ try {
                             $targetFile = $targetDir . $fileName;
                             $dbPath = $folderName . '/' . $fileName;
 
-                            if (!file_exists($targetFile)) {
+                            // Si el archivo ya existe localmente (por un sync previo), no lo descargamos de nuevo
+                            if (file_exists($targetFile)) {
+                                $remoteDownloaded[$url] = $dbPath;
+                                continue;
+                            }
+
                                 $ch = curl_init($url);
                                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                                curl_setopt($ch, CURLOPT_TIMEOUT, 10);
                                 $imgRaw = curl_exec($ch);
+                                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                                $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
                                 curl_close($ch);
-                                if ($imgRaw) file_put_contents($targetFile, $imgRaw);
-                            }
-                            $remoteDownloaded[$url] = $dbPath;
+
+                                // Solo guardar si el servidor respondió 200 OK y es una imagen real
+                                if ($httpCode === 200 && strpos($contentType, 'image/') !== false && $imgRaw) {
+                                    file_put_contents($targetFile, $imgRaw);
+                                    $remoteDownloaded[$url] = $dbPath;
+                                }
                         }
                     }
                 }
@@ -194,15 +217,19 @@ try {
                 // Limpiar galería actual
                 $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
                 
+                // Actualizar imagen principal o limpiar si el usuario borró todo
                 if (!empty($finalPaths)) {
-                    // Actualizar imagen principal (index 0)
                     $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$finalPaths[0], $id]);
+                    
                     // Insertar resto en galería
                     for ($i = 1; $i < count($finalPaths); $i++) {
                         if ($i >= 6) break; // Límite de 6 imágenes
                         $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
                             ->execute([$id, $finalPaths[$i], $i]);
                     }
+                } else {
+                    // Si se enviaron instrucciones de orden pero no quedaron imágenes válidas, limpiar la principal
+                    $pdo->prepare("UPDATE productos SET imagen = NULL WHERE id_producto = ?")->execute([$id]);
                 }
             }
 

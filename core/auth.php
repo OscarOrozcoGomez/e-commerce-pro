@@ -704,11 +704,13 @@ function slugify(string $text): string {
  * Resuelve la URL de la imagen de un producto de forma robusta.
  */
 function getProductImageUrl(?string $imgData): string {
-    $default = BASE_URL . 'assets/img/no-product.png';
-    if (empty($imgData)) return $default;
+    if (empty($imgData) || $imgData === 'NULL' || $imgData === 'undefined' || $imgData === '') return '';
 
-    // Si es una ruta de archivo (formato: carpeta-ID/archivo.jpg)
-    if (strlen($imgData) < 255 && preg_match('/\.(jpg|jpeg|png|webp)$/i', $imgData)) {
+    // Si ya es una URL completa (http o https), devolverla tal cual
+    if (strpos($imgData, 'http') === 0) return $imgData;
+
+    // Si es una ruta de archivo (contiene una barra diagonal o tiene extensión de imagen)
+    if (strpos($imgData, '/') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif)$/i', $imgData)) {
         return BASE_URL . 'assets/img/products/' . $imgData;
     }
 
@@ -723,5 +725,5 @@ function getProductImageUrl(?string $imgData): string {
         return "data:$mime;base64," . trim($clean);
     }
 
-    return $default;
+    return '';
 }
