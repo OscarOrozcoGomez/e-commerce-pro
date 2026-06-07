@@ -669,7 +669,7 @@ function dbGetPresentationTypes(): array {
 function dbGetParentProducts(): array {
     try {
         $pdo = getPDO();
-        $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE id_padre IS NULL AND estado = 'activo' ORDER BY nombre ASC";
+        $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE (id_padre IS NULL OR id_padre = 0) AND estado = 'activo' ORDER BY nombre ASC";
         return $pdo->query($sql)->fetchAll();
     } catch (PDOException $e) {
         error_log("Error en dbGetParentProducts: " . $e->getMessage());

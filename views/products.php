@@ -92,6 +92,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
                             <div class="input-field col s8" style="margin: 0;">
                                 <input type="text" id="blife_id" placeholder="ID B-Life">
+                                <input type="hidden" name="imagenes_orden_json" id="imagenes_orden_json">
                                 <label for="blife_id" class="active">Sync con B-Life (Variant ID)</label>
                             </div>
                             <div class="col s4">
@@ -252,7 +253,7 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
-    let archivosSeleccionados = []; // Acumulador global de archivos
+    let colaImagenes = []; // { type: 'local'|'server', file: File|null, path: string|null, preview: string }
 
     // Función para expandir/colapsar variantes
     window.toggleVariants = function(id) {
@@ -358,10 +359,15 @@ include __DIR__ . '/includes/header.php';
                 // 4. Capturar y mostrar previsualización de imágenes externas para importación automática
                 if (fullData.producto?.variante) {
                     const v = fullData.producto.variante;
-                    const allUrls = [v.featuredImage, v.secondaryImage, ...(v.gallery || [])].filter(Boolean);
-                    // Guardamos el JSON de URLs para que el backend las descargue al guardar
-                    document.getElementById('remote_images_urls').value = JSON.stringify(allUrls);
-                    renderBlifeImageSuggestions(v);
+                    let urls = [...new Set([v.featuredImage, v.secondaryImage, ...(v.gallery || [])])].filter(Boolean);
+                    urls.forEach(url => {
+                        if (url.startsWith('//')) url = 'https:' + url;
+                        // Solo agregar si no está ya en la cola para evitar duplicados en re-syncs
+                        if (!colaImagenes.find(item => item.path === url)) {
+                            colaImagenes.push({ type: 'remote', path: url, preview: url });
+                        }
+                    });
+                    renderPreviews();
                 }
                 
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
@@ -373,60 +379,6 @@ include __DIR__ . '/includes/header.php';
             })
             .catch(err => M.toast({html: 'Error: ' + err.message, classes: 'red'}))
             .finally(() => { btn.disabled = false; btn.innerText = originalText; });
-    };
-
-    window.renderBlifeImageSuggestions = function(variante) {
-        const container = document.getElementById('blife-external-images');
-        // Usar Set para evitar URLs duplicadas y asegurar protocolo HTTPS
-        let urls = [...new Set([variante.featuredImage, variante.secondaryImage, ...(variante.gallery || [])])].filter(Boolean);
-        
-        urls = urls.map(url => {
-            if (url.startsWith('//')) return 'https:' + url;
-            return url;
-        });
-        
-        if (urls.length > 0) {
-            container.style.display = 'block';
-            container.innerHTML = `
-                <p style="font-size: 0.8rem; margin: 10px 0 5px 0; color: #1a237e; font-weight: bold;">
-                    <i class="material-icons tiny">collections</i> Imágenes encontradas (Arrastra para reordenar):
-                </p>
-                <div id="remote-sortable-list" class="row" style="margin-bottom: 0;"></div>
-            `;
-            
-            const list = document.getElementById('remote-sortable-list');
-            urls.forEach((url, index) => {
-                const div = document.createElement('div');
-                div.className = 'col s4 m3 remote-img-item';
-                div.setAttribute('data-url', url);
-                div.style = 'position:relative; margin-bottom:10px; cursor:move;';
-                div.innerHTML = `
-                    <div class="card" style="margin:0; border: 1px solid #ddd;">
-                        <div class="card-image">
-                            <img src="${url}" referrerpolicy="no-referrer" style="height: 70px; object-fit: contain; background:#fff; padding:2px;">
-                            <span class="remote-label" style="position:absolute; top:0; left:0; color:white; font-size:7px; padding:1px 3px; width:100%; text-align:center; font-weight:bold;"></span>
-                        </div>
-                    </div>`;
-                list.appendChild(div);
-            });
-
-            const updateRemoteInput = () => {
-                const currentUrls = [];
-                const items = list.querySelectorAll('.remote-img-item');
-                items.forEach((item, i) => {
-                    currentUrls.push(item.getAttribute('data-url'));
-                    const label = item.querySelector('.remote-label');
-                    if (label) {
-                        label.innerText = (i === 0) ? 'ESTARÁ COMO PRINCIPAL' : 'GALERÍA';
-                        label.style.background = (i === 0) ? '#2e7d32' : '#1a237e';
-                    }
-                });
-                document.getElementById('remote_images_urls').value = JSON.stringify(currentUrls);
-            };
-
-            new Sortable(list, { animation: 150, onEnd: updateRemoteInput });
-            updateRemoteInput();
-        }
     };
 
     window.renderNutritionalPreview = function() {
@@ -471,108 +423,98 @@ include __DIR__ . '/includes/header.php';
         }
     };
 
+    window.renderPreviews = function() {
+        const container = document.getElementById('preview-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        colaImagenes.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = 'col s4 m2 preview-item';
+            div.style.position = 'relative';
+            div.setAttribute('data-index', index);
+            const labelBg = index === 0 ? '#2e7d32' : '#546e7a';
+            div.innerHTML = `
+                <div class="card" style="margin: 5px 0;">
+                    <div class="card-image">
+                        <img src="${item.preview}" style="height: 60px; object-fit: cover;">
+                        <span style="position: absolute; top:0; left:0; background:${labelBg}; color:white; font-size:9px; padding:2px 5px; width:100%; text-align:center;">
+                            ${index === 0 ? 'PRINCIPAL' : 'GALERÍA'}
+                        </span>
+                        <button type="button" onclick="quitarImagen(${index})" class="btn-floating btn-small red" style="position:absolute; top:-10px; right:-10px; width:24px; height:24px;">
+                            <i class="material-icons" style="line-height:24px; font-size:14px;">close</i>
+                        </button>
+                        ${index > 0 ? `<button type="button" onclick="hacerPrincipal(${index})" class="btn-flat white-text" style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.5); font-size:8px; padding:0; height:18px;">SUBIR A PRINCIPAL</button>` : ''}
+                    </div>
+                </div>`;
+            container.appendChild(div);
+        });
+    };
+
+    window.quitarImagen = function(index) {
+        colaImagenes.splice(index, 1);
+        renderPreviews();
+    };
+
+    window.hacerPrincipal = function(index) {
+        const item = colaImagenes.splice(index, 1)[0];
+        colaImagenes.unshift(item); 
+        renderPreviews();
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
         cargarDependencias();
 
         // Inicializar el Drag and Drop en el contenedor de previsualización
         const previewContainer = document.getElementById('preview-container');
-        new Sortable(previewContainer, {
-            animation: 150,
-            ghostClass: 'blue-lighten-5',
-            onEnd: function() {
-                // Reordenar el array archivosSeleccionados basado en el nuevo orden visual
-                const nuevoOrden = [];
-                previewContainer.querySelectorAll('.preview-item').forEach(el => {
-                    const indexOriginal = el.getAttribute('data-index');
-                    nuevoOrden.push(archivosSeleccionados[indexOriginal]);
-                });
-                archivosSeleccionados = nuevoOrden;
-                renderPreviews(); // Re-renderizar para actualizar etiquetas (Principal/Galería)
-            }
-        });
-
-        // Previsualización de imágenes seleccionadas
-        document.getElementById('input-imagenes').addEventListener('change', function(e) {
-            const nuevosArchivos = Array.from(this.files);
-            
-            // Añadir nuevos archivos al acumulador sin borrar los anteriores
-            // Limitamos a un total de 6
-            nuevosArchivos.forEach(file => {
-                if (archivosSeleccionados.length < 6) {
-                    archivosSeleccionados.push(file);
+        if (previewContainer) {
+            new Sortable(previewContainer, {
+                animation: 150,
+                ghostClass: 'blue-lighten-5',
+                onEnd: function() {
+                    const nuevaCola = [];
+                    previewContainer.querySelectorAll('.preview-item').forEach(el => {
+                        const indexOriginal = el.getAttribute('data-index');
+                        nuevaCola.push(colaImagenes[indexOriginal]);
+                    });
+                    colaImagenes = nuevaCola;
+                    renderPreviews(); // Re-renderizar para actualizar etiquetas (Principal/Galería)
                 }
-            });
-
-            // Limpiar el input para permitir volver a seleccionar los mismos archivos si se desea
-            this.value = '';
-            renderPreviews();
-        });
-        
-        function renderPreviews() {
-            const container = document.getElementById('preview-container');
-            container.innerHTML = '';
-
-            archivosSeleccionados.forEach((file, index) => {
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                    const div = document.createElement('div');
-                    div.className = 'col s4 m2 preview-item';
-                    div.style.position = 'relative';
-                    div.setAttribute('data-index', index);
-                    div.innerHTML = `
-                        <div class="card" style="margin: 5px 0;">
-                            <div class="card-image">
-                                <img src="${event.target.result}" style="height: 60px; object-fit: cover;">
-                                <span style="
-                                    position: absolute; 
-                                    top: 0; 
-                                    left: 0; 
-                                    background: ${index === 0 ? '#2e7d32' : '#546e7a'}; 
-                                    color: white; 
-                                    font-size: 9px; 
-                                    padding: 2px 5px; 
-                                    width: 100%; 
-                                    text-align: center;">
-                                    ${index === 0 ? 'PRINCIPAL' : 'GALERÍA'}
-                                </span>
-                                <button type="button" onclick="quitarImagen(${index})" class="btn-floating btn-small red" style="position: absolute; top: -10px; right: -10px; width: 24px; height: 24px;">
-                                    <i class="material-icons" style="line-height: 24px; font-size: 14px;">close</i>
-                                </button>
-                                ${index > 0 ? `
-                                <button type="button" onclick="hacerPrincipal(${index})" class="btn-flat white-text" style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.5); font-size: 8px; padding: 0; height: 18px; line-height: 18px;">
-                                    SUBIR A PRINCIPAL
-                                </button>` : ''}
-                            </div>
-                        </div>
-                    `;
-                    container.appendChild(div);
-                }
-                reader.readAsDataURL(file);
             });
         }
 
-        window.quitarImagen = function(index) {
-            archivosSeleccionados.splice(index, 1);
-            renderPreviews();
-        };
-
-        window.hacerPrincipal = function(index) {
-            const item = archivosSeleccionados.splice(index, 1)[0];
-            archivosSeleccionados.unshift(item); // Mover al principio
-            renderPreviews();
-        };
+        // Previsualización de imágenes seleccionadas
+        document.getElementById('input-imagenes').addEventListener('change', function(e) {
+            Array.from(this.files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    colaImagenes.push({ type: 'local', file: file, preview: event.target.result });
+                    renderPreviews();
+                };
+                reader.readAsDataURL(file);
+            });
+            this.value = '';
+        });
         
         // Manejar envío de formularios
         document.getElementById('form-producto').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
+            const ordenMapa = [];
+            let localIdx = 0;
             
-            // Limpiar las imágenes del formData original (las del input vacío)
-            formData.delete('imagenes[]');
-            // Añadir los archivos desde nuestro acumulador controlado
-            archivosSeleccionados.forEach(file => {
-                formData.append('imagenes[]', file);
+            formData.delete('imagenes[]'); 
+            colaImagenes.forEach(item => {
+                if (item.type === 'local') {
+                    formData.append('imagenes[]', item.file);
+                    ordenMapa.push('local:' + localIdx++);
+                } else if (item.type === 'server') {
+                    ordenMapa.push('server:' + item.path);
+                } else if (item.type === 'remote') {
+                    ordenMapa.push('remote:' + item.path);
+                }
             });
+            formData.append('imagenes_orden_json', JSON.stringify(ordenMapa));
             
             fetch(`${BASE_API}?action=save`, { method: 'POST', body: formData })
                 .then(r => r.json())
@@ -832,6 +774,18 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
 
+        // Cargar imágenes actuales a la cola
+        colaImagenes = [];
+        if (prod.imagen && prod.imagen !== 'NULL') {
+            colaImagenes.push({ type: 'server', path: prod.imagen, preview: getProductImgUrl(prod.imagen) });
+        }
+        if (prod.galeria_paths) {
+            prod.galeria_paths.split(',').forEach(p => {
+                colaImagenes.push({ type: 'server', path: p, preview: getProductImgUrl(p) });
+            });
+        }
+        renderPreviews();
+
         // Cargar estado
         const checkVisible = document.getElementById('visible_catalogo');
         checkVisible.checked = (prod.estado === 'activo');
@@ -877,8 +831,8 @@ include __DIR__ . '/includes/header.php';
     
     function cancelarEdicion() {
         document.getElementById('form-producto').reset();
-        archivosSeleccionados = []; // Limpiar acumulador
-        document.getElementById('preview-container').innerHTML = '';
+        colaImagenes = []; 
+        renderPreviews();
         document.getElementById('blife_id').value = '';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';

@@ -18,9 +18,10 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($action === 'list') {
             $id_alm = (int)($_GET['almacen_id'] ?? 1);
-            $sql = "SELECT p.*, GROUP_CONCAT(pc.id_categoria) as categorias_ids, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
+            $sql = "SELECT p.*, GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids, GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
                     FROM productos p 
                     LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
+                    LEFT JOIN producto_imagenes pi ON p.id_producto = pi.id_producto
                     LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_alm
                     WHERE p.estado != 'inactivo' 
                     GROUP BY p.id_producto
@@ -121,81 +122,86 @@ try {
             // PROCESAR IMÁGENES (Combinación de locales y remotas de B-Life)
             $hasLocal = isset($_FILES['imagenes']) && !empty($_FILES['imagenes']['name'][0]);
             $hasRemote = !empty($data['remote_images_urls']);
+            $hasOrden = !empty($data['imagenes_orden_json']);
 
-            if ($hasLocal || $hasRemote) {
+            if ($hasLocal || $hasRemote || $hasOrden) {
                 $folderName = slugify($data['nombre'] ?? 'producto') . '-' . $id;
                 $targetDir = PRODUCTS_IMG_DIR . $folderName . '/';
                 if (!is_dir($targetDir)) {
                     if (!mkdir($targetDir, 0755, true)) throw new Exception("Error al crear carpeta de imágenes. Revisa permisos en assets/img/products/");
                 }
                 
-                // Limpiar galería actual antes de repoblar para evitar duplicidad
-                $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
-                $imageCount = 0;
-
-                // 1. Procesar imágenes Locales primero
+                $uploadedPaths = [];
                 if ($hasLocal) {
                     $files = $_FILES['imagenes'];
-                    $totalFiles = count($files['name']);
-                    for ($i = 0; $i < min($totalFiles, 6); $i++) {
+                    for ($i = 0; $i < count($files['name']); $i++) {
                         if ($files['error'][$i] !== UPLOAD_ERR_OK) continue;
-                        
                         $ext = strtolower(pathinfo($files['name'][$i], PATHINFO_EXTENSION));
-                        $fileName = ($imageCount === 0) ? "principal.{$ext}" : "gal_{$imageCount}_" . time() . ".{$ext}";
+                        $fileName = "upd_" . $i . "_" . time() . "." . $ext;
                         $targetFile = $targetDir . $fileName;
-                        $dbPath = $folderName . '/' . $fileName;
-
                         if (move_uploaded_file($files['tmp_name'][$i], $targetFile)) {
-                            if ($imageCount === 0) {
-                                $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$dbPath, $id]);
-                            } else {
-                                $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")->execute([$id, $dbPath, $imageCount]);
-                            }
-                            $imageCount++;
+                            $uploadedPaths[] = $folderName . '/' . $fileName;
                         }
                     }
                 }
 
-                // 2. Procesar imágenes Remotas de B-Life (si queda espacio hasta llegar a 6)
-                if ($imageCount < 6 && $hasRemote) {
-                    $remoteUrls = json_decode($data['remote_images_urls'], true);
-                    if (is_array($remoteUrls)) {
-                        foreach ($remoteUrls as $url) {
-                            if ($imageCount >= 6) break;
-                            
-                            // Determinar extensión (B-Life usa principalmente webp)
+                // Pre-descargar imágenes remotas (B-Life) si vienen en el orden
+                $remoteDownloaded = [];
+                if ($hasOrden) {
+                    $ordenRaw = json_decode($data['imagenes_orden_json'], true);
+                    foreach ($ordenRaw as $ref) {
+                        if (strpos($ref, 'remote:') === 0) {
+                            $url = substr($ref, 7);
                             $parsedPath = parse_url($url, PHP_URL_PATH);
                             $ext = strtolower(pathinfo($parsedPath, PATHINFO_EXTENSION)) ?: 'webp';
-                            
-                            $fileName = ($imageCount === 0) ? "principal.{$ext}" : "gal_{$imageCount}_" . time() . ".{$ext}";
+                            $fileName = "blife_" . md5($url) . "." . $ext;
                             $targetFile = $targetDir . $fileName;
                             $dbPath = $folderName . '/' . $fileName;
 
-                            // Descargar imagen vía servidor
-                            $ch = curl_init($url);
-                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-                            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-                            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                                'Referer: https://blife.mx/'
-                            ]);
-                            $imgRaw = curl_exec($ch);
-                            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                            curl_close($ch);
-
-                            if ($http_code === 200 && !empty($imgRaw)) {
-                                if (file_put_contents($targetFile, $imgRaw)) {
-                                    if ($imageCount === 0) {
-                                        $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$dbPath, $id]);
-                                    } else {
-                                        $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")->execute([$id, $dbPath, $imageCount]);
-                                    }
-                                    $imageCount++;
-                                }
+                            if (!file_exists($targetFile)) {
+                                $ch = curl_init($url);
+                                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                                $imgRaw = curl_exec($ch);
+                                curl_close($ch);
+                                if ($imgRaw) file_put_contents($targetFile, $imgRaw);
                             }
+                            $remoteDownloaded[$url] = $dbPath;
                         }
+                    }
+                }
+
+                // Reconstruir lista final basada en el orden enviado desde el cliente
+                $finalPaths = [];
+                if ($hasOrden) {
+                    $orden = json_decode($data['imagenes_orden_json'], true);
+                    foreach ($orden as $ref) {
+                        if (strpos($ref, 'server:') === 0) {
+                            $finalPaths[] = substr($ref, 7);
+                        } elseif (strpos($ref, 'local:') === 0) {
+                            $idx = (int)substr($ref, 6);
+                            if (isset($uploadedPaths[$idx])) $finalPaths[] = $uploadedPaths[$idx];
+                        } elseif (strpos($ref, 'remote:') === 0) {
+                            $url = substr($ref, 7);
+                            if (isset($remoteDownloaded[$url])) $finalPaths[] = $remoteDownloaded[$url];
+                        }
+                    }
+                } else {
+                    $finalPaths = $uploadedPaths;
+                }
+
+                // Limpiar galería actual
+                $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
+                
+                if (!empty($finalPaths)) {
+                    // Actualizar imagen principal (index 0)
+                    $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$finalPaths[0], $id]);
+                    // Insertar resto en galería
+                    for ($i = 1; $i < count($finalPaths); $i++) {
+                        if ($i >= 6) break; // Límite de 6 imágenes
+                        $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
+                            ->execute([$id, $finalPaths[$i], $i]);
                     }
                 }
             }
