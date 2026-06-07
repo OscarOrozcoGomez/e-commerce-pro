@@ -447,7 +447,19 @@ include __DIR__ . '/views/includes/header.php';
                 const pill = document.createElement('button');
                 pill.type = 'button';
                 pill.className = 'variant-pill' + (v.id_producto == product.id_producto ? ' active' : '');
-                pill.textContent = v.nombre_variante || v.unidad || v.sku;
+                
+                // Combinar valor (ej: 120) con unidad (ej: Cápsulas, Tomas, Porciones)
+                let variantText = v.nombre_variante || '';
+                const unitText = (v.unidad && v.unidad.toLowerCase() !== 'unidades') ? v.unidad : '';
+                
+                // Si el nombre es solo un número o no contiene la unidad, la agregamos
+                if (variantText && unitText && !variantText.toLowerCase().includes(unitText.toLowerCase())) {
+                    variantText = `${variantText} ${unitText}`;
+                } else if (!variantText) {
+                    variantText = unitText || v.sku;
+                }
+                
+                pill.textContent = variantText;
                 
                 pill.onclick = () => {
                     if (pill.classList.contains('active')) return;

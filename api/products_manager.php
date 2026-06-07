@@ -35,7 +35,8 @@ try {
                 'success' => true,
                 'almacenes' => $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC")->fetchAll(),
                 'categorias' => dbGetCategories(),
-                'presentaciones' => $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC")->fetchAll(PDO::FETCH_COLUMN)
+                'presentaciones' => $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC")->fetchAll(PDO::FETCH_COLUMN),
+                'productos_padre' => dbGetParentProducts()
             ]);
         }
         elseif ($action === 'fetch_blife_info') {
@@ -79,37 +80,39 @@ try {
                 // EDITAR
                 $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras, 
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
-                        `tabla_nutrimental` = :tabla, `unidad` = :unidad, `precio_costo` = :precio_costo, 
-                        `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado 
+                        `tabla_nutrimental` = :tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo, 
+                        `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
-                    ':nombre' => $data['nombre'], ':nombre_variante' => $data['nombre_variante'] ?? null,
-                    ':sku' => $data['sku'], ':codigo_barras' => $data['codigo_barras'],
-                    ':descripcion' => $data['descripcion'], ':ingredientes' => $data['ingredientes'],
-                    ':modo_uso' => $data['modo_uso'], ':tabla' => $data['tabla_nutrimental'],
-                    ':unidad' => $data['unidad'], ':precio_costo' => $data['precio_costo'],
-                    ':precio_venta' => $data['precio_venta'], ':precio_comparacion' => $data['precio_comparacion'],
+                    ':nombre' => $data['nombre'] ?? '', ':nombre_variante' => $data['nombre_variante'] ?? null,
+                    ':sku' => $data['sku'] ?? null, ':codigo_barras' => $data['codigo_barras'] ?? null,
+                    ':descripcion' => $data['descripcion'] ?? '', ':ingredientes' => $data['ingredientes'] ?? '',
+                    ':modo_uso' => $data['modo_uso'] ?? '', ':tabla' => $data['tabla_nutrimental'] ?? '[]',
+                    ':unidad' => $data['unidad'] ?? null, ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
+                    ':precio_costo' => $data['precio_costo'] ?? 0,
+                    ':precio_venta' => $data['precio_venta'] ?? 0, ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
                     ':estado' => $estado, ':id' => $id
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `unidad`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
-                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :unidad, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `unidad`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
+                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :unidad, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
-                    ':nombre' => $data['nombre'],
+                    ':nombre' => $data['nombre'] ?? '',
                     ':nombre_variante' => $data['nombre_variante'] ?? null,
-                    ':sku' => $data['sku'],
-                    ':codigo_barras' => $data['codigo_barras'],
-                    ':descripcion' => $data['descripcion'],
-                    ':ingredientes' => $data['ingredientes'],
-                    ':modo_uso' => $data['modo_uso'],
-                    ':tabla' => $data['tabla_nutrimental'],
-                    ':unidad' => $data['unidad'],
-                    ':precio_costo' => $data['precio_costo'],
-                    ':precio_venta' => $data['precio_venta'],
-                    ':precio_comparacion' => $data['precio_comparacion'],
+                    ':sku' => $data['sku'] ?? null,
+                    ':codigo_barras' => $data['codigo_barras'] ?? null,
+                    ':descripcion' => $data['descripcion'] ?? '',
+                    ':ingredientes' => $data['ingredientes'] ?? '',
+                    ':modo_uso' => $data['modo_uso'] ?? '',
+                    ':tabla' => $data['tabla_nutrimental'] ?? '[]',
+                    ':unidad' => $data['unidad'] ?? null,
+                    ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
+                    ':precio_costo' => $data['precio_costo'] ?? 0,
+                    ':precio_venta' => $data['precio_venta'] ?? 0,
+                    ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
                     ':estado' => $estado
                 ]);
                 $id = (int)$pdo->lastInsertId();
@@ -120,9 +123,11 @@ try {
             $hasRemote = !empty($data['remote_images_urls']);
 
             if ($hasLocal || $hasRemote) {
-                $folderName = slugify($data['nombre']) . '-' . $id;
+                $folderName = slugify($data['nombre'] ?? 'producto') . '-' . $id;
                 $targetDir = PRODUCTS_IMG_DIR . $folderName . '/';
-                if (!is_dir($targetDir)) mkdir($targetDir, 0755, true);
+                if (!is_dir($targetDir)) {
+                    if (!mkdir($targetDir, 0755, true)) throw new Exception("Error al crear carpeta de imágenes. Revisa permisos en assets/img/products/");
+                }
                 
                 // Limpiar galería actual antes de repoblar para evitar duplicidad
                 $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
@@ -172,6 +177,10 @@ try {
                             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
                             curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+                            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                'Referer: https://blife.mx/'
+                            ]);
                             $imgRaw = curl_exec($ch);
                             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                             curl_close($ch);
@@ -217,7 +226,7 @@ try {
             }
         }
     }
-} catch (Exception $e) {
+} catch (Throwable $e) {
     http_response_code(400);
     error_log("Error en products_manager: " . $e->getMessage());
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);

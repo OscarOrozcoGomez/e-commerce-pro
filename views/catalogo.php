@@ -10,9 +10,12 @@ $categorias = dbGetCategories();
 
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
-$sql = "SELECT p.* FROM productos p ";
+$sql = "SELECT p.*, 
+        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto OR TRIM(p3.nombre) = TRIM(p.nombre)) AND p3.estado = 'activo') as precio_desde,
+        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto OR TRIM(p2.nombre) = TRIM(p.nombre)) AND p2.estado = 'activo') as total_variantes 
+        FROM productos p ";
 $params = [];
-$whereClauses = ["p.estado = 'activo'"];
+$whereClauses = ["p.estado = 'activo'", "p.id_padre IS NULL"];
 
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
@@ -27,6 +30,7 @@ if (!empty($busqueda)) {
 }
 
 $sql .= " WHERE " . implode(" AND ", $whereClauses);
+$sql .= " GROUP BY p.nombre"; // Agrupamiento fail-safe por nombre para evitar duplicados visuales
 $sql .= " ORDER BY p.nombre ASC";
 
 try {
@@ -114,13 +118,22 @@ include __DIR__ . '/includes/header.php';
                                         <?php echo esc($p['nombre']); ?>
                                     </span>
                                     <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
-                                        $<?php echo number_format((float)$p['precio_venta'], 2); ?>
-                                        <?php if ((float)($p['precio_comparacion'] ?? 0) > 0): ?>
-                                            <span class="grey-text text-darken-1" style="text-decoration: line-through; font-size: 0.9rem; margin-left: 8px;">
+                                        <?php if ($p['total_variantes'] > 1): ?>
+                                            <span style="font-size: 0.8rem; color: #757575; display: block;">Desde</span>
+                                        <?php endif; ?>
+                                        $<?php echo number_format((float)($p['precio_desde'] ?? $p['precio_venta']), 2); ?>
+                                        
+                                        <?php if ($p['total_variantes'] == 1 && (float)($p['precio_comparacion'] ?? 0) > 0): ?>
+                                            <span class="grey-text" style="text-decoration: line-through; font-size: 0.9rem; margin-left: 8px;">
                                                 $<?php echo number_format((float)$p['precio_comparacion'], 2); ?>
                                             </span>
                                         <?php endif; ?>
                                     </p>
+                                    <?php if ($p['total_variantes'] > 1): ?>
+                                        <p class="orange-text text-darken-3" style="font-size: 0.8rem; font-weight: bold;">
+                                            <?php echo $p['total_variantes']; ?> presentaciones disponibles
+                                        </p>
+                                    <?php endif; ?>
                                     <p class="grey-text truncate-3-lines" style="font-size: 0.85rem;">
                                         <?php echo esc($p['descripcion'] ?? 'Sin descripción disponible.'); ?>
                                     </p>
@@ -163,6 +176,11 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+// Evitar que el formulario recargue la página al presionar Enter
+document.querySelector('form[action*="catalogo.php"]')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+});
+
 function addToCart(id, nombre, precio, imagen = '') {
     let cart = getCart();
     // Usamos comparación de Strings para evitar fallos de tipo

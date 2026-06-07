@@ -11,8 +11,8 @@ $categorias = dbGetCategories();
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
 $sql = "SELECT p.*, 
-        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto) AND p3.estado = 'activo') as precio_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto) AND p2.estado = 'activo') as total_variantes 
+        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto OR TRIM(p3.nombre) = TRIM(p.nombre)) AND p3.estado = 'activo') as precio_desde,
+        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto OR TRIM(p2.nombre) = TRIM(p.nombre)) AND p2.estado = 'activo') as total_variantes 
         FROM productos p";
 $params = [];
 
@@ -31,6 +31,7 @@ if (!empty($busqueda)) {
 }
 
 $sql .= " WHERE " . implode(" AND ", $whereClauses);
+$sql .= " GROUP BY p.nombre"; // Agrupamiento fail-safe por nombre
 $sql .= " ORDER BY p.nombre ASC";
 
 try {
@@ -181,6 +182,11 @@ include __DIR__ . '/../views/includes/header.php';
 </div>
 
 <script>
+// Evitar que el formulario se envíe al presionar Enter (mantiene el filtro en tiempo real sin recargar)
+document.querySelector('form[action*="catalogo.php"]')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+});
+
 // Filtrado dinámico en tiempo real (Estilo "desaparecer poco a poco")
 document.getElementById('search-input')?.addEventListener('input', function() {
     const term = this.value.toLowerCase().trim();

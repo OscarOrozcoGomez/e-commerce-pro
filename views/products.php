@@ -63,6 +63,11 @@ include __DIR__ . '/includes/header.php';
                             <input type="text" id="nombre_variante" name="nombre_variante" placeholder="Ej: 240 Caps, 500mg, Sabor Fresa">
                             <label for="nombre_variante" class="active">Valor de la Variante (Lo que lo hace único)</label>
                         </div>
+
+                        <div class="input-field">
+                            <input type="text" id="sku" name="sku">
+                            <label for="sku">SKU (Código Interno)</label>
+                        </div>
                         
                         <div class="input-field">
                             <input type="text" id="codigo_barras" name="codigo_barras">
@@ -372,18 +377,55 @@ include __DIR__ . '/includes/header.php';
 
     window.renderBlifeImageSuggestions = function(variante) {
         const container = document.getElementById('blife-external-images');
-        const imgs = [variante.featuredImage, variante.secondaryImage, ...(variante.gallery || [])].filter(Boolean);
+        // Usar Set para evitar URLs duplicadas y asegurar protocolo HTTPS
+        let urls = [...new Set([variante.featuredImage, variante.secondaryImage, ...(variante.gallery || [])])].filter(Boolean);
         
-        if (imgs.length > 0) {
+        urls = urls.map(url => {
+            if (url.startsWith('//')) return 'https:' + url;
+            return url;
+        });
+        
+        if (urls.length > 0) {
             container.style.display = 'block';
-            container.innerHTML = '<p style="font-size: 0.8rem; margin: 0 0 5px 0; color: #2e7d32; font-weight: bold;"><i class="material-icons tiny">check_circle</i> Imágenes B-Life listas para importar:</p>';
-            imgs.forEach(url => {
-                container.innerHTML += `
-                    <a href="${url}" target="_blank" style="display:inline-block; margin-right:5px; position:relative;">
-                        <span style="position:absolute; bottom:0; right:0; background:rgba(46,125,50,0.8); color:white; font-size:8px; padding:0 2px;">AUTO</span>
-                        <img src="${url}" style="width: 40px; height: 40px; border: 1px solid #ddd; object-fit: cover; border-radius: 4px;">
-                    </a>`;
+            container.innerHTML = `
+                <p style="font-size: 0.8rem; margin: 10px 0 5px 0; color: #1a237e; font-weight: bold;">
+                    <i class="material-icons tiny">collections</i> Imágenes encontradas (Arrastra para reordenar):
+                </p>
+                <div id="remote-sortable-list" class="row" style="margin-bottom: 0;"></div>
+            `;
+            
+            const list = document.getElementById('remote-sortable-list');
+            urls.forEach((url, index) => {
+                const div = document.createElement('div');
+                div.className = 'col s4 m3 remote-img-item';
+                div.setAttribute('data-url', url);
+                div.style = 'position:relative; margin-bottom:10px; cursor:move;';
+                div.innerHTML = `
+                    <div class="card" style="margin:0; border: 1px solid #ddd;">
+                        <div class="card-image">
+                            <img src="${url}" referrerpolicy="no-referrer" style="height: 70px; object-fit: contain; background:#fff; padding:2px;">
+                            <span class="remote-label" style="position:absolute; top:0; left:0; color:white; font-size:7px; padding:1px 3px; width:100%; text-align:center; font-weight:bold;"></span>
+                        </div>
+                    </div>`;
+                list.appendChild(div);
             });
+
+            const updateRemoteInput = () => {
+                const currentUrls = [];
+                const items = list.querySelectorAll('.remote-img-item');
+                items.forEach((item, i) => {
+                    currentUrls.push(item.getAttribute('data-url'));
+                    const label = item.querySelector('.remote-label');
+                    if (label) {
+                        label.innerText = (i === 0) ? 'ESTARÁ COMO PRINCIPAL' : 'GALERÍA';
+                        label.style.background = (i === 0) ? '#2e7d32' : '#1a237e';
+                    }
+                });
+                document.getElementById('remote_images_urls').value = JSON.stringify(currentUrls);
+            };
+
+            new Sortable(list, { animation: 150, onEnd: updateRemoteInput });
+            updateRemoteInput();
         }
     };
 
@@ -593,7 +635,11 @@ include __DIR__ . '/includes/header.php';
                 const parentSelect = document.getElementById('id_padre');
                 if(parentSelect && res.productos_padre) {
                     parentSelect.innerHTML = '<option value="">Es Producto Principal (Sin Padre)</option>' + 
-                        res.productos_padre.map(p => `<option value="${p.id_producto}">${p.nombre}</option>`).join('');
+                        res.productos_padre.map(p => {
+                            const variante = p.nombre_variante ? ` (${p.nombre_variante})` : '';
+                            const sku = p.sku ? ` [${p.sku}]` : '';
+                            return `<option value="${p.id_producto}">${p.nombre}${variante}${sku}</option>`;
+                        }).join('');
                 }
 
                 cargarProductos(res.almacenes[0].id_almacen);
@@ -704,7 +750,16 @@ include __DIR__ . '/includes/header.php';
         let variantsHtml = `<div id="${groupId}" style="display:none; max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; padding: 8px; background: #f1f8ff; min-width: 220px; margin-top:8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">`;
         variants.forEach(v => {
             const jsonV = JSON.stringify(v).replace(/'/g, "&apos;");
-            const label = v.nombre_variante || v.unidad || v.sku;
+            
+            // Mejorar etiqueta visual en la lista de variantes del Admin
+            let label = v.nombre_variante || '';
+            let unit = (v.unidad && v.unidad.toLowerCase() !== 'unidades') ? v.unidad : '';
+            if (unit && label && !label.toLowerCase().includes(unit.toLowerCase())) {
+                label += ' ' + unit;
+            } else if (!label) {
+                label = v.unidad || v.sku;
+            }
+
             variantsHtml += `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding-bottom:2px; border-bottom:1px dashed #eee;">
                     <span style="font-size:0.75rem; color:#444;">${label} (${v.cantidad_actual})</span>
@@ -765,6 +820,7 @@ include __DIR__ . '/includes/header.php';
         
         document.getElementById('nombre').value = prod.nombre;
         document.getElementById('nombre_variante').value = prod.nombre_variante || '';
+        document.getElementById('sku').value = prod.sku || '';
         document.getElementById('codigo_barras').value = prod.codigo_barras || '';
         document.getElementById('descripcion').value = prod.descripcion || '';
         document.getElementById('modo_uso').value = prod.modo_uso || '';
@@ -772,7 +828,6 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('tabla_nutrimental').value = prod.tabla_nutrimental || '';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('precio_costo').value = prod.precio_costo;
-        document.getElementById('id_padre').value = prod.id_padre || '';
         document.getElementById('id_padre').value = prod.id_padre || '';
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
@@ -828,6 +883,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('accion').value = 'agregar';
+        document.getElementById('sku').value = '';
         document.getElementById('nombre_variante').value = '';
         document.getElementById('id_padre').value = '';
         document.getElementById('id_producto').value = '';
