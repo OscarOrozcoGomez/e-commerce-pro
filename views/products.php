@@ -647,7 +647,7 @@ include __DIR__ . '/includes/header.php';
         return `
             <tr data-codes="${(p.codigo_barras || '').toLowerCase()}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
-                <td>${p.nombre} <br><small class="blue-text">(${p.nombre_variante || 'Sin etiqueta'})</small></td>
+                <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}</td>
                 <td>
                     $${parseFloat(p.precio_venta).toFixed(2)}
                     ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
