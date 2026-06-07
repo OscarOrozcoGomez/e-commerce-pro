@@ -11,12 +11,12 @@ $categorias = dbGetCategories();
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
 $sql = "SELECT p.*, 
-        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto OR TRIM(p3.nombre) = TRIM(p.nombre)) AND p3.estado = 'activo') as precio_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto OR TRIM(p2.nombre) = TRIM(p.nombre)) AND p2.estado = 'activo') as total_variantes 
+        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto) AND p3.estado = 'activo') as precio_desde,
+        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto) AND p2.estado = 'activo') as total_variantes 
         FROM productos p";
 $params = [];
 
-$whereClauses = ["p.estado = 'activo'", "p.id_padre IS NULL"];
+$whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
 
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
@@ -31,7 +31,6 @@ if (!empty($busqueda)) {
 }
 
 $sql .= " WHERE " . implode(" AND ", $whereClauses);
-$sql .= " GROUP BY p.nombre"; // Agrupamiento fail-safe por nombre
 $sql .= " ORDER BY p.nombre ASC";
 
 try {

@@ -481,11 +481,24 @@ function dbGetCatalogProducts(?int $id_categoria = null): array {
 /**
  * Obtiene todas las presentaciones (variantes) de un producto específico.
  */
-function dbGetProductPresentations(int $id_producto_padre): array {
+function dbGetProductPresentations(int $id_producto): array {
     try {
         $pdo = getPDO();
-        $stmt = $pdo->prepare("SELECT * FROM productos WHERE (id_padre = ? OR id_producto = ?) AND estado = 'activo' ORDER BY precio_venta ASC");
-        $stmt->execute([$id_producto_padre, $id_producto_padre]);
+        
+        $stmtInfo = $pdo->prepare("SELECT nombre FROM productos WHERE id_producto = ?");
+        $stmtInfo->execute([$id_producto]);
+        $nombre_base = $stmtInfo->fetchColumn();
+
+        if (!$nombre_base) return [];
+
+        // Agrupamos por nombre exacto para corregir errores de jerarquía en DB
+        $sql = "SELECT * FROM productos 
+                WHERE estado = 'activo' 
+                AND TRIM(nombre) = ?
+                ORDER BY precio_venta ASC";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([trim($nombre_base)]);
         return $stmt->fetchAll();
     } catch (PDOException $e) {
         error_log("Error en dbGetProductPresentations: " . $e->getMessage());
