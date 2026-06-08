@@ -129,11 +129,11 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
-                            <select id="id_padre" name="id_padre" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px;">
-                                <option value="">Es Producto Principal (Sin Padre)</option>
-                                <!-- Se llena vía JS -->
-                            </select>
-                            <span class="helper-text">Si este producto es una variante, selecciona el producto "Padre" aquí.</span>
+                            <i class="material-icons prefix">account_tree</i>
+                            <input type="text" id="search_padre" class="autocomplete" autocomplete="off" placeholder="Escribe el nombre del padre (ej: Creatina)...">
+                            <label for="search_padre" class="active">Producto Padre / Principal</label>
+                            <input type="hidden" name="id_padre" id="id_padre">
+                            <span class="helper-text">Busca el producto base. Si este es el principal, déjalo vacío.</span>
                         </div>
                         
                         <div class="input-field">
@@ -264,6 +264,8 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+    let cacheProductosPadre = [];
+
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
     let colaImagenes = []; // { type: 'local'|'server', file: File|null, path: string|null, preview: string }
 
@@ -628,14 +630,9 @@ include __DIR__ . '/includes/header.php';
                 }
                 
                 // Llenar lista de productos padre para asociación
-                const parentSelect = document.getElementById('id_padre');
-                if(parentSelect && res.productos_padre) {
-                    parentSelect.innerHTML = '<option value="">Es Producto Principal (Sin Padre)</option>' + 
-                        res.productos_padre.map(p => {
-                            const variante = p.nombre_variante ? ` (${p.nombre_variante})` : '';
-                            const sku = p.sku ? ` [${p.sku}]` : '';
-                            return `<option value="${p.id_producto}">${p.nombre}${variante}${sku}</option>`;
-                        }).join('');
+                if (Array.isArray(res.productos_padre)) {
+                    cacheProductosPadre = res.productos_padre;
+                    initParentAutocomplete(cacheProductosPadre);
                 }
 
                 cargarProductos(res.almacenes[0].id_almacen);
@@ -649,22 +646,30 @@ include __DIR__ . '/includes/header.php';
             .then(res => {
                 if(!res.success) throw new Error(res.message);
                 
+                if (!res.data || !Array.isArray(res.data)) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="center">No hay productos que mostrar</td></tr>';
+                    return;
+                }
+
                 // Agrupar productos por nombre base para visualización limpia estilo Odoo
                 const grouped = res.data.reduce((acc, p) => {
-                    const key = p.nombre.trim();
+                    const key = (p && p.nombre ? p.nombre : 'Sin nombre').trim();
                     if (!acc[key]) acc[key] = [];
                     acc[key].push(p);
                     return acc;
                 }, {});
 
                 let html = '';
-                // Ordenar alfabéticamente por nombre de producto
                 Object.keys(grouped).sort().forEach(name => {
-                    const variants = grouped[name];
-                    if (variants.length === 1) {
-                        html += renderRow(variants[0]);
-                    } else {
-                        html += renderGroupedRow(variants);
+                    try {
+                        const variants = grouped[name];
+                        if (variants.length === 1) {
+                            html += renderRow(variants[0]);
+                        } else {
+                            html += renderGroupedRow(variants);
+                        }
+                    } catch (err) {
+                        console.error("Error renderizando producto:", name, err);
                     }
                 });
                 tbody.innerHTML = html;
@@ -835,9 +840,20 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('mostrar_tabla').checked = (prod.mostrar_tabla == 1);
         document.getElementById('precio_costo').value = prod.precio_costo;
-        document.getElementById('id_padre').value = prod.id_padre || '';
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
+
+        // Manejo del Autocomplete de Padre
+        const idPadreHidden = document.getElementById('id_padre');
+        const searchInput = document.getElementById('search_padre');
+        idPadreHidden.value = prod.id_padre || '';
+        
+        const padre = cacheProductosPadre.find(p => p.id_producto == prod.id_padre);
+        if (padre) {
+            searchInput.value = `${padre.nombre}${padre.nombre_variante ? ' ('+padre.nombre_variante+')' : ''}${padre.sku ? ' ['+padre.sku+']' : ''}`;
+        } else {
+            searchInput.value = '';
+        }
 
         // Cargar imágenes actuales a la cola
         colaImagenes = [];
@@ -913,8 +929,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('sku').value = '';
         document.getElementById('nombre_variante').value = '';
         document.getElementById('id_padre').value = '';
+        document.getElementById('search_padre').value = '';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
+
+        document.getElementById('search_padre').value = '';
 
         // Resetear estado
         const checkVisible = document.getElementById('visible_catalogo');
@@ -974,6 +993,31 @@ include __DIR__ . '/includes/header.php';
             M.toast({html: '<?php echo esc($success); ?>', classes: 'green darken-1 rounded', displayLength: 4000});
         <?php endif; ?>
     });
+
+    let parentMap = {};
+    function initParentAutocomplete(list) {
+        const data = {};
+        parentMap = {};
+        list.forEach(p => {
+            const label = `${p.nombre}${p.nombre_variante ? ' ('+p.nombre_variante+')' : ''}${p.sku ? ' ['+p.sku+']' : ''}`;
+            data[label] = null;
+            parentMap[label] = p.id_producto;
+        });
+
+        const input = document.getElementById('search_padre');
+        M.Autocomplete.init(input, {
+            data: data,
+            onAutocomplete: function(val) {
+                document.getElementById('id_padre').value = parentMap[val];
+            }
+        });
+
+        input.addEventListener('input', function() {
+            if (this.value === '') {
+                document.getElementById('id_padre').value = '';
+            }
+        });
+    }
 </script>
 
 <style>

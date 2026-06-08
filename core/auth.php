@@ -670,7 +670,8 @@ function dbGetPresentationTypes(): array {
 function dbGetParentProducts(): array {
     try {
         $pdo = getPDO();
-        $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE (id_padre IS NULL OR id_padre = 0) AND estado = 'activo' ORDER BY nombre ASC";
+        // Cambiamos a != 'inactivo' para que los archivados también puedan ser padres en el dropdown
+        $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE (id_padre IS NULL OR id_padre = 0) AND estado != 'inactivo' ORDER BY nombre ASC";
         $stmt = $pdo->query($sql);
         return $stmt ? $stmt->fetchAll() : [];
     } catch (PDOException $e) {
@@ -706,28 +707,22 @@ function slugify(string $text): string {
  * Resuelve la URL de la imagen de un producto de forma robusta.
  */
 function getProductImageUrl(?string $imgData): string {
-    if (empty($imgData) || $imgData === 'NULL' || $imgData === 'undefined' || $imgData === '') return '';
+    if (empty($imgData) || in_array($imgData, ['NULL', 'undefined', ''])) return '';
 
     // Si ya es una URL completa (http o https), devolverla tal cual
     if (strpos($imgData, 'http') === 0) return $imgData;
 
-    // Si es una ruta de archivo (contiene una barra o tiene extensión de imagen)
-    if (strpos($imgData, '/') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
-        $base = rtrim(BASE_URL, '/') . '/';
-        $cleanPath = ltrim($imgData, '/');
-        return $base . 'assets/img/products/' . $cleanPath;
-    }
-
-    // Si es Base64 (compatibilidad con datos antiguos)
-    if (strpos($imgData, 'iVBORw') !== false || strpos($imgData, '/9j/') !== false || strpos($imgData, 'data:image') !== false) {
-        // Si ya tiene el prefijo data:image, devolver tal cual
+    // Detección robusta de Base64 (PNG, JPG, WebP o data-uri)
+    // UklGR = WebP | iVBORw = PNG | /9j/ = JPG
+    if (preg_match('/^(data:image|iVBORw|\/9j\/|UklGR)/', $imgData)) {
         if (strpos($imgData, 'data:image') === 0) return $imgData;
-        
-        $mime = (strpos($imgData, 'iVBORw') === 0) ? 'image/png' : 'image/jpeg';
-        // Limpiar el contenido si trae el encabezado
-        $clean = (strpos($imgData, ',') !== false) ? explode(',', $imgData)[1] : $imgData;
-        return "data:$mime;base64," . trim($clean);
+        $mime = 'image/jpeg';
+        if (strpos($imgData, 'iVBORw') === 0) $mime = 'image/png';
+        if (strpos($imgData, 'UklGR') === 0) $mime = 'image/webp';
+        return "data:$mime;base64," . $imgData;
     }
 
-    return '';
+    // Si no es ninguna de las anteriores, es una ruta de archivo local
+    $base = rtrim(BASE_URL, '/') . '/';
+    return $base . 'assets/img/products/' . ltrim($imgData, '/');
 }
