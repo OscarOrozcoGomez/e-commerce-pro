@@ -32,19 +32,20 @@ try {
         } 
         elseif ($action === 'get_dependencies') {
             // Carga almacenes y categorías para los dropdowns
-            $almacenesQuery = $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC");
-            $almacenes = $almacenesQuery ? $almacenesQuery->fetchAll() : [];
+            try {
+                $almacenes = $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC") ?: null;
+                $presentaciones = $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC") ?: null;
 
-            $presentacionesQuery = $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC");
-            $presentaciones = $presentacionesQuery ? $presentacionesQuery->fetchAll(PDO::FETCH_COLUMN) : [];
-
-            echo json_encode([
-                'success' => true,
-                'almacenes' => $almacenes,
-                'categorias' => dbGetCategories(),
-                'presentaciones' => $presentaciones,
-                'productos_padre' => dbGetParentProducts()
-            ]);
+                echo json_encode([
+                    'success' => true,
+                    'almacenes' => $almacenes ? $almacenes->fetchAll() : [],
+                    'categorias' => dbGetCategories(),
+                    'presentaciones' => $presentaciones ? $presentaciones->fetchAll(PDO::FETCH_COLUMN) : [],
+                    'productos_padre' => dbGetParentProducts()
+                ]);
+            } catch (Throwable $e) {
+                throw new Exception("Error cargando dependencias: " . $e->getMessage());
+            }
         }
         elseif ($action === 'fetch_blife_info') {
             $variant_id = $_GET['variant_id'] ?? '';
@@ -139,7 +140,7 @@ try {
                 
                 // FORZAR RUTA ABSOLUTA: Independiente de si PRODUCTS_IMG_DIR es relativo o absoluto
                 // Buscamos la carpeta assets desde la raíz del proyecto (un nivel arriba de api/)
-                $baseDir = dirname(__DIR__) . '/assets/img/products/';
+                $baseDir = rtrim(dirname(__DIR__), '/\\') . '/assets/img/products/';
                 $targetDir = $baseDir . $folderName . '/';
                 
                 if (!is_dir($targetDir)) {

@@ -2,41 +2,121 @@
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
-
 header('Content-Type: application/json');
 
-$search = trim($_GET['search'] ?? '');
-$almacenId = getCurrentAlmacenId();
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'error' => 'Método no permitido']);
+    exit;
+}
+
+if (!isset($_POST['id_producto']) || empty($_POST['id_producto'])) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'error' => 'ID de producto no proporcionado']);
+    exit;
+}
+
+$id_producto = intval($_POST['id_producto']);
+$nombre = trim($_POST['nombre'] ?? '');
+$sku = trim($_POST['sku'] ?? '');
+$precio_venta = floatval($_POST['precio_venta'] ?? 0);
+$precio_costo = floatval($_POST['precio_costo'] ?? 0);
+$categoria = trim($_POST['categoria'] ?? '');
+
+// =========================================================================
+// 1. PROCESAR LA IMAGEN PRINCIPAL (LA PORTADA - MULTIMEDIA 1 DE 6)
+// =========================================================================
+$imagen_principal_final = '';
+
+if (isset($_FILES['imagen_nueva']) && $_FILES['imagen_nueva']['error'] === UPLOAD_ERR_OK) {
+    $nombre_temporal = $_FILES['imagen_nueva']['tmp_name'];
+    $extension = pathinfo($_FILES['imagen_nueva']['name'], PATHINFO_EXTENSION);
+    $imagen_principal_final = uniqid('prod_main_', true) . '.' . $extension;
+    move_uploaded_file($nombre_temporal, __DIR__ . '/../uploads/productos/' . $imagen_principal_final);
+} else {
+    // Si no cambió, rescatamos la principal actual y la limpiamos con basename
+    $imagen_principal_actual = $_POST['imagen_actual'] ?? '';
+    $imagen_principal_final = !empty($imagen_principal_actual) ? basename($imagen_principal_actual) : null;
+}
+
+
+// =========================================================================
+// 2. PROCESAR LAS OTRAS 5 IMÁGENES (LA GALERÍA SECUNDARIA)
+// =========================================================================
+$galeria_final = [];
+
+// Recuperar las imágenes secundarias que el usuario ya tenía y mantuvo en la edición
+$galeria_actual = $_POST['galeria_actual'] ?? [];
+
+if (is_array($galeria_actual)) {
+    foreach ($galeria_actual as $img_gal) {
+        if (!empty($img_gal)) {
+            $nombre_limpio = basename($img_gal);
+            // Evitamos que la imagen principal se duplique dentro de la galería secundaria
+            if ($nombre_limpio !== $imagen_principal_final) {
+                $galeria_final[] = $nombre_limpio;
+            }
+        }
+    }
+}
+
+// Procesar si se subieron nuevas fotos a la galería desde el editor
+if (isset($_FILES['galeria_nuevas'])) {
+    foreach ($_FILES['galeria_nuevas']['tmp_name'] as $index => $tmpName) {
+        if ($_FILES['galeria_nuevas']['error'][$index] === UPLOAD_ERR_OK) {
+            $ext = pathinfo($_FILES['galeria_nuevas']['name'][$index], PATHINFO_EXTENSION);
+            $nuevo_nombre_gal = uniqid('prod_gal_', true) . '.' . $ext;
+            
+            if (move_uploaded_file($tmpName, __DIR__ . '/../uploads/productos/' . $nuevo_nombre_gal)) {
+                $galeria_final[] = $nuevo_nombre_gal;
+            }
+        }
+    }
+}
+
+// =========================================================================
+// 3. GUARDADO EN BASE DE DATOS (TRANSACCIÓN SEGURA)
+// =========================================================================
+$pdo = getPDO();
 
 try {
-    $pdo = getPDO();
+    $pdo->beginTransaction();
 
-    $sql = "SELECT p.id_producto, p.nombre, p.sku, p.precio_venta, p.precio_costo, p.categoria, p.imagen,
-                   SUM(COALESCE(ia.cantidad_actual, 0)) as stock
-            FROM productos p
-            LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto
-            WHERE p.estado = 'activo'";
+    // Actualizar tabla principal (1 imagen)
+    $sqlProduct = "UPDATE productos 
+                   SET nombre = ?, sku = ?, precio_venta = ?, precio_costo = ?, categoria = ?, imagen = ? 
+                   WHERE id_producto = ?";
+    $stmtProd = $pdo->prepare($sqlProduct);
+    $stmtProd->execute([$nombre, $sku, $precio_venta, $precio_costo, $categoria, $imagen_principal_final, $id_producto]);
 
-    $params = [];
+    // Limpiar galería secundaria anterior para el producto
+    $stmtDel = $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?");
+    $stmtDel->execute([$id_producto]);
 
-    if ($search !== '') {
-        $sql .= " AND (p.nombre LIKE :search1 OR p.sku LIKE :search2)";
-        $params[':search1'] = '%' . $search . '%';
-        $params[':search2'] = '%' . $search . '%';
+    // Insertar las imágenes secundarias restantes (las otras 5 imágenes)
+    if (!empty($galeria_final)) {
+        $sqlInsGal = "INSERT FROM producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)";
+        $stmtIns = $pdo->prepare($sqlInsGal);
+        
+        foreach ($galeria_final as $orden => $archivo_limpio) {
+            $stmtIns->execute([$id_producto, $archivo_limpio, $orden]);
+        }
     }
 
-    $sql .= " GROUP BY p.id_producto ORDER BY p.nombre ASC";
+    $pdo->commit();
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    echo json_encode([
+        'success' => true, 
+        'message' => 'Producto actualizado. Total de imágenes procesadas: ' . (1 + count($galeria_final))
+    ]);
 
-    // Formatear el campo imagen
-    foreach ($products as &$product) {
-        $product['imagen'] = getProductImageUrl($product['imagen']);
-    }
-
-    echo json_encode(['success' => true, 'products' => $products]);
 } catch (Throwable $e) {
-    echo json_encode(['success' => false, 'error' => 'Error al cargar productos']);
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    http_response_code(500);
+    echo json_encode([
+        'success' => false, 
+        'error' => 'Error al actualizar imágenes: ' . $e->getMessage()
+    ]);
 }
