@@ -10,14 +10,16 @@ $categorias = dbGetCategories();
 
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
+
+// REPARACIÓN DE QA: Modificamos las subconsultas para que busquen por ID de Parentesco (id_padre), no por texto plano.
 $sql = "SELECT p.*, 
-        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_padre = p.id_producto OR p3.id_producto = p.id_producto) AND p3.estado = 'activo') as precio_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_padre = p.id_producto OR p2.id_producto = p.id_producto) AND p2.estado = 'activo') as total_variantes 
+        (SELECT MIN(p3.precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
+        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
         FROM productos p ";
 $params = [];
 
-// Mostramos todos los productos activos (incluyendo variantes si así lo deseas)
-$whereClauses = ["p.estado = 'activo'"];
+// Forzamos que solo se listen los registros raíz en la cuadricula principal
+$whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
 
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
@@ -27,16 +29,18 @@ if (!empty($categoriaSeleccionada)) {
 }
 
 if (!empty($busqueda)) {
-    // Buscamos en el padre O en cualquiera de sus hijos
+    // Buscamos en el padre O en cualquiera de sus hijos asignados por ID
     $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.descripcion LIKE :search OR EXISTS (
         SELECT 1 FROM productos p_v 
-        WHERE p_v.id_padre = p.id_producto AND (p_v.nombre LIKE :search OR p_v.nombre_variante LIKE :search OR p_v.sku LIKE :search)
+        WHERE p_v.id_padre = p.id_producto AND (p_v.nombre_variante LIKE :search OR p_v.sku LIKE :search)
     ))";
     $params[':search'] = '%' . $busqueda . '%';
 }
 
 $sql .= " WHERE " . implode(" AND ", $whereClauses);
-$sql .= " ORDER BY p.nombre ASC, p.nombre_variante ASC";
+
+// CORRECCIÓN CLAVE: Agrupamos de forma única por el ID de Producto para impedir duplicidad de tarjetas por errores de espacios.
+$sql .= " GROUP BY p.id_producto ORDER BY p.nombre ASC";
 
 try {
     $stmt = $pdo->prepare($sql);
@@ -53,7 +57,6 @@ include __DIR__ . '/includes/header.php';
 
 <div class="container" style="margin-top: 30px;">
     <div class="row">
-        <!-- Sidebar de Categorización (Lado Izquierdo) -->
         <div class="col s12 m3">
             <div class="card-panel z-depth-1" style="padding: 10px; border-radius: 8px;">
                 <h6 class="blue-text text-darken-4" style="padding-left: 15px; margin-bottom: 20px; font-weight: bold;">
@@ -78,9 +81,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <!-- Contenido Principal: Listado de Productos -->
         <div class="col s12 m9">
-            <!-- Barra de Búsqueda Moderna -->
             <div class="row">
                 <div class="col s12">
                     <form method="GET" action="catalogo.php" class="row valign-wrapper" style="background: #fff; padding: 5px 15px; border-radius: 30px; margin-bottom: 30px; border: 1px solid #ddd; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
@@ -123,18 +124,18 @@ include __DIR__ . '/includes/header.php';
                                         <?php echo esc($p['nombre']); ?>
                                     </span>
                                     <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
-                                        <?php if ($p['total_variantes'] > 1): ?>
+                                        <?php if ((int)$p['total_variantes'] > 1): ?>
                                             <span style="font-size: 0.8rem; color: #757575; display: block;">Desde</span>
                                         <?php endif; ?>
                                         $<?php echo number_format((float)($p['precio_desde'] ?? $p['precio_venta']), 2); ?>
                                         
-                                        <?php if ($p['total_variantes'] == 1 && (float)($p['precio_comparacion'] ?? 0) > 0): ?>
+                                        <?php if ((int)$p['total_variantes'] == 1 && (float)($p['precio_comparacion'] ?? 0) > 0): ?>
                                             <span class="grey-text" style="text-decoration: line-through; font-size: 0.9rem; margin-left: 8px;">
                                                 $<?php echo number_format((float)$p['precio_comparacion'], 2); ?>
                                             </span>
                                         <?php endif; ?>
                                     </p>
-                                    <?php if ($p['total_variantes'] > 1): ?>
+                                    <?php if ((int)$p['total_variantes'] > 1): ?>
                                         <p class="orange-text text-darken-3" style="font-size: 0.8rem; font-weight: bold;">
                                             <?php echo $p['total_variantes']; ?> presentaciones disponibles
                                         </p>
@@ -181,14 +182,12 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// Evitar que el formulario recargue la página al presionar Enter
 document.querySelector('form[action*="catalogo.php"]')?.addEventListener('submit', function(e) {
     e.preventDefault();
 });
 
 function addToCart(id, nombre, precio, imagen = '') {
     let cart = getCart();
-    // Usamos comparación de Strings para evitar fallos de tipo
     let item = cart.find(i => String(i.id_producto) === String(id));
     
     if (item) {
@@ -204,7 +203,6 @@ function addToCart(id, nombre, precio, imagen = '') {
     }
     
     localStorage.setItem('cart', JSON.stringify(cart));
-    // Notificación visual robusta
     M.toast({html: `🛒 <b>${nombre}</b> añadido al carrito`, classes: 'green rounded'});
     
     updateCartBadge();
@@ -262,8 +260,6 @@ document.addEventListener('DOMContentLoaded', renderMiniCart);
         -webkit-box-orient: vertical;  
         overflow: hidden;
     }
-
-    /* Estilos Mini Carrito */
     .mini-cart-floating {
         position: fixed;
         bottom: 20px;
