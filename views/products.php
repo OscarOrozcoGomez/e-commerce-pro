@@ -677,17 +677,19 @@ include __DIR__ . '/includes/header.php';
 
     // Ayudante JS para resolver la URL de la imagen similar a la función de PHP
     function getProductImgUrl(imgData) {
-        const baseUrl = '<?php echo BASE_URL; ?>';
-        if (!imgData || imgData === 'NULL' || imgData === '' || imgData === 'undefined') {
+        let baseUrl = '<?php echo BASE_URL; ?>';
+        if (typeof imgData !== 'string' || !imgData || imgData === 'NULL' || imgData === 'undefined') {
             return '';
         }
         
+        if (!baseUrl.endsWith('/')) baseUrl += '/';
+
         // Si ya es una URL completa, devolverla tal cual para evitar rutas deformes
         if (imgData.startsWith('http')) return imgData;
         
         // Si es una ruta de archivo (formato corto con extensión)
-        if (imgData.length < 255 && /\.(jpg|jpeg|png|webp|gif)$/i.test(imgData)) {
-            return baseUrl + 'assets/img/products/' + imgData;
+        if (imgData.length < 255 && /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
+            return baseUrl + 'assets/img/products/' + imgData.replace(/^\/+/, '');
         }
         
         // Si es Base64
@@ -699,21 +701,21 @@ include __DIR__ . '/includes/header.php';
     }
 
     function renderRow(p) {
-        let imgSrc = getProductImgUrl(p.imagen);
+        const imgSrc = getProductImgUrl(p.imagen);
         const isLow = (parseInt(p.cantidad_actual) || 0) <= (parseInt(p.stock_minimo) || 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
-
+        const precio = parseFloat(p.precio_venta) || 0;
         return `
             <tr data-codes="${(p.codigo_barras || '').toLowerCase()}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
                 <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}</td>
                 <td>
-                    $${parseFloat(p.precio_venta).toFixed(2)}
+                    $${precio.toFixed(2)}
                     ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
                 </td>
                 <td>
-                    <span class="badge ${p.estado === 'activo' ? 'blue' : 'grey darken-1'} white-text" style="float: none; border-radius: 4px;">
-                        ${p.estado.toUpperCase()}
+                    <span class="badge ${(p.estado || '').toLowerCase() === 'activo' ? 'blue' : 'grey darken-1'} white-text" style="float: none; border-radius: 4px;">
+                        ${(p.estado || 'INACTIVO').toUpperCase()}
                     </span>
                 </td>
                 <td class="center-align">
@@ -745,7 +747,7 @@ include __DIR__ . '/includes/header.php';
         const priceRange = minP === maxP ? `$${minP.toFixed(2)}` : `$${minP.toFixed(2)} - $${maxP.toFixed(2)}`;
         const groupId = 'variants-list-' + p.id_producto;
         
-        let imgSrc = getProductImgUrl(p.imagen);
+        const imgSrc = getProductImgUrl(p.imagen);
         
         // Lista de botones para cada variante
         let variantsHtml = `<div id="${groupId}" style="display:none; max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; padding: 8px; background: #f1f8ff; min-width: 220px; margin-top:8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">`;
@@ -754,7 +756,7 @@ include __DIR__ . '/includes/header.php';
             
             // Mejorar etiqueta visual en la lista de variantes del Admin
             let label = v.nombre_variante || '';
-            let unit = (v.unidad && v.unidad.toLowerCase() !== 'unidades') ? v.unidad : '';
+            const unit = (v.unidad && typeof v.unidad === 'string' && v.unidad.toLowerCase() !== 'unidades') ? v.unidad : '';
             if (unit && label && !label.toLowerCase().includes(unit.toLowerCase())) {
                 label += ' ' + unit;
             } else if (!label) {

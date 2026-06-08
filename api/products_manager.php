@@ -32,11 +32,17 @@ try {
         } 
         elseif ($action === 'get_dependencies') {
             // Carga almacenes y categorías para los dropdowns
+            $almacenesQuery = $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC");
+            $almacenes = $almacenesQuery ? $almacenesQuery->fetchAll() : [];
+
+            $presentacionesQuery = $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC");
+            $presentaciones = $presentacionesQuery ? $presentacionesQuery->fetchAll(PDO::FETCH_COLUMN) : [];
+
             echo json_encode([
                 'success' => true,
-                'almacenes' => $pdo->query("SELECT * FROM almacenes WHERE estado = 'activo' ORDER BY nombre ASC")->fetchAll(),
+                'almacenes' => $almacenes,
                 'categorias' => dbGetCategories(),
-                'presentaciones' => $pdo->query("SELECT nombre FROM tipos_presentacion ORDER BY nombre ASC")->fetchAll(PDO::FETCH_COLUMN),
+                'presentaciones' => $presentaciones,
                 'productos_padre' => dbGetParentProducts()
             ]);
         }

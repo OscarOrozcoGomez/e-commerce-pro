@@ -642,7 +642,8 @@ function dbGetCategories(): array {
     try {
         $pdo = getPDO();
         $sql = "SELECT * FROM categorias WHERE estado = 'activo' ORDER BY nombre ASC";
-        return $pdo->query($sql)->fetchAll();
+        $stmt = $pdo->query($sql);
+        return $stmt ? $stmt->fetchAll() : [];
     } catch (PDOException $e) {
         error_log("Error en dbGetCategories: " . $e->getMessage());
         return [];
@@ -670,7 +671,8 @@ function dbGetParentProducts(): array {
     try {
         $pdo = getPDO();
         $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE (id_padre IS NULL OR id_padre = 0) AND estado = 'activo' ORDER BY nombre ASC";
-        return $pdo->query($sql)->fetchAll();
+        $stmt = $pdo->query($sql);
+        return $stmt ? $stmt->fetchAll() : [];
     } catch (PDOException $e) {
         error_log("Error en dbGetParentProducts: " . $e->getMessage());
         return [];
@@ -709,9 +711,11 @@ function getProductImageUrl(?string $imgData): string {
     // Si ya es una URL completa (http o https), devolverla tal cual
     if (strpos($imgData, 'http') === 0) return $imgData;
 
-    // Si es una ruta de archivo (contiene una barra diagonal o tiene extensión de imagen)
-    if (strpos($imgData, '/') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif)$/i', $imgData)) {
-        return BASE_URL . 'assets/img/products/' . $imgData;
+    // Si es una ruta de archivo (contiene una barra o tiene extensión de imagen)
+    if (strpos($imgData, '/') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
+        $base = rtrim(BASE_URL, '/') . '/';
+        $cleanPath = ltrim($imgData, '/');
+        return $base . 'assets/img/products/' . $cleanPath;
     }
 
     // Si es Base64 (compatibilidad con datos antiguos)
