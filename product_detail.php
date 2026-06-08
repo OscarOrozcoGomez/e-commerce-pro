@@ -466,7 +466,7 @@ include __DIR__ . '/views/includes/header.php';
                 
                 // Combinar valor (ej: 120) con unidad (ej: Cápsulas, Tomas, Porciones)
                 let variantText = v.nombre_variante || '';
-                const unitText = (v.unidad && v.unidad.toLowerCase() !== 'unidades') ? v.unidad : '';
+                const unitText = v.unidad || '';
                 
                 // Si el nombre es solo un número o no contiene la unidad, la agregamos
                 if (variantText && unitText && !variantText.toLowerCase().includes(unitText.toLowerCase())) {

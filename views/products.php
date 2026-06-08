@@ -632,7 +632,8 @@ include __DIR__ . '/includes/header.php';
                 // Llenar Presentaciones
                 const presSelect = document.getElementById('unidad');
                 if(presSelect && res.presentaciones) {
-                    presSelect.innerHTML = '<option value="" disabled selected>Tipo de Presentación</option>' + 
+                    presSelect.innerHTML = '<option value="" disabled selected>Tipo de Presentación</option>' +
+                        '<option value="Unidades">Unidades</option>' + 
                         res.presentaciones.map(p => `<option value="${p}">${p}</option>`).join('');
                 }
                 

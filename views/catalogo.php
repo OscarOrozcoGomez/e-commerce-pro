@@ -113,7 +113,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 <?php else: ?>
                     <?php foreach ($productos as $p): ?>
-                        <div class="col s12 m6 l4">
+                        <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
                             <div class="card hoverable" style="height: 420px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;">
                                 <div class="card-image" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                                     <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
@@ -182,6 +182,76 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+// Manejo de navegación y filtros dinámicos
+let searchTimeout;
+
+/**
+ * Aplica el filtrado visual de los productos en la página
+ */
+function applySearchFilter(term) {
+    const cards = document.querySelectorAll('.product-card-container');
+    let foundCount = 0;
+    const lowerTerm = term.toLowerCase().trim();
+
+    cards.forEach(card => {
+        const name = (card.getAttribute('data-name') || '');
+        const sku = (card.getAttribute('data-sku') || '');
+        const desc = (card.querySelector('.card-content p.grey-text')?.textContent.toLowerCase() || '');
+
+        if (name.includes(lowerTerm) || sku.includes(lowerTerm) || desc.includes(lowerTerm)) {
+            card.style.display = '';
+            foundCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+
+    // Manejo de mensaje "Sin resultados"
+    let dynamicMsg = document.getElementById('no-results-dynamic');
+    if (foundCount === 0 && cards.length > 0 && lowerTerm !== '') {
+        if (!dynamicMsg) {
+            dynamicMsg = document.createElement('div');
+            dynamicMsg.id = 'no-results-dynamic';
+            dynamicMsg.className = 'col s12 center-align grey-text';
+            dynamicMsg.style.padding = '50px';
+            dynamicMsg.innerHTML = '<i class="material-icons large">search_off</i><p>No hay coincidencias en esta página.</p>';
+            document.querySelector('.row:has(.product-card-container)')?.appendChild(dynamicMsg);
+        }
+    } else if (dynamicMsg) {
+        dynamicMsg.remove();
+    }
+}
+
+// Escuchar cambios en el input de búsqueda
+document.getElementById('search-input')?.addEventListener('input', function() {
+    const term = this.value;
+    applySearchFilter(term);
+
+    // Actualizar URL en el historial con debounce (para no saturar el historial al escribir)
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        const url = new URL(window.location);
+        if (term.trim()) url.searchParams.set('search', term.trim());
+        else url.searchParams.delete('search');
+
+        // Solo añadir al historial si el parámetro de búsqueda realmente cambió
+        if (url.search !== window.location.search) {
+            window.history.pushState({ search: term }, '', url);
+        }
+    }, 800);
+});
+
+// Manejar botones de Atrás / Adelante del navegador
+window.addEventListener('popstate', function(event) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const term = urlParams.get('search') || '';
+    const input = document.getElementById('search-input');
+    if (input) {
+        input.value = term;
+        applySearchFilter(term);
+    }
+});
+
 document.querySelector('form[action*="catalogo.php"]')?.addEventListener('submit', function(e) {
     e.preventDefault();
 });
