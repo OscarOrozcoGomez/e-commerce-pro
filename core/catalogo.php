@@ -16,7 +16,9 @@ $sql = "SELECT p.*,
         FROM productos p";
 $params = [];
 
-$whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
+// Mostramos todos los productos activos. 
+// Si quieres que la Creatina de 200 servicios sea visible individualmente, quitamos el filtro de id_padre.
+$whereClauses = ["p.estado = 'activo'"];
 
 if (!empty($categoriaSeleccionada)) {
     $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 

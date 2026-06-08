@@ -670,8 +670,9 @@ function dbGetPresentationTypes(): array {
 function dbGetParentProducts(): array {
     try {
         $pdo = getPDO();
-        // Cambiamos a != 'inactivo' para que los archivados también puedan ser padres en el dropdown
-        $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE (id_padre IS NULL OR id_padre = 0) AND estado != 'inactivo' ORDER BY nombre ASC";
+        // Permitimos que cualquier producto activo o archivado aparezca en la lista de padres.
+        // Esto permite rescatar productos que fueron mal asociados anteriormente.
+        $sql = "SELECT id_producto, nombre, sku, nombre_variante FROM productos WHERE estado != 'inactivo' ORDER BY nombre ASC";
         $stmt = $pdo->query($sql);
         return $stmt ? $stmt->fetchAll() : [];
     } catch (PDOException $e) {

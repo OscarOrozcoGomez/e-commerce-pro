@@ -227,15 +227,22 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                     <div class="row" style="margin-bottom: 0;">
-                        <div class="input-field col s12 m8">
+                        <div class="input-field col s12 m6">
                             <i class="material-icons prefix">search</i>
                             <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
                         </div>
-                        <div class="input-field col s12 m4">
+                        <div class="input-field col s12 m3">
                             <select id="filtro_estado" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px; height: 3rem;">
-                                <option value="activo" selected>Ver: Solo Activos</option>
-                                <option value="archivado">Ver: Solo Archivados</option>
-                                <option value="todos">Ver: Todos</option>
+                                <option value="activo" selected>Estado: Activos</option>
+                                <option value="archivado">Estado: Archivados</option>
+                                <option value="todos">Estado: Todos</option>
+                            </select>
+                        </div>
+                        <div class="input-field col s12 m3">
+                            <select id="filtro_imagen" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px; height: 3rem;">
+                                <option value="todas" selected>Fotos: Todas</option>
+                                <option value="con">Con Foto</option>
+                                <option value="sin">Sin Foto</option>
                             </select>
                         </div>
                     </div>
@@ -689,32 +696,35 @@ include __DIR__ . '/includes/header.php';
         
         if (!baseUrl.endsWith('/')) baseUrl += '/';
 
-        // Si ya es una URL completa, devolverla tal cual para evitar rutas deformes
-        if (imgData.startsWith('http')) return imgData;
+        // 1. Si ya es una URL completa o un data-uri
+        if (imgData.startsWith('http') || imgData.startsWith('data:image')) return imgData;
+
+        // 2. Detección robusta de Base64 (WebP, PNG, JPG) antes de buscar "/"
+        // iVBORw = PNG | /9j/ = JPG | UklGR = WebP
+        if (/^(iVBORw|\/9j\/|UklGR)/.test(imgData)) {
+            let mime = 'image/jpeg';
+            if (imgData.startsWith('iVBORw')) mime = 'image/png';
+            if (imgData.startsWith('UklGR')) mime = 'image/webp';
+            return `data:${mime};base64,${imgData}`;
+        }
         
-        // Si es una ruta de archivo (contiene carpeta o tiene extensión de imagen)
+        // 3. Ruta de archivo (solo si tiene extensión de imagen o "/" y NO es base64)
         if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
             const cleanPath = imgData.replace(/^\/+/, '');
             const finalUrl = baseUrl + 'assets/img/products/' + cleanPath;
             return finalUrl;
         }
-        
-        // Si es Base64
-        if (imgData.includes('data:image') || imgData.length > 500) {
-            return imgData.includes('data:image') ? imgData : `data:image/jpeg;base64,${imgData}`;
-        }
-        
-        console.warn("No se pudo resolver la URL de la imagen para:", imgData);
         return '';
     }
 
     function renderRow(p) {
         let imgSrc = getProductImgUrl(p.imagen);
+        const hasImg = !!imgSrc;
         const isLow = (parseInt(p.cantidad_actual) || 0) <= (parseInt(p.stock_minimo) || 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
-            <tr data-codes="${(p.codigo_barras || '').toLowerCase()}">
+            <tr data-codes="${(p.codigo_barras || '').toLowerCase()}" data-has-image="${hasImg}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
                 <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}</td>
                 <td>
@@ -756,6 +766,7 @@ include __DIR__ . '/includes/header.php';
         const groupId = 'variants-list-' + p.id_producto;
         
         let imgSrc = getProductImgUrl(p.imagen);
+        const hasImg = !!imgSrc;
         
         // Lista de botones para cada variante
         let variantsHtml = `<div id="${groupId}" style="display:none; max-height: 200px; overflow-y: auto; border: 1px solid #bbdefb; border-radius: 4px; padding: 8px; background: #f1f8ff; min-width: 220px; margin-top:8px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);">`;
@@ -786,7 +797,7 @@ include __DIR__ . '/includes/header.php';
         const allCodes = variants.map(v => v.codigo_barras).join(' ');
 
         return `
-            <tr class="product-group-row" data-codes="${allCodes.toLowerCase()}">
+            <tr class="product-group-row" data-codes="${allCodes.toLowerCase()}" data-has-image="${hasImg}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
                 <td>
                     <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong><br>
@@ -964,19 +975,24 @@ include __DIR__ . '/includes/header.php';
     function aplicarFiltros() {
         const busqueda = document.getElementById('buscar_producto').value.toLowerCase();
         const estadoFiltro = document.getElementById('filtro_estado').value;
+        const imagenFiltro = document.getElementById('filtro_imagen').value;
         const rows = document.querySelectorAll('table.striped tbody tr');
         
         rows.forEach(row => {
             const nombre = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
             const codigo = (row.getAttribute('data-codes') || '');
+            const hasImg = row.getAttribute('data-has-image') === 'true';
             
-            // El estado ahora está en la celda 3 tras quitar la de Código de Barras
             const estadoActual = row.cells[3] ? row.cells[3].textContent.trim().toLowerCase() : '';
             
             const coincideBusqueda = nombre.includes(busqueda) || codigo.includes(busqueda);
             const coincideEstado = (estadoFiltro === 'todos') || (estadoActual === estadoFiltro);
             
-            if (coincideBusqueda && coincideEstado) {
+            let coincideImagen = true;
+            if (imagenFiltro === 'con') coincideImagen = hasImg;
+            else if (imagenFiltro === 'sin') coincideImagen = !hasImg;
+            
+            if (coincideBusqueda && coincideEstado && coincideImagen) {
                 row.style.display = '';
             } else {
                 row.style.display = 'none';
@@ -986,6 +1002,7 @@ include __DIR__ . '/includes/header.php';
 
     document.getElementById('buscar_producto').addEventListener('keyup', aplicarFiltros);
     document.getElementById('filtro_estado').addEventListener('change', aplicarFiltros);
+    document.getElementById('filtro_imagen').addEventListener('change', aplicarFiltros);
 
     document.addEventListener('DOMContentLoaded', function() {
         aplicarFiltros(); // Aplicar filtro por defecto (Activos) al cargar
