@@ -691,10 +691,12 @@ include __DIR__ . '/includes/header.php';
     // Ayudante JS para resolver la URL de la imagen similar a la función de PHP
     function getProductImgUrl(imgData) {
         let baseUrl = '<?php echo BASE_URL; ?>';
-        if (!imgData || typeof imgData !== 'string' || imgData === 'NULL' || imgData === 'undefined' || imgData === '') {
+        if (!imgData || typeof imgData !== 'string') return '';
+        
+        imgData = imgData.trim();
+        if (['NULL', 'undefined', '[object Object]', 'null', ''].includes(imgData)) {
             return '';
         }
-        
         if (!baseUrl.endsWith('/')) baseUrl += '/';
 
         // 1. Si ya es una URL completa o un data-uri

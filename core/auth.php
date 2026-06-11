@@ -708,7 +708,10 @@ function slugify(string $text): string {
  * Resuelve la URL de la imagen de un producto de forma robusta.
  */
 function getProductImageUrl(?string $imgData): string {
-    if (empty($imgData) || in_array($imgData, ['NULL', 'undefined', ''])) return '';
+    $imgData = trim((string)$imgData);
+    if (empty($imgData) || in_array($imgData, ['NULL', 'undefined', '[object Object]', 'null', ''])) {
+        return BASE_URL . 'assets/img/products/default-product.png';
+    }
 
     // Si ya es una URL completa (http o https), devolverla tal cual
     if (strpos($imgData, 'http') === 0) return $imgData;
@@ -723,7 +726,11 @@ function getProductImageUrl(?string $imgData): string {
         return "data:$mime;base64," . $imgData;
     }
 
-    // Si no es ninguna de las anteriores, es una ruta de archivo local
-    $base = rtrim(BASE_URL, '/') . '/';
-    return $base . 'assets/img/products/' . ltrim($imgData, '/');
+    // Si no es ninguna de las anteriores, verificar si parece una ruta de archivo local (tiene / o extensión)
+    if (strpos($imgData, '/') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
+        $base = rtrim(BASE_URL, '/') . '/';
+        return $base . 'assets/img/products/' . ltrim($imgData, '/');
+    }
+
+    return '';
 }

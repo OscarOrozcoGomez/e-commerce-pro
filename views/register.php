@@ -101,11 +101,13 @@ include __DIR__ . '/includes/header.php';
                                 <i class="material-icons prefix">lock</i>
                                 <input id="password" name="password" type="password" required>
                                 <label for="password">Contraseña</label>
+                                <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('password', this)">visibility</i>
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">lock_outline</i>
                                 <input id="confirm_password" name="confirm_password" type="password" required>
                                 <label for="confirm_password">Confirmar Contraseña</label>
+                                <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('confirm_password', this)">visibility</i>
                             </div>
                             
                             <div style="margin-top: 30px;">
@@ -127,5 +129,18 @@ include __DIR__ . '/includes/header.php';
 <style>
     .w-100 { width: 100%; }
 </style>
+
+<script>
+    function togglePass(inputId, iconElement) {
+        const input = document.getElementById(inputId);
+        if (input.type === 'password') {
+            input.type = 'text';
+            iconElement.innerText = 'visibility_off';
+        } else {
+            input.type = 'password';
+            iconElement.innerText = 'visibility';
+        }
+    }
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

@@ -30,21 +30,19 @@ try {
     $stmtStock->execute([$id]);
     $product['stock'] = (float)$stmtStock->fetchColumn();
 
-    $product['imagen'] = getProductImageUrl($product['imagen']);
-
     // 2. Obtener galería de imágenes
     $stmtGal = $pdo->prepare("SELECT ruta_archivo FROM producto_imagenes WHERE id_producto = ? ORDER BY orden ASC");
     $stmtGal->execute([$id]);
     $galeria = $stmtGal->fetchAll(PDO::FETCH_COLUMN);
     
     $imagenes = [];
-    if (!empty($product['imagen'])) {
-        $imagenes[] = $product['imagen']; // La imagen principal siempre va primero
-    }
     foreach ($galeria as $img) {
         $fmt = getProductImageUrl($img);
         if ($fmt && !empty($img)) $imagenes[] = $fmt;
     }
+    
+    // Definir la imagen principal como la primera de la galería
+    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : '';
     $product['galeria'] = $imagenes;
 
     // =========================================================================

@@ -13,10 +13,14 @@ $pdo = getPDO();
 
 // REPARACIÓN DE QA: Modificamos las subconsultas para que busquen por ID de Parentesco (id_padre), no por texto plano.
 $sql = "SELECT p.*, 
+        COALESCE(
+            (SELECT pi_sub.ruta_archivo FROM producto_imagenes pi_sub INNER JOIN productos p_img_sub ON pi_sub.id_producto = p_img_sub.id_producto WHERE (p_img_sub.id_producto = p.id_producto OR p_img_sub.id_padre = p.id_producto) ORDER BY (p_img_sub.id_producto = p.id_producto) DESC, pi_sub.orden ASC LIMIT 1),
+            p.imagen, p.imagen_url
+        ) as calculated_imagen,
         (SELECT MIN(p3.precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
         (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
         FROM productos p ";
-$params = [];
+$params = []; 
 
 // Forzamos que solo se listen los registros raíz en la cuadricula principal
 $whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
@@ -116,7 +120,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
                             <div class="card hoverable" style="height: 420px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;">
                                 <div class="card-image" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                                    <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
+                                    <?php $imgSrc = getProductImageUrl($p['calculated_imagen']); ?>
                                     <img src="<?php echo $imgSrc; ?>" style="max-height: 180px; width: auto; object-fit: contain;">
                                 </div>
                                 <div class="card-content" style="flex-grow: 1; padding: 15px;">

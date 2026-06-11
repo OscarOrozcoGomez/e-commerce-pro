@@ -35,8 +35,15 @@ if (isset($_FILES['imagen_nueva']) && $_FILES['imagen_nueva']['error'] === UPLOA
     move_uploaded_file($nombre_temporal, __DIR__ . '/../uploads/productos/' . $imagen_principal_final);
 } else {
     // Si no cambió, rescatamos la principal actual y la limpiamos con basename
-    $imagen_principal_actual = $_POST['imagen_actual'] ?? '';
-    $imagen_principal_final = !empty($imagen_principal_actual) ? basename($imagen_principal_actual) : null;
+    $img_act = trim($_POST['imagen_actual'] ?? '');
+    if (empty($img_act) || in_array(strtolower($img_act), ['null', 'undefined', '[object object]'])) {
+        $imagen_principal_final = null;
+    } else {
+        // Solo aplicar basename si parece una ruta de archivo (contiene / o .)
+        // Si es Base64 (contiene la firma de WebP o PNG), lo dejamos intacto
+        $isBase64 = preg_match('/^(data:image|iVBORw|\/9j\/|UklGR)/', $img_act);
+        $imagen_principal_final = $isBase64 ? $img_act : basename($img_act);
+    }
 }
 
 
@@ -95,7 +102,7 @@ try {
 
     // Insertar las imágenes secundarias restantes (las otras 5 imágenes)
     if (!empty($galeria_final)) {
-        $sqlInsGal = "INSERT FROM producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)";
+        $sqlInsGal = "INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)";
         $stmtIns = $pdo->prepare($sqlInsGal);
         
         foreach ($galeria_final as $orden => $archivo_limpio) {

@@ -18,7 +18,11 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($action === 'list') {
             $id_alm = (int)($_GET['almacen_id'] ?? 1);
-            $sql = "SELECT p.*, GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids, GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
+            // Obtenemos la primera imagen de la galería como 'imagen' para el frontend
+            $sql = "SELECT p.*, 
+                    (SELECT pi2.ruta_archivo FROM producto_imagenes pi2 WHERE pi2.id_producto = p.id_producto ORDER BY pi2.orden ASC LIMIT 1) as imagen,
+                    GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids, 
+                    GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
                     FROM productos p 
                     LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
                     LEFT JOIN producto_imagenes pi ON p.id_producto = pi.id_producto
@@ -224,19 +228,13 @@ try {
                 // Limpiar galería actual
                 $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
                 
-                // Actualizar imagen principal o limpiar si el usuario borró todo
                 if (!empty($finalPaths)) {
-                    $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")->execute([$finalPaths[0], $id]);
-                    
-                    // Insertar resto en galería
-                    for ($i = 1; $i < count($finalPaths); $i++) {
+                    // Insertar todas en la galería (la primera será la principal por orden 0)
+                    for ($i = 0; $i < count($finalPaths); $i++) {
                         if ($i >= 6) break; // Límite de 6 imágenes
                         $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
                             ->execute([$id, $finalPaths[$i], $i]);
                     }
-                } else {
-                    // Si se enviaron instrucciones de orden pero no quedaron imágenes válidas, limpiar la principal
-                    $pdo->prepare("UPDATE productos SET imagen = NULL WHERE id_producto = ?")->execute([$id]);
                 }
             }
 
