@@ -230,7 +230,29 @@ include __DIR__ . '/includes/header.php';
     /* Estilo para mensajes de sistema (separadores) */
     .system-msg { clear: both; text-align: center; margin: 20px 0; }
     .system-msg span { background: #eeeeee; color: #757575; padding: 4px 15px; border-radius: 20px; font-size: 0.75rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
-    
+
+    /* Estilo para los encabezados de fecha colapsables (Rediseño Intuitivo) */
+    .chat-date-header { text-align: center; margin: 20px 0; cursor: pointer; position: relative; }
+    .chat-date-header span { 
+        background: #e8eaf6; 
+        color: #1a237e; 
+        padding: 6px 18px; 
+        border-radius: 20px; 
+        font-size: 0.8rem; 
+        font-weight: 600; 
+        display: inline-flex; 
+        align-items: center; 
+        gap: 6px; 
+        box-shadow: 0 1px 4px rgba(0,0,0,0.1); 
+        transition: all 0.2s ease;
+        border: 1px solid #c5cae9;
+    }
+    .chat-date-header span:hover { 
+        background: #c5cae9; 
+        transform: scale(1.05); 
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+
     /* Asegurar que el desplegable de búsqueda se vea sobre el chat */
     .autocomplete-content {
         z-index: 9999 !important;
@@ -309,13 +331,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (esStaff) cargarListaClientes();
     if (esStaff) {
         // Cargar productos para el buscador interno del chat
-        fetch('<?php echo BASE_URL; ?>api/products.php')
+        const idAlmacenStaff = <?php echo json_encode($_SESSION['usuario']['id_almacen'] ?? 1); ?>;
+        fetch('<?php echo BASE_URL; ?>api/products_manager.php?action=list&almacen_id=' + idAlmacenStaff)
             .then(r => r.json())
             .then(data => {
-                if (data.success) {
+                if (data.success && data.data) {
                     const acData = {};
-                    data.products.forEach(p => {
-                        const label = `[${p.sku}] ${p.nombre}`;
+                    data.data.forEach(p => {
+                        const label = `[${p.sku || 'S/S'}] ${p.nombre}${p.nombre_variante ? ' (' + p.nombre_variante + ')' : ''}`;
                         // No usamos p.imagen aquí porque el base64 es muy pesado para el buscador
                         acData[label] = null; 
                         productosData[label] = p;
@@ -735,7 +758,9 @@ function cargarMensajes() {
                 box.innerHTML = '';
                 let lastDateStr = null;
                 let currentDayContent = null;
-                const todayStr = new Date().toISOString().split('T')[0];
+                // Obtener fecha de hoy en formato local YYYY-MM-DD para evitar desfases de zona horaria (UTC)
+                const n = new Date();
+                const todayStr = n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
 
                 data.mensajes.forEach(m => {
                     const msgDate = m.fecha_envio.split(' ')[0]; // YYYY-MM-DD
@@ -743,17 +768,12 @@ function cargarMensajes() {
                     // Crear un nuevo grupo si cambia el día
                     if (msgDate !== lastDateStr) {
                         const isToday = (msgDate === todayStr);
-                        
-                        // Por defecto expandimos el día de hoy en la primera carga
-                        if (isToday && !diasExpandidos.has(msgDate)) {
-                            diasExpandidos.add(msgDate);
-                        }
-
-                        const isExpanded = diasExpandidos.has(msgDate);
+                        // El día de hoy siempre aparece expandido; otros días solo si el usuario los abrió
+                        const isExpanded = isToday || diasExpandidos.has(msgDate);
                         
                         const header = document.createElement('div');
                         header.className = 'chat-date-header';
-                        header.innerHTML = `<span>${formatFriendlyDate(msgDate)} <i class="material-icons tiny">${isExpanded ? 'expand_more' : 'expand_less'}</i></span>`;
+                        header.innerHTML = `<span>${formatFriendlyDate(msgDate)} <i class="material-icons" style="font-size: 1.2rem;">${isExpanded ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}</i></span>`;
                         
                         currentDayContent = document.createElement('div');
                         currentDayContent.className = 'day-content';
@@ -762,7 +782,7 @@ function cargarMensajes() {
                         header.onclick = () => {
                             const isHidden = currentDayContent.style.display === 'none';
                             currentDayContent.style.display = isHidden ? 'block' : 'none';
-                            header.querySelector('i').textContent = isHidden ? 'expand_more' : 'expand_less';
+                            header.querySelector('i').textContent = isHidden ? 'keyboard_arrow_up' : 'keyboard_arrow_down';
                             if (isHidden) diasExpandidos.add(msgDate); else diasExpandidos.delete(msgDate);
                         };
 
@@ -812,8 +832,38 @@ function cargarMensajes() {
         });
 }
 
+// Ayudante JS para resolver la URL de la imagen de forma robusta en el chat
+function getProductImgUrl(imgData) {
+    let baseUrl = '<?php echo BASE_URL; ?>';
+    if (!imgData || typeof imgData !== 'string') return baseUrl + 'assets/img/no-product.png';
+    
+    imgData = imgData.trim();
+    if (['NULL', 'undefined', '[object Object]', 'null', ''].includes(imgData)) {
+        return baseUrl + 'assets/img/no-product.png';
+    }
+    if (!baseUrl.endsWith('/')) baseUrl += '/';
+
+    // 1. Si ya es una URL completa o un data-uri
+    if (imgData.startsWith('http') || imgData.startsWith('data:image')) return imgData;
+
+    // 2. Detección de Base64 (PNG, JPG, WebP)
+    if (/^(iVBORw|\/9j\/|UklGR)/.test(imgData)) {
+        let mime = 'image/jpeg';
+        if (imgData.startsWith('iVBORw')) mime = 'image/png';
+        if (imgData.startsWith('UklGR')) mime = 'image/webp';
+        return `data:${mime};base64,${imgData}`;
+    }
+    
+    // 3. Ruta de archivo (asumimos que está en la carpeta de productos)
+    if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
+        const cleanPath = imgData.replace(/^\/+/, '');
+        return baseUrl + 'assets/img/products/' + cleanPath;
+    }
+    return baseUrl + 'assets/img/no-product.png';
+}
+
 function renderProductCard(p, isMe) {
-    const img = p.imagen || '<?php echo BASE_URL; ?>assets/img/no-product.png';
+    const img = getProductImgUrl(p.imagen);
     const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
@@ -862,9 +912,10 @@ function enviarMensaje(tipo = 'texto', contenido = null) {
 }
 
 function enviarProducto(p) {
+    const nombreCompleto = p.nombre + (p.nombre_variante ? ' (' + p.nombre_variante + ')' : '');
     const pData = JSON.stringify({
         id_producto: p.id_producto,
-        nombre: p.nombre,
+        nombre: nombreCompleto,
         precio_venta: p.precio_venta,
         imagen: p.imagen
     });
