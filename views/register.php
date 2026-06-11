@@ -81,7 +81,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="card-panel green lighten-4 green-text text-darken-4">
                             <?php echo esc($success); ?>
                             <div style="margin-top: 10px;">
-                                <a href="<?php echo BASE_URL; ?>views/login.php" class="btn green waves-effect waves-light">Ir a Login</a>
+                                <a href="<?php echo BASE_URL; ?>views/login.php" class="btn green waves-effect waves-light">Ir a Iniciar Sesión</a>
                             </div>
                         </div>
                     <?php else: ?>

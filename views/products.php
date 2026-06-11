@@ -93,10 +93,10 @@ include __DIR__ . '/includes/header.php';
                             <div class="input-field col s8" style="margin: 0;">
                                 <input type="text" id="blife_id" placeholder="ID B-Life">
                                 <input type="hidden" name="imagenes_orden_json" id="imagenes_orden_json">
-                                <label for="blife_id" class="active">Sync con B-Life (Variant ID)</label>
+                                <label for="blife_id" class="active">Sincronización con B-Life (ID de Variante)</label>
                             </div>
                             <div class="col s4">
-                                <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SYNC</button>
+                                <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
                             </div>
                             <input type="hidden" name="remote_images_urls" id="remote_images_urls">
                             <div id="blife-external-images" class="col s12" style="margin-top: 10px; display: none;"></div>

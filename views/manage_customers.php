@@ -92,7 +92,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php else: foreach ($dirs as $d): ?>
                                     <li class="collection-item">
                                         <strong><?php echo esc($d['alias']); ?></strong> 
-                                        <?php if ($d['es_default']): ?><span class="new badge blue" data-badge-caption="Default"></span><?php endif; ?><br>
+                                        <?php if ($d['es_default']): ?><span class="new badge blue" data-badge-caption="Predeterminada"></span><?php endif; ?><br>
                                         <span class="grey-text text-darken-1"><?php echo esc($d['direccion']); ?></span>
                                     </li>
                                 <?php endforeach; endif; ?>

@@ -214,7 +214,7 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Chat de Soporte</span>
+                        <span class="card-title">Chat</span>
                         <p>Atender dudas y consultas directas de tus clientes en tiempo real.</p>
                     </div>
                     <div class="card-action">

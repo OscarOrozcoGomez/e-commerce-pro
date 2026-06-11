@@ -95,7 +95,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php echo csrfInput(); ?>
                                                 <input type="hidden" name="accion" value="set_default">
                                                 <input type="hidden" name="id_direccion" value="<?php echo $d['id_direccion']; ?>">
-                                                <button type="submit" class="btn-small blue-text btn-flat">Hacer Default</button>
+                                                <button type="submit" class="btn-small blue-text btn-flat">Hacer Predeterminada</button>
                                             </form>
                                         <?php else: ?>
                                             <span class="blue-text text-darken-2"><strong>Predeterminada</strong></span>

@@ -4,7 +4,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 requireAuth();
 
-$pageTitle = 'Chat de Soporte';
+$pageTitle = 'Chat';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $soyCliente = isCliente();
@@ -27,7 +27,7 @@ include __DIR__ . '/includes/header.php';
 <div class="container" style="margin-top: 20px;">
     <div class="row">
         <?php if (!$soyCliente): ?>
-            <!-- Sidebar para Staff -->
+            <!-- Barra lateral para el Personal -->
             <div class="col s12 m4 l3">
                 <div class="collection with-header z-depth-1" id="conversations-list" style="border-radius: 8px; overflow: hidden;">
                     <div class="collection-header blue darken-4 white-text"><h6>Conversaciones</h6></div>
@@ -48,7 +48,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-content" style="height: 500px; display: flex; flex-direction: column;">
                     <span class="card-title" id="chat-header">
                         <i class="material-icons left blue-text">chat</i>
-                        <span id="chat-title-text"><?php echo $soyCliente ? 'Soporte Técnico' : 'Selecciona un cliente'; ?></span>
+                        <span id="chat-title-text"><?php echo $soyCliente ? 'Chat' : 'Selecciona un cliente'; ?></span>
                         <div id="staff-actions" class="right" style="display:none;">
                             <button class="btn-flat blue-text" onclick="abrirTransferir()" title="Transferir chat"><i class="material-icons">swap_horiz</i></button>
                             <button class="btn-flat red-text" onclick="terminarChat()" title="Finalizar"><i class="material-icons">check_circle</i></button>
@@ -680,7 +680,7 @@ function cargarMensajes() {
                         
                         Swal.fire({
                             title: 'Sesión Finalizada',
-                            html: `Soporte ha terminado la consulta.<br><small class="grey-text">Cerrado el: ${fechaHora}</small>`,
+                            html: `El Chat ha terminado la consulta.<br><small class="grey-text">Cerrado el: ${fechaHora}</small>`,
                             icon: 'info',
                             confirmButtonText: 'Ir al Catálogo',
                             confirmButtonColor: '#1a237e',
@@ -712,7 +712,7 @@ function cargarMensajes() {
                 }
 
                 if (data.is_typing) {
-                    document.getElementById('typing-name').textContent = esStaff ? 'El cliente' : 'Soporte';
+                    document.getElementById('typing-name').textContent = esStaff ? 'El cliente' : 'Chat';
                     typingDiv.style.display = 'block';
                 } else {
                     typingDiv.style.display = 'none';
@@ -725,7 +725,7 @@ function cargarMensajes() {
                     
                     if (enviadoPorOtro) {
                         document.getElementById('chat-notification-sound').play().catch(e => console.log("Audio bloqueado por navegador"));
-                        if (!esStaff) M.toast({html: 'Nuevo mensaje de Soporte', classes: 'blue'});
+                        if (!esStaff) M.toast({html: 'Nuevo mensaje del Chat', classes: 'blue'});
                     }
                 }
 
