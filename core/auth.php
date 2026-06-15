@@ -351,7 +351,7 @@ function resetPasswordWithToken(string $token, string $newPassword): bool
     $pdo->beginTransaction();
 
     try {
-        $stmt = $pdo->prepare('UPDATE usuarios SET contrasena = :contrasena WHERE email = :email');
+        $stmt = $pdo->prepare('UPDATE usuarios SET contrasena = :contrasena, intentos_fallidos = 0, bloqueado_hasta = NULL WHERE email = :email');
         $stmt->execute([
             ':contrasena' => $passwordHash,
             ':email' => $record['email'],
@@ -375,21 +375,42 @@ function sendPasswordResetEmail(string $email, string $token): bool
                "Ingrésalo en la página para restablecer tu contraseña.\n" .
                "Si no solicitaste esto, ignora este mensaje.\n";
 
-    // SIMULACIÓN PARA XAMPP / LOCALHOST
-    // Guardamos el "email" en un archivo local para que puedas verlo sin configurar servidores
-    $logPath = __DIR__ . '/../mail_log.txt';
-    $logContent = "========================================\n" .
-                  "FECHA: " . date('Y-m-d H:i:s') . "\n" .
-                  "PARA: $email\n" .
-                  "ASUNTO: $subject\n" .
-                  "MENSAJE: $message\n" .
-                  "========================================\n\n";
-    
-    file_put_contents($logPath, $logContent, FILE_APPEND);
+    // Detectar si estamos en localhost o en el host real
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    $isLocal = (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false);
 
-    // En producción, aquí usarías mail() o PHPMailer. 
-    // Por ahora retornamos true para que el flujo continúe en XAMPP.
-    return true;
+    if ($isLocal) {
+        // Seguimos guardando en log para pruebas locales en XAMPP
+        $logPath = __DIR__ . '/../mail_log.txt';
+        $logContent = "========================================\n" .
+                      "FECHA: " . date('Y-m-d H:i:s') . "\n" .
+                      "PARA: $email\n" .
+                      "ASUNTO: $subject\n" .
+                      "MENSAJE: $message\n" .
+                      "========================================\n\n";
+        file_put_contents($logPath, $logContent, FILE_APPEND);
+        return true;
+    }
+
+    // LÓGICA PARA EL HOST REAL
+    // Es vital que el remitente (From) sea un correo de tu dominio para evitar el SPAM
+    $domain = str_replace('www.', '', $host);
+    $fromEmail = "no-reply@" . $domain;
+    $fromName = "Belleza y Bienestar";
+    
+    $headers = [
+        "From: $fromName <$fromEmail>",
+        "Reply-To: $fromEmail",
+        "Return-Path: $fromEmail",
+        "X-Mailer: PHP/" . phpversion(),
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=UTF-8"
+    ];
+
+    // El quinto parámetro "-f" es fundamental en muchos hostings para validar el remitente real
+    $extraParams = "-f" . $fromEmail;
+
+    return mail($email, '=?UTF-8?B?'.base64_encode($subject).'?=', $message, implode("\r\n", $headers), $extraParams);
 }
 
 /**

@@ -93,6 +93,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </form>
             </div>
+            <div class="card-action center-align">
+                <a href="<?php echo BASE_URL; ?>index.php" class="blue-text text-darken-4" style="display: inline-flex; align-items: center; gap: 5px;">
+                    <i class="material-icons">arrow_back</i> Volver al Catálogo
+                </a>
+            </div>
         </div>
     </div>
 
