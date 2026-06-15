@@ -140,8 +140,13 @@ include __DIR__ . '/views/includes/header.php';
     .qty-btn:hover { background: #f5f5f5; }
     .qty-input { width: 50px; border: none !important; text-align: center; margin: 0 !important; height: 55px !important; font-size: 1.2rem; font-weight: bold; box-shadow: none !important; pointer-events: none; }
     
-    .btn-add-cart { background-color: #1a237e; color: #fff; box-shadow: 0 4px 15px rgba(26, 35, 126, 0.3); font-weight: 600; border-radius: 30px; text-transform: uppercase; padding: 0 40px; height: 55px; display: flex; align-items: center; gap: 10px; border: none; font-size: 1.1rem; }
+    .btn-add-cart { background-color: #1a237e; color: #fff; box-shadow: 0 4px 15px rgba(26, 35, 126, 0.3); font-weight: 600; border-radius: 30px; text-transform: uppercase; padding: 0 40px; height: 55px; display: inline-flex; align-items: center; gap: 10px; border: none; font-size: 1.1rem; cursor: pointer; }
     .btn-add-cart:hover { background-color: #f8bbd0; color: #c2185b; box-shadow: none; }
+    .btn-add-cart:disabled {
+        background-color: #bdbdbd !important;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
     
     .btn-icon { background-color: #fff; border: 1px solid #ccc; color: #777; width: 55px; height: 55px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
     .btn-icon:hover { border-color: #f06292; color: #f06292; }
@@ -199,9 +204,9 @@ include __DIR__ . '/views/includes/header.php';
                     <input type="text" id="qty-input" class="qty-input" value="1" readonly>
                     <button class="qty-btn" onclick="updateQty(1)">+</button>
                 </div>
-                <a href="#" id="btn-add-cart" class="btn btn-add-cart">
+                <button type="button" id="btn-add-cart" class="btn-add-cart">
                     <i class="material-icons" style="font-size: 1.1rem;">shopping_cart</i> Agregar al carrito
-                </a>
+                </button>
                 <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">favorite_border</i></div>
                 <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">compare_arrows</i></div>
             </div>
@@ -273,6 +278,11 @@ include __DIR__ . '/views/includes/header.php';
         document.getElementById('btn-add-cart').addEventListener('click', function(e) {
             e.preventDefault();
             if(currentProduct) {
+                if (currentProduct.stock <= 0) {
+                    M.toast({html: '❌ Producto agotado', classes: 'red rounded'});
+                    return;
+                }
+
                 // Integración con tu carrito existente
                 let cart = JSON.parse(localStorage.getItem('cart') || '[]');
                 const existing = cart.find(item => item.id_producto === currentProduct.id_producto);

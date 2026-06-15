@@ -867,6 +867,9 @@ function renderProductCard(p, isMe) {
     const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
+    const stock = parseInt(p.cantidad_actual) || 0;
+    const isAvailable = stock > 0;
+
     return `
         <div class="chat-product-card">
             <a href="${detailUrl}" target="_blank" title="Ver detalles del producto">
@@ -877,10 +880,16 @@ function renderProductCard(p, isMe) {
                     <div class="truncate" style="font-weight:bold; font-size:0.85rem; cursor: pointer;">${p.nombre}</div>
                 </a>
                 <div class="blue-text" style="font-weight:bold;">$${parseFloat(p.precio_venta).toFixed(2)}</div>
+                ${isAvailable ? `
                 <button class="btn-small green darken-1 waves-effect" style="width:100%; margin-top:5px; height:28px; line-height:28px; font-size:0.7rem;" 
-                        onclick="addToCartFromChat(${p.id_producto}, '${safeName}', ${p.precio_venta}, '${img}')">
+                        onclick="addToCartFromChat(${p.id_producto}, '${safeName}', ${p.precio_venta}, '${img}', ${stock})">
                     AGREGAR
                 </button>
+                ` : `
+                <button class="btn-small grey lighten-1" disabled style="width:100%; margin-top:5px; height:28px; line-height:28px; font-size:0.7rem;">
+                    AGOTADO
+                </button>
+                `}
             </div>
         </div>
     `;
@@ -923,7 +932,12 @@ function enviarProducto(p) {
     document.getElementById('chat-product-autocomplete').value = '';
 }
 
-function addToCartFromChat(id, nombre, precio, imagen) {
+function addToCartFromChat(id, nombre, precio, imagen, stock = 1) {
+    if (stock <= 0) {
+        M.toast({html: `❌ <b>${nombre}</b> está agotado`, classes: 'red rounded'});
+        return;
+    }
+
     let cart = getCart();
     let item = cart.find(i => String(i.id_producto) === String(id));
     

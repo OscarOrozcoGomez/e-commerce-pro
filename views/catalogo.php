@@ -18,7 +18,8 @@ $sql = "SELECT p.*,
             p.imagen, p.imagen_url
         ) as calculated_imagen,
         (SELECT MIN(p3.precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
+        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes,
+        (SELECT COALESCE(SUM(ia_sub.cantidad_actual), 0) FROM inventario_almacen ia_sub JOIN productos p_all ON ia_sub.id_producto = p_all.id_producto WHERE p_all.id_producto = p.id_producto OR p_all.id_padre = p.id_producto) as total_stock
         FROM productos p ";
 $params = []; 
 
@@ -117,11 +118,13 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 <?php else: ?>
                     <?php foreach ($productos as $p): ?>
+                        <?php $isAvailable = (float)($p['total_stock'] ?? 0) > 0; ?>
                         <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
                             <div class="card hoverable" style="height: 420px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;">
                                 <div class="card-image" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                                     <?php $imgSrc = getProductImageUrl($p['calculated_imagen']); ?>
                                     <img src="<?php echo $imgSrc; ?>" style="max-height: 180px; width: auto; object-fit: contain;">
+                                    <?php if (!$isAvailable): ?><span class="badge red white-text stock-badge">AGOTADO</span><?php endif; ?>
                                 </div>
                                 <div class="card-content" style="flex-grow: 1; padding: 15px;">
                                     <span class="card-title truncate" style="font-size: 1.1rem; font-weight: bold; margin-bottom: 5px;">
@@ -150,16 +153,23 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                                 <div class="card-action center-align" style="border-top: 1px solid #eee; background: white;">
                                     <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo $p['id_producto']; ?>" class="btn-flat blue-text text-darken-4 waves-effect">VER</a>
+                                    <?php if ($isAvailable): ?>
                                     <button class="btn blue darken-4 waves-effect waves-light" 
                                             data-img="<?php echo esc($imgSrc); ?>"
                                             onclick="addToCart(
                                                 <?php echo (int)$p['id_producto']; ?>, 
                                                 '<?php echo addslashes(esc($p['nombre'])); ?>', 
                                                 <?php echo (float)$p['precio_venta']; ?>,
-                                                this.dataset.img
+                                                this.dataset.img,
+                                                <?php echo (float)($p['total_stock'] ?? 0); ?>
                                             )">
                                         <i class="material-icons">add_shopping_cart</i>
                                     </button>
+                                    <?php else: ?>
+                                    <button class="btn grey lighten-1" disabled title="Producto Agotado">
+                                        <i class="material-icons">block</i>
+                                    </button>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         </div>
@@ -260,7 +270,12 @@ document.querySelector('form[action*="catalogo.php"]')?.addEventListener('submit
     e.preventDefault();
 });
 
-function addToCart(id, nombre, precio, imagen = '') {
+function addToCart(id, nombre, precio, imagen = '', stock = 1) {
+    if (stock <= 0) {
+        M.toast({html: `❌ <b>${nombre}</b> no tiene stock disponible`, classes: 'red rounded'});
+        return;
+    }
+
     let cart = getCart();
     let item = cart.find(i => String(i.id_producto) === String(id));
     

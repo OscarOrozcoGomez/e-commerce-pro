@@ -397,12 +397,27 @@ include __DIR__ . '/includes/header.php';
         const sinProd = context.querySelector('.sin-productos');
         if (sinProd) sinProd.style.display = 'none';
         
+        // VALIDACIÓN DE STOCK
+        const stockDisponible = parseInt(product.cantidad_actual) || 0;
+
         const existente = context.querySelector(`.producto-item[data-id="${product.id_producto}"]`);
         if (existente) {
             const cantInput = existente.querySelector('.cantidad');
-            cantInput.value = parseInt(cantInput.value) + 1;
+            const nuevaCant = parseInt(cantInput.value) + 1;
+            
+            if (nuevaCant > stockDisponible) {
+                M.toast({html: `No hay más stock disponible de ${product.nombre} (${stockDisponible} max)`, classes: 'red'});
+                return;
+            }
+            
+            cantInput.value = nuevaCant;
             actualizarTotal(tabId);
             M.toast({html: `+1 ${product.nombre}`, classes: 'blue lighten-3'});
+            return;
+        }
+
+        if (stockDisponible <= 0) {
+            M.toast({html: `${product.nombre} está AGOTADO en esta sucursal`, classes: 'red darken-2'});
             return;
         }
 
@@ -425,7 +440,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 
                 <div class="input-field col s4 m2" style="margin: 0;">
-                    <input type="number" class="cantidad" name="cantidad_${productoIndex}" value="1" min="1" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; font-weight: bold; text-align: center;">
+                    <input type="number" class="cantidad" name="cantidad_${productoIndex}" value="1" min="1" max="${stockDisponible}" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; font-weight: bold; text-align: center;">
                     <label class="active">Cant.</label>
                 </div>
                 
@@ -455,8 +470,18 @@ include __DIR__ . '/includes/header.php';
         let subtotal = 0;
         let itemsTotales = 0;
         context.querySelectorAll('.producto-item').forEach(item => {
+            const id = item.dataset.id;
+            const prodData = productosDisponibles.find(p => p.id_producto == id);
+            const stockMax = parseInt(prodData?.cantidad_actual || 0);
+
+            let cantidad = parseInt(item.querySelector('.cantidad').value) || 0;
+            if (cantidad > stockMax) {
+                M.toast({html: `Stock superado para ${prodData.nombre}. Ajustando a ${stockMax}`, classes: 'orange'});
+                cantidad = stockMax;
+                item.querySelector('.cantidad').value = cantidad;
+            }
+
             const precio = parseFloat(item.querySelector('.precio-unitario').value) || 0;
-            const cantidad = parseInt(item.querySelector('.cantidad').value) || 0;
             subtotal += precio * cantidad;
             itemsTotales += cantidad;
         });
