@@ -119,8 +119,8 @@ function loadSecretsFromFile(string $filePath): bool
 function preloadSecretSources(): void
 {
     $googleLoadedCount = 0;
+    $googleDebug = [];
     if (function_exists('gsmLoadSecrets')) {
-        $googleDebug = [];
         $googleSecrets = gsmLoadSecrets([
             'DB_HOST' => ['DB_HOST'],
             'DB_NAME' => ['DB_NAME'],
@@ -141,6 +141,22 @@ function preloadSecretSources(): void
                 ? $googleDebug['token_source']
                 : 'unknown';
             error_log('INFO: Secretos cargados desde Google Secret Manager (' . $googleLoadedCount . ') con token ' . $source);
+        } elseif (!empty($googleDebug['errors']) && is_array($googleDebug['errors'])) {
+            $source = isset($googleDebug['token_source']) && is_string($googleDebug['token_source'])
+                ? $googleDebug['token_source']
+                : 'unknown';
+            $projectId = isset($googleDebug['project_id']) && is_string($googleDebug['project_id'])
+                ? $googleDebug['project_id']
+                : 'unknown';
+            $saEmail = isset($googleDebug['service_account_email']) && is_string($googleDebug['service_account_email'])
+                ? $googleDebug['service_account_email']
+                : 'unknown';
+            error_log('WARNING: GSM contexto -> project=' . $projectId . ' | token_source=' . $source . ' | sa=' . $saEmail);
+            foreach ($googleDebug['errors'] as $googleError) {
+                if (is_string($googleError) && trim($googleError) !== '') {
+                    error_log('WARNING: Google Secret Manager: ' . $googleError);
+                }
+            }
         }
     }
 

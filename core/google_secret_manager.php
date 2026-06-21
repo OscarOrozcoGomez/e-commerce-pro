@@ -103,8 +103,9 @@ function gsmGetServiceAccountPath(): ?string
         ?? gsmGetEnvValue('GOOGLE_APPLICATION_CREDENTIALS')
         ?? gsmGetEnvValue('GCP_SERVICE_ACCOUNT_FILE');
 
+    $candidates = [];
     if ($envPath !== null) {
-        return $envPath;
+        $candidates[] = $envPath;
     }
 
     $homePath = getenv('HOME');
@@ -112,17 +113,24 @@ function gsmGetServiceAccountPath(): ?string
         $homePath = $_SERVER['HOME'] ?? '';
     }
 
-    if (!is_string($homePath) || trim($homePath) === '') {
-        return null;
+    if (is_string($homePath) && trim($homePath) !== '') {
+        $homePath = rtrim($homePath, '/\\');
+        $candidates[] = $homePath . '/.gcp/sa.json';
+        $candidates[] = $homePath . '/.gcp/service-account.json';
+        $candidates[] = $homePath . '/public_html/.gcp/sa.json';
+        $candidates[] = $homePath . '/public_html/.gcp/service-account.json';
     }
 
-    $homePath = rtrim($homePath, '/\\');
-    $candidates = [
-        $homePath . '/.gcp/sa.json',
-        $homePath . '/.gcp/service-account.json',
-    ];
-
+    $checked = [];
     foreach ($candidates as $candidate) {
+        if (!is_string($candidate) || trim($candidate) === '') {
+            continue;
+        }
+        if (isset($checked[$candidate])) {
+            continue;
+        }
+        $checked[$candidate] = true;
+
         if (is_readable($candidate)) {
             return $candidate;
         }
@@ -141,7 +149,8 @@ function gsmGetAccessTokenFromServiceAccount(array $sa, ?string &$reason): ?stri
     $header = ['alg' => 'RS256', 'typ' => 'JWT'];
     $payload = [
         'iss' => (string) $sa['client_email'],
-        'scope' => 'https://www.googleapis.com/auth/secretmanager',
+        // Secret Manager acepta cloud-platform para acceso OAuth server-to-server.
+        'scope' => 'https://www.googleapis.com/auth/cloud-platform',
         'aud' => $tokenUri,
         'iat' => $now,
         'exp' => $now + 3600,
@@ -194,7 +203,19 @@ function gsmReadSecret(string $projectId, string $secretName, string $accessToke
     ]);
 
     if (!$response['ok']) {
-        $reason = 'Google API failed for ' . $secretName . ' (code=' . $response['code'] . ', error=' . $response['error'] . ')';
+        $bodySnippet = '';
+        if (isset($response['body']) && is_string($response['body']) && trim($response['body']) !== '') {
+            $decoded = json_decode($response['body'], true);
+            if (is_array($decoded) && isset($decoded['error']['message']) && is_string($decoded['error']['message'])) {
+                $bodySnippet = $decoded['error']['message'];
+            } else {
+                $bodySnippet = substr(trim($response['body']), 0, 220);
+            }
+        }
+        $reason = 'Google API failed for ' . $secretName
+            . ' (code=' . $response['code']
+            . ', error=' . $response['error']
+            . ', detail=' . $bodySnippet . ')';
         return null;
     }
 
@@ -218,6 +239,7 @@ function gsmLoadSecrets(array $mapping, array &$debug): array
     $debug = [
         'project_id' => null,
         'token_source' => null,
+        'service_account_email' => null,
         'loaded' => [],
         'errors' => [],
     ];
@@ -237,9 +259,16 @@ function gsmLoadSecrets(array $mapping, array &$debug): array
     if ($accessToken !== null) {
         $debug['token_source'] = 'env:GCP_ACCESS_TOKEN';
     } else {
+        $configuredSaPath = gsmGetEnvValue('GCP_SA_KEY_FILE')
+            ?? gsmGetEnvValue('GOOGLE_APPLICATION_CREDENTIALS')
+            ?? gsmGetEnvValue('GCP_SERVICE_ACCOUNT_FILE');
         $saPath = gsmGetServiceAccountPath();
         if ($saPath === null) {
-            $debug['errors'][] = 'No hay token ni service account file (GCP_SA_KEY_FILE).';
+            if ($configuredSaPath !== null) {
+                $debug['errors'][] = 'Service account file no legible en ruta configurada: ' . $configuredSaPath . ' (revisa existencia y permisos).';
+            } else {
+                $debug['errors'][] = 'No hay token ni service account file (GCP_SA_KEY_FILE).';
+            }
             return [];
         }
 
@@ -247,6 +276,9 @@ function gsmLoadSecrets(array $mapping, array &$debug): array
         if ($sa === null) {
             $debug['errors'][] = 'No se pudo leer service account file: ' . $saPath;
             return [];
+        }
+        if (isset($sa['client_email']) && is_string($sa['client_email'])) {
+            $debug['service_account_email'] = $sa['client_email'];
         }
 
         $tokenReason = '';
