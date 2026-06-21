@@ -31,48 +31,7 @@ if (!$almacenId) {
     exit;
 }
 
-// Procesar entrada individual
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
-    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
-        $error = 'Token CSRF inválido.';
-    } else {
-        if ($_POST['accion'] === 'entrada_individual') {
-            $id_producto = intval($_POST['id_producto']);
-            $cantidad = intval($_POST['cantidad']);
-            $observacion = htmlspecialchars($_POST['observacion'] ?? 'Entrada manual');
-
-            if ($id_producto > 0 && $cantidad > 0) {
-                try {
-                    $pdo->beginTransaction();
-                    
-                    // Actualizar stock
-                    $stmt = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual + ? WHERE id_producto = ? AND id_almacen = ?");
-                    $stmt->execute([$cantidad, $id_producto, $almacenId]);
-                    
-                    // Registrar movimiento
-                    $stmtMov = $pdo->prepare("INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion) VALUES (?, 'entrada', ?, ?, ?, ?)");
-                    $stmtMov->execute([$id_producto, $almacenId, $cantidad, $usuario['id_usuario'], $observacion]);
-                    
-                    $pdo->commit();
-                    $success = 'Stock actualizado correctamente.';
-                } catch (Exception $e) {
-                    $pdo->rollBack();
-                    $error = 'Error al procesar la entrada: ' . $e->getMessage();
-                }
-            }
-        }
-    }
-}
-
-// Obtener productos para la lista de entrada rápida
-$sql = "SELECT p.id_producto, p.nombre, p.sku, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo 
-        FROM productos p 
-        JOIN inventario_almacen ia ON p.id_producto = ia.id_producto 
-        WHERE ia.id_almacen = :almacen AND p.estado = 'activo'
-        ORDER BY p.nombre ASC";
-$stmt = $pdo->prepare($sql);
-$stmt->execute([':almacen' => $almacenId]);
-$productos = $stmt->fetchAll();
+$productos = dbGetInventoryProducts((int)$almacenId);
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -105,9 +64,10 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Entrada Individual</span>
-                    <form method="POST">
+                    <form id="form-inbound-manual">
                         <?php echo csrfInput(); ?>
                         <input type="hidden" name="accion" value="entrada_individual">
+                        <input type="hidden" name="id_almacen" value="<?php echo (int)$almacenId; ?>">
                         
                         <div class="input-field">
                             <input type="text" id="buscador-inbound" class="autocomplete" autocomplete="off">
@@ -187,23 +147,17 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Autocomplete para entrada individual
-        const productos = <?php echo json_encode($productos); ?>;
-        const data = {};
-        const map = {};
-        productos.forEach(p => {
-            const label = `[${p.sku}] ${p.nombre}`;
-            data[label] = null;
-            map[label] = p.id_producto;
-        });
+    const API_INV = '<?php echo BASE_URL; ?>api/inventory_handler.php';
 
-        const elem = document.getElementById('buscador-inbound');
-        M.Autocomplete.init(elem, {
-            data: data,
-            onAutocomplete: function(val) {
-                document.getElementById('id_producto_inbound').value = map[val];
-            }
+    document.addEventListener('DOMContentLoaded', function() {
+        const productos = <?php echo json_encode($productos); ?>;
+        initAutocomplete(productos);
+
+        // Manejar envío individual
+        document.getElementById('form-inbound-manual').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            enviarEntrada(formData);
         });
 
         // Lógica de búsqueda/filtro para la lista rápida

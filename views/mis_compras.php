@@ -19,7 +19,6 @@ try {
             WHERE c.id_usuario = :id_usuario 
             ORDER BY p.fecha_creacion DESC";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':id_usuario' => $usuario['id_usuario']]);
     $stmt->execute([':id_usuario' => (int)$usuario['id_usuario']]);
     $compras = $stmt->fetchAll();
 } catch (PDOException $e) {

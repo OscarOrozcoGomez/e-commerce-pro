@@ -755,3 +755,89 @@ function getProductImageUrl(?string $imgData): string {
 
     return '';
 }
+
+/**
+ * Obtiene los productos para el catálogo con filtros de seguridad aplicados.
+ * Migrado desde views/catalogo.php para mayor seguridad.
+ */
+function dbGetCatalogFiltered(string $categoria = '', string $busqueda = ''): array {
+    $pdo = getPDO();
+    
+    $sql = "SELECT p.*, 
+        COALESCE(
+            (SELECT pi_sub.ruta_archivo FROM producto_imagenes pi_sub INNER JOIN productos p_img_sub ON pi_sub.id_producto = p_img_sub.id_producto WHERE (p_img_sub.id_producto = p.id_producto OR p_img_sub.id_padre = p.id_producto) ORDER BY (p_img_sub.id_producto = p.id_producto) DESC, pi_sub.orden ASC LIMIT 1),
+            p.imagen, p.imagen_url
+        ) as calculated_imagen,
+        (SELECT MIN(p3.precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
+        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes,
+        (SELECT COALESCE(SUM(ia_sub.cantidad_actual), 0) FROM inventario_almacen ia_sub JOIN productos p_all ON ia_sub.id_producto = p_all.id_producto WHERE p_all.id_producto = p.id_producto OR p_all.id_padre = p.id_producto) as total_stock
+        FROM productos p ";
+    
+    $params = []; 
+    $whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
+
+    if (!empty($categoria)) {
+        $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
+                  JOIN categorias c ON pc.id_categoria = c.id_categoria ";
+        $whereClauses[] = "c.nombre = :cat";
+        $params[':cat'] = $categoria;
+    }
+
+    if (!empty($busqueda)) {
+        $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.descripcion LIKE :search OR EXISTS (
+            SELECT 1 FROM productos p_v 
+            WHERE p_v.id_padre = p.id_producto AND (p_v.nombre_variante LIKE :search OR p_v.sku LIKE :search)
+        ))";
+        $params[':search'] = '%' . $busqueda . '%';
+    }
+
+    $sql .= " WHERE " . implode(" AND ", $whereClauses);
+    $sql .= " GROUP BY p.id_producto ORDER BY p.nombre ASC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Obtiene el reporte de ventas con filtros de seguridad.
+ */
+function dbGetSalesReport(string $inicio, string $fin, ?int $idAlmacen = null, ?int $idUsuario = null, bool $isAdmin = false): array {
+    $pdo = getPDO();
+    $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo
+            FROM pedidos p
+            JOIN usuarios u ON p.id_usuario = u.id_usuario
+            JOIN almacenes a ON p.id_almacen = a.id_almacen
+            LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
+            WHERE DATE(p.fecha_creacion) BETWEEN :inicio AND :fin
+            AND p.estado != 'cancelado'";
+
+    $params = [':inicio' => $inicio, ':fin' => $fin];
+
+    if (!$isAdmin) {
+        $sql .= " AND (p.id_usuario = :usuario OR p.id_almacen = :almacen)";
+        $params[':usuario'] = $idUsuario;
+        $params[':almacen'] = $idAlmacen;
+    }
+
+    $sql .= " ORDER BY p.fecha_creacion DESC LIMIT 1000";
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Obtiene productos con stock para una sucursal específica.
+ */
+function dbGetInventoryProducts(int $idAlmacen): array {
+    $pdo = getPDO();
+    $sql = "SELECT p.id_producto, p.nombre, p.sku, ia.cantidad_actual, ia.stock_minimo, ia.stock_maximo 
+            FROM productos p 
+            JOIN inventario_almacen ia ON p.id_producto = ia.id_producto 
+            WHERE ia.id_almacen = :almacen AND p.estado = 'activo'
+            ORDER BY p.nombre ASC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':almacen' => $idAlmacen]);
+    return $stmt->fetchAll();
+}

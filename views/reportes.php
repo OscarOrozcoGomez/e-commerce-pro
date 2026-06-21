@@ -15,48 +15,15 @@ $usuario = $_SESSION['usuario'];
 $fecha_inicio = isset($_GET['fecha_inicio']) ? htmlspecialchars($_GET['fecha_inicio']) : date('Y-m-01');
 $fecha_fin = isset($_GET['fecha_fin']) ? htmlspecialchars($_GET['fecha_fin']) : date('Y-m-d');
 
-// Obtener reporte de ventas según el rol
+$ventas = dbGetSalesReport(
+    $fecha_inicio, 
+    $fecha_fin, 
+    (int)($usuario['id_almacen'] ?? 0), 
+    (int)$usuario['id_usuario'], 
+    isAdmin()
+);
+
 try {
-    if (isAdmin()) {
-        // Admin: todas las ventas
-        $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo
-                FROM pedidos p
-                JOIN usuarios u ON p.id_usuario = u.id_usuario
-                JOIN almacenes a ON p.id_almacen = a.id_almacen
-                LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
-                WHERE DATE(p.fecha_creacion) BETWEEN :inicio AND :fin
-                AND p.estado != 'cancelado'
-                ORDER BY p.fecha_creacion DESC
-                LIMIT 100";
-    } else {
-        // Encargado/Vendedor: sus ventas
-        $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo
-                FROM pedidos p
-                JOIN usuarios u ON p.id_usuario = u.id_usuario
-                JOIN almacenes a ON p.id_almacen = a.id_almacen
-                LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
-                WHERE (p.id_usuario = :usuario OR p.id_almacen = :almacen)
-                AND DATE(p.fecha_creacion) BETWEEN :inicio AND :fin
-                AND p.estado != 'cancelado'
-                ORDER BY p.fecha_creacion DESC
-                LIMIT 100";
-    }
-
-    $stmt = $pdo->prepare($sql);
-    
-    if (isAdmin()) {
-        $stmt->execute([':inicio' => $fecha_inicio, ':fin' => $fecha_fin]);
-    } else {
-        $stmt->execute([
-            ':usuario' => $usuario['id_usuario'],
-            ':almacen' => $usuario['id_almacen'] ?? 0,
-            ':inicio' => $fecha_inicio,
-            ':fin' => $fecha_fin,
-        ]);
-    }
-    
-    $ventas = $stmt->fetchAll();
-
     // Calcular totales
     $total_ventas = 0;
     $cantidad_ventas = 0;

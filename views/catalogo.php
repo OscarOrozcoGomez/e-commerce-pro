@@ -7,54 +7,7 @@ require_once __DIR__ . '/../core/auth.php';
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
 $busqueda = $_GET['search'] ?? '';
 $categorias = dbGetCategories();
-
-// Lógica para obtener y filtrar productos
-$pdo = getPDO();
-
-// REPARACIÓN DE QA: Modificamos las subconsultas para que busquen por ID de Parentesco (id_padre), no por texto plano.
-$sql = "SELECT p.*, 
-        COALESCE(
-            (SELECT pi_sub.ruta_archivo FROM producto_imagenes pi_sub INNER JOIN productos p_img_sub ON pi_sub.id_producto = p_img_sub.id_producto WHERE (p_img_sub.id_producto = p.id_producto OR p_img_sub.id_padre = p.id_producto) ORDER BY (p_img_sub.id_producto = p.id_producto) DESC, pi_sub.orden ASC LIMIT 1),
-            p.imagen, p.imagen_url
-        ) as calculated_imagen,
-        (SELECT MIN(p3.precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes,
-        (SELECT COALESCE(SUM(ia_sub.cantidad_actual), 0) FROM inventario_almacen ia_sub JOIN productos p_all ON ia_sub.id_producto = p_all.id_producto WHERE p_all.id_producto = p.id_producto OR p_all.id_padre = p.id_producto) as total_stock
-        FROM productos p ";
-$params = []; 
-
-// Forzamos que solo se listen los registros raíz en la cuadricula principal
-$whereClauses = ["p.estado = 'activo'", "(p.id_padre IS NULL OR p.id_padre = 0)"];
-
-if (!empty($categoriaSeleccionada)) {
-    $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
-              JOIN categorias c ON pc.id_categoria = c.id_categoria ";
-    $whereClauses[] = "c.nombre = :cat";
-    $params[':cat'] = $categoriaSeleccionada;
-}
-
-if (!empty($busqueda)) {
-    // Buscamos en el padre O en cualquiera de sus hijos asignados por ID
-    $whereClauses[] = "(p.nombre LIKE :search OR p.sku LIKE :search OR p.descripcion LIKE :search OR EXISTS (
-        SELECT 1 FROM productos p_v 
-        WHERE p_v.id_padre = p.id_producto AND (p_v.nombre_variante LIKE :search OR p_v.sku LIKE :search)
-    ))";
-    $params[':search'] = '%' . $busqueda . '%';
-}
-
-$sql .= " WHERE " . implode(" AND ", $whereClauses);
-
-// CORRECCIÓN CLAVE: Agrupamos de forma única por el ID de Producto para impedir duplicidad de tarjetas por errores de espacios.
-$sql .= " GROUP BY p.id_producto ORDER BY p.nombre ASC";
-
-try {
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $productos = $stmt->fetchAll();
-} catch (PDOException $e) {
-    error_log("Error al cargar catálogo: " . $e->getMessage());
-    $productos = [];
-}
+$productos = dbGetCatalogFiltered($categoriaSeleccionada, $busqueda);
 
 $pageTitle = 'Catálogo de Productos';
 include __DIR__ . '/includes/header.php';
