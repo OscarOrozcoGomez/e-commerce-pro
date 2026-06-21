@@ -2,6 +2,50 @@
 require_once __DIR__ . '/core/config.php';
 require_once __DIR__ . '/core/auth.php';
 
+$requestedProductId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, [
+    'options' => ['min_range' => 1],
+]);
+
+$productExists = false;
+$dbCheckFailed = false;
+
+if ($requestedProductId !== false && $requestedProductId !== null) {
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare("SELECT id_producto FROM productos WHERE id_producto = ? AND estado = 'activo' LIMIT 1");
+        $stmt->execute([$requestedProductId]);
+        $productExists = (bool) $stmt->fetchColumn();
+    } catch (PDOException $e) {
+        $dbCheckFailed = true;
+        error_log('Error validando producto en product_detail.php: ' . $e->getMessage());
+    }
+}
+
+if (!$productExists) {
+    http_response_code($dbCheckFailed ? 500 : 404);
+    $pageTitle = $dbCheckFailed ? 'Error al cargar producto' : 'Producto no encontrado';
+    include __DIR__ . '/views/includes/header.php';
+    ?>
+    <div class="container" style="margin-top: 40px; margin-bottom: 40px; max-width: 900px;">
+        <div class="card-panel z-depth-1" style="padding: 30px; border-radius: 12px;">
+            <h4 class="blue-text text-darken-4" style="margin-top: 0;">
+                <?php echo $dbCheckFailed ? 'No fue posible cargar el producto' : 'Producto no encontrado'; ?>
+            </h4>
+            <p class="grey-text text-darken-2" style="font-size: 1.05rem; margin-bottom: 25px;">
+                <?php echo $dbCheckFailed
+                    ? 'Ocurrió un problema al consultar la base de datos. Intenta de nuevo en unos minutos.'
+                    : 'El producto que buscas no existe o ya no está disponible.'; ?>
+            </p>
+            <a href="<?php echo BASE_URL; ?>index.php" class="btn blue darken-4 waves-effect waves-light">
+                <i class="material-icons left">arrow_back</i> Volver al catálogo
+            </a>
+        </div>
+    </div>
+    <?php
+    include __DIR__ . '/views/includes/footer.php';
+    exit;
+}
+
 $pageTitle = 'Detalles del Producto';
 include __DIR__ . '/views/includes/header.php';
 ?>
