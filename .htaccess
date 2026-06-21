@@ -5,3 +5,7 @@ Options -Indexes
 ErrorDocument 403 /views/error.php
 ErrorDocument 404 /views/error.php
 ErrorDocument 500 /views/error.php
+
+# Google Secret Manager (sin token temporal)
+SetEnv GCP_PROJECT_ID vendimia-497305
+SetEnv GCP_SA_KEY_FILE /home/beautyandwell/.gcp/sa.json

@@ -57,6 +57,11 @@ set_exception_handler(function ($exception) {
     exit;
 });
 
+$gsmHelperPath = __DIR__ . '/google_secret_manager.php';
+if (is_readable($gsmHelperPath)) {
+    require_once $gsmHelperPath;
+}
+
 function applySecretValue(string $key, string $value): void
 {
     $trimmedKey = trim($key);
@@ -113,6 +118,32 @@ function loadSecretsFromFile(string $filePath): bool
 
 function preloadSecretSources(): void
 {
+    $googleLoadedCount = 0;
+    if (function_exists('gsmLoadSecrets')) {
+        $googleDebug = [];
+        $googleSecrets = gsmLoadSecrets([
+            'DB_HOST' => ['DB_HOST'],
+            'DB_NAME' => ['DB_NAME'],
+            'DB_USER' => ['DB_USER'],
+            'DB_PASSWORD' => ['DB_PASSWORD'],
+            'DB_CHARSET' => ['DB_CHARSET'],
+            'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
+            'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
+        ], $googleDebug);
+
+        foreach ($googleSecrets as $key => $value) {
+            applySecretValue($key, $value);
+            $googleLoadedCount++;
+        }
+
+        if ($googleLoadedCount > 0) {
+            $source = isset($googleDebug['token_source']) && is_string($googleDebug['token_source'])
+                ? $googleDebug['token_source']
+                : 'unknown';
+            error_log('INFO: Secretos cargados desde Google Secret Manager (' . $googleLoadedCount . ') con token ' . $source);
+        }
+    }
+
     $candidates = [
         __DIR__ . '/app_secrets.php',
         __DIR__ . '/app_secrets.env',
@@ -148,7 +179,7 @@ function preloadSecretSources(): void
 
     if ($loadedSecretSource !== null) {
         error_log('INFO: Secretos cargados desde: ' . $loadedSecretSource);
-    } else {
+    } elseif ($googleLoadedCount === 0) {
         error_log('WARNING: No se encontró archivo de secretos local.');
     }
 }
