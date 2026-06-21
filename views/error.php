@@ -1,3 +1,10 @@
+<?php
+$host = $_SERVER['HTTP_HOST'] ?? '';
+$isLocal = strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false;
+$baseUrl = defined('BASE_URL') ? BASE_URL : ($isLocal ? '/e-commerce-pro/' : '/');
+$reqId = isset($_GET['rid']) ? preg_replace('/[^a-f0-9]/', '', (string) $_GET['rid']) : '';
+$safeReqId = htmlspecialchars($reqId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -26,8 +33,13 @@
                     <p class="grey-text">
                         Nuestro equipo técnico ha sido notificado. Por seguridad, no podemos mostrar más detalles.
                     </p>
+                    <?php if ($reqId !== ''): ?>
+                        <p class="grey-text text-darken-2" style="margin-top: 10px; font-size: 0.9rem;">
+                            Folio técnico: <?php echo $safeReqId; ?>
+                        </p>
+                    <?php endif; ?>
                     <div style="margin-top: 40px;">
-                        <a href="<?php echo BASE_URL; ?>" class="btn-large blue darken-4 waves-effect waves-light">
+                        <a href="<?php echo $baseUrl; ?>" class="btn-large blue darken-4 waves-effect waves-light">
                             <i class="material-icons left">home</i> Volver al Inicio
                         </a>
                     </div>

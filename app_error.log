@@ -1,0 +1,60 @@
+[20-Jun-2026 22:14:30 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:14:32 America/Mexico_City] Error en dbGetCategories: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[20-Jun-2026 22:14:34 America/Mexico_City]  [EXCEPCIÓN CRÍTICA] ReqID: 6f44fa59dde0 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+[20-Jun-2026 22:14:34 America/Mexico_City] STACK TRACE (ReqID 6f44fa59dde0): #0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+[2026-06-20 22:14:34]  [EXCEPCIÓN CRÍTICA] ReqID: 6f44fa59dde0 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+#0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+
+[20-Jun-2026 22:16:18 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:16:20 America/Mexico_City] Error en dbGetCategories: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[20-Jun-2026 22:16:22 America/Mexico_City]  [EXCEPCIÓN CRÍTICA] ReqID: a14d67a4c732 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+[20-Jun-2026 22:16:22 America/Mexico_City] STACK TRACE (ReqID a14d67a4c732): #0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+[2026-06-20 22:16:22]  [EXCEPCIÓN CRÍTICA] ReqID: a14d67a4c732 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+#0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+
+[20-Jun-2026 22:17:13 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:17:15 America/Mexico_City] Error en dbGetCategories: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[20-Jun-2026 22:17:17 America/Mexico_City]  [EXCEPCIÓN CRÍTICA] ReqID: 6f72cdc2117b | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+[20-Jun-2026 22:17:17 America/Mexico_City] STACK TRACE (ReqID 6f72cdc2117b): #0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+[2026-06-20 22:17:17]  [EXCEPCIÓN CRÍTICA] ReqID: 6f72cdc2117b | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+#0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+
+[20-Jun-2026 22:17:19 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:17:21 America/Mexico_City] Error en dbGetCategories: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[20-Jun-2026 22:17:23 America/Mexico_City]  [EXCEPCIÓN CRÍTICA] ReqID: e1a5c5b88be7 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+[20-Jun-2026 22:17:23 America/Mexico_City] STACK TRACE (ReqID e1a5c5b88be7): #0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+[2026-06-20 22:17:23]  [EXCEPCIÓN CRÍTICA] ReqID: e1a5c5b88be7 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+#0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+
+[20-Jun-2026 22:17:26 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:17:28 America/Mexico_City] Error en dbGetCategories: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[20-Jun-2026 22:17:30 America/Mexico_City]  [EXCEPCIÓN CRÍTICA] ReqID: b208c8f93e0c | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+[20-Jun-2026 22:17:30 America/Mexico_City] STACK TRACE (ReqID b208c8f93e0c): #0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+[2026-06-20 22:17:30]  [EXCEPCIÓN CRÍTICA] ReqID: b208c8f93e0c | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 252
+#0 C:\xampp\htdocs\e-commerce-pro\core\config.php(252): PDO->__construct('mysql:host=127....', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\core\catalogo.php(12): getPDO()
+#2 {main}
+
+[20-Jun-2026 22:20:51 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:21:25 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:21:26 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:21:26 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[20-Jun-2026 22:21:27 America/Mexico_City] WARNING: No se encontró archivo de secretos local.

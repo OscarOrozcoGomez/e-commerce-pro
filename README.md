@@ -28,7 +28,13 @@ ecommerce/
 ## Instalación
 
 1. Importar `database.sql` en MariaDB/MySQL
-2. Configurar credenciales en `core/config.php`
+2. Configurar credenciales como variables de entorno en el servidor o en Secret Manager.
+    - `DB_HOST`
+    - `DB_NAME`
+    - `DB_USER`
+    - `DB_PASSWORD`
+    - `DB_CHARSET` (opcional)
+    - `MAPS_KEY` o `GOOGLE_MAPS_API_KEY`
 3. Ejecutar `scripts/import_products.php` para cargar productos
 4. Acceder a `index.php` (requiere login)
 
@@ -44,4 +50,8 @@ ecommerce/
 - Catálogo de productos con búsqueda AJAX
 - Inventario multi-almacén
 - Importación masiva desde CSV de Odoo
+
+## Seguridad y despliegue
+
+- Guía rápida para flujo con SFTP: `DEPLOY_SFTP_SECURE.md`
 

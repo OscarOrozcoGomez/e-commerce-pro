@@ -7,6 +7,10 @@ ini_set('display_startup_errors', '0');
 ini_set('log_errors', '1'); 
 error_reporting(E_ALL);
 
+// Log dedicado de la app para diagnostico en hostings donde error_log global no se actualiza.
+$appErrorLogPath = __DIR__ . '/../app_error.log';
+ini_set('error_log', $appErrorLogPath);
+
 // Configuración general del sistema POS
 date_default_timezone_set('America/Mexico_City');
 if (!session_id()) {
@@ -15,37 +19,7 @@ if (!session_id()) {
 }
 sendSecurityHeaders();
 
-set_exception_handler(function ($exception) {
-    $logMsg = sprintf(
-        " [EXCEPCIÓN CRÍTICA] Mensaje: %s | Archivo: %s | Línea: %d",
-        $exception->getMessage(),
-        $exception->getFile(),
-        $exception->getLine()
-    );
-    error_log($logMsg);
-    error_log("STACK TRACE: " . $exception->getTraceAsString());
-    if (!headers_sent()) {
-        header('Location: ' . BASE_URL . 'views/error.php');
-    }
-    exit;
-});
-
-// Cargar variables de entorno locales si existen (para no subirlas a GitHub)
-// El archivo env.php ha sido eliminado para evitar conflictos de configuración.
-
-// Parámetros de conexión a la base de datos
-define('DB_HOST', '127.0.0.1');
-define('DB_NAME', 'beautyandwell_prod'); 
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_CHARSET', 'utf8mb4');
-
-// Llaves de API (En producción, lo ideal es usar variables de entorno)
-if (!defined('GOOGLE_MAPS_API_KEY')) {
-    define('GOOGLE_MAPS_API_KEY', ''); 
-}
-
-// Rutas y constantes del proyecto
+// Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
 if (!defined('BASE_URL')) {
     // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
     $host = $_SERVER['HTTP_HOST'] ?? '';
@@ -54,6 +28,202 @@ if (!defined('BASE_URL')) {
     } else {
         define('BASE_URL', '/');
     }
+}
+
+set_exception_handler(function ($exception) {
+    $requestId = bin2hex(random_bytes(6));
+    $logMsg = sprintf(
+        " [EXCEPCIÓN CRÍTICA] ReqID: %s | Mensaje: %s | Archivo: %s | Línea: %d",
+        $requestId,
+        $exception->getMessage(),
+        $exception->getFile(),
+        $exception->getLine()
+    );
+    error_log($logMsg);
+    error_log("STACK TRACE (ReqID {$requestId}): " . $exception->getTraceAsString());
+
+    // Escribir tambien de forma directa por si el handler de PHP ignora error_log.
+    $manualLog = sprintf(
+        "[%s] %s\n%s\n\n",
+        date('Y-m-d H:i:s'),
+        $logMsg,
+        $exception->getTraceAsString()
+    );
+    @file_put_contents(__DIR__ . '/../app_error.log', $manualLog, FILE_APPEND);
+    if (!headers_sent()) {
+        $safeBaseUrl = defined('BASE_URL') ? BASE_URL : '/';
+        header('Location: ' . $safeBaseUrl . 'views/error.php?rid=' . urlencode($requestId));
+    }
+    exit;
+});
+
+function applySecretValue(string $key, string $value): void
+{
+    $trimmedKey = trim($key);
+    if ($trimmedKey === '') {
+        return;
+    }
+
+    $trimmedValue = trim($value);
+    putenv($trimmedKey . '=' . $trimmedValue);
+    $_ENV[$trimmedKey] = $trimmedValue;
+    $_SERVER[$trimmedKey] = $trimmedValue;
+}
+
+function loadSecretsFromFile(string $filePath): bool
+{
+    if (!is_readable($filePath)) {
+        return false;
+    }
+
+    if (substr($filePath, -4) === '.php') {
+        $data = require $filePath;
+        if (!is_array($data)) {
+            return false;
+        }
+        foreach ($data as $key => $value) {
+            if (!is_string($key) || (!is_string($value) && !is_numeric($value))) {
+                continue;
+            }
+            applySecretValue($key, (string) $value);
+        }
+        return true;
+    }
+
+    $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return false;
+    }
+
+    foreach ($lines as $line) {
+        $trimmedLine = trim($line);
+        if ($trimmedLine === '' || strpos($trimmedLine, '#') === 0) {
+            continue;
+        }
+        if (strpos($trimmedLine, '=') === false) {
+            continue;
+        }
+        [$key, $value] = explode('=', $trimmedLine, 2);
+        $normalizedValue = trim($value, " \t\n\r\0\x0B\"'");
+        applySecretValue($key, $normalizedValue);
+    }
+
+    return true;
+}
+
+function preloadSecretSources(): void
+{
+    $candidates = [
+        __DIR__ . '/app_secrets.php',
+        __DIR__ . '/app_secrets.env',
+        __DIR__ . '/../.app_secrets.env',
+        __DIR__ . '/../.app_secrets.php',
+        __DIR__ . '/../app_secrets.env',
+        __DIR__ . '/../app_secrets.php',
+        __DIR__ . '/../.app_secrests.php',
+        __DIR__ . '/../app_secrests.php',
+    ];
+
+    $homePath = getenv('HOME');
+    if ($homePath === false || trim($homePath) === '') {
+        $homePath = $_SERVER['HOME'] ?? '';
+    }
+    if (is_string($homePath) && trim($homePath) !== '') {
+        $homePath = rtrim($homePath, '/\\');
+        $candidates[] = $homePath . '/.app_secrets.env';
+        $candidates[] = $homePath . '/.app_secrets.php';
+        $candidates[] = $homePath . '/app_secrets.env';
+        $candidates[] = $homePath . '/app_secrets.php';
+        $candidates[] = $homePath . '/.app_secrests.php';
+        $candidates[] = $homePath . '/app_secrests.php';
+    }
+
+    $loadedSecretSource = null;
+    foreach ($candidates as $secretFile) {
+        if (loadSecretsFromFile($secretFile)) {
+            $loadedSecretSource = $secretFile;
+            break;
+        }
+    }
+
+    if ($loadedSecretSource !== null) {
+        error_log('INFO: Secretos cargados desde: ' . $loadedSecretSource);
+    } else {
+        error_log('WARNING: No se encontró archivo de secretos local.');
+    }
+}
+
+preloadSecretSources();
+
+// Configuración segura: leer secretos desde el entorno del servidor.
+// En despliegues como Google Cloud, setear estas variables en Secret Manager
+// o en el entorno de ejecución en lugar de dejar valores en el código.
+function getEnvVar(string $name, ?string $default = null, bool $required = false): ?string
+{
+    $value = getenv($name);
+    if ($value === false) {
+        $value = $_SERVER[$name] ?? $_ENV[$name] ?? $_SERVER['REDIRECT_' . $name] ?? null;
+    }
+    if ($value !== null) {
+        $value = trim((string) $value);
+        if ($value === '') {
+            $value = null;
+        }
+    }
+    if ($value === null) {
+        if ($required) {
+            error_log(sprintf('ERROR: Falta variable de entorno requerida: %s.', $name));
+            throw new RuntimeException(sprintf('Falta variable de entorno requerida: %s.', $name));
+        }
+        return $default;
+    }
+    return $value;
+}
+
+function getMapsApiKey(bool $required = false): string
+{
+    $mapsKey = getEnvVar('MAPS_KEY');
+    if ($mapsKey !== null) {
+        return $mapsKey;
+    }
+
+    // Compatibilidad con nombres legacy o con diferente capitalización.
+    $mapsKeyLegacyCase = getEnvVar('Maps_KEY');
+    if ($mapsKeyLegacyCase !== null) {
+        return $mapsKeyLegacyCase;
+    }
+
+    $legacyKey = getEnvVar('GOOGLE_MAPS_API_KEY');
+    if ($legacyKey !== null) {
+        return $legacyKey;
+    }
+
+    if ($required) {
+        error_log('ERROR: Falta secreto requerido de Google Maps: MAPS_KEY, Maps_KEY o GOOGLE_MAPS_API_KEY.');
+        throw new RuntimeException('Falta secreto requerido de Google Maps: MAPS_KEY, Maps_KEY o GOOGLE_MAPS_API_KEY.');
+    }
+
+    return '';
+}
+
+// Modo de ejecución: local por defecto en localhost/CLI, producción fuera de ahí.
+$hostForEnv = $_SERVER['HTTP_HOST'] ?? '';
+$isLocalHost = strpos($hostForEnv, 'localhost') !== false || strpos($hostForEnv, '127.0.0.1') !== false;
+$defaultAppEnv = (PHP_SAPI === 'cli' || $isLocalHost) ? 'local' : 'production';
+define('APP_ENV', strtolower((string) getEnvVar('APP_ENV', $defaultAppEnv)));
+define('IS_PRODUCTION', APP_ENV === 'production');
+
+// Parámetros de conexión a la base de datos.
+define('DB_HOST', getEnvVar('DB_HOST', '127.0.0.1'));
+define('DB_NAME', getEnvVar('DB_NAME', 'beautyandwell_prod'));
+define('DB_USER', getEnvVar('DB_USER', IS_PRODUCTION ? null : 'root', IS_PRODUCTION));
+define('DB_PASS', getEnvVar('DB_PASSWORD', IS_PRODUCTION ? null : '', IS_PRODUCTION));
+define('DB_CHARSET', getEnvVar('DB_CHARSET', 'utf8mb4'));
+
+// Llaves de API para Google Maps. Se puede usar MAPS_KEY o GOOGLE_MAPS_API_KEY.
+if (!defined('GOOGLE_MAPS_API_KEY')) {
+    // No bloquear toda la app si falta la llave; solo afectará vistas que usan Maps.
+    define('GOOGLE_MAPS_API_KEY', getMapsApiKey(false));
 }
 
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
