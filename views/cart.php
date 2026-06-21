@@ -228,11 +228,16 @@ include __DIR__ . '/includes/header.php';
                     title: '¡Pedido Confirmado!',
                     text: 'Tu pedido ha sido registrado con éxito. Puedes consultar el estado en tu sección de compras.',
                     icon: 'success',
-                    confirmButtonText: 'Ver Mis Compras',
+                    confirmButtonText: 'Continuar',
                     confirmButtonColor: '#0d47a1'
                 }).then(() => {
                     localStorage.removeItem('cart');
-                    window.location.href = 'mis_compras.php';
+                    const idPedido = Number.parseInt(data.id_pedido, 10);
+                    if (Number.isInteger(idPedido) && idPedido > 0) {
+                        window.location.href = `gracias.php?id=${idPedido}`;
+                    } else {
+                        window.location.href = 'mis_compras.php';
+                    }
                 });
             } else {
                 M.toast({html: 'Error: ' + data.message});

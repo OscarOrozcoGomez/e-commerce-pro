@@ -227,6 +227,39 @@
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
+        // Persistir parametros de marketing para atribucion de conversiones.
+        (function persistAttribution() {
+            const params = new URLSearchParams(window.location.search);
+            const keys = ['gclid', 'wbraid', 'gbraid', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+            const found = {};
+            let hasAny = false;
+
+            keys.forEach((key) => {
+                const value = params.get(key);
+                if (value && value.trim() !== '') {
+                    found[key] = value.trim();
+                    hasAny = true;
+                }
+            });
+
+            if (!hasAny) {
+                return;
+            }
+
+            const payload = {
+                ...found,
+                landing_page: window.location.pathname,
+                captured_at: new Date().toISOString(),
+                referrer: document.referrer || null
+            };
+
+            try {
+                localStorage.setItem('bb_marketing_attribution', JSON.stringify(payload));
+            } catch (e) {
+                // No bloquear UX si localStorage esta deshabilitado.
+            }
+        })();
+
         // Función global para obtener el carrito de forma segura
         function getCart() {
             try {

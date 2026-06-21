@@ -64,3 +64,579 @@
 [21-Jun-2026 00:01:41 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
 [21-Jun-2026 00:01:41 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
 [21-Jun-2026 00:01:41 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:33 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:33 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:33 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:40 America/Mexico_City] DEBUG LOGIN: Intentando autenticar a: allmithy@gmail.com
+[21-Jun-2026 00:53:40 America/Mexico_City] DEBUG LOGIN: Usuario encontrado. ID: 5 | Rol: cliente
+[21-Jun-2026 00:53:40 America/Mexico_City] DEBUG LOGIN: Contraseña CORRECTA para ID 5
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:40 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:42 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:42 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:42 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:43 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:43 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:43 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:54 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:54 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:54 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:54 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:54 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:54 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:53:55 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:53:55 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:53:55 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:03 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:03 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:03 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:03 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:03 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:03 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:54:50 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:09 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:09 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:09 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:23 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:23 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:23 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:24 America/Mexico_City] PHP Warning:  session_destroy(): Trying to destroy uninitialized session in C:\xampp\htdocs\e-commerce-pro\core\auth.php on line 300
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:24 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:39 America/Mexico_City] DEBUG LOGIN: Intentando autenticar a: admin@system.local
+[21-Jun-2026 00:55:39 America/Mexico_City] DEBUG LOGIN: Usuario encontrado. ID: 1 | Rol: admin
+[21-Jun-2026 00:55:39 America/Mexico_City] DEBUG LOGIN: Contraseña CORRECTA para ID 1
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:55:39 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:07 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:07 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:07 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:14 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:14 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:14 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:15 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:15 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:15 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 00:56:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 00:56:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 00:56:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:03:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:03:46 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:04:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:28 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:34 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:06:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:07 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:07 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:07 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:08 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:12 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:13 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:14 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:14 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:14 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:14 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:14 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:14 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:15 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:16 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:44 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:44 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:44 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:44 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:44 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:44 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:53 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:07:59 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:07:59 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:07:59 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:02 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:03 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:03 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:03 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:10 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:10 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:10 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:17 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:26 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:26 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:26 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:26 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:26 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:26 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:31 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:32 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:32 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:32 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:32 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:32 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:32 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:33 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:33 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:33 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:33 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:33 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:33 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:35 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:35 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:35 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:44 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:44 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:44 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:48 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:48 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:48 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:48 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:48 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:48 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:54 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:54 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:54 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:56 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:08:58 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:09:46 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:09:46 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:09:46 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:09:47 America/Mexico_City] PHP Warning:  session_destroy(): Trying to destroy uninitialized session in C:\xampp\htdocs\e-commerce-pro\core\auth.php on line 300
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:09:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:01 America/Mexico_City] DEBUG LOGIN: Intentando autenticar a: allmithy@gmail.com
+[21-Jun-2026 01:10:01 America/Mexico_City] DEBUG LOGIN: Usuario encontrado. ID: 5 | Rol: cliente
+[21-Jun-2026 01:10:01 America/Mexico_City] DEBUG LOGIN: Contraseña CORRECTA para ID 5
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:01 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:02 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:02 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:02 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:04 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:10:07 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:27 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:27 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:27 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:27 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:27 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:27 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:35 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:40 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:40 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:40 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:41 America/Mexico_City] PHP Warning:  session_destroy(): Trying to destroy uninitialized session in C:\xampp\htdocs\e-commerce-pro\core\auth.php on line 300
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:41 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:47 America/Mexico_City] DEBUG LOGIN: Intentando autenticar a: admin@system.local
+[21-Jun-2026 01:17:47 America/Mexico_City] DEBUG LOGIN: Usuario encontrado. ID: 1 | Rol: admin
+[21-Jun-2026 01:17:47 America/Mexico_City] DEBUG LOGIN: Contraseña CORRECTA para ID 1
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:47 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:57 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:17:59 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:00 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:17 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:17 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:17 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:20 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:30 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:45 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[21-Jun-2026 01:18:54 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
+[21-Jun-2026 01:18:54 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
+[21-Jun-2026 01:18:54 America/Mexico_City] WARNING: No se encontró archivo de secretos local.

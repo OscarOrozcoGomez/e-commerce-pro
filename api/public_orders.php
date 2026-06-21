@@ -20,7 +20,12 @@ if (isAuthenticated()) {
 $result = dbCreatePublicOrder($data);
 
 if ($result['success']) {
-    echo json_encode(['success' => true, 'pedido' => $result['pedido'], 'message' => "Gracias {$data['cliente']['nombre']}, tu pedido {$result['pedido']} registrado."]);
+    echo json_encode([
+        'success' => true,
+        'pedido' => $result['pedido'],
+        'id_pedido' => $result['id_pedido'] ?? null,
+        'message' => "Gracias {$data['cliente']['nombre']}, tu pedido {$result['pedido']} registrado.",
+    ]);
 } else {
     echo json_encode(['success' => false, 'message' => $result['message']]);
 }

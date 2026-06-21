@@ -13,18 +13,33 @@ $usuario = $_SESSION['usuario'];
 $error = '';
 $success = '';
 
-// Procesar cambio de estado a entregado
+// Procesar cambio de estado de reparto
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Token CSRF inválido.';
     } else {
         $id_pedido = intval($_POST['id_pedido']);
+        if ($_POST['accion'] === 'en_camino') {
+            try {
+                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'en_reparto' WHERE id_pedido = ? AND id_repartidor = ? AND estado = 'pagado'");
+                $stmt->execute([$id_pedido, $usuario['id_usuario']]);
+                if ($stmt->rowCount() > 0) {
+                    logAudit('PEDIDO_EN_CAMINO', 'pedidos', $id_pedido, 'Pedido marcado en camino por repartidor');
+                    $success = 'Pedido marcado como en camino.';
+                }
+            } catch (PDOException $e) {
+                $error = 'Error al actualizar el pedido.';
+            }
+        }
+
         if ($_POST['accion'] === 'entregar') {
             try {
-                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW() WHERE id_pedido = ? AND id_repartidor = ?");
+                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pagado','en_reparto')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
-                logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, "Pedido marcado como entregado por repartidor");
-                $success = 'Pedido entregado correctamente.';
+                if ($stmt->rowCount() > 0) {
+                    logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado por repartidor');
+                    $success = 'Pedido entregado correctamente.';
+                }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
             }
@@ -37,7 +52,7 @@ try {
     $sql = "SELECT p.*, c.nombre as cliente, c.direccion, c.telefono, c.ubicacion_mapa
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
-            WHERE p.id_repartidor = :repartidor AND p.estado = 'pagado'
+            WHERE p.id_repartidor = :repartidor AND p.estado IN ('pagado','en_reparto')
             ORDER BY p.fecha_entrega_programada ASC, p.fecha_creacion DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':repartidor' => $usuario['id_usuario']]);
@@ -128,10 +143,17 @@ include __DIR__ . '/includes/header.php';
                             <form method="POST">
                                 <?php echo csrfInput(); ?>
                                 <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                <input type="hidden" name="accion" value="entregar">
-                                <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar que el pedido fue entregado?')">
-                                    MARCAR COMO ENTREGADO <i class="material-icons right">done_all</i>
-                                </button>
+                                <?php if (($ent['estado'] ?? '') === 'pagado'): ?>
+                                    <input type="hidden" name="accion" value="en_camino">
+                                    <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('¿Marcar pedido como en camino?')">
+                                        MARCAR EN CAMINO <i class="material-icons right">local_shipping</i>
+                                    </button>
+                                <?php else: ?>
+                                    <input type="hidden" name="accion" value="entregar">
+                                    <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar que el pedido fue entregado?')">
+                                        MARCAR COMO ENTREGADO <i class="material-icons right">done_all</i>
+                                    </button>
+                                <?php endif; ?>
                             </form>
                         </div>
                     </div>

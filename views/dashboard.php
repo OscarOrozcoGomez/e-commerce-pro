@@ -177,10 +177,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Liberar Stock</span>
-                        <p>Cancelar pedidos expirados y devolver productos al inventario</p>
+                        <p>Revisar pedidos expirados y devolver productos al inventario</p>
                     </div>
                     <div class="card-action">
-                        <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
+                            <a href="<?php echo BASE_URL; ?>views/cleanup_reservations.php" class="btn waves-effect waves-light orange darken-3">Revisar</a>
                     </div>
                 </div>
             </div>
@@ -342,10 +342,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Liberar Stock</span>
-                        <p>Devolver al inventario productos de pedidos no concretados</p>
+                        <p>Revisar pedidos expirados y devolver productos al inventario</p>
                     </div>
                     <div class="card-action">
-                        <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
+                        <a href="<?php echo BASE_URL; ?>views/cleanup_reservations.php" class="btn waves-effect waves-light orange darken-3">Revisar</a>
                     </div>
                 </div>
             </div>
@@ -486,17 +486,7 @@ include __DIR__ . '/includes/header.php';
     });
 
     function cleanupStock() {
-        if(!confirm('¿Deseas liberar el stock de pedidos pendientes de más de 10 minutos?')) return;
-        fetch('<?php echo BASE_URL; ?>api/cleanup_reservations.php')
-            .then(r => r.json())
-            .then(data => {
-                if(data.success) {
-                    M.toast({html: data.message, classes: 'green'});
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    M.toast({html: 'Error: ' + data.error, classes: 'red'});
-                }
-            });
+            window.location.href = '<?php echo BASE_URL; ?>views/cleanup_reservations.php';
     }
 </script>
 <?php include __DIR__ . '/includes/footer.php'; ?>

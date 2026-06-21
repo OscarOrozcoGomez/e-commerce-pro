@@ -55,3 +55,11 @@ ecommerce/
 
 - Guía rápida para flujo con SFTP: `DEPLOY_SFTP_SECURE.md`
 
+## Marketing y conversiones
+
+- Página de agradecimiento: `views/gracias.php`
+- El checkout redirige a `views/gracias.php?id={id_pedido}` para medir conversiones.
+- Parámetros de campaña (`gclid`, `wbraid`, `gbraid`, `utm_*`) se guardan en `localStorage` para atribución.
+- Para disparo directo de Google Ads con `gtag`, configura en servidor:
+    - `GOOGLE_ADS_SEND_TO` (ejemplo: `AW-123456789/AbCdEfGhIjK`)
+
