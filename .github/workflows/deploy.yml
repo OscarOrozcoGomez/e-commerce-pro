@@ -36,7 +36,7 @@ jobs:
           username: ${{ secrets.PTF_USERNAME }}
           password: ${{ secrets.PTF_PASSWORD }}
           protocol: sftp
-          port: 22
+          port: 21
           local-dir: ./
           server-dir: /public_html/
           state-name: .ftp-deploy-sync-state.json
