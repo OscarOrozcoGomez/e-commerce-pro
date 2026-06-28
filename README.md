@@ -55,6 +55,81 @@ ecommerce/
 
 - Guía rápida para flujo con SFTP: `DEPLOY_SFTP_SECURE.md`
 
+## Migraciones de base de datos (local + remoto)
+
+Para mantener sincronizado el esquema entre XAMPP y el host remoto:
+
+1. Crear una migración SQL nueva en `database/migrations/` con formato:
+     - `YYYYMMDD_HHMMSS_descripcion.sql`
+2. Probar localmente en XAMPP:
+     - `php scripts/migrate.php --dry-run`
+     - `php scripts/migrate.php`
+3. Hacer push a `main`.
+4. El workflow `deploy.yml` sube archivos y luego ejecuta `api/run_migrations.php` en remoto.
+
+### Comandos locales
+
+- Aplicar pendientes:
+    - `php scripts/migrate.php`
+- Simular sin aplicar:
+    - `php scripts/migrate.php --dry-run`
+- Aplicar solo hasta una versión:
+    - `php scripts/migrate.php --to=20260628_000001`
+
+### Variables requeridas en producción
+
+- `MIGRATIONS_DEPLOY_TOKEN`: token secreto que valida el endpoint de migraciones.
+- `MIGRATIONS_URL` (GitHub Secret): URL completa, por ejemplo:
+    - `https://tu-dominio.com/api/run_migrations.php`
+
+## Ambientes de trabajo (QA y Producción)
+
+Se implementó una separación explícita:
+
+- QA (pruebas):
+    - Branch: `qa`
+    - Workflow: `.github/workflows/deploy-qa.yml`
+    - Environment GitHub: `qa`
+    - Directorio remoto sugerido: `/public_html_qa/`
+
+- Producción:
+    - Branch: `main`
+    - Workflow: `.github/workflows/deploy.yml`
+    - Environment GitHub: `production`
+    - Directorio remoto: `/public_html/`
+
+### Configuración local en XAMPP (QA)
+
+1. Copia `core/app_secrets.qa.example.php` a `core/app_secrets.qa.php`.
+2. Ajusta `DB_NAME` para tu base QA local (por ejemplo `beautyandwell_qa`).
+3. Opcional: define `APP_ENV=qa` en el entorno de Apache/PHP.
+
+Nota: En localhost/CLI ahora el valor por defecto de `APP_ENV` es `qa`.
+
+### Configuración remota (Producción)
+
+1. En hosting, configura `APP_ENV=production`.
+2. Configura variables reales de DB (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
+3. Configura `MIGRATIONS_DEPLOY_TOKEN` con el mismo valor que en GitHub Secrets del environment `production`.
+
+### GitHub Environments y Secrets recomendados
+
+Crea dos environments en GitHub: `qa` y `production`, cada uno con sus secrets:
+
+- `PTF_HOST`
+- `PTF_USERNAME`
+- `PTF_PASSWORD`
+- `MIGRATIONS_URL`
+- `MIGRATIONS_DEPLOY_TOKEN`
+
+Esto permite que QA y Producción usen credenciales distintas con el mismo nombre de secret.
+
+### Seguridad
+
+- Nunca edites una migración ya aplicada; crea una nueva.
+- El endpoint remoto acepta solo `POST` y exige header `X-Migrations-Token`.
+- El runner usa `schema_migrations` para evitar aplicar dos veces la misma versión.
+
 ## Marketing y conversiones
 
 - Página de agradecimiento: `views/gracias.php`

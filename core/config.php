@@ -160,7 +160,18 @@ function preloadSecretSources(): void
         }
     }
 
-    $candidates = [
+    $rawAppEnv = getenv('APP_ENV');
+    if ($rawAppEnv === false) {
+        $rawAppEnv = $_SERVER['APP_ENV'] ?? $_ENV['APP_ENV'] ?? '';
+    }
+    $normalizedEnv = strtolower(trim((string) $rawAppEnv));
+
+    $envSuffixCandidates = [];
+    if ($normalizedEnv !== '' && preg_match('/^[a-z0-9_\-]+$/', $normalizedEnv)) {
+        $envSuffixCandidates[] = $normalizedEnv;
+    }
+
+    $baseCandidates = [
         __DIR__ . '/app_secrets.php',
         __DIR__ . '/app_secrets.env',
         __DIR__ . '/../.app_secrets.env',
@@ -171,12 +182,31 @@ function preloadSecretSources(): void
         __DIR__ . '/../app_secrests.php',
     ];
 
+    $candidates = [];
+    foreach ($envSuffixCandidates as $envSuffix) {
+        $candidates[] = __DIR__ . '/app_secrets.' . $envSuffix . '.php';
+        $candidates[] = __DIR__ . '/app_secrets.' . $envSuffix . '.env';
+        $candidates[] = __DIR__ . '/../.app_secrets.' . $envSuffix . '.php';
+        $candidates[] = __DIR__ . '/../.app_secrets.' . $envSuffix . '.env';
+        $candidates[] = __DIR__ . '/../app_secrets.' . $envSuffix . '.php';
+        $candidates[] = __DIR__ . '/../app_secrets.' . $envSuffix . '.env';
+    }
+
+    $candidates = array_merge($candidates, $baseCandidates);
+
     $homePath = getenv('HOME');
     if ($homePath === false || trim($homePath) === '') {
         $homePath = $_SERVER['HOME'] ?? '';
     }
     if (is_string($homePath) && trim($homePath) !== '') {
         $homePath = rtrim($homePath, '/\\');
+        foreach ($envSuffixCandidates as $envSuffix) {
+            $candidates[] = $homePath . '/.app_secrets.' . $envSuffix . '.env';
+            $candidates[] = $homePath . '/.app_secrets.' . $envSuffix . '.php';
+            $candidates[] = $homePath . '/app_secrets.' . $envSuffix . '.env';
+            $candidates[] = $homePath . '/app_secrets.' . $envSuffix . '.php';
+        }
+
         $candidates[] = $homePath . '/.app_secrets.env';
         $candidates[] = $homePath . '/.app_secrets.php';
         $candidates[] = $homePath . '/app_secrets.env';
@@ -253,10 +283,10 @@ function getMapsApiKey(bool $required = false): string
     return '';
 }
 
-// Modo de ejecución: local por defecto en localhost/CLI, producción fuera de ahí.
+// Modo de ejecución: QA por defecto en localhost/CLI, producción fuera de ahí.
 $hostForEnv = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = strpos($hostForEnv, 'localhost') !== false || strpos($hostForEnv, '127.0.0.1') !== false;
-$defaultAppEnv = (PHP_SAPI === 'cli' || $isLocalHost) ? 'local' : 'production';
+$defaultAppEnv = (PHP_SAPI === 'cli' || $isLocalHost) ? 'qa' : 'production';
 define('APP_ENV', strtolower((string) getEnvVar('APP_ENV', $defaultAppEnv)));
 define('IS_PRODUCTION', APP_ENV === 'production');
 

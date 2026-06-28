@@ -1,26 +1,20 @@
-name: Deploy to Neubox (SFTP)
+name: Deploy QA to Neubox (SFTP)
 
 on:
   push:
     branches:
-      - main
+      - qa
   workflow_dispatch:
-    inputs:
-      confirm_production:
-        description: "Escribe DEPLOY para confirmar despliegue manual a produccion"
-        required: true
-        default: ""
 
 concurrency:
-  group: deploy-production
+  group: deploy-qa
   cancel-in-progress: true
 
 jobs:
   deploy:
-    name: Upload changed files to Production via SFTP
+    name: Upload changed files to QA via SFTP
     runs-on: ubuntu-latest
-    environment: production
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
+    environment: qa
     permissions:
       contents: read
 
@@ -30,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Deploy only changes to Neubox via SFTP
+      - name: Deploy only changes to QA via SFTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.PTF_HOST }}
@@ -40,8 +34,8 @@ jobs:
           port: 21
           port-type: passive
           local-dir: ./
-          server-dir: /public_html/
-          state-name: .ftp-deploy-sync-state.json
+          server-dir: /public_html_qa/
+          state-name: .ftp-deploy-sync-state-qa.json
           dangerous-clean-slate: false
           exclude: |
             **/.git/**
@@ -55,8 +49,9 @@ jobs:
             scripts/migrate.php
             core/app_secrets.*.example.php
             .ftp-deploy-sync-state.json
+            .ftp-deploy-sync-state-qa.json
 
-      - name: Run remote DB migrations
+      - name: Run QA DB migrations
         if: ${{ secrets.MIGRATIONS_URL != '' && secrets.MIGRATIONS_DEPLOY_TOKEN != '' }}
         env:
           MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
