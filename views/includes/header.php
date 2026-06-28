@@ -88,7 +88,7 @@
                     </a>
                 </li>
                 
-                <?php if (isAuthenticated() && !isCliente()): ?>
+                <?php if (isAuthenticated() && !isCliente() && !isRepartidor()): ?>
                     <?php
                         $pdoHead = getPDO();
                         $sqlAlert = "SELECT COUNT(*) FROM inventario_almacen ia 
