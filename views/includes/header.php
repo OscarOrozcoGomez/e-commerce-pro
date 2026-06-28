@@ -250,6 +250,10 @@
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
+        const USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+        const CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
+        const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
+
         // Persistir parametros de marketing para atribucion de conversiones.
         (function persistAttribution() {
             const params = new URLSearchParams(window.location.search);
@@ -312,16 +316,6 @@
             }
         }
 
-        function getFavoritesSafe() {
-            try {
-                const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-                return Array.isArray(favorites) ? favorites : [];
-            } catch (e) {
-                console.error('Error al obtener favoritos:', e);
-                return [];
-            }
-        }
-
         // Función global para actualizar todos los numerales del carrito en la página
         function updateCartBadge() {
             const cart = getCart();
@@ -333,14 +327,82 @@
             });
         }
 
-        function updateFavoritesBadge() {
-            const favorites = getFavoritesSafe();
-            const totalFavorites = favorites.length;
+        function paintFavoritesBadge(totalFavorites) {
             const badges = document.querySelectorAll('#favorites-count, .favorites-count-mobile');
             badges.forEach(badge => {
                 badge.textContent = totalFavorites;
                 badge.style.setProperty('display', 'inline-block', 'important');
             });
+        }
+
+        async function updateFavoritesBadge(totalFavoritesOverride = null) {
+            if (!USER_IS_AUTHENTICATED) {
+                return;
+            }
+
+            if (typeof totalFavoritesOverride === 'number' && Number.isFinite(totalFavoritesOverride)) {
+                paintFavoritesBadge(Math.max(0, Math.floor(totalFavoritesOverride)));
+                return;
+            }
+
+            try {
+                const response = await fetch(`${FAVORITES_API_URL}?mode=count`);
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    paintFavoritesBadge(parseInt(data.count, 10) || 0);
+                }
+            } catch (e) {
+                console.error('Error al actualizar favoritos:', e);
+            }
+        }
+
+        async function syncLegacyFavoritesToServer() {
+            if (!USER_IS_AUTHENTICATED || CURRENT_USER_ID <= 0) {
+                return;
+            }
+
+            const migrationKey = `bb_favorites_synced_user_${CURRENT_USER_ID}`;
+            if (localStorage.getItem(migrationKey) === '1') {
+                return;
+            }
+
+            let legacy = [];
+            try {
+                const parsed = JSON.parse(localStorage.getItem('favorites') || '[]');
+                legacy = Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                legacy = [];
+            }
+
+            const productIds = Array.from(new Set(
+                legacy
+                    .map(item => parseInt(item?.id_producto ?? item?.id ?? 0, 10))
+                    .filter(id => Number.isFinite(id) && id > 0)
+            ));
+
+            if (productIds.length === 0) {
+                localStorage.setItem(migrationKey, '1');
+                return;
+            }
+
+            try {
+                const response = await fetch(FAVORITES_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'sync',
+                        items: productIds
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    localStorage.removeItem('favorites');
+                    localStorage.setItem(migrationKey, '1');
+                    await updateFavoritesBadge(data.count);
+                }
+            } catch (e) {
+                console.error('Error migrando favoritos legacy:', e);
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -374,14 +436,13 @@
 
             // Carga inicial del contador al entrar a cualquier página
             updateCartBadge();
-            updateFavoritesBadge();
+            syncLegacyFavoritesToServer().finally(() => {
+                updateFavoritesBadge();
+            });
 
             window.addEventListener('storage', function(event) {
                 if (event.key === 'cart') {
                     updateCartBadge();
-                }
-                if (event.key === 'favorites') {
-                    updateFavoritesBadge();
                 }
             });
         });

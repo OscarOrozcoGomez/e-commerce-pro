@@ -336,6 +336,11 @@ include __DIR__ . '/views/includes/header.php';
 </div>
 
 <script>
+    const PDP_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+    const PDP_FAVORITES_API_URL = (typeof FAVORITES_API_URL !== 'undefined')
+        ? FAVORITES_API_URL
+        : '<?php echo BASE_URL; ?>api/favorites.php';
+
     let currentProduct = null;
     let qty = 1;
     
@@ -660,51 +665,7 @@ include __DIR__ . '/views/includes/header.php';
         document.getElementById('qty-input').value = qty;
     }
 
-    function getFavorites() {
-        return JSON.parse(localStorage.getItem('favorites') || '[]');
-    }
-
-    function saveFavorites(favorites) {
-        localStorage.setItem('favorites', JSON.stringify(favorites));
-        if (typeof updateFavoritesBadge === 'function') {
-            updateFavoritesBadge();
-        }
-    }
-
-    function toggleFavorite() {
-        if (!currentProduct) return;
-        let favorites = getFavorites();
-        const favoriteBtn = document.getElementById('btn-favorite');
-        const index = favorites.findIndex(fav => fav.id_producto === currentProduct.id_producto);
-
-        if (favoriteBtn) {
-            favoriteBtn.classList.remove('pulse-once');
-            // Reinicia animacion de click para que siempre se reproduzca.
-            void favoriteBtn.offsetWidth;
-            favoriteBtn.classList.add('pulse-once');
-        }
-
-        if (index > -1) {
-            // Ya es favorito, lo quitamos
-            favorites.splice(index, 1);
-            M.toast({html: 'Eliminado de tus favoritos', classes: 'orange rounded'});
-        } else {
-            // No es favorito, lo agregamos
-            favorites.push({
-                id_producto: currentProduct.id_producto,
-                nombre: currentProduct.nombre + (currentProduct.nombre_variante ? ` (${currentProduct.nombre_variante})` : ''),
-                precio: currentProduct.precio_venta,
-                imagen: currentProduct.galeria.length > 0 ? currentProduct.galeria[0] : ''
-            });
-            M.toast({html: '¡Guardado en tus favoritos!', classes: 'green rounded'});
-        }
-        saveFavorites(favorites);
-        checkIfFavorite();
-    }
-
-    function checkIfFavorite() {
-        const favorites = getFavorites();
-        const isFav = favorites.some(fav => fav.id_producto === currentProduct.id_producto);
+    function applyFavoriteVisualState(isFav) {
         const favoriteBtn = document.getElementById('btn-favorite');
         const favoriteIcon = document.querySelector('#btn-favorite i');
 
@@ -713,9 +674,87 @@ include __DIR__ . '/views/includes/header.php';
         }
         if (favoriteBtn) {
             favoriteBtn.classList.toggle('active-favorite', isFav);
-            if (!isFav) {
-                favoriteBtn.classList.remove('pulse-once');
+        }
+    }
+
+    async function toggleFavorite() {
+        if (!currentProduct) return;
+
+        if (!PDP_IS_AUTHENTICATED) {
+            M.toast({html: 'Inicia sesion para guardar favoritos', classes: 'orange rounded'});
+            setTimeout(() => {
+                window.location.href = '<?php echo BASE_URL; ?>views/login.php';
+            }, 600);
+            return;
+        }
+
+        const favoriteBtn = document.getElementById('btn-favorite');
+        if (favoriteBtn) favoriteBtn.disabled = true;
+
+        try {
+            const response = await fetch(PDP_FAVORITES_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'toggle',
+                    id_producto: currentProduct.id_producto
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'No fue posible actualizar favoritos');
             }
+
+            const isFav = !!data.is_favorite;
+            applyFavoriteVisualState(isFav);
+
+            if (isFav && favoriteBtn) {
+                favoriteBtn.classList.remove('pulse-once');
+                void favoriteBtn.offsetWidth;
+                favoriteBtn.classList.add('pulse-once');
+                setTimeout(() => favoriteBtn.classList.remove('pulse-once'), 320);
+            }
+
+            if (typeof updateFavoritesBadge === 'function') {
+                updateFavoritesBadge(data.count);
+            }
+
+            M.toast({
+                html: isFav ? 'Guardado en tus favoritos' : 'Eliminado de tus favoritos',
+                classes: isFav ? 'green rounded' : 'orange rounded'
+            });
+        } catch (error) {
+            console.error(error);
+            M.toast({html: 'No se pudo actualizar favoritos', classes: 'red rounded'});
+        } finally {
+            if (favoriteBtn) favoriteBtn.disabled = false;
+        }
+    }
+
+    async function checkIfFavorite() {
+        if (!currentProduct) return;
+
+        if (!PDP_IS_AUTHENTICATED) {
+            applyFavoriteVisualState(false);
+            return;
+        }
+
+        try {
+            const response = await fetch(`${PDP_FAVORITES_API_URL}?mode=status&id_producto=${encodeURIComponent(currentProduct.id_producto)}`);
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'No fue posible consultar favoritos');
+            }
+
+            applyFavoriteVisualState(!!data.is_favorite);
+            if (typeof updateFavoritesBadge === 'function') {
+                updateFavoritesBadge(data.count);
+            }
+        } catch (error) {
+            console.error(error);
+            applyFavoriteVisualState(false);
         }
     }
 </script>

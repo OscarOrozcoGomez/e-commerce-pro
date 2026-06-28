@@ -2,6 +2,8 @@
 require_once __DIR__ . '/core/config.php';
 require_once __DIR__ . '/core/auth.php';
 
+requireAuth();
+
 $pageTitle = 'Mis Favoritos';
 include __DIR__ . '/views/includes/header.php';
 ?>
@@ -31,27 +33,44 @@ document.addEventListener('DOMContentLoaded', function() {
     renderFavorites();
 });
 
-function getFavorites() {
-    return JSON.parse(localStorage.getItem('favorites') || '[]');
-}
+const FAVORITES_API_URL_PAGE = (typeof FAVORITES_API_URL !== 'undefined')
+    ? FAVORITES_API_URL
+    : '<?php echo BASE_URL; ?>api/favorites.php';
 
-function renderFavorites() {
-    const favorites = getFavorites();
+async function renderFavorites() {
     const container = document.getElementById('favorites-list');
     const noFavoritesMessage = document.getElementById('no-favorites');
+
+    let favorites = [];
+    try {
+        const response = await fetch(`${FAVORITES_API_URL_PAGE}?mode=list`);
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'No fue posible cargar favoritos');
+        }
+        favorites = Array.isArray(data.items) ? data.items : [];
+    } catch (error) {
+        console.error(error);
+        M.toast({html: 'No se pudieron cargar tus favoritos', classes: 'red rounded'});
+    }
 
     if (favorites.length === 0) {
         container.innerHTML = '';
         noFavoritesMessage.style.display = 'block';
+        if (typeof updateFavoritesBadge === 'function') {
+            updateFavoritesBadge(0);
+        }
         return;
     }
 
     noFavoritesMessage.style.display = 'none';
     container.innerHTML = ''; // Limpiar antes de renderizar
 
-    favorites.forEach((item, index) => {
+    favorites.forEach((item) => {
         const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${item.id_producto}`;
         const imgSrc = item.imagen || '<?php echo BASE_URL; ?>assets/img/products/default-product.svg';
+        const safeName = String(item.nombre || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safePrice = parseFloat(item.precio || 0);
 
         const cardHtml = `
             <div class="col s12 m6 l4">
@@ -66,14 +85,14 @@ function renderFavorites() {
                             <span class="card-title truncate" style="font-size: 1.1rem; font-weight: bold;">${item.nombre}</span>
                         </a>
                         <p class="blue-text text-darken-4" style="font-size: 1.4rem; margin: 10px 0;">
-                            $${parseFloat(item.precio).toFixed(2)}
+                            $${safePrice.toFixed(2)}
                         </p>
                     </div>
                     <div class="card-action" style="display: flex; justify-content: space-between; align-items: center;">
-                        <button class="btn-flat red-text" onclick="removeFromFavorites(${index})">
+                        <button class="btn-flat red-text" onclick="removeFromFavorites(${item.id_producto})">
                             <i class="material-icons left">delete</i>Quitar
                         </button>
-                        <button class="btn blue darken-4 waves-effect waves-light" onclick="addToCartFromFav(${item.id_producto}, '${item.nombre.replace(/'/g, "\\'")}', ${item.precio})">
+                        <button class="btn blue darken-4 waves-effect waves-light" onclick="addToCartFromFav(${item.id_producto}, '${safeName}', ${safePrice})">
                             <i class="material-icons">add_shopping_cart</i>
                         </button>
                     </div>
@@ -82,19 +101,37 @@ function renderFavorites() {
         `;
         container.innerHTML += cardHtml;
     });
+
+    if (typeof updateFavoritesBadge === 'function') {
+        updateFavoritesBadge(favorites.length);
+    }
 }
 
-function removeFromFavorites(index) {
-    let favorites = getFavorites();
-    favorites.splice(index, 1);
-    localStorage.setItem('favorites', JSON.stringify(favorites));
-    
-    if (typeof updateFavoritesBadge === 'function') {
-        updateFavoritesBadge();
+async function removeFromFavorites(productId) {
+    try {
+        const response = await fetch(FAVORITES_API_URL_PAGE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'remove',
+                id_producto: productId
+            })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'No fue posible eliminar favorito');
+        }
+
+        if (typeof updateFavoritesBadge === 'function') {
+            updateFavoritesBadge(data.count);
+        }
+
+        await renderFavorites();
+        M.toast({html: 'Producto eliminado de favoritos', classes: 'orange rounded'});
+    } catch (error) {
+        console.error(error);
+        M.toast({html: 'No se pudo eliminar el favorito', classes: 'red rounded'});
     }
-    
-    renderFavorites();
-    M.toast({html: 'Producto eliminado de favoritos', classes: 'orange rounded'});
 }
 
 function addToCartFromFav(id, nombre, precio) {
