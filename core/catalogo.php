@@ -8,6 +8,12 @@ $categoriaSeleccionada = $_GET['categoria'] ?? '';
 $busqueda = $_GET['search'] ?? '';
 $categorias = dbGetCategories();
 
+$catalogBaseUrl = 'catalogo.php';
+$catalogBaseParams = [];
+if (!empty($busqueda)) {
+    $catalogBaseParams['search'] = $busqueda;
+}
+
 // Lógica para obtener y filtrar productos
 $pdo = getPDO();
 $sql = "SELECT p.*,         COALESCE(p.imagen, (SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto) ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC LIMIT 1), p.imagen_url) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
@@ -73,21 +79,48 @@ include __DIR__ . '/../views/includes/header.php';
                     <i class="material-icons left">filter_list</i> Categorías
                 </h6>
                 <div class="collection borderless" style="border: none;">
-                    <a href="catalogo.php" class="collection-item <?php echo empty($categoriaSeleccionada) ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>" style="border-radius: 4px; margin-bottom: 5px; padding: 12px 15px;">
+                    <?php
+                        $allCategoriesUrl = $catalogBaseUrl;
+                        if (!empty($catalogBaseParams)) {
+                            $allCategoriesUrl .= '?' . http_build_query($catalogBaseParams);
+                        }
+                    ?>
+                    <a href="<?php echo $allCategoriesUrl; ?>" class="collection-item <?php echo empty($categoriaSeleccionada) ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>" style="border-radius: 4px; margin-bottom: 5px; padding: 12px 15px;">
                         Todas las categorías
                     </a>
                     <?php if (empty($categorias)): ?>
                         <p class="grey-text center-align" style="font-size: 0.9rem; padding: 10px;">No hay categorías configuradas.</p>
                     <?php else: ?>
                         <?php foreach ($categorias as $cat): ?>
-                            <a href="catalogo.php?categoria=<?php echo urlencode($cat['nombre']); ?>" 
-                               class="collection-item <?php echo $categoriaSeleccionada === $cat['nombre'] ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>"
+                            <?php
+                                $isSelectedCategory = ($categoriaSeleccionada === $cat['nombre']);
+                                $categoryLinkParams = $catalogBaseParams;
+                                if (!$isSelectedCategory) {
+                                    $categoryLinkParams['categoria'] = $cat['nombre'];
+                                }
+                                $categoryUrl = $catalogBaseUrl;
+                                if (!empty($categoryLinkParams)) {
+                                    $categoryUrl .= '?' . http_build_query($categoryLinkParams);
+                                }
+                            ?>
+                            <a href="<?php echo $categoryUrl; ?>"
+                               class="collection-item <?php echo $isSelectedCategory ? 'active blue darken-4' : 'grey-text text-darken-3'; ?>"
                                style="border-radius: 4px; margin-bottom: 5px;">
-                                <?php echo esc($cat['nombre']); ?>
+                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                    <span><?php echo esc($cat['nombre']); ?></span>
+                                    <?php if ($isSelectedCategory): ?>
+                                        <span style="font-weight: bold; font-size: 1rem; line-height: 1;" title="Quitar filtro">x</span>
+                                    <?php endif; ?>
+                                </div>
                             </a>
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
+                <?php if (!empty($categoriaSeleccionada)): ?>
+                    <p class="grey-text text-darken-1" style="font-size: 0.82rem; margin: 8px 15px 0;">
+                        Tip: haz clic en la categoría marcada con x para quitar el filtro.
+                    </p>
+                <?php endif; ?>
 
                 <!-- Sección de Blogs -->
                 <h6 class="blue-text text-darken-4" style="padding-left: 15px; margin-top: 30px; margin-bottom: 20px; font-weight: bold;">

@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_
         $id_pedido = intval($_POST['id_pedido']);
         if ($_POST['accion'] === 'en_camino') {
             try {
-                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'en_reparto' WHERE id_pedido = ? AND id_repartidor = ? AND estado = 'pagado'");
+                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'en_reparto' WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                 if ($stmt->rowCount() > 0) {
                     logAudit('PEDIDO_EN_CAMINO', 'pedidos', $id_pedido, 'Pedido marcado en camino por repartidor');
@@ -34,7 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_
 
         if ($_POST['accion'] === 'entregar') {
             try {
-                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pagado','en_reparto')");
+                // Confirma entrega y cobro simultáneamente (pago contra entrega)
+                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                 if ($stmt->rowCount() > 0) {
                     logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado por repartidor');
@@ -52,7 +53,7 @@ try {
     $sql = "SELECT p.*, c.nombre as cliente, c.direccion, c.telefono, c.ubicacion_mapa
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
-            WHERE p.id_repartidor = :repartidor AND p.estado IN ('pagado','en_reparto')
+            WHERE p.id_repartidor = :repartidor AND p.estado IN ('pendiente_pago','pagado','en_reparto')
             ORDER BY p.fecha_entrega_programada ASC, p.fecha_creacion DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':repartidor' => $usuario['id_usuario']]);
@@ -143,15 +144,23 @@ include __DIR__ . '/includes/header.php';
                             <form method="POST">
                                 <?php echo csrfInput(); ?>
                                 <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                <?php if (($ent['estado'] ?? '') === 'pagado'): ?>
+                                <?php if (in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado'])): ?>
                                     <input type="hidden" name="accion" value="en_camino">
-                                    <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('¿Marcar pedido como en camino?')">
-                                        MARCAR EN CAMINO <i class="material-icons right">local_shipping</i>
+                                    <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
+                                        <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
+                                            <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                        </p>
+                                    <?php endif; ?>
+                                    <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('¿Salir a entregar este pedido?')">
+                                        SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
                                     </button>
                                 <?php else: ?>
                                     <input type="hidden" name="accion" value="entregar">
-                                    <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar que el pedido fue entregado?')">
-                                        MARCAR COMO ENTREGADO <i class="material-icons right">done_all</i>
+                                    <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
+                                        <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                    </p>
+                                    <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar entrega y cobro del pedido?')">
+                                        ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                     </button>
                                 <?php endif; ?>
                             </form>
