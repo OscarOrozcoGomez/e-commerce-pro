@@ -63,8 +63,46 @@ include __DIR__ . '/includes/header.php';
                         </p>
                     </div>
                     <form id="form-checkout">
+                        <!-- PASO 1: Tipo de entrega -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #333; font-size: 0.9rem;">¿Cómo deseas recibir tu pedido?</label>
+                            <select id="tipo_entrega" name="tipo_entrega" required class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
+                                <option value="" disabled selected>Selecciona método de entrega</option>
+                                <option value="Sucursal">Recoger en Sucursal (Gratis)</option>
+                                <option value="Domicilio">Entrega a Domicilio (Miércoles y Sábados)</option>
+                            </select>
+                        </div>
+
+                        <!-- Info sucursal (visible solo cuando se elige Sucursal) -->
+                        <div id="info-sucursal" style="display:none; margin-bottom: 20px;">
+                            <div class="card-panel blue lighten-5" style="margin:0; border-radius:8px;">
+                                <p style="margin:0 0 8px 0; font-weight:bold; color:#0d47a1;">
+                                    <i class="material-icons tiny">store</i> Punto de Venta
+                                </p>
+                                <p style="margin:0 0 4px 0; color:#333;">
+                                    Tabachín 248, Bosques de Tonalá,<br>45400 Tonalá, Jal.
+                                </p>
+                                <a href="https://maps.app.goo.gl/gasKXxJgcHsvG3qM6" target="_blank"
+                                   class="btn-small blue darken-4 waves-effect waves-light"
+                                   style="margin-top:10px; margin-bottom:14px; width:100%; text-align:center;">
+                                    <i class="material-icons left">navigation</i> Cómo Llegar
+                                </a>
+                                <p style="margin:0 0 4px 0; font-weight:bold; color:#333; font-size:0.85rem;">
+                                    <i class="material-icons tiny">schedule</i> Horarios:
+                                </p>
+                                <table style="width:100%; font-size:0.82rem; border-collapse:collapse;">
+                                    <tr><td style="padding:2px 6px;">Lunes – Miércoles</td><td style="padding:2px 6px; color:#2e7d32;">7:30 AM – 8:00 PM</td></tr>
+                                    <tr><td style="padding:2px 6px;">Jueves</td><td style="padding:2px 6px; color:#2e7d32;">7:30 AM – 1:50 PM</td></tr>
+                                    <tr><td style="padding:2px 6px;">Viernes</td><td style="padding:2px 6px; color:#2e7d32;">7:30 AM – 8:00 PM</td></tr>
+                                    <tr><td style="padding:2px 6px;">Sábado</td><td style="padding:2px 6px; color:#2e7d32;">9:00 AM – 3:00 PM</td></tr>
+                                    <tr><td style="padding:2px 6px;">Domingo</td><td style="padding:2px 6px; color:#c62828;">Cerrado</td></tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- PASO 2: Mis Direcciones (solo domicilio) -->
                         <?php if (!empty($direcciones)): ?>
-                        <div id="wrapper-select-direccion" style="margin-bottom: 25px;">
+                        <div id="wrapper-select-direccion" style="display:none; margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #333; font-size: 0.9rem;">Mis Direcciones</label>
                             <select id="select_direccion" class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
                                 <option value="">-- Seleccionar dirección guardada --</option>
@@ -76,15 +114,6 @@ include __DIR__ . '/includes/header.php';
                             </select>
                         </div>
                         <?php endif; ?>
-
-                        <div style="margin-bottom: 30px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #333; font-size: 0.9rem;">¿Cómo deseas recibir tu pedido?</label>
-                            <select id="tipo_entrega" name="tipo_entrega" required class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
-                                <option value="" disabled selected>Selecciona método de entrega</option>
-                                <option value="Sucursal">Recoger en Sucursal (Gratis)</option>
-                                <option value="Domicilio">Entrega a Domicilio (Miércoles y Sábados)</option>
-                            </select>
-                        </div>
 
                         <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required value="<?php echo esc($usuarioLogueado['nombre'] ?? ''); ?>">
@@ -258,18 +287,27 @@ include __DIR__ . '/includes/header.php';
     const direccionContainer = document.getElementById('direccion-container');
     const wrapperSelect = document.getElementById('wrapper-select-direccion');
     const inputDireccion = document.getElementById('direccion');
+    const infoSucursal = document.getElementById('info-sucursal');
 
-    tipoEntrega.addEventListener('change', function() {
-        if (this.value === 'Sucursal') {
-            direccionContainer.style.display = 'none';
-            inputDireccion.required = false;
+    function aplicarModoEntrega(valor) {
+        if (valor === 'Sucursal') {
+            if (infoSucursal) infoSucursal.style.display = 'block';
+            if (direccionContainer) direccionContainer.style.display = 'none';
             if (wrapperSelect) wrapperSelect.style.display = 'none';
-        } else {
-            direccionContainer.style.display = 'block';
-            inputDireccion.required = true;
+            if (inputDireccion) { inputDireccion.required = false; inputDireccion.value = 'Tabachín 248, Bosques de Tonalá, 45400 Tonalá, Jal.'; }
+        } else if (valor === 'Domicilio') {
+            if (infoSucursal) infoSucursal.style.display = 'none';
+            if (direccionContainer) direccionContainer.style.display = 'block';
             if (wrapperSelect) wrapperSelect.style.display = 'block';
+            if (inputDireccion) inputDireccion.required = true;
+        } else {
+            if (infoSucursal) infoSucursal.style.display = 'none';
+            if (direccionContainer) direccionContainer.style.display = 'block';
+            if (wrapperSelect) wrapperSelect.style.display = 'none';
         }
-    });
+    }
+
+    tipoEntrega.addEventListener('change', function() { aplicarModoEntrega(this.value); });
 
     document.getElementById('select_direccion')?.addEventListener('change', function() {
         if (this.value) {
