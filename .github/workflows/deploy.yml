@@ -32,7 +32,7 @@ jobs:
       - name: Deploy only changes to Neubox via SFTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          server: 207.210.229.90
+          server: ${{ secrets.PTF_HOST }}
           username: ${{ secrets.PTF_USERNAME }}
           password: ${{ secrets.PTF_PASSWORD }}
           protocol: sftp
