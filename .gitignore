@@ -9,3 +9,5 @@ mail_log.txt
 PRESENTATIONS_SQL.md
 core/db_tools.php
 app_error.log
+
+.vscode/sftp.json
