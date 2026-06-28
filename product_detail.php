@@ -194,6 +194,44 @@ include __DIR__ . '/views/includes/header.php';
     
     .btn-icon { background-color: #fff; border: 1px solid #ccc; color: #777; width: 55px; height: 55px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
     .btn-icon:hover { border-color: #f06292; color: #f06292; }
+    .btn-favorite {
+        width: 64px;
+        height: 64px;
+        border-width: 2px;
+    }
+    .btn-favorite i {
+        font-size: 1.7rem !important;
+    }
+    .btn-favorite.active-favorite {
+        color: #e53935;
+        border-color: #ef9a9a;
+        background: #fff5f5;
+        box-shadow: 0 0 0 4px rgba(229, 57, 53, 0.14);
+        animation: heartBeat 1.15s ease-in-out infinite;
+    }
+    .btn-favorite.active-favorite:hover {
+        color: #d32f2f;
+        border-color: #e57373;
+        background: #ffecec;
+    }
+    .btn-favorite.pulse-once {
+        animation: heartPop 280ms ease-out;
+    }
+
+    @keyframes heartBeat {
+        0% { transform: scale(1); }
+        12% { transform: scale(1.12); }
+        24% { transform: scale(1); }
+        36% { transform: scale(1.1); }
+        50% { transform: scale(1); }
+        100% { transform: scale(1); }
+    }
+
+    @keyframes heartPop {
+        0% { transform: scale(1); }
+        45% { transform: scale(1.25); }
+        100% { transform: scale(1); }
+    }
 
     .terms-link { color: #888; text-decoration: underline; font-size: 0.85rem; }
 </style>
@@ -251,8 +289,9 @@ include __DIR__ . '/views/includes/header.php';
                 <button type="button" id="btn-add-cart" class="btn-add-cart">
                     <i class="material-icons" style="font-size: 1.1rem;">shopping_cart</i> Agregar al carrito
                 </button>
-                <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">favorite_border</i></div>
-                <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">compare_arrows</i></div>
+                <button type="button" id="btn-favorite" class="btn-icon btn-favorite" onclick="toggleFavorite()" title="Agregar a favoritos">
+                    <i class="material-icons">favorite_border</i>
+                </button>
             </div>
 
             <a href="<?php echo BASE_URL; ?>views/terminos.php" class="terms-link">Términos y condiciones</a>
@@ -383,6 +422,7 @@ include __DIR__ . '/views/includes/header.php';
                 // Inicializar tabs de Materialize después de renderizar el contenido
                 var tabs = document.querySelectorAll('.tabs');
                 M.Tabs.init(tabs);
+                checkIfFavorite(); // Revisar si el producto ya es favorito al cargar
                 document.getElementById('pdp-container').style.display = 'block';
             })
             .catch(err => {
@@ -618,6 +658,65 @@ include __DIR__ . '/views/includes/header.php';
 
     function updateQtyDisplay() {
         document.getElementById('qty-input').value = qty;
+    }
+
+    function getFavorites() {
+        return JSON.parse(localStorage.getItem('favorites') || '[]');
+    }
+
+    function saveFavorites(favorites) {
+        localStorage.setItem('favorites', JSON.stringify(favorites));
+        if (typeof updateFavoritesBadge === 'function') {
+            updateFavoritesBadge();
+        }
+    }
+
+    function toggleFavorite() {
+        if (!currentProduct) return;
+        let favorites = getFavorites();
+        const favoriteBtn = document.getElementById('btn-favorite');
+        const index = favorites.findIndex(fav => fav.id_producto === currentProduct.id_producto);
+
+        if (favoriteBtn) {
+            favoriteBtn.classList.remove('pulse-once');
+            // Reinicia animacion de click para que siempre se reproduzca.
+            void favoriteBtn.offsetWidth;
+            favoriteBtn.classList.add('pulse-once');
+        }
+
+        if (index > -1) {
+            // Ya es favorito, lo quitamos
+            favorites.splice(index, 1);
+            M.toast({html: 'Eliminado de tus favoritos', classes: 'orange rounded'});
+        } else {
+            // No es favorito, lo agregamos
+            favorites.push({
+                id_producto: currentProduct.id_producto,
+                nombre: currentProduct.nombre + (currentProduct.nombre_variante ? ` (${currentProduct.nombre_variante})` : ''),
+                precio: currentProduct.precio_venta,
+                imagen: currentProduct.galeria.length > 0 ? currentProduct.galeria[0] : ''
+            });
+            M.toast({html: '¡Guardado en tus favoritos!', classes: 'green rounded'});
+        }
+        saveFavorites(favorites);
+        checkIfFavorite();
+    }
+
+    function checkIfFavorite() {
+        const favorites = getFavorites();
+        const isFav = favorites.some(fav => fav.id_producto === currentProduct.id_producto);
+        const favoriteBtn = document.getElementById('btn-favorite');
+        const favoriteIcon = document.querySelector('#btn-favorite i');
+
+        if (favoriteIcon) {
+            favoriteIcon.textContent = isFav ? 'favorite' : 'favorite_border';
+        }
+        if (favoriteBtn) {
+            favoriteBtn.classList.toggle('active-favorite', isFav);
+            if (!isFav) {
+                favoriteBtn.classList.remove('pulse-once');
+            }
+        }
     }
 </script>
 

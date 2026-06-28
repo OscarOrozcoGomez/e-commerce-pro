@@ -1,5 +1,5 @@
 <?php
 // Redirigir automáticamente al catálogo
-header('Location: core/catalogo.php');
+header('Location: views/catalogo.php');
 exit;
 ?>

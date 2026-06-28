@@ -36,6 +36,21 @@
             line-height: 18px;
             padding: 0 4px;
         }
+        .nav-favorites-link {
+            position: relative;
+            display: flex !important;
+            align-items: center;
+        }
+        #favorites-count {
+            position: absolute;
+            top: 5px;
+            right: -5px;
+            min-width: 18px;
+            height: 18px;
+            line-height: 18px;
+            padding: 0 4px;
+            display: inline-block;
+        }
         .nav-wrapper .brand-logo img {
             height: 50px;
             margin-top: 7px;
@@ -79,7 +94,7 @@
             <a href="#" data-target="mobile-nav" class="sidenav-trigger"><i class="material-icons">menu</i></a>
 
             <ul id="nav-mobile" class="right hide-on-med-and-down">
-                <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/catalogo.php">Catálogo</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/blog.php">Blog</a></li>
                 <li class="nav-cart-container">
                     <a href="<?php echo BASE_URL; ?>views/cart.php" class="nav-cart-link">
@@ -135,6 +150,12 @@
                                     <?php echo $unreadChat; ?>
                                 </span>
                             <?php endif; ?>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="<?php echo BASE_URL; ?>favoritos.php" class="nav-favorites-link" title="Mis Favoritos">
+                            <i class="material-icons">favorite</i>
+                            <span id="favorites-count" class="new badge pink" data-badge-caption="">0</span>
                         </a>
                     </li>
                     <!-- Dropdown Trigger -->
@@ -210,9 +231,11 @@
                 <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
+                <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php else: ?>
                 <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes</a></li>
+                <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php endif; ?>
             <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text"><i class="material-icons red-text">exit_to_app</i> Salir</a></li>
         <?php else: ?>
@@ -289,6 +312,16 @@
             }
         }
 
+        function getFavoritesSafe() {
+            try {
+                const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+                return Array.isArray(favorites) ? favorites : [];
+            } catch (e) {
+                console.error('Error al obtener favoritos:', e);
+                return [];
+            }
+        }
+
         // Función global para actualizar todos los numerales del carrito en la página
         function updateCartBadge() {
             const cart = getCart();
@@ -297,6 +330,16 @@
             badges.forEach(badge => {
                 badge.textContent = totalItems;
                 badge.style.setProperty('display', totalItems > 0 ? 'inline-block' : 'none', 'important');
+            });
+        }
+
+        function updateFavoritesBadge() {
+            const favorites = getFavoritesSafe();
+            const totalFavorites = favorites.length;
+            const badges = document.querySelectorAll('#favorites-count, .favorites-count-mobile');
+            badges.forEach(badge => {
+                badge.textContent = totalFavorites;
+                badge.style.setProperty('display', 'inline-block', 'important');
             });
         }
 
@@ -331,6 +374,16 @@
 
             // Carga inicial del contador al entrar a cualquier página
             updateCartBadge();
+            updateFavoritesBadge();
+
+            window.addEventListener('storage', function(event) {
+                if (event.key === 'cart') {
+                    updateCartBadge();
+                }
+                if (event.key === 'favorites') {
+                    updateFavoritesBadge();
+                }
+            });
         });
     </script>
 
