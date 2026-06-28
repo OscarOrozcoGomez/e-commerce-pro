@@ -189,7 +189,8 @@ function authenticate(string $email, string $password): bool
     $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol, 
                    GROUP_CONCAT(p.clave) as permisos,
                    c.id_cliente,
-                   u.intentos_fallidos, u.bloqueado_hasta
+                 c.telefono as telefono_cliente,
+                 u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
@@ -438,18 +439,44 @@ function dbCreatePublicOrder(array $data): array {
 
         $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?)");
         $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?");
+        $stmtStockCheck = $pdo->prepare("SELECT COALESCE(cantidad_actual, 0) FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ? FOR UPDATE");
 
         foreach ($data['items'] as $item) {
-            $lineTotal = $item['precio'] * $item['quantity'];
-            $stmtDetalle->execute([$id_pedido, $item['id_producto'], $item['quantity'], $item['precio'], $item['precio'], $lineTotal]);
-            $stmtStock->execute([$item['quantity'], $item['id_producto'], $id_almacen_despacho]);
+            $idProducto = (int)($item['id_producto'] ?? 0);
+            $cantidad = max(0, (int)($item['quantity'] ?? 0));
+            $precio = (float)($item['precio'] ?? 0);
+
+            if ($idProducto <= 0 || $cantidad <= 0 || $precio <= 0) {
+                throw new Exception('Producto o cantidad inválidos en el pedido.');
+            }
+
+            $stmtStockCheck->execute([$idProducto, $id_almacen_despacho]);
+            $stockActual = (int)$stmtStockCheck->fetchColumn();
+            if ($stockActual < $cantidad) {
+                throw new Exception('Stock insuficiente para uno o más productos.');
+            }
+
+            $lineTotal = $precio * $cantidad;
+            $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $precio, $lineTotal]);
+            $stmtStock->execute([$cantidad, $idProducto, $id_almacen_despacho]);
         }
 
         $pdo->commit();
-        return ['success' => true, 'pedido' => $numero_pedido];
+        return [
+            'success' => true,
+            'pedido' => $numero_pedido,
+            'id_pedido' => (int)$id_pedido,
+        ];
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log("Error en dbCreatePublicOrder: " . $e->getMessage());
+        $msg = $e->getMessage();
+        if (stripos($msg, 'stock insuficiente') !== false) {
+            return ['success' => false, 'message' => 'No hay stock suficiente para uno o más productos del carrito. Actualiza tu carrito e intenta de nuevo.'];
+        }
+        if (stripos($msg, 'producto o cantidad inválidos') !== false) {
+            return ['success' => false, 'message' => 'Hay productos inválidos en tu carrito. Actualiza la página e intenta de nuevo.'];
+        }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
     }
 }
@@ -731,7 +758,7 @@ function slugify(string $text): string {
 function getProductImageUrl(?string $imgData): string {
     $imgData = trim((string)$imgData);
     if (empty($imgData) || in_array($imgData, ['NULL', 'undefined', '[object Object]', 'null', ''])) {
-        return BASE_URL . 'assets/img/products/default-product.png';
+        return BASE_URL . 'assets/img/products/default-product.svg';
     }
 
     // Si ya es una URL completa (http o https), devolverla tal cual

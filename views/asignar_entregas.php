@@ -14,35 +14,43 @@ $error = '';
 $success = '';
 
 // Procesar asignación
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'], $_POST['id_repartidor'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Token CSRF inválido.';
     } else {
         $id_pedido = intval($_POST['id_pedido']);
-        $id_repartidor = intval($_POST['id_repartidor']);
-        $fecha = $_POST['fecha_entrega'] ?? null;
+        $accion = $_POST['accion'] ?? '';
 
         try {
-            $stmt = $pdo->prepare("UPDATE pedidos SET id_repartidor = :rep, fecha_entrega_programada = :fecha WHERE id_pedido = :pedido");
-            $stmt->execute([
-                ':rep' => $id_repartidor,
-                ':fecha' => $fecha ?: null,
-                ':pedido' => $id_pedido
-            ]);
-            logAudit('PEDIDO_ASIGNADO', 'pedidos', $id_pedido, "Pedido asignado al repartidor ID: $id_repartidor");
-            $success = 'Pedido asignado correctamente.';
+            if ($accion === 'asignar' && isset($_POST['id_repartidor'])) {
+                $id_repartidor = intval($_POST['id_repartidor']);
+                $fecha = $_POST['fecha_entrega'] ?? null;
+                // El repartidor cobra al momento de entregar, no se requiere pago previo
+                $stmt = $pdo->prepare("UPDATE pedidos SET id_repartidor = :rep, fecha_entrega_programada = :fecha WHERE id_pedido = :pedido AND estado IN ('pendiente_pago','pagado')");
+                $stmt->execute([
+                    ':rep' => $id_repartidor,
+                    ':fecha' => $fecha ?: null,
+                    ':pedido' => $id_pedido
+                ]);
+                if ($stmt->rowCount() > 0) {
+                    logAudit('PEDIDO_ASIGNADO', 'pedidos', $id_pedido, "Pedido asignado al repartidor ID: $id_repartidor");
+                    $success = 'Pedido asignado correctamente.';
+                } else {
+                    $error = 'No se pudo asignar. Verifica que el pedido no esté ya en reparto o entregado.';
+                }
+            }
         } catch (PDOException $e) {
             $error = 'Error al asignar: ' . $e->getMessage();
         }
     }
 }
 
-// Obtener pedidos pagados sin repartidor
+// Obtener pedidos pendientes de asignación (sin repartidor aún, estados pre-entrega)
 try {
-    $sql = "SELECT p.*, c.nombre as cliente, c.direccion 
+    $sql = "SELECT p.*, c.nombre as cliente, c.direccion, c.telefono
             FROM pedidos p 
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
-            WHERE p.estado = 'pagado' AND p.id_repartidor IS NULL
+            WHERE p.estado IN ('pendiente_pago','pagado') AND p.id_repartidor IS NULL
             ORDER BY p.fecha_creacion DESC";
     $pedidos = $pdo->query($sql)->fetchAll();
 
@@ -71,12 +79,18 @@ include __DIR__ . '/includes/header.php';
             <i class="material-icons left">check_circle</i> <?php echo esc($success); ?>
         </div>
     <?php endif; ?>
+    <?php if ($error): ?>
+        <div class="card red lighten-4 red-text text-darken-4" style="padding: 10px;">
+            <i class="material-icons left">error</i> <?php echo esc($error); ?>
+        </div>
+    <?php endif; ?>
 
     <div class="row">
         <div class="col s12">
             <div class="card">
                 <div class="card-content">
-                    <span class="card-title">Pedidos Pendientes de Asignación</span>
+                    <span class="card-title">Pedidos por Asignar a Repartidor</span>
+                    <p class="grey-text" style="font-size:0.9rem; margin-top:0;">El repartidor cobrará al momento de entregar. Solo asigna el repartidor y la fecha estimada.</p>
                     
                     <?php if (empty($pedidos)): ?>
                         <p class="center-align grey-text">No hay pedidos pendientes de asignación por ahora.</p>
@@ -98,8 +112,14 @@ include __DIR__ . '/includes/header.php';
                                         <form method="POST">
                                             <?php echo csrfInput(); ?>
                                             <input type="hidden" name="id_pedido" value="<?php echo $p['id_pedido']; ?>">
+                                            <input type="hidden" name="accion" value="asignar">
                                             
-                                            <td><strong><?php echo esc($p['numero_pedido']); ?></strong></td>
+                                            <td>
+                                                <strong><?php echo esc($p['numero_pedido']); ?></strong><br>
+                                                <span style="font-size:0.75rem; padding:2px 6px; border-radius:4px; color:#fff; background:<?php echo $p['estado'] === 'pendiente_pago' ? '#f57c00' : '#388e3c'; ?>;">
+                                                    <?php echo $p['estado'] === 'pendiente_pago' ? 'Cobro al entregar' : 'Ya pagado'; ?>
+                                                </span>
+                                            </td>
                                             <td>
                                                 <?php echo esc($p['cliente'] ?? 'N/A'); ?><br>
                                                 <small class="grey-text"><?php echo esc($p['direccion'] ?? 'S/D'); ?></small>

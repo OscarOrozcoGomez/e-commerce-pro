@@ -66,7 +66,7 @@ include __DIR__ . '/includes/header.php';
 
         <!-- SECCIÓN 1: GESTIÓN COMERCIAL Y CONTENIDO -->
         <div class="row"><div class="col s12"><h5><i class="material-icons left">shopping_basket</i> Catálogo y Clientes</h5></div></div>
-        <div class="row">
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -101,7 +101,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <div class="row">
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -139,7 +139,7 @@ include __DIR__ . '/includes/header.php';
 
         <!-- SECCIÓN 2: LOGÍSTICA E INVENTARIO -->
         <div class="row"><div class="col s12"><h5><i class="material-icons left">inventory</i> Operaciones y Stock</h5></div></div>
-        <div class="row">
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -177,10 +177,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Liberar Stock</span>
-                        <p>Cancelar pedidos expirados y devolver productos al inventario</p>
+                        <p>Revisar pedidos expirados y devolver productos al inventario</p>
                     </div>
                     <div class="card-action">
-                        <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
+                            <a href="<?php echo BASE_URL; ?>views/cleanup_reservations.php" class="btn waves-effect waves-light orange darken-3">Revisar</a>
                     </div>
                 </div>
             </div>
@@ -188,7 +188,7 @@ include __DIR__ . '/includes/header.php';
 
         <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
         <div class="row"><div class="col s12"><h5><i class="material-icons left">settings</i> Administración y Usuarios</h5></div></div>
-        <div class="row">
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -273,15 +273,16 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <div class="row">
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Atención</h5></div></div>
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Gestionar Productos</span>
-                        <p>Dar de alta productos, actualizar precios e inventario</p>
+                        <span class="card-title">Realizar Venta</span>
+                        <p>Procesar nuevas ventas y consultar historial</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/products.php" class="btn waves-effect waves-light teal">Ir</a>
+                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green">Ir</a>
                     </div>
                 </div>
             </div>
@@ -299,11 +300,26 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Realizar Venta</span>
-                        <p>Procesar nuevas ventas y consultar historial</p>
+                        <span class="card-title">Reportes de Ventas</span>
+                        <p>Generar archivos de ventas y análisis del período</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green">Ir</a>
+                        <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">inventory_2</i> Inventario y Operación</h5></div></div>
+        <div class="row dashboard-actions">
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Productos</span>
+                        <p>Dar de alta productos, actualizar precios e inventario</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/products.php" class="btn waves-effect waves-light teal">Ir</a>
                     </div>
                 </div>
             </div>
@@ -332,23 +348,18 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Reportes de Ventas</span>
-                        <p>Generar archivos de ventas y análisis del período</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
-                    </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
                         <span class="card-title">Liberar Stock</span>
-                        <p>Devolver al inventario productos de pedidos no concretados</p>
+                        <p>Revisar pedidos expirados y devolver productos al inventario</p>
                     </div>
                     <div class="card-action">
-                        <button onclick="cleanupStock()" class="btn waves-effect waves-light orange darken-3">Limpiar</button>
+                        <a href="<?php echo BASE_URL; ?>views/cleanup_reservations.php" class="btn waves-effect waves-light orange darken-3">Revisar</a>
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">article</i> Contenido</h5></div></div>
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -410,7 +421,8 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <div class="row">
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Catálogo</h5></div></div>
+        <div class="row dashboard-actions">
             <div class="col s12 m6 l6">
                 <div class="card">
                     <div class="card-content">
@@ -446,6 +458,30 @@ include __DIR__ . '/includes/header.php';
     }
     .text-small {
         font-size: 0.9rem;
+    }
+
+    .dashboard-actions .col {
+        display: flex;
+    }
+
+    .dashboard-actions .card {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .dashboard-actions .card-content {
+        flex: 1;
+        min-height: 140px;
+    }
+
+    .dashboard-actions .card-title {
+        line-height: 1.3;
+        word-break: break-word;
+    }
+
+    .dashboard-actions .card-action .btn {
+        width: 100%;
     }
 </style>
 
@@ -486,17 +522,7 @@ include __DIR__ . '/includes/header.php';
     });
 
     function cleanupStock() {
-        if(!confirm('¿Deseas liberar el stock de pedidos pendientes de más de 10 minutos?')) return;
-        fetch('<?php echo BASE_URL; ?>api/cleanup_reservations.php')
-            .then(r => r.json())
-            .then(data => {
-                if(data.success) {
-                    M.toast({html: data.message, classes: 'green'});
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    M.toast({html: 'Error: ' + data.error, classes: 'red'});
-                }
-            });
+            window.location.href = '<?php echo BASE_URL; ?>views/cleanup_reservations.php';
     }
 </script>
 <?php include __DIR__ . '/includes/footer.php'; ?>

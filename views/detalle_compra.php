@@ -12,11 +12,10 @@ $pdo = getPDO();
 
 try {
     // Validar que el pedido exista y pertenezca al usuario logueado
-    $sql = "SELECT p.*, a.nombre as almacen_nombre, mp.nombre as metodo_nombre,
+    $sql = "SELECT p.*, mp.nombre as metodo_nombre,
                    c.nombre as cliente_nombre, c.email as cliente_email
             FROM pedidos p
             JOIN clientes c ON p.id_cliente = c.id_cliente
-            LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
             LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
             WHERE p.id_pedido = :id_pedido AND c.id_usuario = :id_usuario";
     
@@ -33,13 +32,36 @@ try {
     }
 
     // Obtener detalles con imágenes
-    $sqlItems = "SELECT dp.*, p.nombre, p.nombre_variante, p.sku, p.imagen, p.unidad
+    $sqlItems = "SELECT dp.*, p.nombre, p.nombre_variante, p.sku, p.imagen, p.imagen_url, p.unidad,
+                        COALESCE(
+                            (SELECT pi.ruta_archivo
+                             FROM producto_imagenes pi
+                             WHERE pi.id_producto = p.id_producto
+                             ORDER BY pi.orden ASC
+                             LIMIT 1),
+                            p.imagen,
+                            p.imagen_url
+                        ) AS imagen_resuelta
                  FROM detalle_pedidos dp
                  JOIN productos p ON dp.id_producto = p.id_producto
                  WHERE dp.id_pedido = :id_pedido";
     $stmtItems = $pdo->prepare($sqlItems);
     $stmtItems->execute([':id_pedido' => $idPedido]);
     $items = $stmtItems->fetchAll();
+
+    foreach ($items as &$item) {
+        $item['imagen_render'] = getProductImageUrl($item['imagen_resuelta'] ?? ($item['imagen'] ?? ''));
+        $item['liberado'] = ((int)($item['cantidad'] ?? 0) <= 0);
+    }
+    unset($item);
+
+    $hasReleasedItems = false;
+    foreach ($items as $it) {
+        if (!empty($it['liberado'])) {
+            $hasReleasedItems = true;
+            break;
+        }
+    }
 
 } catch (PDOException $e) {
     error_log("Error en detalle_compra: " . $e->getMessage());
@@ -49,6 +71,7 @@ try {
 
 function getStatusLabel(string $status): string {
     switch ($status) {
+        case 'apartado': return '<span class="badge grey darken-1 white-text">Apartado</span>';
         case 'pendiente_pago': return '<span class="badge grey white-text">Pendiente de Pago</span>';
         case 'pagado': return '<span class="badge blue white-text">Pagado / Confirmado</span>';
         case 'en_reparto': return '<span class="badge orange white-text">En Reparto</span>';
@@ -69,7 +92,8 @@ $estadosTimeline = [
     'entregado'      => ['icon' => 'home', 'label' => 'Entregado']
 ];
 $ordenEstados = array_keys($estadosTimeline);
-$indiceActual = array_search($pedido['estado'], $ordenEstados);
+$estadoTimelineActual = ($pedido['estado'] === 'apartado') ? 'pendiente_pago' : $pedido['estado'];
+$indiceActual = array_search($estadoTimelineActual, $ordenEstados);
 if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado'
 ?>
 
@@ -112,6 +136,14 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                         </div>
                     </div>
                 </div>
+                <div class="row" style="margin-bottom: 0;">
+                    <div class="col s12">
+                        <div class="status-rules-box">
+                            <strong>Flujo de estados:</strong>
+                            <span>Pendiente/Apartado -> Confirmado (vendedor o encargado valida pago) -> En camino (repartidor) -> Entregado (repartidor).</span>
+                        </div>
+                    </div>
+                </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -124,7 +156,6 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                 <div class="card-content">
                     <span class="card-title" style="font-size: 1.2rem; font-weight: bold;"><i class="material-icons left blue-text">info</i> Resumen del Pedido</span>
                     <p style="margin-top: 15px;"><strong>Método de Pago:</strong><br><?php echo esc($pedido['metodo_nombre'] ?? 'No especificado'); ?></p>
-                    <p style="margin-top: 15px;"><strong>Sucursal de Despacho:</strong><br><?php echo esc($pedido['almacen_nombre'] ?? 'Principal'); ?></p>
                     <div class="divider" style="margin: 15px 0;"></div>
                     <p><strong>Información de entrega:</strong></p>
                     <p class="grey-text text-darken-2" style="font-size: 0.9rem; white-space: pre-line;">
@@ -139,31 +170,35 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
             <div class="card">
                 <div class="card-content">
                     <span class="card-title" style="font-size: 1.2rem; font-weight: bold;"><i class="material-icons left green-text">inventory_2</i> Productos en este pedido</span>
+                    <?php if (!empty($hasReleasedItems)): ?>
+                        <div class="released-legend">
+                            <i class="material-icons left">info</i>
+                            Uno o mas productos fueron liberados por tiempo maximo de apartado. Esto ocurre para devolver inventario cuando hay espera de otros clientes.
+                        </div>
+                    <?php endif; ?>
                     <ul class="collection" style="border: none; margin-top: 20px;">
-                        <?php foreach ($items as $item): 
-                            $imgSrc = '';
-                            if (!empty($item['imagen'])) {
-                                $mime = 'image/jpeg';
-                                if (strpos($item['imagen'], 'iVBORw') === 0) $mime = 'image/png';
-                                elseif (strpos($item['imagen'], 'UklGR') === 0) $mime = 'image/webp';
-                                $imgSrc = "data:$mime;base64," . $item['imagen'];
-                            }
+                        <?php foreach ($items as $item):
+                            $imgSrc = $item['imagen_render'] ?? '';
+                            $isReleased = !empty($item['liberado']);
                         ?>
-                            <li class="collection-item avatar" style="border-bottom: 1px solid #f0f0f0; padding-left: 85px; min-height: 100px;">
+                            <li class="collection-item avatar <?php echo $isReleased ? 'released-item' : ''; ?>" style="border-bottom: 1px solid #f0f0f0; padding-left: 85px; min-height: 100px;">
                                 <?php if ($imgSrc): ?>
-                                    <img src="<?php echo $imgSrc; ?>" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
+                                    <img src="<?php echo $imgSrc; ?>" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
                                 <?php else: ?>
-                                    <i class="material-icons circle grey lighten-2 grey-text" style="left: 10px; border-radius: 4px; width: 60px; height: 60px; line-height: 60px;">image</i>
+                                    <img src="<?php echo BASE_URL; ?>assets/img/products/default-product.svg" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
                                 <?php endif; ?>
                                 
                                 <span class="title" style="font-weight: bold;"><?php echo esc($item['nombre'] . ($item['nombre_variante'] ? " - " . $item['nombre_variante'] : "")); ?></span>
                                 <p class="grey-text" style="font-size: 0.85rem;">SKU: <?php echo esc($item['sku']); ?></p>
+                                <?php if ($isReleased): ?>
+                                    <p class="released-note"><i class="material-icons tiny">report_problem</i> Producto liberado por tiempo maximo de apartado.</p>
+                                <?php endif; ?>
                                 <div class="row" style="margin-bottom: 0; margin-top: 10px;">
                                     <div class="col s6">
-                                        <span class="blue-text"><?php echo $item['cantidad']; ?> x $<?php echo number_format((float)$item['precio_unitario'], 2); ?></span>
+                                        <span class="<?php echo $isReleased ? 'red-text text-darken-2' : 'blue-text'; ?>"><?php echo $item['cantidad']; ?> x $<?php echo number_format((float)$item['precio_unitario'], 2); ?></span>
                                     </div>
                                     <div class="col s6 right-align">
-                                        <span class="font-weight-bold" style="font-size: 1.1rem;">$<?php echo number_format((float)$item['cantidad'] * (float)$item['precio_unitario'], 2); ?></span>
+                                        <span class="font-weight-bold <?php echo $isReleased ? 'red-text text-darken-2' : ''; ?>" style="font-size: 1.1rem;">$<?php echo number_format((float)$item['cantidad'] * (float)$item['precio_unitario'], 2); ?></span>
                                     </div>
                                 </div>
                             </li>
@@ -187,6 +222,10 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
     .badge { float: none !important; border-radius: 4px; padding: 4px 12px; font-weight: bold; font-size: 1rem; }
     .font-weight-bold { font-weight: bold; }
     .collection .collection-item.avatar { border-left: none; }
+    .released-legend { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; padding: 10px 12px; border-radius: 6px; font-size: 0.92rem; margin-top: 10px; }
+    .released-item { background: #fff8f8; border-left: 4px solid #ef5350 !important; }
+    .released-note { color: #c62828; font-size: 0.82rem; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+    .status-rules-box { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: #eef4ff; border: 1px solid #d7e3ff; color: #1a237e; font-size: 0.88rem; display: flex; gap: 8px; flex-wrap: wrap; }
 
     /* Estilos para el Seguimiento Visual */
     .timeline-container { display: flex; justify-content: space-between; position: relative; padding: 0 10px; }
@@ -205,13 +244,25 @@ function repetirPedido() {
     const itemsPedido = <?php echo json_encode($items); ?>;
     
     // Mapeamos al formato que espera tu carrito en localStorage
-    const nuevoCarrito = itemsPedido.map(item => ({
+    const nuevoCarrito = itemsPedido
+    .filter(item => parseInt(item.cantidad, 10) > 0)
+    .map(item => ({
         id_producto: parseInt(item.id_producto),
         nombre: item.nombre + (item.nombre_variante ? ' - ' + item.nombre_variante : ''),
         precio: parseFloat(item.precio_unitario),
         quantity: parseInt(item.cantidad),
-        imagen: item.imagen ? (item.imagen.startsWith('iVBORw') ? 'data:image/png;base64,' : 'data:image/jpeg;base64/') + item.imagen : ''
+        imagen: item.imagen_render || ''
     }));
+
+    if (nuevoCarrito.length === 0) {
+        Swal.fire({
+            title: 'Sin productos disponibles',
+            text: 'Los productos de este pedido fueron liberados y no pueden repetirse.',
+            icon: 'warning',
+            confirmButtonColor: '#b71c1c'
+        });
+        return;
+    }
 
     Swal.fire({
         title: '¿Quieres repetir este pedido?',

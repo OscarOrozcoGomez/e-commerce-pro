@@ -13,18 +13,34 @@ $usuario = $_SESSION['usuario'];
 $error = '';
 $success = '';
 
-// Procesar cambio de estado a entregado
+// Procesar cambio de estado de reparto
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Token CSRF inválido.';
     } else {
         $id_pedido = intval($_POST['id_pedido']);
+        if ($_POST['accion'] === 'en_camino') {
+            try {
+                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'en_reparto' WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado')");
+                $stmt->execute([$id_pedido, $usuario['id_usuario']]);
+                if ($stmt->rowCount() > 0) {
+                    logAudit('PEDIDO_EN_CAMINO', 'pedidos', $id_pedido, 'Pedido marcado en camino por repartidor');
+                    $success = 'Pedido marcado como en camino.';
+                }
+            } catch (PDOException $e) {
+                $error = 'Error al actualizar el pedido.';
+            }
+        }
+
         if ($_POST['accion'] === 'entregar') {
             try {
-                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW() WHERE id_pedido = ? AND id_repartidor = ?");
+                // Confirma entrega y cobro simultáneamente (pago contra entrega)
+                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
-                logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, "Pedido marcado como entregado por repartidor");
-                $success = 'Pedido entregado correctamente.';
+                if ($stmt->rowCount() > 0) {
+                    logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado por repartidor');
+                    $success = 'Pedido entregado correctamente.';
+                }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
             }
@@ -34,10 +50,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_
 
 // Obtener entregas pendientes asignadas a este repartidor
 try {
-    $sql = "SELECT p.*, c.nombre as cliente, c.direccion, c.telefono, c.ubicacion_mapa
+    $sql = "SELECT p.*, p.observaciones,
+                   c.nombre as cliente, c.direccion, c.telefono, c.ubicacion_mapa
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
-            WHERE p.id_repartidor = :repartidor AND p.estado = 'pagado'
+            WHERE p.id_repartidor = :repartidor AND p.estado IN ('pendiente_pago','pagado','en_reparto')
             ORDER BY p.fecha_entrega_programada ASC, p.fecha_creacion DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':repartidor' => $usuario['id_usuario']]);
@@ -81,24 +98,70 @@ include __DIR__ . '/includes/header.php';
                             <span class="card-title indigo-text"><strong><?php echo esc($ent['numero_pedido']); ?></strong></span>
                             <div class="divider"></div>
                             
-                            <div class="section-info">
-                                <p><i class="material-icons tiny indigo-text">person</i> <strong>Cliente:</strong> <?php echo esc($ent['cliente'] ?? 'N/A'); ?></p>
-                                <p>
-                                    <i class="material-icons tiny indigo-text">phone</i> <strong>Teléfono:</strong> <?php echo esc($ent['telefono'] ?? 'N/A'); ?>
-                                    <a href="https://wa.me/52<?php echo preg_replace('/\D/', '', $ent['telefono']); ?>" target="_blank" class="green-text" style="margin-left: 10px;">
-                                        (WhatsApp <i class="material-icons tiny">chat</i>)
+                        <div class="section-info">
+                            <?php
+                                // Extraer datos desde observaciones cuando la tabla clientes no los tiene
+                                // Formato: "ENTREGA: domicilio | Cliente: Nombre | Tel: 555... | Dir: Calle..."
+                                $obs = $ent['observaciones'] ?? '';
+                                $clienteNombre = $ent['cliente'] ?? null;
+                                $clienteTel    = $ent['telefono'] ?? null;
+                                $clienteDir    = $ent['direccion'] ?? null;
+                                $clienteMapas  = $ent['ubicacion_mapa'] ?? null;
+
+                                if ($obs) {
+                                    if (!$clienteNombre && preg_match('/Cliente:\s*([^|]+)/i', $obs, $m)) {
+                                        $clienteNombre = trim($m[1]);
+                                    }
+                                    if (!$clienteTel && preg_match('/Tel:\s*([^|]+)/i', $obs, $m)) {
+                                        $clienteTel = trim($m[1]);
+                                    }
+                                    if (!$clienteDir && preg_match('/Dir:\s*(.+)/i', $obs, $m)) {
+                                        $clienteDir = trim($m[1]);
+                                    }
+                                }
+
+                                // URL de navegación: primero coordenadas guardadas, luego búsqueda por texto
+                                if ($clienteMapas) {
+                                    $mapsUrl = $clienteMapas;
+                                } elseif ($clienteDir) {
+                                    $mapsUrl = 'https://www.google.com/maps/dir/?api=1&destination=' . rawurlencode($clienteDir);
+                                } else {
+                                    $mapsUrl = null;
+                                }
+
+                                // Teléfono limpio para WhatsApp
+                                $telLimpio = preg_replace('/\D/', '', (string)$clienteTel);
+                            ?>
+                            <p><i class="material-icons tiny indigo-text">person</i> <strong>Cliente:</strong> <?php echo esc($clienteNombre ?? 'N/A'); ?></p>
+                            <p>
+                                <i class="material-icons tiny indigo-text">phone</i>
+                                <strong>Teléfono:</strong>
+                                <?php if ($clienteTel && $clienteTel !== 'N/A'): ?>
+                                    <a href="tel:<?php echo esc($telLimpio); ?>" class="indigo-text"><?php echo esc($clienteTel); ?></a>
+                                    &nbsp;
+                                    <a href="https://wa.me/52<?php echo esc($telLimpio); ?>" target="_blank" class="green-text" style="font-size:0.85rem;">
+                                        <i class="material-icons tiny">chat</i> WhatsApp
                                     </a>
-                                </p>
-                                <p><i class="material-icons tiny indigo-text">place</i> <strong>Dirección:</strong> <?php echo esc($ent['direccion'] ?? 'No especificada'); ?></p>
-                                
-                                <?php if ($ent['ubicacion_mapa']): ?>
-                                    <div style="margin-top: 10px;">
-                                        <a href="<?php echo $ent['ubicacion_mapa']; ?>" target="_blank" class="btn-small waves-effect waves-light blue">
-                                            <i class="material-icons left">map</i> Ver en Google Maps
-                                        </a>
-                                    </div>
+                                <?php else: ?>
+                                    <span class="grey-text">No disponible</span>
                                 <?php endif; ?>
-                            </div>
+                            </p>
+                            <p><i class="material-icons tiny indigo-text">place</i> <strong>Dirección:</strong> <?php echo esc($clienteDir ?? 'No especificada'); ?></p>
+
+                            <?php if ($mapsUrl): ?>
+                                <div style="margin-top: 12px;">
+                                    <a href="<?php echo esc($mapsUrl); ?>" target="_blank"
+                                       class="btn waves-effect waves-light blue darken-2"
+                                       style="width:100%; text-align:center;">
+                                        <i class="material-icons left">navigation</i> Abrir Navegación
+                                    </a>
+                                </div>
+                            <?php else: ?>
+                                <p class="grey-text" style="font-size:0.85rem; margin-top:8px;">
+                                    <i class="material-icons tiny">info</i> Sin coordenadas de mapa registradas.
+                                </p>
+                            <?php endif; ?>
+                        </div>
 
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
@@ -128,10 +191,25 @@ include __DIR__ . '/includes/header.php';
                             <form method="POST">
                                 <?php echo csrfInput(); ?>
                                 <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                <input type="hidden" name="accion" value="entregar">
-                                <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar que el pedido fue entregado?')">
-                                    MARCAR COMO ENTREGADO <i class="material-icons right">done_all</i>
-                                </button>
+                                <?php if (in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado'])): ?>
+                                    <input type="hidden" name="accion" value="en_camino">
+                                    <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
+                                        <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
+                                            <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                        </p>
+                                    <?php endif; ?>
+                                    <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('¿Salir a entregar este pedido?')">
+                                        SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
+                                    </button>
+                                <?php else: ?>
+                                    <input type="hidden" name="accion" value="entregar">
+                                    <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
+                                        <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                    </p>
+                                    <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar entrega y cobro del pedido?')">
+                                        ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
+                                    </button>
+                                <?php endif; ?>
                             </form>
                         </div>
                     </div>

@@ -327,10 +327,22 @@ include __DIR__ . '/views/includes/header.php';
                     return;
                 }
 
+                const stockDisponible = Math.max(0, parseInt(currentProduct.stock, 10) || 0);
+                if (qty > stockDisponible) {
+                    M.toast({html: 'Solo hay ' + stockDisponible + ' unidad(es) disponibles.', classes: 'orange darken-2 rounded'});
+                    qty = Math.max(1, stockDisponible);
+                    updateQtyDisplay();
+                    return;
+                }
+
                 // Integración con tu carrito existente
                 let cart = JSON.parse(localStorage.getItem('cart') || '[]');
                 const existing = cart.find(item => item.id_producto === currentProduct.id_producto);
                 if (existing) {
+                    if ((existing.quantity + qty) > stockDisponible) {
+                        M.toast({html: 'No puedes apartar más de ' + stockDisponible + ' unidad(es).', classes: 'orange darken-2 rounded'});
+                        return;
+                    }
                     existing.quantity += qty;
                 } else {
                     cart.push({
@@ -494,6 +506,11 @@ include __DIR__ . '/views/includes/header.php';
             actionBtn.innerHTML = '<i class="material-icons">event</i> Reservar Miér/Sáb';
             if(qtyContainer) qtyContainer.style.display = 'flex';
             if(warningBox) warningBox.style.display = 'none';
+            const stockDisponible = Math.max(1, parseInt(product.stock, 10) || 1);
+            if (qty > stockDisponible) {
+                qty = stockDisponible;
+                updateQtyDisplay();
+            }
         } else {
             actionBtn.disabled = true;
             actionBtn.classList.add('grey');
@@ -589,6 +606,11 @@ include __DIR__ . '/views/includes/header.php';
     function updateQty(change) {
         const newVal = qty + change;
         if (newVal >= 1) {
+            const stockDisponible = currentProduct ? Math.max(0, parseInt(currentProduct.stock, 10) || 0) : 0;
+            if (stockDisponible > 0 && newVal > stockDisponible) {
+                M.toast({html: 'Stock máximo disponible: ' + stockDisponible, classes: 'orange darken-2 rounded'});
+                return;
+            }
             qty = newVal;
             updateQtyDisplay();
         }

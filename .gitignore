@@ -8,3 +8,6 @@ mail_log.txt
 # SQL de mantenimiento de presentaciones
 PRESENTATIONS_SQL.md
 core/db_tools.php
+app_error.log
+
+.vscode/sftp.json

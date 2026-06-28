@@ -12,7 +12,9 @@ $usuario = $_SESSION['usuario'];
 
 // Obtener los pedidos asociados a este usuario a través de la tabla clientes
 try {
-    $sql = "SELECT p.*, a.nombre as almacen_nombre 
+    $sql = "SELECT p.*, a.nombre as almacen_nombre,
+                   (SELECT COUNT(*) FROM detalle_pedidos dp0 WHERE dp0.id_pedido = p.id_pedido AND dp0.cantidad <= 0) AS items_liberados,
+                   (SELECT COUNT(*) FROM detalle_pedidos dp1 WHERE dp1.id_pedido = p.id_pedido AND dp1.cantidad > 0) AS items_activos
             FROM pedidos p 
             JOIN clientes c ON p.id_cliente = c.id_cliente 
             LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
@@ -58,8 +60,11 @@ include __DIR__ . '/includes/header.php';
             </div>
         <?php else: ?>
             <?php foreach ($compras as $c): ?>
+                <?php
+                    $isLiberadoParcial = ((int)($c['items_liberados'] ?? 0) > 0) && ((int)($c['items_activos'] ?? 0) > 0) && ($c['estado'] !== 'cancelado');
+                ?>
                 <div class="col s12">
-                    <div class="card horizontal hoverable border-status-<?php echo $c['estado']; ?>">
+                    <div class="card horizontal hoverable border-status-<?php echo $c['estado']; ?> <?php echo $isLiberadoParcial ? 'border-status-liberado-parcial' : ''; ?>">
                         <div class="card-stacked">
                             <div class="card-content">
                                 <div class="row" style="margin-bottom: 0;">
@@ -71,6 +76,9 @@ include __DIR__ . '/includes/header.php';
                                     <div class="col s12 m6 right-align">
                                         <div style="margin-bottom: 10px;">
                                             <?php echo getStatusBadge($c['estado']); ?>
+                                            <?php if ($isLiberadoParcial): ?>
+                                                <span class="badge amber darken-2 white-text" style="margin-left: 6px;">Liberado parcial</span>
+                                            <?php endif; ?>
                                         </div>
                                         <h5 class="indigo-text">Total: $<?php echo number_format((float)$c['total'], 2); ?></h5>
                                     </div>
@@ -91,10 +99,14 @@ include __DIR__ . '/includes/header.php';
                                             $stmtD->execute([$c['id_pedido']]);
                                             while($d = $stmtD->fetch()):
                                                 $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
+                                                $isReleasedItem = ((int)$d['cantidad'] <= 0);
                                             ?>
-                                                <li class="collection-item" style="padding: 5px 0; border: none;">
+                                                <li class="collection-item <?php echo $isReleasedItem ? 'released-line' : ''; ?>" style="padding: 5px 0; border: none;">
                                                     <?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?> 
                                                     <span class="right grey-text">$<?php echo number_format($d['cantidad'] * $d['precio_unitario'], 2); ?></span>
+                                                    <?php if ($isReleasedItem): ?>
+                                                        <span class="released-chip">Liberado por tiempo de apartado</span>
+                                                    <?php endif; ?>
                                                 </li>
                                             <?php endwhile; ?>
                                         </ul>
@@ -125,6 +137,9 @@ include __DIR__ . '/includes/header.php';
     .border-status-cancelado { border-left: 8px solid #f44336; }
     .border-status-apartado { border-left: 8px solid #9c27b0; }
     .border-status-pendiente_pago { border-left: 8px solid #9e9e9e; }
+    .border-status-liberado-parcial { box-shadow: inset 0 0 0 2px #ffb300; }
+    .released-line { background: #fff8e1; border-radius: 4px; padding: 6px 8px !important; margin-bottom: 4px; }
+    .released-chip { display: inline-block; margin-left: 8px; font-size: 0.75rem; color: #bf360c; background: #ffe0b2; border-radius: 10px; padding: 2px 8px; }
 </style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

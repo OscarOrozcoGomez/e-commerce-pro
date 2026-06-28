@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $nombre = trim($_POST['nombre'] ?? '');
         $email = trim($_POST['email'] ?? '');
+        $telefono = trim($_POST['telefono'] ?? '');
         $password = $_POST['password'] ?? '';
         $confirm_password = $_POST['confirm_password'] ?? '';
 
@@ -48,7 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     // Crear entrada en tabla clientes para este usuario
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, id_usuario) VALUES (?, ?, ?)");
-                    $stmtCli->execute([$nombre, $email, $newUserId]);
+                    $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_usuario) VALUES (?, ?, ?, ?)");
+                    $stmtCli->execute([$nombre, $email, $telefono ?: null, $newUserId]);
                     
                     $success = 'Cuenta creada con éxito. Ya puedes iniciar sesión.';
                 }
@@ -96,6 +98,11 @@ include __DIR__ . '/includes/header.php';
                                 <i class="material-icons prefix">email</i>
                                 <input id="email" name="email" type="email" required value="<?php echo esc($email ?? ''); ?>">
                                 <label for="email">Correo Electrónico</label>
+                            </div>
+                            <div class="input-field">
+                                <i class="material-icons prefix">phone</i>
+                                <input id="telefono" name="telefono" type="tel" value="<?php echo esc($telefono ?? ''); ?>" placeholder="Ej: 3311223344">
+                                <label for="telefono">Teléfono de contacto (opcional)</label>
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">lock</i>

@@ -28,13 +28,28 @@ if (!$id_almacen_actual) {
 
 // Obtener productos disponibles
 try {
-    $sql = "SELECT p.*, ia.cantidad_actual 
+    $sql = "SELECT p.*, ia.cantidad_actual,
+            COALESCE(
+                (SELECT pi.ruta_archivo
+                 FROM producto_imagenes pi
+                 INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto
+                 WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto)
+                 ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC
+                 LIMIT 1),
+                p.imagen,
+                p.imagen_url
+            ) as imagen_fuente
             FROM productos p 
             LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :almacen
             WHERE p.estado = 'activo' ORDER BY p.nombre ASC, p.nombre_variante ASC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':almacen' => $id_almacen_actual]);
     $productos = $stmt->fetchAll();
+
+    foreach ($productos as &$producto) {
+        $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''));
+    }
+    unset($producto);
 } catch (PDOException $e) {
     $error = 'Error al obtener productos: ' . $e->getMessage();
     $productos = [];
@@ -128,8 +143,8 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             
                             <div class="input-field col s12 m6">
-                                <input type="number" class="descuento" name="descuento" step="0.01" value="0" min="0" oninput="actualizarTotal('{{id}}')">
-                                <label for="descuento">Descuento</label>
+                                <input type="number" id="descuento-{{id}}" class="descuento" name="descuento" step="0.01" value="0" min="0" oninput="actualizarTotal('{{id}}')">
+                                <label for="descuento-{{id}}" class="active">Descuento</label>
                             </div>
                         </div>
 
@@ -219,6 +234,32 @@ include __DIR__ . '/includes/header.php';
     const productMap = {};
     const autocompleteData = {};
 
+    function resolveProductImageSrc(rawImage) {
+        if (!rawImage) {
+            return '../assets/img/no-product.png';
+        }
+
+        const value = String(rawImage).trim();
+        if (value === '') {
+            return '../assets/img/no-product.png';
+        }
+
+        // URL completa, data URI o ruta relativa/absoluta ya válida
+        if (
+            value.startsWith('data:') ||
+            value.startsWith('http://') ||
+            value.startsWith('https://') ||
+            value.startsWith('/') ||
+            value.startsWith('../') ||
+            value.startsWith('./')
+        ) {
+            return value;
+        }
+
+        // Si no parece ruta/URL, asumimos base64 de imagen JPEG
+        return `data:image/jpeg;base64,${value}`;
+    }
+
     // Función para prevenir pérdida de datos al cerrar pestaña
     const prevenirCierre = (e) => {
         const items = document.querySelectorAll('.producto-item');
@@ -231,9 +272,7 @@ include __DIR__ . '/includes/header.php';
     document.addEventListener('DOMContentLoaded', function() {
         // 1. Preparar datos de productos una sola vez para mejorar rendimiento
         productosDisponibles.forEach(p => {
-            const imgSrc = p.imagen 
-                ? (p.imagen.startsWith('data:') ? p.imagen : `data:image/jpeg;base64,${p.imagen}`)
-                : null;
+            const imgSrc = resolveProductImageSrc(p.imagen_resuelta || p.imagen_fuente || p.imagen || p.imagen_url);
 
             let label = p.nombre;
             if (p.codigo_barras && !p.nombre.includes(`[${p.codigo_barras}]`)) {
@@ -288,6 +327,7 @@ include __DIR__ . '/includes/header.php';
         tabsInstance = M.Tabs.init(tabsUl);
         
         M.FormSelect.init(context.querySelectorAll('select'));
+        M.updateTextFields();
 
         // 4. Configurar el buscador Autocomplete
         const buscador = context.querySelector('.buscador-producto');
@@ -422,9 +462,7 @@ include __DIR__ . '/includes/header.php';
         }
 
         const label = product.nombre_variante ? `${product.nombre} - ${product.nombre_variante}` : product.nombre;
-        const imgSrc = product.imagen 
-            ? (product.imagen.startsWith('data:') ? product.imagen : `data:image/jpeg;base64,${product.imagen}`)
-            : '../assets/img/no-product.png';
+        const imgSrc = resolveProductImageSrc(product.imagen_resuelta || product.imagen_fuente || product.imagen || product.imagen_url);
         
         const html = `
             <div class="row producto-item animated fadeIn" data-id="${product.id_producto}" style="padding: 15px; margin: 10px 0; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid #4caf50;">

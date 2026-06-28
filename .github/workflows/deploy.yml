@@ -50,3 +50,56 @@ jobs:
             .gitignore
             README.md
             .ftp-deploy-sync-state.json
+
+name: Deploy to Neubox (SFTP)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: "Escribe DEPLOY para confirmar despliegue manual a produccion"
+        required: true
+        default: ""
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Upload changed files via SFTP
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Deploy only changes to Neubox via SFTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.PTF_HOST }}
+          username: ${{ secrets.PTF_USERNAME }}
+          password: ${{ secrets.PTF_PASSWORD }}
+          protocol: ftp
+          port: 21
+          local-dir: ./
+          server-dir: /public_html/
+          state-name: .ftp-deploy-sync-state.json
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git/**
+            **/.github/**
+            **/.vscode/**
+            **/*.sql
+            **/respaldos/**
+            .gitignore
+            README.md
+            .ftp-deploy-sync-state.json
