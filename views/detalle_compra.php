@@ -12,11 +12,10 @@ $pdo = getPDO();
 
 try {
     // Validar que el pedido exista y pertenezca al usuario logueado
-    $sql = "SELECT p.*, a.nombre as almacen_nombre, mp.nombre as metodo_nombre,
+    $sql = "SELECT p.*, mp.nombre as metodo_nombre,
                    c.nombre as cliente_nombre, c.email as cliente_email
             FROM pedidos p
             JOIN clientes c ON p.id_cliente = c.id_cliente
-            LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
             LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
             WHERE p.id_pedido = :id_pedido AND c.id_usuario = :id_usuario";
     
@@ -157,7 +156,6 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                 <div class="card-content">
                     <span class="card-title" style="font-size: 1.2rem; font-weight: bold;"><i class="material-icons left blue-text">info</i> Resumen del Pedido</span>
                     <p style="margin-top: 15px;"><strong>Método de Pago:</strong><br><?php echo esc($pedido['metodo_nombre'] ?? 'No especificado'); ?></p>
-                    <p style="margin-top: 15px;"><strong>Sucursal de Despacho:</strong><br><?php echo esc($pedido['almacen_nombre'] ?? 'Principal'); ?></p>
                     <div class="divider" style="margin: 15px 0;"></div>
                     <p><strong>Información de entrega:</strong></p>
                     <p class="grey-text text-darken-2" style="font-size: 0.9rem; white-space: pre-line;">

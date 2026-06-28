@@ -14,6 +14,8 @@ if ($isUserAuthenticated && isCliente()) {
     $direcciones = $stmtDir->fetchAll();
 }
 
+$telefonoGuardado = $usuarioLogueado['telefono_cliente'] ?? '';
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -107,7 +109,7 @@ include __DIR__ . '/includes/header.php';
                             <select id="select_direccion" class="browser-default" style="border: 1px solid #9e9e9e; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
                                 <option value="">-- Seleccionar dirección guardada --</option>
                                 <?php foreach ($direcciones as $d): ?>
-                                    <option value="<?php echo esc($d['direccion']); ?>" <?php echo $d['es_default'] ? 'selected' : ''; ?>>
+                                    <option value="<?php echo esc($d['direccion']); ?>" data-maps-link="<?php echo esc($d['maps_link'] ?? ''); ?>" <?php echo $d['es_default'] ? 'selected' : ''; ?>>
                                         <?php echo esc($d['alias']); ?>: <?php echo esc($d['direccion']); ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -115,13 +117,34 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <?php endif; ?>
 
+                        <!-- Buscador de Google Maps (solo domicilio) -->
+                        <div id="wrapper-maps-search" style="display:none; margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: #333; font-size: 0.9rem;">Buscar dirección con Google</label>
+                            <div class="input-field" style="margin: 0;">
+                                <i class="material-icons prefix blue-text">search</i>
+                                <input type="text" id="autocomplete_search_cart" placeholder="Escribe tu calle y número...">
+                                <span class="helper-text">Selecciona una opción sugerida para mayor precisión</span>
+                            </div>
+                        </div>
+
+                        <!-- Vista previa del mapa -->
+                        <div id="map-preview-cart" class="z-depth-1" style="height: 200px; width: 100%; margin-bottom: 20px; border-radius: 4px; display: none; border: 1px solid #ddd;"></div>
+
+                        <input type="hidden" id="maps_link" name="maps_link" value="">
+
                         <div class="input-field">
                             <input type="text" id="nombre" name="nombre" required value="<?php echo esc($usuarioLogueado['nombre'] ?? ''); ?>">
                             <label for="nombre">Nombre Completo</label>
                         </div>
                         <div class="input-field">
-                            <input type="text" id="telefono" name="telefono" required>
-                            <label for="telefono">Teléfono de contacto</label>
+                            <input type="tel" id="telefono" name="telefono" required
+                                   value="<?php echo esc($telefonoGuardado); ?>">
+                            <label for="telefono" class="<?php echo $telefonoGuardado ? 'active' : ''; ?>">Teléfono de contacto</label>
+                            <?php if (empty($telefonoGuardado) && $isUserAuthenticated): ?>
+                                <span class="helper-text orange-text">
+                                    <i class="material-icons tiny">info</i> Lo guardaremos para no pedírtelo otra vez.
+                                </span>
+                            <?php endif; ?>
                         </div>
                         <div id="direccion-container">
                             <div class="input-field">
@@ -141,8 +164,71 @@ include __DIR__ . '/includes/header.php';
 
 <!-- SweetAlert2 para mensajes emergentes -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=places&callback=initAutocompleteCart" async defer></script>
 
 <script>
+    let mapCart, markerCart;
+
+    function initAutocompleteCart() {
+        if (typeof google === 'undefined') {
+            console.error('Google Maps no pudo cargarse. Revisa tu API Key y Facturacion.');
+            return;
+        }
+
+        const input = document.getElementById('autocomplete_search_cart');
+        const mapEl = document.getElementById('map-preview-cart');
+        if (!input || !mapEl) return;
+
+        const autocomplete = new google.maps.places.Autocomplete(input, {
+            types: ['address'],
+            componentRestrictions: { country: 'mx' }
+        });
+
+        mapCart = new google.maps.Map(mapEl, {
+            center: { lat: 23.6345, lng: -102.5528 },
+            zoom: 5,
+            disableDefaultUI: true,
+            zoomControl: true
+        });
+        markerCart = new google.maps.Marker({ map: mapCart });
+
+        autocomplete.addListener('place_changed', function() {
+            const place = autocomplete.getPlace();
+            if (!place.geometry) return;
+
+            mapEl.style.display = 'block';
+            const direccionEl = document.getElementById('direccion');
+            const mapsLinkEl = document.getElementById('maps_link');
+
+            if (direccionEl) {
+                direccionEl.value = place.formatted_address || direccionEl.value;
+                M.textareaAutoResize(direccionEl);
+            }
+            if (mapsLinkEl) {
+                mapsLinkEl.value = `https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat()},${place.geometry.location.lng()}`;
+            }
+
+            mapCart.setCenter(place.geometry.location);
+            mapCart.setZoom(17);
+            markerCart.setPosition(place.geometry.location);
+            M.updateTextFields();
+        });
+    }
+
+    function actualizarMapaCartDesdeCoords(coords) {
+        if (!mapCart || !markerCart) return;
+        const [lat, lng] = String(coords || '').split(',').map(Number);
+        if (!isNaN(lat) && !isNaN(lng)) {
+            const pos = { lat, lng };
+            const mapEl = document.getElementById('map-preview-cart');
+            if (mapEl) mapEl.style.display = 'block';
+            mapCart.setCenter(pos);
+            mapCart.setZoom(17);
+            markerCart.setPosition(pos);
+            setTimeout(() => google.maps.event.trigger(mapCart, 'resize'), 100);
+        }
+    }
+
     function clearCart() {
         Swal.fire({
             title: '¿Vaciar el carrito?',
@@ -242,6 +328,7 @@ include __DIR__ . '/includes/header.php';
                 telefono: document.getElementById('telefono').value,
                 direccion: document.getElementById('direccion').value
             },
+            maps_link: document.getElementById('maps_link')?.value || '',
             items: cart
         };
 
@@ -286,24 +373,36 @@ include __DIR__ . '/includes/header.php';
     const tipoEntrega = document.getElementById('tipo_entrega');
     const direccionContainer = document.getElementById('direccion-container');
     const wrapperSelect = document.getElementById('wrapper-select-direccion');
+    const wrapperMapsSearch = document.getElementById('wrapper-maps-search');
     const inputDireccion = document.getElementById('direccion');
     const infoSucursal = document.getElementById('info-sucursal');
+    const mapsLinkInput = document.getElementById('maps_link');
+    const mapPreviewCart = document.getElementById('map-preview-cart');
+    const inputSearchCart = document.getElementById('autocomplete_search_cart');
 
     function aplicarModoEntrega(valor) {
         if (valor === 'Sucursal') {
             if (infoSucursal) infoSucursal.style.display = 'block';
             if (direccionContainer) direccionContainer.style.display = 'none';
             if (wrapperSelect) wrapperSelect.style.display = 'none';
+            if (wrapperMapsSearch) wrapperMapsSearch.style.display = 'none';
+            if (mapPreviewCart) mapPreviewCart.style.display = 'none';
             if (inputDireccion) { inputDireccion.required = false; inputDireccion.value = 'Tabachín 248, Bosques de Tonalá, 45400 Tonalá, Jal.'; }
+            if (mapsLinkInput) mapsLinkInput.value = '';
+            if (inputSearchCart) inputSearchCart.value = '';
         } else if (valor === 'Domicilio') {
             if (infoSucursal) infoSucursal.style.display = 'none';
             if (direccionContainer) direccionContainer.style.display = 'block';
             if (wrapperSelect) wrapperSelect.style.display = 'block';
+            if (wrapperMapsSearch) wrapperMapsSearch.style.display = 'block';
             if (inputDireccion) inputDireccion.required = true;
         } else {
             if (infoSucursal) infoSucursal.style.display = 'none';
             if (direccionContainer) direccionContainer.style.display = 'block';
             if (wrapperSelect) wrapperSelect.style.display = 'none';
+            if (wrapperMapsSearch) wrapperMapsSearch.style.display = 'none';
+            if (mapPreviewCart) mapPreviewCart.style.display = 'none';
+            if (mapsLinkInput) mapsLinkInput.value = '';
         }
     }
 
@@ -312,6 +411,14 @@ include __DIR__ . '/includes/header.php';
     document.getElementById('select_direccion')?.addEventListener('change', function() {
         if (this.value) {
             document.getElementById('direccion').value = this.value;
+            const mapsLink = this.options[this.selectedIndex]?.dataset?.mapsLink || '';
+            if (mapsLinkInput) mapsLinkInput.value = mapsLink;
+            if (mapsLink.includes('query=')) {
+                const coords = mapsLink.split('query=')[1];
+                if (coords) actualizarMapaCartDesdeCoords(coords);
+            } else if (mapPreviewCart) {
+                mapPreviewCart.style.display = 'none';
+            }
             M.textareaAutoResize(document.getElementById('direccion'));
             M.updateTextFields();
         }
@@ -320,7 +427,21 @@ include __DIR__ . '/includes/header.php';
     document.addEventListener('DOMContentLoaded', () => {
         renderCart();
         updateCartBadge();
+        if (typeof google !== 'undefined') initAutocompleteCart();
+
+        const initialMapsLink = mapsLinkInput?.value || '';
+        if (initialMapsLink.includes('query=')) {
+            const coords = initialMapsLink.split('query=')[1];
+            if (coords) actualizarMapaCartDesdeCoords(coords);
+        }
     });
 </script>
+
+<style>
+    .pac-container {
+        z-index: 1051 !important;
+        border-radius: 4px;
+    }
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

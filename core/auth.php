@@ -189,7 +189,8 @@ function authenticate(string $email, string $password): bool
     $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol, 
                    GROUP_CONCAT(p.clave) as permisos,
                    c.id_cliente,
-                   u.intentos_fallidos, u.bloqueado_hasta
+                 c.telefono as telefono_cliente,
+                 u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
