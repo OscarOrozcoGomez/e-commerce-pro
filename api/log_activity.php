@@ -4,27 +4,33 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
-// Solo registrar si el usuario está logueado
-if (!isAuthenticated()) {
-    exit;
-}
-
 $pdo = getPDO();
-$usuario = $_SESSION['usuario'];
+$idUsuario = null;
+if (isAuthenticated()) {
+    $idUsuario = (int)($_SESSION['usuario']['id_usuario'] ?? 0);
+    if ($idUsuario <= 0) {
+        $idUsuario = null;
+    }
+}
 
 // Obtener datos del cuerpo de la solicitud (JSON)
 $data = json_decode(file_get_contents('php://input'), true);
 
 if ($data && isset($data['tipo'])) {
     try {
+        $tipo = (string)$data['tipo'];
+        if (!in_array($tipo, ['visit', 'click'], true)) {
+            exit;
+        }
+
         $sql = "INSERT INTO logs_actividad 
                 (id_usuario, tipo_accion, url, elemento_id, elemento_texto, ip_address, user_agent) 
                 VALUES (:id_usuario, :tipo, :url, :elemento_id, :elemento_texto, :ip, :ua)";
         
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
-            ':id_usuario' => $usuario['id_usuario'],
-            ':tipo' => $data['tipo'], // 'click' o 'visit'
+            ':id_usuario' => $idUsuario,
+            ':tipo' => $tipo, // 'click' o 'visit'
             ':url' => $data['url'] ?? $_SERVER['HTTP_REFERER'] ?? '',
             ':elemento_id' => $data['id'] ?? null,
             ':elemento_texto' => mb_substr($data['texto'] ?? '', 0, 255),
