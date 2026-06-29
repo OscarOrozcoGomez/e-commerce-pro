@@ -38,9 +38,8 @@ jobs:
           server: ${{ secrets.PTF_HOST }}
           username: ${{ secrets.PTF_USERNAME }}
           password: ${{ secrets.PTF_PASSWORD }}
-          protocol: ftp
-          port: 21
-          port-type: passive
+          protocol: sftp
+          port: 22
           local-dir: ./
           server-dir: /public_html/
           state-name: .ftp-deploy-sync-state.json
