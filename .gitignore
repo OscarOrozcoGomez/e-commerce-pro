@@ -25,4 +25,3 @@ app_secrets.*.env
 .app_secrets.env
 .app_secrets.*.php
 .app_secrets.*.env
-DEPLOY_ENVIRONMENTS_SETUP.md
