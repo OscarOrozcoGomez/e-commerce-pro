@@ -71,9 +71,43 @@ jobs:
 
       - name: Run remote DB migrations
         run: |
-          curl --fail --show-error --silent \
-            --request POST \
-            --header "Content-Type: application/json" \
-            --header "X-Migrations-Token: ${MIGRATIONS_DEPLOY_TOKEN}" \
-            --data '{"dry_run":false}' \
-            "${MIGRATIONS_URL}"
+          ATTEMPTS=5
+          DELAY_SECONDS=15
+          LAST_HTTP_CODE=""
+
+          for attempt in $(seq 1 ${ATTEMPTS}); do
+            echo "Intento ${attempt}/${ATTEMPTS}: ejecutando migraciones remotas..."
+
+            LAST_HTTP_CODE=$(curl \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --header "X-Migrations-Token: ${MIGRATIONS_DEPLOY_TOKEN}" \
+              --data '{"dry_run":false}' \
+              --connect-timeout 15 \
+              --max-time 90 \
+              --show-error \
+              --silent \
+              --output /tmp/migrations_response.json \
+              --write-out "%{http_code}" \
+              "${MIGRATIONS_URL}" || true)
+
+            if [ "${LAST_HTTP_CODE}" = "200" ]; then
+              echo "Migraciones ejecutadas correctamente. Respuesta:"
+              cat /tmp/migrations_response.json
+              exit 0
+            fi
+
+            echo "::warning::Fallo en intento ${attempt}/${ATTEMPTS}. HTTP=${LAST_HTTP_CODE:-curl_error}"
+            if [ -s /tmp/migrations_response.json ]; then
+              echo "Respuesta parcial del endpoint:"
+              cat /tmp/migrations_response.json
+            fi
+
+            if [ "${attempt}" -lt "${ATTEMPTS}" ]; then
+              echo "Reintentando en ${DELAY_SECONDS}s..."
+              sleep "${DELAY_SECONDS}"
+            fi
+          done
+
+          echo "::error::No fue posible ejecutar migraciones remotas tras ${ATTEMPTS} intentos. Ultimo HTTP=${LAST_HTTP_CODE:-curl_error}."
+          exit 1
