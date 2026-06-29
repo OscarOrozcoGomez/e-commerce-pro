@@ -69,6 +69,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .login-container { max-width: 500px; margin: 50px auto; }
         body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
         .card { border-radius: 10px; }
+        .password-criteria-list { margin-top: -10px; margin-bottom: 18px; padding-left: 0; }
+        .password-criteria-list li { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .password-criteria-list .criteria-icon { font-size: 16px; line-height: 1; }
     </style>
 </head>
 <body>
@@ -132,13 +135,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <p class="grey-text text-darken-1" style="margin-top: -6px; margin-bottom: 18px;">
                         Debe tener al menos 10 caracteres e incluir mayúscula, minúscula, número y símbolo. No puede ser la misma contraseña anterior.
                     </p>
-                    <ul id="password-rules-forgot" style="margin-top: -10px; margin-bottom: 18px; padding-left: 18px;">
-                        <li id="forgot-rule-length" class="red-text text-darken-2">Al menos 10 caracteres</li>
-                        <li id="forgot-rule-upper" class="red-text text-darken-2">Al menos una mayúscula</li>
-                        <li id="forgot-rule-lower" class="red-text text-darken-2">Al menos una minúscula</li>
-                        <li id="forgot-rule-number" class="red-text text-darken-2">Al menos un número</li>
-                        <li id="forgot-rule-symbol" class="red-text text-darken-2">Al menos un símbolo (!@#$...)</li>
-                        <li id="forgot-rule-match" class="red-text text-darken-2">Las contraseñas coinciden</li>
+                    <ul id="password-rules-forgot" class="password-criteria-list" aria-live="polite">
+                        <li id="forgot-rule-length" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos 10 caracteres</span></li>
+                        <li id="forgot-rule-upper" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos una mayúscula</span></li>
+                        <li id="forgot-rule-lower" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos una minúscula</span></li>
+                        <li id="forgot-rule-number" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos un número</span></li>
+                        <li id="forgot-rule-symbol" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos un símbolo (!@#$...)</span></li>
+                        <li id="forgot-rule-match" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Las contraseñas coinciden</span></li>
                     </ul>
 
                     <div class="center-align">
@@ -198,8 +201,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!el) {
                     return;
                 }
+                const icon = el.querySelector('.criteria-icon');
                 el.classList.remove('red-text', 'green-text', 'text-darken-2');
                 el.classList.add(ok ? 'green-text' : 'red-text', 'text-darken-2');
+                if (icon) {
+                    icon.textContent = ok ? 'check_circle' : 'cancel';
+                }
             }
 
             function updateState() {

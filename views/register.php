@@ -116,13 +116,13 @@ include __DIR__ . '/includes/header.php';
                                 <label for="confirm_password">Confirmar Contraseña</label>
                                 <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('confirm_password', this)">visibility</i>
                             </div>
-                            <ul id="password-rules-register" style="margin-top: -6px; margin-bottom: 20px; padding-left: 18px;">
-                                <li id="register-rule-length" class="red-text text-darken-2">Al menos 10 caracteres</li>
-                                <li id="register-rule-upper" class="red-text text-darken-2">Al menos una mayúscula</li>
-                                <li id="register-rule-lower" class="red-text text-darken-2">Al menos una minúscula</li>
-                                <li id="register-rule-number" class="red-text text-darken-2">Al menos un número</li>
-                                <li id="register-rule-symbol" class="red-text text-darken-2">Al menos un símbolo (!@#$...)</li>
-                                <li id="register-rule-match" class="red-text text-darken-2">Las contraseñas coinciden</li>
+                            <ul id="password-rules-register" class="password-criteria-list" aria-live="polite">
+                                <li id="register-rule-length" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos 10 caracteres</span></li>
+                                <li id="register-rule-upper" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos una mayúscula</span></li>
+                                <li id="register-rule-lower" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos una minúscula</span></li>
+                                <li id="register-rule-number" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos un número</span></li>
+                                <li id="register-rule-symbol" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos un símbolo (!@#$...)</span></li>
+                                <li id="register-rule-match" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Las contraseñas coinciden</span></li>
                             </ul>
                             
                             <div style="margin-top: 30px;">
@@ -143,6 +143,9 @@ include __DIR__ . '/includes/header.php';
 
 <style>
     .w-100 { width: 100%; }
+    .password-criteria-list { margin-top: -6px; margin-bottom: 20px; padding-left: 0; }
+    .password-criteria-list li { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .password-criteria-list .criteria-icon { font-size: 16px; line-height: 1; }
 </style>
 
 <script>
@@ -179,8 +182,12 @@ include __DIR__ . '/includes/header.php';
             if (!el) {
                 return;
             }
+            const icon = el.querySelector('.criteria-icon');
             el.classList.remove('red-text', 'green-text', 'text-darken-2');
             el.classList.add(ok ? 'green-text' : 'red-text', 'text-darken-2');
+            if (icon) {
+                icon.textContent = ok ? 'check_circle' : 'cancel';
+            }
         }
 
         function updateState() {
