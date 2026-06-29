@@ -82,21 +82,12 @@ Para mantener sincronizado el esquema entre XAMPP y el host remoto:
 - `MIGRATIONS_URL` (GitHub Secret): URL completa, por ejemplo:
     - `https://tu-dominio.com/api/run_migrations.php`
 
-## Ambientes de trabajo (QA y Producción)
+## Ambientes de trabajo (QA local + Producción)
 
-Se implementó una separación explícita:
+El flujo actual está simplificado así:
 
-- QA (pruebas):
-    - Branch: `qa`
-    - Workflow: `.github/workflows/deploy-qa.yml`
-    - Environment GitHub: `qa`
-    - Directorio remoto sugerido: `/public_html_qa/`
-
-- Producción:
-    - Branch: `main`
-    - Workflow: `.github/workflows/deploy.yml`
-    - Environment GitHub: `production`
-    - Directorio remoto: `/public_html/`
+- QA (pruebas): solo local en tu equipo con XAMPP.
+- Producción: único entorno remoto en Neubox.
 
 ### Configuración local en XAMPP (QA)
 
@@ -110,11 +101,11 @@ Nota: En localhost/CLI ahora el valor por defecto de `APP_ENV` es `qa`.
 
 1. En hosting, configura `APP_ENV=production`.
 2. Configura variables reales de DB (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
-3. Configura `MIGRATIONS_DEPLOY_TOKEN` con el mismo valor que en GitHub Secrets del environment `production`.
+3. Configura `MIGRATIONS_DEPLOY_TOKEN` con el mismo valor que en GitHub Secrets globales del repositorio.
 
-### GitHub Environments y Secrets recomendados
+### GitHub Secrets globales requeridos
 
-Crea dos environments en GitHub: `qa` y `production`, cada uno con sus secrets:
+Agrega estos secrets a nivel repositorio (sin GitHub Environments):
 
 - `PTF_HOST`
 - `PTF_USERNAME`
@@ -122,12 +113,10 @@ Crea dos environments en GitHub: `qa` y `production`, cada uno con sus secrets:
 - `MIGRATIONS_URL`
 - `MIGRATIONS_DEPLOY_TOKEN`
 
-Esto permite que QA y Producción usen credenciales distintas con el mismo nombre de secret.
-
 ### Seguridad
 
 - Nunca edites una migración ya aplicada; crea una nueva.
-- El endpoint remoto acepta solo `POST` y exige header `X-Migrations-Token`.
+- El endpoint remoto acepta solo `POST` y valida token por header `X-Migrations-Token` o query param `token`.
 - El runner usa `schema_migrations` para evitar aplicar dos veces la misma versión.
 
 ## Marketing y conversiones

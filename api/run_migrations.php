@@ -11,14 +11,22 @@ if (strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     exit;
 }
 
-$expectedToken = getEnvVar('MIGRATIONS_DEPLOY_TOKEN');
+$expectedToken = migrationDeployToken();
 if ($expectedToken === null || $expectedToken === '') {
     http_response_code(500);
     echo json_encode(['success' => false, 'error' => 'MIGRATIONS_DEPLOY_TOKEN no configurado']);
     exit;
 }
 
-$providedToken = $_SERVER['HTTP_X_MIGRATIONS_TOKEN'] ?? '';
+$providedToken = '';
+if (isset($_SERVER['HTTP_X_MIGRATIONS_TOKEN']) && is_string($_SERVER['HTTP_X_MIGRATIONS_TOKEN'])) {
+    $providedToken = trim($_SERVER['HTTP_X_MIGRATIONS_TOKEN']);
+}
+
+if ($providedToken === '' && isset($_GET['token']) && is_string($_GET['token'])) {
+    $providedToken = trim($_GET['token']);
+}
+
 if (!is_string($providedToken) || !hash_equals($expectedToken, $providedToken)) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'Token invalido']);

@@ -19,7 +19,6 @@ jobs:
   deploy:
     name: Upload changed files to Production via SFTP
     runs-on: ubuntu-latest
-    environment: production
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
     permissions:
       contents: read

@@ -1,13 +1,8 @@
-# Setup rapido de ambientes QA y Produccion
+# Setup rapido: QA local + Produccion
 
-## 1) GitHub Environments
+## 1) GitHub Secrets (globales de repositorio)
 
-Crea dos environments en el repositorio:
-
-- qa
-- production
-
-En cada environment agrega estos secrets:
+Agrega estos secrets en Settings > Secrets and variables > Actions:
 
 - PTF_HOST
 - PTF_USERNAME
@@ -15,20 +10,15 @@ En cada environment agrega estos secrets:
 - MIGRATIONS_URL
 - MIGRATIONS_DEPLOY_TOKEN
 
-Sugerencias:
+Sugerencias para Produccion:
 
-- qa:
-  - MIGRATIONS_URL = https://tu-dominio.com/api/run_migrations.php (sitio QA)
-  - server-dir ya esta configurado como /public_html_qa/ en deploy-qa.yml
-- production:
-  - MIGRATIONS_URL = https://tu-dominio.com/api/run_migrations.php (sitio produccion)
-  - server-dir ya esta configurado como /public_html/ en deploy.yml
+- MIGRATIONS_URL = https://tu-dominio.com/api/run_migrations.php
+- El deploy FTP ya apunta a /public_html/ en deploy.yml
 
-## 2) Hosting por ambiente
+## 2) Hosting de Produccion
 
-Define variables de entorno en cada ambiente remoto:
+Define variables de entorno en el host remoto:
 
-- APP_ENV=qa en QA
 - APP_ENV=production en Produccion
 - DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_CHARSET
 - MIGRATIONS_DEPLOY_TOKEN (igual al secret en GitHub para ese ambiente)
@@ -39,8 +29,7 @@ Define variables de entorno en cada ambiente remoto:
 2. Probar local en QA:
    - C:\xampp\php\php.exe scripts/migrate.php --dry-run
    - C:\xampp\php\php.exe scripts/migrate.php
-3. Push a qa para validar en ambiente QA remoto.
-4. Merge a main para desplegar a Produccion.
+3. Push a main para desplegar a Produccion.
 
 ## 4) Validacion de migraciones
 

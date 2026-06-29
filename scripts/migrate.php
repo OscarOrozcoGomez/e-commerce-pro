@@ -19,26 +19,57 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
+$showHelp = in_array('--help', $argv, true) || in_array('-h', $argv, true);
+if ($showHelp) {
+    echo "Uso:\n";
+    echo "  C:\\xampp\\php\\php.exe scripts/migrate.php [--dry-run] [--to=YYYYMMDD_HHMMSS]\n\n";
+    echo "Opciones:\n";
+    echo "  --dry-run   Muestra migraciones pendientes sin ejecutarlas.\n";
+    echo "  --to=...    Ejecuta solo hasta esa version (inclusive).\n";
+    exit(0);
+}
+
 $dryRun = in_array('--dry-run', $argv, true);
 $targetVersion = cliArgValue($argv, '--to=');
 
 try {
     $result = runDatabaseMigrations($targetVersion, $dryRun);
 
-    echo "Migraciones completadas.\n";
-    echo 'Dry run: ' . ($result['dry_run'] ? 'si' : 'no') . "\n";
-    echo 'Aplicadas: ' . (string) $result['applied_count'] . "\n";
-    echo 'Omitidas (ya aplicadas): ' . (string) $result['skipped_count'] . "\n";
+    echo "========================================\n";
+    echo "MIGRATIONS REPORT\n";
+    echo "========================================\n";
+    echo 'Dry run: ' . ($result['dry_run'] ? 'YES' : 'NO') . "\n";
+    echo 'Target version: ' . ($result['target_version'] ?? 'latest') . "\n";
+    echo 'Total SQL files: ' . (string) $result['total_files'] . "\n";
+    echo 'Applied: ' . (string) $result['applied_count'] . "\n";
+    echo 'Skipped: ' . (string) $result['skipped_count'] . "\n";
+    echo 'Pending: ' . (string) $result['pending_count'] . "\n";
 
-    if (!empty($result['applied'])) {
-        echo "Detalle de migraciones procesadas:\n";
-        foreach ($result['applied'] as $row) {
-            echo '- ' . $row['version'] . ' | ' . $row['filename'] . ' | ' . $row['status'] . "\n";
+    if (!empty($result['applied_files'])) {
+        echo "\nApplied files:\n";
+        foreach ($result['applied_files'] as $file) {
+            echo '  [OK] ' . $file . "\n";
         }
     }
 
+    if (!empty($result['pending_files'])) {
+        echo "\nPending files:\n";
+        foreach ($result['pending_files'] as $file) {
+            echo '  [..] ' . $file . "\n";
+        }
+    }
+
+    if (!empty($result['skipped_files'])) {
+        echo "\nSkipped files (already applied):\n";
+        foreach ($result['skipped_files'] as $file) {
+            echo '  [SKIP] ' . $file . "\n";
+        }
+    }
+
+    echo "\nDone.\n";
     exit(0);
 } catch (Throwable $e) {
-    fwrite(STDERR, 'Error de migraciones: ' . $e->getMessage() . "\n");
+    fwrite(STDERR, "\nMigration error:\n");
+    fwrite(STDERR, '  ' . $e->getMessage() . "\n");
     exit(1);
 }
