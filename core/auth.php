@@ -246,6 +246,7 @@ function authenticate(string $email, string $password): bool
         $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
         $_SESSION['usuario'] = $user;
         session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
+        $_SESSION['_session_id_rotated_at'] = time();
         
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
@@ -311,7 +312,6 @@ function logout(): void
             $params["secure"], $params["httponly"]
         );
     }
-    session_write_close(); // Liberar el bloqueo del archivo inmediatamente
     session_destroy();
     header('Location: ' . BASE_URL . 'views/login.php?logout=1');
     exit;

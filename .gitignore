@@ -32,3 +32,11 @@ app_secrets.*.env
 .app_secrets.env
 .app_secrets.*.php
 .app_secrets.*.env
+
+# Bloqueo explícito de secretos locales/qa para evitar subidas accidentales
+core/app_secrets.qa.php
+core/app_secrets.local.php
+app_secrets.qa.php
+app_secrets.local.php
+.app_secrets.qa.php
+.app_secrets.local.php

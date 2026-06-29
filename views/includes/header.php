@@ -555,7 +555,6 @@
         }
     </style>
 
-    <?php if (isAuthenticated()): ?>
     <!-- Sistema de Rastreo de Actividad -->
     <script>
         (function() {
@@ -589,4 +588,3 @@
             }, true);
         })();
     </script>
-    <?php endif; ?>

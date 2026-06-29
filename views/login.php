@@ -8,6 +8,11 @@ if (isAuthenticated()) {
 }
 
 $error = '';
+if (!empty($_SESSION['session_expired'])) {
+    $error = 'Tu sesión expiró por inactividad. Inicia sesión nuevamente.';
+    unset($_SESSION['session_expired']);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';

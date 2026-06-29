@@ -10,6 +10,8 @@
 
     <php>
         <env name="APP_ENV" value="qa"/>
+        <env name="DISABLE_GSM" value="1"/>
+        <env name="ALLOW_GSM_LOCAL" value="0"/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_NAME" value="test_db"/>
         <env name="DB_USER" value="root"/>

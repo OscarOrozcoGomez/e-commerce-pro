@@ -24,13 +24,15 @@ $usuarios = $pdo->query("SELECT id_usuario, nombre, email FROM usuarios ORDER BY
 // Construir consulta de logs
 $query = "SELECT l.*, u.nombre as usuario_nombre, u.email as usuario_email 
           FROM logs_actividad l 
-          JOIN usuarios u ON l.id_usuario = u.id_usuario 
+          LEFT JOIN usuarios u ON l.id_usuario = u.id_usuario 
           WHERE 1=1";
 
 $params = [];
 if ($filtro_usuario > 0) {
     $query .= " AND l.id_usuario = :id_usuario";
     $params[':id_usuario'] = $filtro_usuario;
+} elseif ($filtro_usuario === -1) {
+    $query .= " AND l.id_usuario IS NULL";
 }
 if ($filtro_tipo !== '') {
     $query .= " AND l.tipo_accion = :tipo";
@@ -84,6 +86,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="input-field col s12 m3">
                     <select name="usuario" class="browser-default">
                         <option value="0">Todos los usuarios</option>
+                        <option value="-1" <?php echo $filtro_usuario === -1 ? 'selected' : ''; ?>>Solo invitados (sin login)</option>
                         <?php foreach ($usuarios as $u): ?>
                             <option value="<?php echo $u['id_usuario']; ?>" <?php echo $filtro_usuario == $u['id_usuario'] ? 'selected' : ''; ?>>
                                 <?php echo esc($u['nombre']); ?> (<?php echo esc($u['email']); ?>)
@@ -154,7 +157,10 @@ include __DIR__ . '/includes/header.php';
                                             <tr>
                                                 <td><?php echo date('H:i:s', strtotime($log['fecha_creacion'])); ?></td>
                                                 <td>
-                                                    <span style="font-weight: 500;"><?php echo esc($log['usuario_nombre']); ?></span>
+                                                    <span style="font-weight: 500;"><?php echo esc($log['usuario_nombre'] ?? 'Invitado'); ?></span>
+                                                    <?php if (empty($log['usuario_nombre'])): ?>
+                                                        <small class="grey-text" style="display:block;">sin sesión</small>
+                                                    <?php endif; ?>
                                                 </td>
                                                 <td>
                                                     <span class="badge <?php echo $log['tipo_accion'] === 'visit' ? 'blue' : 'green'; ?> white-text" style="float: none;">

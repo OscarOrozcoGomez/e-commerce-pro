@@ -649,3 +649,5 @@
 [28-Jun-2026 14:36:51 America/Mexico_City] WARNING: GSM contexto -> project=vendimia-497305 | token_source=unknown | sa=unknown
 [28-Jun-2026 14:36:51 America/Mexico_City] WARNING: Google Secret Manager: Service account file no legible en ruta configurada: /home/beautyandwell/public_html/.gcp/sa.json (revisa existencia y permisos).
 [28-Jun-2026 14:36:51 America/Mexico_City] WARNING: No se encontró archivo de secretos local.
+[29-Jun-2026 00:16:26 America/Mexico_City] INFO: Entorno local/QA sin secretos cargados desde GCP (DISABLE_GSM activo por defecto).
+[29-Jun-2026 00:16:34 America/Mexico_City] INFO: Entorno local/QA sin secretos cargados desde GCP (DISABLE_GSM activo por defecto).
