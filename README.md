@@ -60,12 +60,24 @@ ecommerce/
 Para mantener sincronizado el esquema entre XAMPP y el host remoto:
 
 1. Crear una migración SQL nueva en `database/migrations/` con formato:
-     - `YYYYMMDD_HHMMSS_descripcion.sql`
+     - Default: `YYYYMMDD_000001_descripcion.sql` (consecutivo diario)
+     - Opcional: `YYYYMMDD_HHMMSS_descripcion.sql` (modo timestamp)
 2. Probar localmente en XAMPP:
      - `php scripts/migrate.php --dry-run`
      - `php scripts/migrate.php`
 3. Hacer push a `main`.
 4. El workflow `deploy.yml` sube archivos y luego ejecuta `api/run_migrations.php` en remoto.
+
+### Generar plantilla de migración
+
+- Modo por defecto (consecutivo diario):
+    - `php scripts/make_migration.php "borrar tabla prueba"`
+- Modo por hora exacta:
+    - `php scripts/make_migration.php --mode=timestamp "borrar tabla prueba"`
+- Alias corto para timestamp:
+    - `php scripts/make_migration.php --timestamp "borrar tabla prueba"`
+- Ver ayuda:
+    - `php scripts/make_migration.php --help`
 
 ### Comandos locales
 
@@ -92,7 +104,7 @@ El flujo actual está simplificado así:
 ### Configuración local en XAMPP (QA)
 
 1. Copia `core/app_secrets.qa.example.php` a `core/app_secrets.qa.php`.
-2. Ajusta `DB_NAME` para tu base QA local (por ejemplo `beautyandwell_qa`).
+2. Ajusta `DB_NAME` para tu base local de XAMPP (por ejemplo `beautyandwell_prod`).
 3. Opcional: define `APP_ENV=qa` en el entorno de Apache/PHP.
 
 Nota: En localhost/CLI ahora el valor por defecto de `APP_ENV` es `qa`.
@@ -117,7 +129,7 @@ Agrega estos secrets a nivel repositorio (sin GitHub Environments):
 
 - Nunca edites una migración ya aplicada; crea una nueva.
 - El endpoint remoto acepta solo `POST` y valida token por header `X-Migrations-Token` o query param `token`.
-- El runner usa `schema_migrations` para evitar aplicar dos veces la misma versión.
+- La tabla oficial de historial es `migration_history`; `schema_migrations` quedó como residuo legacy y se limpia con una migración posterior.
 
 ## Marketing y conversiones
 
