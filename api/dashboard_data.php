@@ -57,12 +57,12 @@ try {
         $stmt->execute([$idAlmacen]);
         $stats['stock_bajo'] = $stmt->fetch();
 
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM pedidos WHERE id_repartidor IS NOT NULL AND estado IN ('pagado','en_reparto') AND id_almacen = ?");
+        $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM pedidos WHERE id_repartidor IS NOT NULL AND estado IN ('pendiente_pago','pagado','en_reparto') AND id_almacen = ?");
         $stmt->execute([$idAlmacen]);
         $stats['por_entregar'] = $stmt->fetch();
 
     } elseif ($rol === 'repartidor') {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM pedidos WHERE id_repartidor = ? AND estado IN ('pagado','en_reparto')");
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM pedidos WHERE id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
         $stmt->execute([$idUsuario]);
         $stats['entregas_hoy'] = ['total' => $stmt->fetchColumn()];
 

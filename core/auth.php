@@ -311,7 +311,6 @@ function logout(): void
             $params["secure"], $params["httponly"]
         );
     }
-    session_write_close(); // Liberar el bloqueo del archivo inmediatamente
     session_destroy();
     header('Location: ' . BASE_URL . 'views/login.php?logout=1');
     exit;

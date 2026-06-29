@@ -5,7 +5,10 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-requirePermission('venta', BASE_URL . 'views/dashboard.php'); // Encargados tienen 'venta'
+if (!isAdmin() && !isEncargado()) {
+    header('Location: ' . BASE_URL . 'views/dashboard.php');
+    exit;
+}
 
 $pageTitle = 'Asignar Entregas';
 $pdo = getPDO();
@@ -47,8 +50,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
 
 // Obtener pedidos pendientes de asignación (sin repartidor aún, estados pre-entrega)
 try {
-    $sql = "SELECT p.*, c.nombre as cliente, c.direccion, c.telefono
-            FROM pedidos p 
+    $hasClientesDireccion = false;
+    $hasClienteDireccionesTable = false;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'direccion'");
+    $stmtMeta->execute();
+    $hasClientesDireccion = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones'");
+    $stmtMeta->execute();
+    $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    if ($hasClientesDireccion && $hasClienteDireccionesTable) {
+        $direccionExpr = "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS direccion";
+    } elseif ($hasClientesDireccion) {
+        $direccionExpr = "c.direccion AS direccion";
+    } elseif ($hasClienteDireccionesTable) {
+        $direccionExpr = "(SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1) AS direccion";
+    } else {
+        $direccionExpr = "NULL AS direccion";
+    }
+
+    $sql = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono
+            FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             WHERE p.estado IN ('pendiente_pago','pagado') AND p.id_repartidor IS NULL
             ORDER BY p.fecha_creacion DESC";
