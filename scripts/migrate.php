@@ -13,9 +13,9 @@ function cliArgValue(array $argv, string $prefix): ?string
     return null;
 }
 
-if (PHP_SAPI !== 'cli') {
+if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
     http_response_code(403);
-    echo "Este script solo se puede ejecutar por CLI.\n";
+    echo "Este script solo se puede ejecutar por CLI o phpdbg.\n";
     exit(1);
 }
 
