@@ -13,10 +13,50 @@ ini_set('error_log', $appErrorLogPath);
 
 // Configuración general del sistema POS
 date_default_timezone_set('America/Mexico_City');
-if (!session_id()) {
-    // Usamos @ para suprimir advertencias de archivos bloqueados temporales comunes en XAMPP/Windows
-    @session_start();
+$isHttpsRequest = (
+    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+    || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https')
+);
+
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+ini_set('session.cookie_secure', $isHttpsRequest ? '1' : '0');
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isHttpsRequest,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
 }
+
+$sessionIdleTimeoutEnv = getenv('SESSION_IDLE_TIMEOUT');
+if ($sessionIdleTimeoutEnv === false) {
+    $sessionIdleTimeoutEnv = $_SERVER['SESSION_IDLE_TIMEOUT'] ?? $_ENV['SESSION_IDLE_TIMEOUT'] ?? null;
+}
+$sessionIdleTimeout = is_numeric($sessionIdleTimeoutEnv) ? (int)$sessionIdleTimeoutEnv : 1800;
+
+$sessionRotateIntervalEnv = getenv('SESSION_ROTATE_INTERVAL');
+if ($sessionRotateIntervalEnv === false) {
+    $sessionRotateIntervalEnv = $_SERVER['SESSION_ROTATE_INTERVAL'] ?? $_ENV['SESSION_ROTATE_INTERVAL'] ?? null;
+}
+$sessionRotateInterval = is_numeric($sessionRotateIntervalEnv) ? (int)$sessionRotateIntervalEnv : 600;
+
+if (session_status() === PHP_SESSION_ACTIVE) {
+    enforceSessionInactivityTimeout($sessionIdleTimeout);
+}
+
+if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario'])) {
+    rotateSessionIdIfNeeded($sessionRotateInterval);
+}
+
 sendSecurityHeaders();
 
 // Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
@@ -118,10 +158,44 @@ function loadSecretsFromFile(string $filePath): bool
 
 function preloadSecretSources(): void
 {
+    $rawAppEnv = getenv('APP_ENV');
+    if ($rawAppEnv === false) {
+        $rawAppEnv = $_SERVER['APP_ENV'] ?? $_ENV['APP_ENV'] ?? '';
+    }
+    $normalizedEnv = strtolower(trim((string) $rawAppEnv));
+    $hostForSecrets = $_SERVER['HTTP_HOST'] ?? '';
+    $isLocalHostForSecrets = strpos($hostForSecrets, 'localhost') !== false || strpos($hostForSecrets, '127.0.0.1') !== false;
+    $isLocalContext = (PHP_SAPI === 'cli')
+        || $isLocalHostForSecrets
+        || in_array($normalizedEnv, ['qa', 'local', 'dev', 'development', 'test'], true);
+
+    $parseBool = static function ($value): ?bool {
+        if ($value === null || $value === false) {
+            return null;
+        }
+        $value = strtolower(trim((string)$value));
+        if ($value === '') {
+            return null;
+        }
+        if (in_array($value, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+        if (in_array($value, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+        return null;
+    };
+
+    $disableGsmEnv = $parseBool(getenv('DISABLE_GSM') !== false ? getenv('DISABLE_GSM') : ($_SERVER['DISABLE_GSM'] ?? $_ENV['DISABLE_GSM'] ?? null));
+    $allowGsmLocalEnv = $parseBool(getenv('ALLOW_GSM_LOCAL') !== false ? getenv('ALLOW_GSM_LOCAL') : ($_SERVER['ALLOW_GSM_LOCAL'] ?? $_ENV['ALLOW_GSM_LOCAL'] ?? null));
+    $disableGsm = $disableGsmEnv ?? $isLocalContext;
+    $allowGsmLocal = $allowGsmLocalEnv ?? false;
+
     $googleLoadedCount = 0;
     $googleDebug = [];
-    if (function_exists('gsmLoadSecrets')) {
-        $googleSecrets = gsmLoadSecrets([
+    $shouldUseGsm = function_exists('gsmLoadSecrets') && !$disableGsm && (!$isLocalContext || $allowGsmLocal);
+    if ($shouldUseGsm) {
+        $secretMapping = [
             'DB_HOST' => ['DB_HOST'],
             'DB_NAME' => ['DB_NAME'],
             'DB_USER' => ['DB_USER'],
@@ -129,18 +203,26 @@ function preloadSecretSources(): void
             'DB_CHARSET' => ['DB_CHARSET'],
             'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
             'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
-        ], $googleDebug);
+        ];
+
+        if (function_exists('gsmLoadSecretsCached')) {
+            $googleSecrets = gsmLoadSecretsCached($secretMapping, $googleDebug, 300);
+        } else {
+            $googleSecrets = gsmLoadSecrets($secretMapping, $googleDebug);
+        }
 
         foreach ($googleSecrets as $key => $value) {
             applySecretValue($key, $value);
             $googleLoadedCount++;
         }
 
-        if ($googleLoadedCount > 0) {
+        if ($googleLoadedCount > 0 && empty($googleDebug['from_cache'])) {
             $source = isset($googleDebug['token_source']) && is_string($googleDebug['token_source'])
                 ? $googleDebug['token_source']
                 : 'unknown';
             error_log('INFO: Secretos cargados desde Google Secret Manager (' . $googleLoadedCount . ') con token ' . $source);
+        } elseif ($googleLoadedCount > 0 && !empty($googleDebug['from_cache'])) {
+            // Cache hit: evitamos ruido en logs de producción para cada request.
         } elseif (!empty($googleDebug['errors']) && is_array($googleDebug['errors'])) {
             $source = isset($googleDebug['token_source']) && is_string($googleDebug['token_source'])
                 ? $googleDebug['token_source']
@@ -160,15 +242,17 @@ function preloadSecretSources(): void
         }
     }
 
-    $rawAppEnv = getenv('APP_ENV');
-    if ($rawAppEnv === false) {
-        $rawAppEnv = $_SERVER['APP_ENV'] ?? $_ENV['APP_ENV'] ?? '';
-    }
-    $normalizedEnv = strtolower(trim((string) $rawAppEnv));
-
     $envSuffixCandidates = [];
     if ($normalizedEnv !== '' && preg_match('/^[a-z0-9_\-]+$/', $normalizedEnv)) {
         $envSuffixCandidates[] = $normalizedEnv;
+
+        // QA y local son equivalentes para pruebas en XAMPP.
+        if ($normalizedEnv === 'qa' && !in_array('local', $envSuffixCandidates, true)) {
+            $envSuffixCandidates[] = 'local';
+        }
+        if ($normalizedEnv === 'local' && !in_array('qa', $envSuffixCandidates, true)) {
+            $envSuffixCandidates[] = 'qa';
+        }
     }
 
     $baseCandidates = [
@@ -226,7 +310,11 @@ function preloadSecretSources(): void
     if ($loadedSecretSource !== null) {
         error_log('INFO: Secretos cargados desde: ' . $loadedSecretSource);
     } elseif ($googleLoadedCount === 0) {
-        error_log('WARNING: No se encontró archivo de secretos local.');
+        if ($isLocalContext || $disableGsm) {
+            error_log('INFO: Entorno local/QA sin secretos cargados desde GCP (DISABLE_GSM activo por defecto).');
+        } else {
+            error_log('WARNING: No se encontró archivo de secretos local.');
+        }
     }
 }
 
@@ -355,6 +443,68 @@ function esc(string $value): string
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function rotateSessionIdIfNeeded(int $intervalSeconds = 600): void
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        return;
+    }
+
+    $intervalSeconds = max(60, $intervalSeconds);
+    $now = time();
+    $lastRotation = isset($_SESSION['_session_id_rotated_at']) ? (int)$_SESSION['_session_id_rotated_at'] : 0;
+
+    if ($lastRotation <= 0) {
+        $_SESSION['_session_id_rotated_at'] = $now;
+        return;
+    }
+
+    if (($now - $lastRotation) < $intervalSeconds) {
+        return;
+    }
+
+    session_regenerate_id(true);
+    $_SESSION['_session_id_rotated_at'] = $now;
+}
+
+function enforceSessionInactivityTimeout(int $timeoutSeconds = 1800): void
+{
+    if (session_status() !== PHP_SESSION_ACTIVE || !isset($_SESSION['usuario'])) {
+        return;
+    }
+
+    $timeoutSeconds = max(300, $timeoutSeconds);
+    $now = time();
+    $lastActivity = isset($_SESSION['_last_activity_at']) ? (int)$_SESSION['_last_activity_at'] : 0;
+
+    if ($lastActivity > 0 && ($now - $lastActivity) > $timeoutSeconds) {
+        $_SESSION = [];
+
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            setcookie(
+                session_name(),
+                '',
+                time() - 42000,
+                $params['path'] ?? '/',
+                $params['domain'] ?? '',
+                (bool)($params['secure'] ?? false),
+                (bool)($params['httponly'] ?? true)
+            );
+        }
+
+        session_destroy();
+
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        $_SESSION['session_expired'] = 1;
+        return;
+    }
+
+    $_SESSION['_last_activity_at'] = $now;
+}
+
 function sendSecurityHeaders(): void
 {
     if (headers_sent()) {
@@ -367,4 +517,11 @@ function sendSecurityHeaders(): void
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
     header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+
+    // Evitar que páginas autenticadas queden en cache del navegador/proxies compartidos.
+    if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario'])) {
+        header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+    }
 }

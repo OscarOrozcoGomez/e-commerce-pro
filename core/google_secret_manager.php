@@ -1,6 +1,40 @@
 <?php
 declare(strict_types=1);
 
+function gsmEnsureSessionStarted(): void
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        @session_start();
+    }
+}
+
+function clear_secrets_cache(): void
+{
+    gsmEnsureSessionStarted();
+    unset($_SESSION['app_secrets'], $_SESSION['app_secrets_cached_at']);
+}
+
+function gsmGetSessionSecretsCache(): ?array
+{
+    gsmEnsureSessionStarted();
+    if (!isset($_SESSION['app_secrets']) || !is_array($_SESSION['app_secrets']) || empty($_SESSION['app_secrets'])) {
+        return null;
+    }
+
+    return $_SESSION['app_secrets'];
+}
+
+function gsmSetSessionSecretsCache(array $secrets): void
+{
+    if (empty($secrets)) {
+        return;
+    }
+
+    gsmEnsureSessionStarted();
+    $_SESSION['app_secrets'] = $secrets;
+    $_SESSION['app_secrets_cached_at'] = time();
+}
+
 function gsmGetEnvValue(string $name): ?string
 {
     $value = getenv($name);
@@ -236,6 +270,19 @@ function gsmReadSecret(string $projectId, string $secretName, string $accessToke
 
 function gsmLoadSecrets(array $mapping, array &$debug): array
 {
+    $sessionSecrets = gsmGetSessionSecretsCache();
+    if (is_array($sessionSecrets) && !empty($sessionSecrets)) {
+        $debug = [
+            'project_id' => gsmGetEnvValue('GCP_PROJECT_ID') ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT') ?? gsmGetEnvValue('GCLOUD_PROJECT') ?? gsmGetEnvValue('PROJECT_ID'),
+            'token_source' => 'cache:session',
+            'service_account_email' => null,
+            'loaded' => array_keys($sessionSecrets),
+            'errors' => [],
+            'from_cache' => true,
+        ];
+        return $sessionSecrets;
+    }
+
     $debug = [
         'project_id' => null,
         'token_source' => null,
@@ -319,5 +366,193 @@ function gsmLoadSecrets(array $mapping, array &$debug): array
         }
     }
 
+    if (!empty($loaded)) {
+        gsmSetSessionSecretsCache($loaded);
+    }
+
     return $loaded;
+}
+
+function gsmNormalizeMapping(array $mapping): array
+{
+    $normalized = [];
+    foreach ($mapping as $envName => $secretNames) {
+        if (!is_string($envName) || $envName === '' || !is_array($secretNames)) {
+            continue;
+        }
+
+        $filteredSecretNames = [];
+        foreach ($secretNames as $secretName) {
+            if (!is_string($secretName)) {
+                continue;
+            }
+            $secretName = trim($secretName);
+            if ($secretName === '') {
+                continue;
+            }
+            $filteredSecretNames[] = $secretName;
+        }
+
+        if (!empty($filteredSecretNames)) {
+            $normalized[$envName] = $filteredSecretNames;
+        }
+    }
+
+    ksort($normalized);
+    return $normalized;
+}
+
+function gsmBuildCacheKey(array $mapping): string
+{
+    $projectId = gsmGetEnvValue('GCP_PROJECT_ID')
+        ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT')
+        ?? gsmGetEnvValue('GCLOUD_PROJECT')
+        ?? gsmGetEnvValue('PROJECT_ID')
+        ?? 'no-project';
+
+    $normalized = gsmNormalizeMapping($mapping);
+    $signature = json_encode($normalized);
+    if (!is_string($signature)) {
+        $signature = '';
+    }
+
+    return 'gsm_cache_' . hash('sha256', $projectId . '|' . $signature);
+}
+
+function gsmGetFileCachePath(string $cacheKey): string
+{
+    $tmpDir = rtrim((string)sys_get_temp_dir(), '/\\');
+    return $tmpDir . DIRECTORY_SEPARATOR . $cacheKey . '.json';
+}
+
+function gsmReadFileCache(string $cachePath): ?array
+{
+    if (!is_readable($cachePath)) {
+        return null;
+    }
+
+    $raw = @file_get_contents($cachePath);
+    if ($raw === false || $raw === '') {
+        return null;
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return null;
+    }
+
+    if (!isset($decoded['expires_at'], $decoded['secrets']) || !is_array($decoded['secrets'])) {
+        return null;
+    }
+
+    return $decoded;
+}
+
+function gsmWriteFileCache(string $cachePath, array $secrets, int $ttlSeconds): void
+{
+    $payload = [
+        'created_at' => time(),
+        'expires_at' => time() + max(30, $ttlSeconds),
+        'secrets' => $secrets,
+    ];
+
+    @file_put_contents($cachePath, (string)json_encode($payload), LOCK_EX);
+}
+
+function gsmReadApcuCache(string $cacheKey): ?array
+{
+    if (!function_exists('apcu_fetch') || !filter_var((string)ini_get('apc.enabled'), FILTER_VALIDATE_BOOLEAN)) {
+        return null;
+    }
+
+    $ok = false;
+    $cached = apcu_fetch($cacheKey, $ok);
+    if (!$ok || !is_array($cached) || !isset($cached['expires_at'], $cached['secrets']) || !is_array($cached['secrets'])) {
+        return null;
+    }
+
+    return $cached;
+}
+
+function gsmWriteApcuCache(string $cacheKey, array $secrets, int $ttlSeconds): void
+{
+    if (!function_exists('apcu_store') || !filter_var((string)ini_get('apc.enabled'), FILTER_VALIDATE_BOOLEAN)) {
+        return;
+    }
+
+    $ttl = max(30, $ttlSeconds);
+    $payload = [
+        'created_at' => time(),
+        'expires_at' => time() + $ttl,
+        'secrets' => $secrets,
+    ];
+
+    @apcu_store($cacheKey, $payload, $ttl);
+}
+
+function gsmLoadSecretsCached(array $mapping, array &$debug, int $ttlSeconds = 300): array
+{
+    $sessionSecrets = gsmGetSessionSecretsCache();
+    if (is_array($sessionSecrets) && !empty($sessionSecrets)) {
+        $debug = [
+            'project_id' => gsmGetEnvValue('GCP_PROJECT_ID') ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT') ?? gsmGetEnvValue('GCLOUD_PROJECT') ?? gsmGetEnvValue('PROJECT_ID'),
+            'token_source' => 'cache:session',
+            'service_account_email' => null,
+            'loaded' => array_keys($sessionSecrets),
+            'errors' => [],
+            'from_cache' => true,
+        ];
+        return $sessionSecrets;
+    }
+
+    $cacheKey = gsmBuildCacheKey($mapping);
+    $now = time();
+
+    $apcuCached = gsmReadApcuCache($cacheKey);
+    if (is_array($apcuCached) && (int)$apcuCached['expires_at'] >= $now) {
+        $debug = [
+            'project_id' => gsmGetEnvValue('GCP_PROJECT_ID') ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT') ?? gsmGetEnvValue('GCLOUD_PROJECT') ?? gsmGetEnvValue('PROJECT_ID'),
+            'token_source' => 'cache:apcu',
+            'service_account_email' => null,
+            'loaded' => array_keys($apcuCached['secrets']),
+            'errors' => [],
+            'from_cache' => true,
+        ];
+        return $apcuCached['secrets'];
+    }
+
+    $fileCachePath = gsmGetFileCachePath($cacheKey);
+    $fileCached = gsmReadFileCache($fileCachePath);
+    if (is_array($fileCached) && (int)$fileCached['expires_at'] >= $now) {
+        gsmWriteApcuCache($cacheKey, $fileCached['secrets'], (int)$fileCached['expires_at'] - $now);
+        $debug = [
+            'project_id' => gsmGetEnvValue('GCP_PROJECT_ID') ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT') ?? gsmGetEnvValue('GCLOUD_PROJECT') ?? gsmGetEnvValue('PROJECT_ID'),
+            'token_source' => 'cache:file',
+            'service_account_email' => null,
+            'loaded' => array_keys($fileCached['secrets']),
+            'errors' => [],
+            'from_cache' => true,
+        ];
+        return $fileCached['secrets'];
+    }
+
+    $secrets = gsmLoadSecrets($mapping, $debug);
+    $debug['from_cache'] = false;
+
+    if (!empty($secrets)) {
+        gsmSetSessionSecretsCache($secrets);
+        gsmWriteApcuCache($cacheKey, $secrets, $ttlSeconds);
+        gsmWriteFileCache($fileCachePath, $secrets, $ttlSeconds);
+        return $secrets;
+    }
+
+    // Fallback de resiliencia: si falla GSM, usar cache expirado reciente (hasta 24h).
+    if (is_array($fileCached) && isset($fileCached['expires_at']) && ($now - (int)$fileCached['expires_at']) <= 86400) {
+        $debug['errors'][] = 'Se usaron secretos en cache expirado por fallo temporal en Google Secret Manager.';
+        $debug['token_source'] = 'cache:file-stale';
+        $debug['from_cache'] = true;
+        return $fileCached['secrets'];
+    }
+
+    return [];
 }

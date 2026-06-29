@@ -50,8 +50,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_
 
 // Obtener entregas pendientes asignadas a este repartidor
 try {
+    $hasClientesDireccion = false;
+    $hasClientesUbicacionMapa = false;
+    $hasClienteDireccionesTable = false;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'direccion'");
+    $stmtMeta->execute();
+    $hasClientesDireccion = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'ubicacion_mapa'");
+    $stmtMeta->execute();
+    $hasClientesUbicacionMapa = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones'");
+    $stmtMeta->execute();
+    $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    if ($hasClientesDireccion && $hasClienteDireccionesTable) {
+        $direccionExpr = "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS direccion";
+    } elseif ($hasClientesDireccion) {
+        $direccionExpr = "c.direccion AS direccion";
+    } elseif ($hasClienteDireccionesTable) {
+        $direccionExpr = "(SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1) AS direccion";
+    } else {
+        $direccionExpr = "NULL AS direccion";
+    }
+
+    if ($hasClientesUbicacionMapa && $hasClienteDireccionesTable) {
+        $mapExpr = "COALESCE(c.ubicacion_mapa, (SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS ubicacion_mapa";
+    } elseif ($hasClientesUbicacionMapa) {
+        $mapExpr = "c.ubicacion_mapa AS ubicacion_mapa";
+    } elseif ($hasClienteDireccionesTable) {
+        $mapExpr = "(SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1) AS ubicacion_mapa";
+    } else {
+        $mapExpr = "NULL AS ubicacion_mapa";
+    }
+
     $sql = "SELECT p.*, p.observaciones,
-                   c.nombre as cliente, c.direccion, c.telefono, c.ubicacion_mapa
+                   c.nombre as cliente, {$direccionExpr}, c.telefono, {$mapExpr}
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             WHERE p.id_repartidor = :repartidor AND p.estado IN ('pendiente_pago','pagado','en_reparto')
@@ -59,9 +95,30 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':repartidor' => $usuario['id_usuario']]);
     $entregas = $stmt->fetchAll();
+
+    $detallesPorPedido = [];
+    if (!empty($entregas)) {
+        $idsPedidos = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $entregas)));
+        $placeholders = implode(',', array_fill(0, count($idsPedidos), '?'));
+        $sqlDetalles = "SELECT dp.id_pedido, dp.cantidad, p.nombre, p.nombre_variante
+                        FROM detalle_pedidos dp
+                        JOIN productos p ON dp.id_producto = p.id_producto
+                        WHERE dp.id_pedido IN ($placeholders)
+                        ORDER BY dp.id_pedido ASC, dp.id_detalle ASC";
+        $stmtDetalles = $pdo->prepare($sqlDetalles);
+        $stmtDetalles->execute($idsPedidos);
+        foreach ($stmtDetalles->fetchAll() as $detalle) {
+            $pedidoId = (int)$detalle['id_pedido'];
+            if (!isset($detallesPorPedido[$pedidoId])) {
+                $detallesPorPedido[$pedidoId] = [];
+            }
+            $detallesPorPedido[$pedidoId][] = $detalle;
+        }
+    }
 } catch (PDOException $e) {
     $error = 'Error al obtener entregas: ' . $e->getMessage();
     $entregas = [];
+    $detallesPorPedido = [];
 }
 
 include __DIR__ . '/includes/header.php';
@@ -166,18 +223,10 @@ include __DIR__ . '/includes/header.php';
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
                                 <ul style="margin: 0; padding-left: 20px;">
-                                    <?php
-                                    // Obtener detalles del pedido
-                                    $stmtD = $pdo->prepare("SELECT dp.cantidad, p.nombre, p.nombre_variante 
-                                                           FROM detalle_pedidos dp 
-                                                           JOIN productos p ON dp.id_producto = p.id_producto 
-                                                           WHERE dp.id_pedido = ?");
-                                    $stmtD->execute([$ent['id_pedido']]);
-                                    while($d = $stmtD->fetch()):
-                                        $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
-                                    ?>
+                                    <?php foreach (($detallesPorPedido[(int)$ent['id_pedido']] ?? []) as $d): ?>
+                                        <?php $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : ""); ?>
                                         <li><?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?></li>
-                                    <?php endwhile; ?>
+                                    <?php endforeach; ?>
                                 </ul>
                             </div>
                             
