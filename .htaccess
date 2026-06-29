@@ -9,3 +9,6 @@ ErrorDocument 500 /views/error.php
 # Google Secret Manager (sin token temporal)
 SetEnv GCP_PROJECT_ID vendimia-497305
 SetEnv GCP_SA_KEY_FILE /home/beautyandwell/public_html/.gcp/sa.json
+
+# 🔑 Inyección directa del Token para el validador de Git
+SetEnv MIGRATIONS_DEPLOY_TOKEN Bul3xdoHleL41scOGLLURJjuqzTISxxkTFjTthPuBcj3v4pqhDs5ied7f6Y6Xo9vj5UtHf5OQQUXAj7cC0EY2bwD1rMw8k7QIemQ9oFuvzSvy29tSKCwPl1tabJXlHwtzXXTlLC2JhDlCDE1Sjkc1YXPr7TOgqarrhW3IY7DMPBt0hWCxy1H

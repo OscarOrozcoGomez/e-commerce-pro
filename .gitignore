@@ -12,6 +12,10 @@ app_error.log
 
 .vscode/sftp.json
 
+# Dependencias de desarrollo locales
+/vendor/
+composer.phar
+
 # Cache local de PHPUnit
 .phpunit.cache/
 
@@ -28,6 +32,3 @@ app_secrets.*.env
 .app_secrets.env
 .app_secrets.*.php
 .app_secrets.*.env
-
-# Token de seguridad para las migraciones automatizadas de bLife
-SetEnv MIGRATIONS_DEPLOY_TOKEN Bul3xdoHleL41scOGLLURJjuqzTISxxkTFjTthPuBcj3v4pqhDs5ied7f6Y6Xo9vj5UtHf5OQQUXAj7cC0EY2bwD1rMw8k7QIemQ9oFuvzSvy29tSKCwPl1tabJXlHwtzXXTlLC2JhDlCDE1Sjkc1YXPr7TOgqarrhW3IY7DMPBt0hWCxy1H

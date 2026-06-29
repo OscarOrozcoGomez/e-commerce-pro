@@ -22,20 +22,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Ingresa un correo electrónico válido.';
             } else {
                 generatePasswordResetToken($email_input);
-                $success = 'Se ha generado un código de seguridad. Revisa tu correo (o el archivo mail_log.txt en XAMPP).';
+                $isProductionEnv = defined('IS_PRODUCTION') && IS_PRODUCTION;
+                if ($isProductionEnv) {
+                    $success = 'Se ha generado un código de seguridad. Revisa tu correo electrónico.';
+                } else {
+                    $success = 'Se ha generado un código de seguridad. Revisa tu correo (o el archivo mail_log.txt en XAMPP).';
+                }
                 $step = 2;
             }
         } elseif ($accion === 'restablecer') {
             $code = trim($_POST['code'] ?? '');
             $new_pass = $_POST['new_password'] ?? '';
+            $confirm_new_pass = $_POST['confirm_new_password'] ?? '';
             $email_input = $_POST['email_hidden'] ?? '';
 
-            if (resetPasswordWithToken($code, $new_pass)) {
-                $success = 'Tu contraseña ha sido actualizada con éxito.';
-                $step = 3; // Éxito total
-            } else {
-                $error = 'El código es inválido o ha expirado.';
+            if ($new_pass === '' || $confirm_new_pass === '') {
+                $error = 'Debes completar ambos campos de contraseña.';
                 $step = 2;
+            } elseif ($new_pass !== $confirm_new_pass) {
+                $error = 'Las contraseñas no coinciden.';
+                $step = 2;
+            } else {
+                $resetError = null;
+                if (resetPasswordWithToken($code, $new_pass, $resetError)) {
+                    $success = 'Tu contraseña ha sido actualizada con éxito.';
+                    $step = 3; // Éxito total
+                } else {
+                    $error = $resetError ?: 'El código es inválido o ha expirado.';
+                    $step = 2;
+                }
             }
         }
     }
@@ -47,12 +62,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recuperar contraseña - Sistema de Punto de Venta</title>
+    <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>assets/img/logo.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         .login-container { max-width: 500px; margin: 50px auto; }
         body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
         .card { border-radius: 10px; }
+        .password-criteria-list { margin-top: -10px; margin-bottom: 18px; padding-left: 0; }
+        .password-criteria-list li { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .password-criteria-list .criteria-icon { font-size: 16px; line-height: 1; }
     </style>
 </head>
 <body>
@@ -103,13 +122,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     <div class="input-field">
                         <i class="material-icons prefix">vpn_key</i>
-                        <input type="password" id="new_password" name="new_password" required autocomplete="new-password">
+                        <input type="password" id="new_password" name="new_password" required autocomplete="new-password" minlength="10">
                         <label for="new_password">Nueva Contraseña</label>
                         <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('new_password', this)">visibility</i>
                     </div>
+                    <div class="input-field">
+                        <i class="material-icons prefix">vpn_key</i>
+                        <input type="password" id="confirm_new_password" name="confirm_new_password" required autocomplete="new-password" minlength="10">
+                        <label for="confirm_new_password">Confirmar Nueva Contraseña</label>
+                        <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('confirm_new_password', this)">visibility</i>
+                    </div>
+                    <p class="grey-text text-darken-1" style="margin-top: -6px; margin-bottom: 18px;">
+                        Debe tener al menos 10 caracteres e incluir mayúscula, minúscula, número y símbolo. No puede ser la misma contraseña anterior.
+                    </p>
+                    <ul id="password-rules-forgot" class="password-criteria-list" aria-live="polite">
+                        <li id="forgot-rule-length" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos 10 caracteres</span></li>
+                        <li id="forgot-rule-upper" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos una mayúscula</span></li>
+                        <li id="forgot-rule-lower" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos una minúscula</span></li>
+                        <li id="forgot-rule-number" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos un número</span></li>
+                        <li id="forgot-rule-symbol" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Al menos un símbolo (!@#$...)</span></li>
+                        <li id="forgot-rule-match" class="red-text text-darken-2"><i class="material-icons criteria-icon" aria-hidden="true">cancel</i><span>Las contraseñas coinciden</span></li>
+                    </ul>
 
                     <div class="center-align">
-                        <button type="submit" class="btn-large green waves-effect waves-light">
+                        <button type="submit" id="forgot-submit-btn" class="btn-large green waves-effect waves-light" disabled>
                             Cambiar Contraseña
                             <i class="material-icons right">check</i>
                         </button>
@@ -142,6 +178,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 iconElement.innerText = 'visibility';
             }
         }
+
+        function bindPasswordRealtimeValidation(passwordId, confirmId, prefix, submitButtonId) {
+            const passwordInput = document.getElementById(passwordId);
+            const confirmInput = document.getElementById(confirmId);
+            const submitButton = document.getElementById(submitButtonId);
+            if (!passwordInput || !confirmInput) {
+                return;
+            }
+
+            const hasSymbol = (value) => /[!@#$%^&*(),.?":{}|<>]/.test(value);
+            const rules = [
+                { id: `${prefix}-rule-length`, test: (value) => value.length >= 10 },
+                { id: `${prefix}-rule-upper`, test: (value) => /[A-Z]/.test(value) },
+                { id: `${prefix}-rule-lower`, test: (value) => /[a-z]/.test(value) },
+                { id: `${prefix}-rule-number`, test: (value) => /[0-9]/.test(value) },
+                { id: `${prefix}-rule-symbol`, test: (value) => hasSymbol(value) }
+            ];
+
+            function paintRule(ruleId, ok) {
+                const el = document.getElementById(ruleId);
+                if (!el) {
+                    return;
+                }
+                const icon = el.querySelector('.criteria-icon');
+                el.classList.remove('red-text', 'green-text', 'text-darken-2');
+                el.classList.add(ok ? 'green-text' : 'red-text', 'text-darken-2');
+                if (icon) {
+                    icon.textContent = ok ? 'check_circle' : 'cancel';
+                }
+            }
+
+            function updateState() {
+                const pass = passwordInput.value || '';
+                const confirm = confirmInput.value || '';
+
+                let allRulesOk = true;
+                rules.forEach((rule) => {
+                    const ok = rule.test(pass);
+                    paintRule(rule.id, ok);
+                    if (!ok) {
+                        allRulesOk = false;
+                    }
+                });
+
+                const matchOk = confirm.length > 0 && pass === confirm;
+                paintRule(`${prefix}-rule-match`, matchOk);
+
+                if (submitButton) {
+                    const canSubmit = allRulesOk && matchOk;
+                    submitButton.disabled = !canSubmit;
+                    submitButton.classList.toggle('disabled', !canSubmit);
+                }
+            }
+
+            passwordInput.addEventListener('input', updateState);
+            confirmInput.addEventListener('input', updateState);
+            updateState();
+        }
+
+        bindPasswordRealtimeValidation('new_password', 'confirm_new_password', 'forgot', 'forgot-submit-btn');
     </script>
 </body>
 </html>

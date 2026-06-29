@@ -76,6 +76,21 @@
     </style>
 </head>
 <body class="grey lighten-4">
+    <?php
+        $headerDisplayName = '';
+        $headerAvatarInitials = 'U';
+        if (isAuthenticated()) {
+            $headerDisplayName = trim((string)($_SESSION['usuario']['nombre'] ?? ''));
+            if ($headerDisplayName !== '') {
+                $nameParts = preg_split('/\s+/u', $headerDisplayName, -1, PREG_SPLIT_NO_EMPTY);
+                if (is_array($nameParts) && count($nameParts) > 0) {
+                    $firstInitial = mb_substr($nameParts[0], 0, 1, 'UTF-8');
+                    $lastInitial = count($nameParts) > 1 ? mb_substr($nameParts[count($nameParts) - 1], 0, 1, 'UTF-8') : '';
+                    $headerAvatarInitials = mb_strtoupper($firstInitial . $lastInitial, 'UTF-8');
+                }
+            }
+        }
+    ?>
     <!-- Banner Informativo de Entregas -->
     <div class="delivery-banner">
         <div class="container">
@@ -162,13 +177,22 @@
                     <li style="height: 64px; display: flex; align-items: center;">
                         <a class="dropdown-trigger waves-effect waves-light" href="#!" data-target="user-dropdown" 
                            style="display: flex; align-items: center; justify-content: center; width: 60px; height: 64px; margin-left: 5px;">
-                            <i class="material-icons blue darken-3 circle white-text" style="width: 40px; height: 40px; line-height: 40px; text-align: center;">person</i>
+                            <span class="profile-avatar-chip" title="Perfil">
+                                <i class="material-icons avatar-person">person</i>
+                                <span class="avatar-initials"><?php echo esc($headerAvatarInitials); ?></span>
+                            </span>
                         </a>
                     </li>
                     
                     <!-- Dropdown Structure -->
                     <ul id="user-dropdown" class="dropdown-content profile-dropdown">
                         <li class="user-info grey lighten-4">
+                            <div class="dropdown-avatar-wrap">
+                                <span class="profile-avatar-chip large">
+                                    <i class="material-icons avatar-person">person</i>
+                                    <span class="avatar-initials"><?php echo esc($headerAvatarInitials); ?></span>
+                                </span>
+                            </div>
                             <div class="user-details">
                                 <span class="user-name"><strong><?php echo esc($_SESSION['usuario']['nombre']); ?></strong></span>
                                 <span class="user-email grey-text"><?php echo esc($_SESSION['usuario']['email']); ?></span>
@@ -177,6 +201,7 @@
                         </li>
                         <li class="divider"></li>
                         <?php if (isCliente()): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/mi_perfil.php"><i class="material-icons">person_outline</i> Mi Perfil</a></li>
                             <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                             <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
                             <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
@@ -213,6 +238,12 @@
             </a>
             <img src="<?php echo BASE_URL; ?>assets/img/logo.png" alt="Logo" style="height: 50px;">
             <?php if (isAuthenticated()): ?>
+                <div style="margin-top: 10px; display: flex; justify-content: center;">
+                    <span class="profile-avatar-chip large mobile-avatar-chip">
+                        <i class="material-icons avatar-person">person</i>
+                        <span class="avatar-initials"><?php echo esc($headerAvatarInitials); ?></span>
+                    </span>
+                </div>
                 <p style="margin: 10px 0 0 0; font-size: 0.9rem;"><?php echo esc($_SESSION['usuario']['nombre']); ?></p>
             <?php endif; ?>
         </li>
@@ -228,6 +259,7 @@
         <?php if (isAuthenticated()): ?>
             <li class="divider"></li>
             <?php if (isCliente()): ?>
+                <li><a href="<?php echo BASE_URL; ?>views/mi_perfil.php"><i class="material-icons">person_outline</i> Mi Perfil</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
@@ -449,6 +481,51 @@
     </script>
 
     <style>
+        .profile-avatar-chip {
+            position: relative;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at 25% 20%, #42a5f5 0%, #1565c0 65%, #0d47a1 100%);
+            border: 2px solid rgba(255, 255, 255, 0.45);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+        .profile-avatar-chip.large {
+            width: 52px;
+            height: 52px;
+        }
+        .profile-avatar-chip .avatar-person {
+            position: absolute;
+            bottom: -2px;
+            left: -1px;
+            font-size: 26px;
+            color: rgba(255, 255, 255, 0.4);
+            pointer-events: none;
+        }
+        .profile-avatar-chip.large .avatar-person { font-size: 32px; }
+        .profile-avatar-chip .avatar-initials {
+            position: relative;
+            z-index: 1;
+            font-size: 0.92rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #ffffff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+        }
+        .profile-avatar-chip.large .avatar-initials { font-size: 1.02rem; }
+        .dropdown-avatar-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        .mobile-avatar-chip {
+            border-color: rgba(255,255,255,0.6);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }
         .profile-dropdown {
             min-width: 250px !important;
             border-radius: 8px !important;

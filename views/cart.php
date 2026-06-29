@@ -15,6 +15,7 @@ if ($isUserAuthenticated && isCliente()) {
 }
 
 $telefonoGuardado = $usuarioLogueado['telefono_cliente'] ?? '';
+$hasSavedAddresses = !empty($direcciones);
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -113,7 +114,9 @@ include __DIR__ . '/includes/header.php';
                                         <?php echo esc($d['alias']); ?>: <?php echo esc($d['direccion']); ?>
                                     </option>
                                 <?php endforeach; ?>
+                                <option value="__other__" data-maps-link="">+ Agregar otra dirección para este pedido</option>
                             </select>
+                            <span class="helper-text">También puedes guardar esta nueva dirección después del pedido.</span>
                         </div>
                         <?php endif; ?>
 
@@ -138,7 +141,7 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="input-field">
                             <input type="tel" id="telefono" name="telefono" required
-                                   value="<?php echo esc($telefonoGuardado); ?>">
+                                   value="<?php echo esc($telefonoGuardado); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
                             <label for="telefono" class="<?php echo $telefonoGuardado ? 'active' : ''; ?>">Teléfono de contacto</label>
                             <?php if (empty($telefonoGuardado) && $isUserAuthenticated): ?>
                                 <span class="helper-text orange-text">
@@ -291,10 +294,64 @@ include __DIR__ . '/includes/header.php';
         updateCartBadge();
     }
 
+    function formatPhoneMx(digits) {
+        if (!digits) return '';
+        if (digits.length <= 3) return `(${digits}`;
+        if (digits.length <= 6) return `(${digits.slice(0, 3)}) - ${digits.slice(3)}`;
+        return `(${digits.slice(0, 3)}) - ${digits.slice(3, 6)} - ${digits.slice(6, 10)}`;
+    }
+
+    function bindPhoneMaskValidationCart(inputId) {
+        const phoneInput = document.getElementById(inputId);
+        if (!phoneInput) return;
+
+        const validatePhone = () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            if (digits.length !== 10) {
+                phoneInput.setCustomValidity('El teléfono debe tener 10 dígitos.');
+                return false;
+            }
+            phoneInput.setCustomValidity('');
+            return true;
+        };
+
+        phoneInput.addEventListener('input', () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = formatPhoneMx(digits);
+            validatePhone();
+        });
+
+        phoneInput.addEventListener('blur', () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = formatPhoneMx(digits);
+            validatePhone();
+        });
+
+        const initialDigits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+        phoneInput.value = formatPhoneMx(initialDigits);
+        validatePhone();
+    }
+
     document.getElementById('form-checkout').addEventListener('submit', function(e) {
         e.preventDefault();
         const cart = getCart();
         if (cart.length === 0) return M.toast({html: 'Tu carrito está vacío'});
+
+        const phoneInput = document.getElementById('telefono');
+        const phoneDigits = (phoneInput?.value || '').replace(/\D/g, '').slice(0, 10);
+        if (phoneDigits.length !== 10) {
+            if (phoneInput) {
+                phoneInput.setCustomValidity('El teléfono debe tener 10 dígitos.');
+                phoneInput.reportValidity();
+                phoneInput.focus();
+            }
+            M.toast({html: 'Completa un teléfono válido de 10 dígitos.'});
+            return;
+        }
+        if (phoneInput) {
+            phoneInput.setCustomValidity('');
+            phoneInput.value = formatPhoneMx(phoneDigits);
+        }
 
         // Bloquear confirmación si el usuario no ha iniciado sesión
         if (!<?php echo json_encode($isUserAuthenticated); ?>) {
@@ -340,13 +397,15 @@ include __DIR__ . '/includes/header.php';
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                Swal.fire({
-                    title: '¡Pedido Confirmado!',
-                    text: 'Tu pedido ha sido registrado con éxito. Puedes consultar el estado en tu sección de compras.',
-                    icon: 'success',
-                    confirmButtonText: 'Continuar',
-                    confirmButtonColor: '#0d47a1'
-                }).then(() => {
+                const tipoEntregaValue = document.getElementById('tipo_entrega')?.value || '';
+                const direccionManual = (document.getElementById('direccion')?.value || '').trim();
+                const mapsLinkActual = document.getElementById('maps_link')?.value || '';
+                const selectedAddressMode = selectDireccion ? selectDireccion.value : '';
+                const usedNewManualAddress = tipoEntregaValue === 'Domicilio' && (
+                    !HAS_SAVED_ADDRESSES || selectedAddressMode === '__other__'
+                ) && direccionManual !== '';
+
+                const continuarFlujo = () => {
                     localStorage.removeItem('cart');
                     const idPedido = Number.parseInt(data.id_pedido, 10);
                     if (Number.isInteger(idPedido) && idPedido > 0) {
@@ -354,6 +413,101 @@ include __DIR__ . '/includes/header.php';
                     } else {
                         window.location.href = 'mis_compras.php';
                     }
+                };
+
+                Swal.fire({
+                    title: '¡Pedido Confirmado!',
+                    text: 'Tu pedido ha sido registrado con éxito. Puedes consultar el estado en tu sección de compras.',
+                    icon: 'success',
+                    confirmButtonText: 'Continuar',
+                    confirmButtonColor: '#0d47a1'
+                }).then(() => {
+                    if (!usedNewManualAddress) {
+                        continuarFlujo();
+                        return;
+                    }
+
+                    Swal.fire({
+                        title: '¿Deseas guardar esta dirección en Mis Direcciones?',
+                        icon: 'question',
+                        showCancelButton: true,
+                        confirmButtonText: 'Sí, guardarla',
+                        cancelButtonText: 'No, continuar',
+                        confirmButtonColor: '#0d47a1'
+                    }).then((saveResult) => {
+                        if (saveResult.isConfirmed) {
+                            Swal.fire({
+                                title: 'Elige un alias para esta dirección',
+                                input: 'select',
+                                inputOptions: {
+                                    Casa: 'Casa',
+                                    Trabajo: 'Trabajo',
+                                    Otro: 'Otro'
+                                },
+                                inputValue: 'Casa',
+                                inputPlaceholder: 'Selecciona un alias',
+                                showCancelButton: true,
+                                confirmButtonText: 'Continuar',
+                                cancelButtonText: 'Cancelar',
+                                confirmButtonColor: '#0d47a1'
+                            }).then((aliasChoiceResult) => {
+                                if (!aliasChoiceResult.isConfirmed) {
+                                    continuarFlujo();
+                                    return;
+                                }
+
+                                const selectedAlias = aliasChoiceResult.value || 'Casa';
+                                if (selectedAlias !== 'Otro') {
+                                    const params = new URLSearchParams({
+                                        prefill: '1',
+                                        alias: selectedAlias,
+                                        direccion: direccionManual,
+                                        maps_link: mapsLinkActual
+                                    });
+                                    localStorage.removeItem('cart');
+                                    window.location.href = `mis_direcciones.php?${params.toString()}`;
+                                    return;
+                                }
+
+                                Swal.fire({
+                                    title: 'Escribe el alias',
+                                    input: 'text',
+                                    inputLabel: 'Ejemplo: Casa de mamá, Oficina centro, etc.',
+                                    inputPlaceholder: 'Alias de la dirección',
+                                    showCancelButton: true,
+                                    confirmButtonText: 'Guardar dirección',
+                                    cancelButtonText: 'Cancelar',
+                                    confirmButtonColor: '#0d47a1',
+                                    inputValidator: (value) => {
+                                        if (!value || !value.trim()) {
+                                            return 'Ingresa un alias para continuar.';
+                                        }
+                                        if (value.trim().length > 50) {
+                                            return 'El alias no debe exceder 50 caracteres.';
+                                        }
+                                        return null;
+                                    }
+                                }).then((customAliasResult) => {
+                                    if (!customAliasResult.isConfirmed) {
+                                        continuarFlujo();
+                                        return;
+                                    }
+
+                                    const params = new URLSearchParams({
+                                        prefill: '1',
+                                        alias: customAliasResult.value.trim(),
+                                        direccion: direccionManual,
+                                        maps_link: mapsLinkActual
+                                    });
+                                    localStorage.removeItem('cart');
+                                    window.location.href = `mis_direcciones.php?${params.toString()}`;
+                                });
+                            });
+                            return;
+                        }
+
+                        continuarFlujo();
+                    });
                 });
             } else {
                 M.toast({html: 'Error: ' + data.message});
@@ -370,6 +524,7 @@ include __DIR__ . '/includes/header.php';
     });
 
     // Lógica para mostrar/ocultar dirección según el tipo de entrega
+    const HAS_SAVED_ADDRESSES = <?php echo $hasSavedAddresses ? 'true' : 'false'; ?>;
     const tipoEntrega = document.getElementById('tipo_entrega');
     const direccionContainer = document.getElementById('direccion-container');
     const wrapperSelect = document.getElementById('wrapper-select-direccion');
@@ -379,6 +534,35 @@ include __DIR__ . '/includes/header.php';
     const mapsLinkInput = document.getElementById('maps_link');
     const mapPreviewCart = document.getElementById('map-preview-cart');
     const inputSearchCart = document.getElementById('autocomplete_search_cart');
+    const selectDireccion = document.getElementById('select_direccion');
+
+    function activarModoDireccionManual() {
+        if (direccionContainer) direccionContainer.style.display = 'block';
+        if (wrapperMapsSearch) wrapperMapsSearch.style.display = 'block';
+        if (inputDireccion) {
+            inputDireccion.required = true;
+            if (!inputDireccion.value || inputDireccion.value === 'Tabachín 248, Bosques de Tonalá, 45400 Tonalá, Jal.') {
+                inputDireccion.value = '';
+            }
+        }
+    }
+
+    function activarModoDireccionGuardada() {
+        if (direccionContainer) direccionContainer.style.display = 'none';
+        if (wrapperMapsSearch) wrapperMapsSearch.style.display = 'none';
+        if (mapPreviewCart) mapPreviewCart.style.display = 'none';
+        if (inputSearchCart) inputSearchCart.value = '';
+        if (inputDireccion) inputDireccion.required = false;
+
+        if (selectDireccion) {
+            const selected = selectDireccion.options[selectDireccion.selectedIndex];
+            const selectedValue = selected ? selected.value : '';
+            if (selectedValue && selectedValue !== '__other__') {
+                if (inputDireccion) inputDireccion.value = selectedValue;
+                if (mapsLinkInput) mapsLinkInput.value = selected?.dataset?.mapsLink || '';
+            }
+        }
+    }
 
     function aplicarModoEntrega(valor) {
         if (valor === 'Sucursal') {
@@ -392,10 +576,18 @@ include __DIR__ . '/includes/header.php';
             if (inputSearchCart) inputSearchCart.value = '';
         } else if (valor === 'Domicilio') {
             if (infoSucursal) infoSucursal.style.display = 'none';
-            if (direccionContainer) direccionContainer.style.display = 'block';
-            if (wrapperSelect) wrapperSelect.style.display = 'block';
-            if (wrapperMapsSearch) wrapperMapsSearch.style.display = 'block';
-            if (inputDireccion) inputDireccion.required = true;
+            if (wrapperSelect) wrapperSelect.style.display = HAS_SAVED_ADDRESSES ? 'block' : 'none';
+
+            if (HAS_SAVED_ADDRESSES) {
+                const selectedValue = selectDireccion ? selectDireccion.value : '';
+                if (selectedValue === '__other__' || !selectedValue) {
+                    activarModoDireccionManual();
+                } else {
+                    activarModoDireccionGuardada();
+                }
+            } else {
+                activarModoDireccionManual();
+            }
         } else {
             if (infoSucursal) infoSucursal.style.display = 'none';
             if (direccionContainer) direccionContainer.style.display = 'block';
@@ -409,6 +601,14 @@ include __DIR__ . '/includes/header.php';
     tipoEntrega.addEventListener('change', function() { aplicarModoEntrega(this.value); });
 
     document.getElementById('select_direccion')?.addEventListener('change', function() {
+        if (this.value === '__other__') {
+            if (mapsLinkInput) mapsLinkInput.value = '';
+            activarModoDireccionManual();
+            M.textareaAutoResize(document.getElementById('direccion'));
+            M.updateTextFields();
+            return;
+        }
+
         if (this.value) {
             document.getElementById('direccion').value = this.value;
             const mapsLink = this.options[this.selectedIndex]?.dataset?.mapsLink || '';
@@ -419,14 +619,18 @@ include __DIR__ . '/includes/header.php';
             } else if (mapPreviewCart) {
                 mapPreviewCart.style.display = 'none';
             }
+            activarModoDireccionGuardada();
             M.textareaAutoResize(document.getElementById('direccion'));
             M.updateTextFields();
+        } else {
+            activarModoDireccionManual();
         }
     });
 
     document.addEventListener('DOMContentLoaded', () => {
         renderCart();
         updateCartBadge();
+        bindPhoneMaskValidationCart('telefono');
         if (typeof google !== 'undefined') initAutocompleteCart();
 
         const initialMapsLink = mapsLinkInput?.value || '';

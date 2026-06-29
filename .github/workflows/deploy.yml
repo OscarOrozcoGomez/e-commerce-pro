@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lftp
 
-      - name: Deploy project to Neubox via SFTP
+      - name: Deploy changed files to Neubox via FTP
         env:
           SFTP_HOST: ${{ secrets.PTF_HOST }}
           SFTP_USER: ${{ secrets.PTF_USERNAME }}
@@ -50,9 +50,62 @@ jobs:
           fi
 
           PORT="${PTF_PORT:-21}"
-          echo "Iniciando deploy FTP a ${SFTP_HOST}:${PORT}..."
+          echo "Iniciando deploy FTP optimizado a ${SFTP_HOST}:${PORT}..."
 
-          lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -e "set ssl:verify-certificate no; set sftp:auto-confirm yes; set net:max-retries 2; set net:timeout 30; set net:reconnect-interval-base 5; set net:reconnect-interval-multiplier 1; mirror --reverse --verbose --only-newer --exclude-glob .git/ --exclude-glob .github/ --exclude-glob .vscode/ --exclude-glob vendor/ --exclude-glob tests/ --exclude-glob respaldos/ --exclude-glob .phpunit.cache/ --exclude-glob .ftp-deploy-sync-state.json --exclude-glob database.sql --exclude-glob .gitignore --exclude-glob README.md --exclude-glob DEPLOY_ENVIRONMENTS_SETUP.md --exclude-glob scripts/migrate.php --exclude-glob composer.json --exclude-glob composer.lock --exclude-glob composer.phar --exclude-glob phpunit.xml --exclude-glob core/app_secrets.*.example.php ./ /public_html/; bye"
+          BASE_SHA="${{ github.event.before }}"
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="$(git rev-parse HEAD~1)"
+          fi
+
+          echo "Calculando cambios entre ${BASE_SHA} y ${GITHUB_SHA}"
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT "${BASE_SHA}" "${GITHUB_SHA}")
+
+          if [ -z "${CHANGED_FILES}" ]; then
+            echo "No hay archivos modificados para desplegar."
+            exit 0
+          fi
+
+          should_skip_file() {
+            local path="$1"
+            case "${path}" in
+              .git/*|.github/*|.vscode/*|vendor/*|tests/*|respaldos/*|.phpunit.cache/*)
+                return 0
+                ;;
+              database.sql|.gitignore|README.md|DEPLOY_ENVIRONMENTS_SETUP.md|scripts/migrate.php|composer.json|composer.lock|composer.phar|phpunit.xml)
+                return 0
+                ;;
+              core/app_secrets.*.example.php)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          while IFS= read -r file; do
+            [ -z "${file}" ] && continue
+
+            if should_skip_file "${file}"; then
+              echo "Omitiendo (exclusion): ${file}"
+              continue
+            fi
+
+            if [ ! -f "${file}" ]; then
+              echo "Omitiendo (no existe localmente): ${file}"
+              continue
+            fi
+
+            remote_dir="$(dirname "${file}")"
+            if [ "${remote_dir}" = "." ]; then
+              remote_dir="/public_html"
+            else
+              remote_dir="/public_html/${remote_dir}"
+            fi
+
+            echo "Subiendo ${file} -> ${remote_dir}/"
+            lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -e "set ssl:verify-certificate no; set ftp:ssl-allow yes; set net:max-retries 2; set net:timeout 30; set net:reconnect-interval-base 5; set net:reconnect-interval-multiplier 1; mkdir -p '${remote_dir}'; put -O '${remote_dir}' '${file}'; bye"
+          done <<< "${CHANGED_FILES}"
 
       - name: Validate migration automation config
         run: |

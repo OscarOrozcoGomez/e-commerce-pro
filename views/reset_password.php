@@ -25,10 +25,13 @@ if (empty($token)) {
         $error = 'Las contraseñas no coinciden.';
     } elseif (!isPasswordSecure($password)) {
         $error = 'La nueva contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.';
-    } elseif (resetPasswordWithToken($token, $password)) {
-        $success = 'Contraseña restablecida correctamente. Ahora puedes iniciar sesión.';
     } else {
-        $error = 'El token no es válido o ya expiró.';
+        $resetError = null;
+        if (resetPasswordWithToken($token, $password, $resetError)) {
+            $success = 'Contraseña restablecida correctamente. Ahora puedes iniciar sesión.';
+        } else {
+            $error = $resetError ?: 'El token no es válido o ya expiró.';
+        }
     }
 }
 ?>
