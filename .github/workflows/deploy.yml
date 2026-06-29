@@ -50,9 +50,9 @@ jobs:
           fi
 
           PORT="${PTF_PORT:-21}"
-          echo "Iniciando deploy SFTP a ${SFTP_HOST}:${PORT}..."
+          echo "Iniciando deploy FTP a ${SFTP_HOST}:${PORT}..."
 
-          lftp -u "${SFTP_USER}","${SFTP_PASS}" "sftp://${SFTP_HOST}:${PORT}" -e "set sftp:auto-confirm yes; set net:max-retries 2; set net:timeout 30; set net:reconnect-interval-base 5; set net:reconnect-interval-multiplier 1; mirror --reverse --verbose --only-newer --exclude-glob .git/ --exclude-glob .github/ --exclude-glob .vscode/ --exclude-glob vendor/ --exclude-glob tests/ --exclude-glob respaldos/ --exclude-glob .phpunit.cache/ --exclude-glob .ftp-deploy-sync-state.json --exclude-glob database.sql --exclude-glob .gitignore --exclude-glob README.md --exclude-glob DEPLOY_ENVIRONMENTS_SETUP.md --exclude-glob scripts/migrate.php --exclude-glob composer.json --exclude-glob composer.lock --exclude-glob composer.phar --exclude-glob phpunit.xml --exclude-glob core/app_secrets.*.example.php ./ /public_html/; bye"
+          lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -e "set sftp:auto-confirm yes; set net:max-retries 2; set net:timeout 30; set net:reconnect-interval-base 5; set net:reconnect-interval-multiplier 1; mirror --reverse --verbose --only-newer --exclude-glob .git/ --exclude-glob .github/ --exclude-glob .vscode/ --exclude-glob vendor/ --exclude-glob tests/ --exclude-glob respaldos/ --exclude-glob .phpunit.cache/ --exclude-glob .ftp-deploy-sync-state.json --exclude-glob database.sql --exclude-glob .gitignore --exclude-glob README.md --exclude-glob DEPLOY_ENVIRONMENTS_SETUP.md --exclude-glob scripts/migrate.php --exclude-glob composer.json --exclude-glob composer.lock --exclude-glob composer.phar --exclude-glob phpunit.xml --exclude-glob core/app_secrets.*.example.php ./ /public_html/; bye"
 
       - name: Validate migration automation config
         run: |
