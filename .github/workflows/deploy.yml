@@ -57,8 +57,19 @@ jobs:
             core/app_secrets.*.example.php
             .ftp-deploy-sync-state.json
 
+      - name: Validate migration automation config
+        run: |
+          if [ -z "${MIGRATIONS_URL}" ]; then
+            echo "Error: MIGRATIONS_URL no esta definido en GitHub Secrets."
+            exit 1
+          fi
+
+          if [ -z "${MIGRATIONS_DEPLOY_TOKEN}" ]; then
+            echo "Error: MIGRATIONS_DEPLOY_TOKEN no esta definido en GitHub Secrets."
+            exit 1
+          fi
+
       - name: Run remote DB migrations
-        if: ${{ env.MIGRATIONS_URL != '' && env.MIGRATIONS_DEPLOY_TOKEN != '' }}
         run: |
           curl --fail --show-error --silent \
             --request POST \
