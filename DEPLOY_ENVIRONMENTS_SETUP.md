@@ -7,14 +7,14 @@ Agrega estos secrets en Settings > Secrets and variables > Actions:
 - PTF_HOST
 - PTF_USERNAME
 - PTF_PASSWORD
-- PTF_PORT (opcional, por default 22)
+- PTF_PORT (opcional, por default 21)
 - MIGRATIONS_URL
 - MIGRATIONS_DEPLOY_TOKEN
 
 Sugerencias para Produccion:
 
 - MIGRATIONS_URL = https://tu-dominio.com/api/run_migrations.php
-- PTF_PORT = 22 (SFTP)
+- PTF_PORT = 21 (SFTP en tu hosting Neubox)
 - El deploy SFTP ya apunta a /public_html/ en deploy.yml
 
 ## 2) Hosting de Produccion
