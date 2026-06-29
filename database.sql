@@ -130,6 +130,20 @@ CREATE TABLE IF NOT EXISTS `productos` (
   INDEX `idx_productos_categoria` (`categoria`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+-- Favoritos por usuario
+CREATE TABLE IF NOT EXISTS `favoritos_usuarios` (
+  `id_favorito` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NOT NULL,
+  `id_producto` INT UNSIGNED NOT NULL,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_favorito`),
+  UNIQUE KEY `uq_favoritos_usuario_producto` (`id_usuario`, `id_producto`),
+  INDEX `idx_favoritos_usuario` (`id_usuario`),
+  INDEX `idx_favoritos_producto` (`id_producto`),
+  CONSTRAINT `fk_favoritos_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_favoritos_producto` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Inventario por almacén
 CREATE TABLE IF NOT EXISTS `inventario_almacen` (
   `id_inventario` INT UNSIGNED NOT NULL AUTO_INCREMENT,

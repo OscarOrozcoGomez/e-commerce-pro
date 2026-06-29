@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Upload changed files via SFTP
+    name: Upload changed files to Production via SFTP
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
     permissions:
@@ -46,8 +46,24 @@ jobs:
             **/.git/**
             **/.github/**
             **/.vscode/**
-            **/*.sql
+            database.sql
             **/respaldos/**
             .gitignore
             README.md
+            DEPLOY_ENVIRONMENTS_SETUP.md
+            scripts/migrate.php
+            core/app_secrets.*.example.php
             .ftp-deploy-sync-state.json
+
+      - name: Run remote DB migrations
+        if: ${{ secrets.MIGRATIONS_URL != '' && secrets.MIGRATIONS_DEPLOY_TOKEN != '' }}
+        env:
+          MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
+          MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
+        run: |
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --header "X-Migrations-Token: ${MIGRATIONS_DEPLOY_TOKEN}" \
+            --data '{"dry_run":false}' \
+            "${MIGRATIONS_URL}"

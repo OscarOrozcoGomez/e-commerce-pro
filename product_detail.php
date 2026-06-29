@@ -194,6 +194,44 @@ include __DIR__ . '/views/includes/header.php';
     
     .btn-icon { background-color: #fff; border: 1px solid #ccc; color: #777; width: 55px; height: 55px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
     .btn-icon:hover { border-color: #f06292; color: #f06292; }
+    .btn-favorite {
+        width: 64px;
+        height: 64px;
+        border-width: 2px;
+    }
+    .btn-favorite i {
+        font-size: 1.7rem !important;
+    }
+    .btn-favorite.active-favorite {
+        color: #e53935;
+        border-color: #ef9a9a;
+        background: #fff5f5;
+        box-shadow: 0 0 0 4px rgba(229, 57, 53, 0.14);
+        animation: heartBeat 1.15s ease-in-out infinite;
+    }
+    .btn-favorite.active-favorite:hover {
+        color: #d32f2f;
+        border-color: #e57373;
+        background: #ffecec;
+    }
+    .btn-favorite.pulse-once {
+        animation: heartPop 280ms ease-out;
+    }
+
+    @keyframes heartBeat {
+        0% { transform: scale(1); }
+        12% { transform: scale(1.12); }
+        24% { transform: scale(1); }
+        36% { transform: scale(1.1); }
+        50% { transform: scale(1); }
+        100% { transform: scale(1); }
+    }
+
+    @keyframes heartPop {
+        0% { transform: scale(1); }
+        45% { transform: scale(1.25); }
+        100% { transform: scale(1); }
+    }
 
     .terms-link { color: #888; text-decoration: underline; font-size: 0.85rem; }
 </style>
@@ -251,8 +289,9 @@ include __DIR__ . '/views/includes/header.php';
                 <button type="button" id="btn-add-cart" class="btn-add-cart">
                     <i class="material-icons" style="font-size: 1.1rem;">shopping_cart</i> Agregar al carrito
                 </button>
-                <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">favorite_border</i></div>
-                <div class="btn-icon"><i class="material-icons" style="font-size: 1.2rem;">compare_arrows</i></div>
+                <button type="button" id="btn-favorite" class="btn-icon btn-favorite" onclick="toggleFavorite()" title="Agregar a favoritos">
+                    <i class="material-icons">favorite_border</i>
+                </button>
             </div>
 
             <a href="<?php echo BASE_URL; ?>views/terminos.php" class="terms-link">Términos y condiciones</a>
@@ -297,6 +336,11 @@ include __DIR__ . '/views/includes/header.php';
 </div>
 
 <script>
+    const PDP_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+    const PDP_FAVORITES_API_URL = (typeof FAVORITES_API_URL !== 'undefined')
+        ? FAVORITES_API_URL
+        : '<?php echo BASE_URL; ?>api/favorites.php';
+
     let currentProduct = null;
     let qty = 1;
     
@@ -383,6 +427,7 @@ include __DIR__ . '/views/includes/header.php';
                 // Inicializar tabs de Materialize después de renderizar el contenido
                 var tabs = document.querySelectorAll('.tabs');
                 M.Tabs.init(tabs);
+                checkIfFavorite(); // Revisar si el producto ya es favorito al cargar
                 document.getElementById('pdp-container').style.display = 'block';
             })
             .catch(err => {
@@ -618,6 +663,99 @@ include __DIR__ . '/views/includes/header.php';
 
     function updateQtyDisplay() {
         document.getElementById('qty-input').value = qty;
+    }
+
+    function applyFavoriteVisualState(isFav) {
+        const favoriteBtn = document.getElementById('btn-favorite');
+        const favoriteIcon = document.querySelector('#btn-favorite i');
+
+        if (favoriteIcon) {
+            favoriteIcon.textContent = isFav ? 'favorite' : 'favorite_border';
+        }
+        if (favoriteBtn) {
+            favoriteBtn.classList.toggle('active-favorite', isFav);
+        }
+    }
+
+    async function toggleFavorite() {
+        if (!currentProduct) return;
+
+        if (!PDP_IS_AUTHENTICATED) {
+            M.toast({html: 'Inicia sesion para guardar favoritos', classes: 'orange rounded'});
+            setTimeout(() => {
+                window.location.href = '<?php echo BASE_URL; ?>views/login.php';
+            }, 600);
+            return;
+        }
+
+        const favoriteBtn = document.getElementById('btn-favorite');
+        if (favoriteBtn) favoriteBtn.disabled = true;
+
+        try {
+            const response = await fetch(PDP_FAVORITES_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'toggle',
+                    id_producto: currentProduct.id_producto
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'No fue posible actualizar favoritos');
+            }
+
+            const isFav = !!data.is_favorite;
+            applyFavoriteVisualState(isFav);
+
+            if (isFav && favoriteBtn) {
+                favoriteBtn.classList.remove('pulse-once');
+                void favoriteBtn.offsetWidth;
+                favoriteBtn.classList.add('pulse-once');
+                setTimeout(() => favoriteBtn.classList.remove('pulse-once'), 320);
+            }
+
+            if (typeof updateFavoritesBadge === 'function') {
+                updateFavoritesBadge(data.count);
+            }
+
+            M.toast({
+                html: isFav ? 'Guardado en tus favoritos' : 'Eliminado de tus favoritos',
+                classes: isFav ? 'green rounded' : 'orange rounded'
+            });
+        } catch (error) {
+            console.error(error);
+            M.toast({html: 'No se pudo actualizar favoritos', classes: 'red rounded'});
+        } finally {
+            if (favoriteBtn) favoriteBtn.disabled = false;
+        }
+    }
+
+    async function checkIfFavorite() {
+        if (!currentProduct) return;
+
+        if (!PDP_IS_AUTHENTICATED) {
+            applyFavoriteVisualState(false);
+            return;
+        }
+
+        try {
+            const response = await fetch(`${PDP_FAVORITES_API_URL}?mode=status&id_producto=${encodeURIComponent(currentProduct.id_producto)}`);
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'No fue posible consultar favoritos');
+            }
+
+            applyFavoriteVisualState(!!data.is_favorite);
+            if (typeof updateFavoritesBadge === 'function') {
+                updateFavoritesBadge(data.count);
+            }
+        } catch (error) {
+            console.error(error);
+            applyFavoriteVisualState(false);
+        }
     }
 </script>
 

@@ -36,6 +36,21 @@
             line-height: 18px;
             padding: 0 4px;
         }
+        .nav-favorites-link {
+            position: relative;
+            display: flex !important;
+            align-items: center;
+        }
+        #favorites-count {
+            position: absolute;
+            top: 5px;
+            right: -5px;
+            min-width: 18px;
+            height: 18px;
+            line-height: 18px;
+            padding: 0 4px;
+            display: inline-block;
+        }
         .nav-wrapper .brand-logo img {
             height: 50px;
             margin-top: 7px;
@@ -79,7 +94,7 @@
             <a href="#" data-target="mobile-nav" class="sidenav-trigger"><i class="material-icons">menu</i></a>
 
             <ul id="nav-mobile" class="right hide-on-med-and-down">
-                <li><a href="<?php echo BASE_URL; ?>">Catálogo</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/catalogo.php">Catálogo</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/blog.php">Blog</a></li>
                 <li class="nav-cart-container">
                     <a href="<?php echo BASE_URL; ?>views/cart.php" class="nav-cart-link">
@@ -135,6 +150,12 @@
                                     <?php echo $unreadChat; ?>
                                 </span>
                             <?php endif; ?>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="<?php echo BASE_URL; ?>favoritos.php" class="nav-favorites-link" title="Mis Favoritos">
+                            <i class="material-icons">favorite</i>
+                            <span id="favorites-count" class="new badge pink" data-badge-caption="">0</span>
                         </a>
                     </li>
                     <!-- Dropdown Trigger -->
@@ -210,9 +231,11 @@
                 <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
+                <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php else: ?>
                 <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes</a></li>
+                <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php endif; ?>
             <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text"><i class="material-icons red-text">exit_to_app</i> Salir</a></li>
         <?php else: ?>
@@ -227,6 +250,10 @@
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
+        const USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+        const CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
+        const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
+
         // Persistir parametros de marketing para atribucion de conversiones.
         (function persistAttribution() {
             const params = new URLSearchParams(window.location.search);
@@ -300,6 +327,84 @@
             });
         }
 
+        function paintFavoritesBadge(totalFavorites) {
+            const badges = document.querySelectorAll('#favorites-count, .favorites-count-mobile');
+            badges.forEach(badge => {
+                badge.textContent = totalFavorites;
+                badge.style.setProperty('display', 'inline-block', 'important');
+            });
+        }
+
+        async function updateFavoritesBadge(totalFavoritesOverride = null) {
+            if (!USER_IS_AUTHENTICATED) {
+                return;
+            }
+
+            if (typeof totalFavoritesOverride === 'number' && Number.isFinite(totalFavoritesOverride)) {
+                paintFavoritesBadge(Math.max(0, Math.floor(totalFavoritesOverride)));
+                return;
+            }
+
+            try {
+                const response = await fetch(`${FAVORITES_API_URL}?mode=count`);
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    paintFavoritesBadge(parseInt(data.count, 10) || 0);
+                }
+            } catch (e) {
+                console.error('Error al actualizar favoritos:', e);
+            }
+        }
+
+        async function syncLegacyFavoritesToServer() {
+            if (!USER_IS_AUTHENTICATED || CURRENT_USER_ID <= 0) {
+                return;
+            }
+
+            const migrationKey = `bb_favorites_synced_user_${CURRENT_USER_ID}`;
+            if (localStorage.getItem(migrationKey) === '1') {
+                return;
+            }
+
+            let legacy = [];
+            try {
+                const parsed = JSON.parse(localStorage.getItem('favorites') || '[]');
+                legacy = Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                legacy = [];
+            }
+
+            const productIds = Array.from(new Set(
+                legacy
+                    .map(item => parseInt(item?.id_producto ?? item?.id ?? 0, 10))
+                    .filter(id => Number.isFinite(id) && id > 0)
+            ));
+
+            if (productIds.length === 0) {
+                localStorage.setItem(migrationKey, '1');
+                return;
+            }
+
+            try {
+                const response = await fetch(FAVORITES_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'sync',
+                        items: productIds
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    localStorage.removeItem('favorites');
+                    localStorage.setItem(migrationKey, '1');
+                    await updateFavoritesBadge(data.count);
+                }
+            } catch (e) {
+                console.error('Error migrando favoritos legacy:', e);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Inicializar Menú Lateral
             var sidenavElems = document.querySelectorAll('.sidenav');
@@ -331,6 +436,15 @@
 
             // Carga inicial del contador al entrar a cualquier página
             updateCartBadge();
+            syncLegacyFavoritesToServer().finally(() => {
+                updateFavoritesBadge();
+            });
+
+            window.addEventListener('storage', function(event) {
+                if (event.key === 'cart') {
+                    updateCartBadge();
+                }
+            });
         });
     </script>
 

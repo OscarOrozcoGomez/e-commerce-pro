@@ -11,3 +11,17 @@ core/db_tools.php
 app_error.log
 
 .vscode/sftp.json
+
+# Secretos locales por ambiente
+core/app_secrets.php
+core/app_secrets.env
+core/app_secrets.*.php
+core/app_secrets.*.env
+app_secrets.php
+app_secrets.env
+app_secrets.*.php
+app_secrets.*.env
+.app_secrets.php
+.app_secrets.env
+.app_secrets.*.php
+.app_secrets.*.env
