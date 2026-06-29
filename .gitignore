@@ -12,6 +12,9 @@ app_error.log
 
 .vscode/sftp.json
 
+# Cache local de PHPUnit
+.phpunit.cache/
+
 # Secretos locales por ambiente
 core/app_secrets.php
 core/app_secrets.env
