@@ -25,6 +25,7 @@ jobs:
     env:
       MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
       MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
+      PTF_PORT: ${{ secrets.PTF_PORT }}
 
     steps:
       - name: Checkout repository
@@ -32,37 +33,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Deploy only changes to Neubox via SFTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.PTF_HOST }}
-          username: ${{ secrets.PTF_USERNAME }}
-          password: ${{ secrets.PTF_PASSWORD }}
-          protocol: ftp
-          port: 21
-          local-dir: ./
-          server-dir: /public_html/
-          state-name: .ftp-deploy-sync-state.json
-          dangerous-clean-slate: false
-          exclude: |
-            **/.git/**
-            **/.github/**
-            **/.vscode/**
-            **/vendor/**
-            tests/**
-            database.sql
-            **/respaldos/**
-            .gitignore
-            README.md
-            DEPLOY_ENVIRONMENTS_SETUP.md
-            scripts/migrate.php
-            core/app_secrets.*.example.php
-            composer.json
-            composer.lock
-            composer.phar
-            phpunit.xml
-            .phpunit.cache/**
-            .ftp-deploy-sync-state.json
+      - name: Install SFTP client (lftp)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
+      - name: Deploy project to Neubox via SFTP
+        env:
+          SFTP_HOST: ${{ secrets.PTF_HOST }}
+          SFTP_USER: ${{ secrets.PTF_USERNAME }}
+          SFTP_PASS: ${{ secrets.PTF_PASSWORD }}
+        run: |
+          if [ -z "${SFTP_HOST}" ] || [ -z "${SFTP_USER}" ] || [ -z "${SFTP_PASS}" ]; then
+            echo "Error: faltan PTF_HOST, PTF_USERNAME o PTF_PASSWORD en GitHub Secrets."
+            exit 1
+          fi
+
+          PORT="${PTF_PORT:-22}"
+          echo "Iniciando deploy SFTP a ${SFTP_HOST}:${PORT}..."
+
+          lftp -u "${SFTP_USER}","${SFTP_PASS}" "sftp://${SFTP_HOST}:${PORT}" <<'LFTP_CMDS'
+          set sftp:auto-confirm yes
+          set net:max-retries 2
+          set net:timeout 30
+          set net:reconnect-interval-base 5
+          set net:reconnect-interval-multiplier 1
+
+          mirror --reverse --verbose --only-newer \
+            --exclude-glob .git/ \
+            --exclude-glob .github/ \
+            --exclude-glob .vscode/ \
+            --exclude-glob vendor/ \
+            --exclude-glob tests/ \
+            --exclude-glob respaldos/ \
+            --exclude-glob .phpunit.cache/ \
+            --exclude-glob .ftp-deploy-sync-state.json \
+            --exclude-glob database.sql \
+            --exclude-glob .gitignore \
+            --exclude-glob README.md \
+            --exclude-glob DEPLOY_ENVIRONMENTS_SETUP.md \
+            --exclude-glob scripts/migrate.php \
+            --exclude-glob composer.json \
+            --exclude-glob composer.lock \
+            --exclude-glob composer.phar \
+            --exclude-glob phpunit.xml \
+            --exclude-glob core/app_secrets.*.example.php \
+            ./ /public_html/
+          bye
+LFTP_CMDS
 
       - name: Validate migration automation config
         run: |

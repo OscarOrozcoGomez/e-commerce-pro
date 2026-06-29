@@ -136,7 +136,16 @@ function isCliente(): bool
  */
 function getCurrentAlmacenId(): ?int
 {
-    return $_SESSION['usuario']['id_almacen'] ?? null;
+    $almacen = $_SESSION['usuario']['id_almacen'] ?? null;
+    if ($almacen === null || $almacen === '') {
+        return null;
+    }
+
+    if (is_numeric($almacen)) {
+        return (int)$almacen;
+    }
+
+    return null;
 }
 
 /**
@@ -287,6 +296,11 @@ function authenticate(string $email, string $password): bool
  */
 function logout(): void
 {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        header('Location: ' . BASE_URL . 'views/login.php?logout=1');
+        exit;
+    }
+
     // Limpiar los datos de sesión en memoria
     $_SESSION = [];
     // Destruir la cookie de sesión en el navegador
