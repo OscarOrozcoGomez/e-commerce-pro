@@ -12,6 +12,59 @@ if (isAuthenticated()) {
 $error = '';
 $success = '';
 
+/**
+ * Valida si el correo tiene formato correcto y un dominio con registros DNS utiles.
+ */
+function isLikelyDeliverableEmail(string $email): bool
+{
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    $parts = explode('@', $email);
+    $domain = strtolower(trim((string)($parts[1] ?? '')));
+    if ($domain === '' || strpos($domain, '.') === false) {
+        return false;
+    }
+
+    $blockedDomains = [
+        'mailinator.com',
+        'tempmail.com',
+        '10minutemail.com',
+        'guerrillamail.com',
+        'yopmail.com',
+        'fakeinbox.com'
+    ];
+    if (in_array($domain, $blockedDomains, true)) {
+        return false;
+    }
+
+    if (!function_exists('checkdnsrr')) {
+        return true;
+    }
+
+    return checkdnsrr($domain, 'MX') || checkdnsrr($domain, 'A') || checkdnsrr($domain, 'AAAA');
+}
+
+/**
+ * Formatea y valida telefono opcional a formato (XXX) - XXX - XXXX.
+ */
+function normalizeUsStylePhone(string $phone): ?string
+{
+    $digits = preg_replace('/\D+/', '', $phone);
+    if (!is_string($digits)) {
+        return null;
+    }
+    if ($digits === '') {
+        return '';
+    }
+    if (strlen($digits) !== 10) {
+        return null;
+    }
+
+    return sprintf('(%s) - %s - %s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Token CSRF inválido.';
@@ -19,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nombre = trim($_POST['nombre'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $telefono = trim($_POST['telefono'] ?? '');
+        $telefonoNormalizado = normalizeUsStylePhone($telefono);
         $password = $_POST['password'] ?? '';
         $confirm_password = $_POST['confirm_password'] ?? '';
 
@@ -26,6 +80,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Todos los campos son obligatorios.';
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $error = 'El formato del correo electrónico no es válido.';
+        } elseif (!isLikelyDeliverableEmail($email)) {
+            $error = 'No pudimos validar el dominio del correo. Usa un correo real y verificable.';
+        } elseif ($telefonoNormalizado === null) {
+            $error = 'Si capturas teléfono, debe tener 10 dígitos con formato (331) - 863 - 5185.';
         } elseif ($password !== $confirm_password) {
             $error = 'Las contraseñas no coinciden.';
         } elseif (!isPasswordSecure($password)) {
@@ -50,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Crear entrada en tabla clientes para este usuario
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, id_usuario) VALUES (?, ?, ?)");
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_usuario) VALUES (?, ?, ?, ?)");
-                    $stmtCli->execute([$nombre, $email, $telefono ?: null, $newUserId]);
+                    $stmtCli->execute([$nombre, $email, ($telefonoNormalizado === '' ? null : $telefonoNormalizado), $newUserId]);
                     
                     $success = 'Cuenta creada con éxito. Ya puedes iniciar sesión.';
                 }
@@ -98,11 +156,13 @@ include __DIR__ . '/includes/header.php';
                                 <i class="material-icons prefix">email</i>
                                 <input id="email" name="email" type="email" required value="<?php echo esc($email ?? ''); ?>">
                                 <label for="email">Correo Electrónico</label>
+                                <span id="email-feedback" class="helper-inline-feedback"></span>
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">phone</i>
-                                <input id="telefono" name="telefono" type="tel" value="<?php echo esc($telefono ?? ''); ?>" placeholder="Ej: 3311223344">
+                                <input id="telefono" name="telefono" type="tel" value="<?php echo esc($telefono ?? ''); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
                                 <label for="telefono">Teléfono de contacto (opcional)</label>
+                                <span id="telefono-feedback" class="helper-inline-feedback"></span>
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">lock</i>
@@ -143,12 +203,24 @@ include __DIR__ . '/includes/header.php';
 
 <style>
     .w-100 { width: 100%; }
+    .helper-inline-feedback { display: block; min-height: 18px; font-size: 12px; margin-top: 4px; }
+    .helper-inline-feedback.error { color: #c62828; }
+    .helper-inline-feedback.success { color: #2e7d32; }
     .password-criteria-list { margin-top: -6px; margin-bottom: 20px; padding-left: 0; }
     .password-criteria-list li { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
     .password-criteria-list .criteria-icon { font-size: 16px; line-height: 1; }
 </style>
 
 <script>
+    const blockedEmailDomains = new Set([
+        'mailinator.com',
+        'tempmail.com',
+        '10minutemail.com',
+        'guerrillamail.com',
+        'yopmail.com',
+        'fakeinbox.com'
+    ]);
+
     function togglePass(inputId, iconElement) {
         const input = document.getElementById(inputId);
         if (input.type === 'password') {
@@ -158,6 +230,131 @@ include __DIR__ . '/includes/header.php';
             input.type = 'password';
             iconElement.innerText = 'visibility';
         }
+    }
+
+    function formatPhone(digits) {
+        if (!digits) {
+            return '';
+        }
+
+        if (digits.length <= 3) {
+            return `(${digits}`;
+        }
+        if (digits.length <= 6) {
+            return `(${digits.slice(0, 3)}) - ${digits.slice(3)}`;
+        }
+        return `(${digits.slice(0, 3)}) - ${digits.slice(3, 6)} - ${digits.slice(6, 10)}`;
+    }
+
+    function bindPhoneMaskValidation(inputId) {
+        const phoneInput = document.getElementById(inputId);
+        const feedback = document.getElementById('telefono-feedback');
+        if (!phoneInput) {
+            return;
+        }
+
+        function paintField(status, message) {
+            phoneInput.classList.remove('valid', 'invalid');
+            if (status === 'error') {
+                phoneInput.classList.add('invalid');
+            } else if (status === 'success') {
+                phoneInput.classList.add('valid');
+            }
+
+            if (feedback) {
+                feedback.classList.remove('error', 'success');
+                feedback.textContent = message || '';
+                if (status === 'error') {
+                    feedback.classList.add('error');
+                } else if (status === 'success') {
+                    feedback.classList.add('success');
+                }
+            }
+        }
+
+        const validatePhone = () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            if (digits.length === 0) {
+                phoneInput.setCustomValidity('');
+                paintField('', '');
+                return;
+            }
+            if (digits.length < 10) {
+                phoneInput.setCustomValidity('Completa los 10 dígitos o deja el campo vacío.');
+                paintField('error', 'Completa los 10 dígitos o borra el campo si no lo usarás por ahora.');
+                return;
+            }
+            phoneInput.setCustomValidity('');
+            paintField('success', 'Teléfono válido (10 dígitos).');
+        };
+
+        phoneInput.addEventListener('input', () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = formatPhone(digits);
+            validatePhone();
+        });
+
+        phoneInput.addEventListener('blur', () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = digits.length === 10 ? formatPhone(digits) : (digits.length === 0 ? '' : formatPhone(digits));
+            validatePhone();
+        });
+    }
+
+    function bindEmailValidation(inputId) {
+        const emailInput = document.getElementById(inputId);
+        const feedback = document.getElementById('email-feedback');
+        if (!emailInput) {
+            return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+        function paintField(status, message) {
+            emailInput.classList.remove('valid', 'invalid');
+            if (status === 'error') {
+                emailInput.classList.add('invalid');
+            } else if (status === 'success') {
+                emailInput.classList.add('valid');
+            }
+
+            if (feedback) {
+                feedback.classList.remove('error', 'success');
+                feedback.textContent = message || '';
+                if (status === 'error') {
+                    feedback.classList.add('error');
+                } else if (status === 'success') {
+                    feedback.classList.add('success');
+                }
+            }
+        }
+
+        function validateEmail() {
+            const value = (emailInput.value || '').trim().toLowerCase();
+            if (value === '') {
+                emailInput.setCustomValidity('');
+                paintField('', '');
+                return;
+            }
+            if (!emailRegex.test(value)) {
+                emailInput.setCustomValidity('Ingresa un correo electrónico válido.');
+                paintField('error', 'Correo inválido. Ejemplo correcto: nombre@dominio.com');
+                return;
+            }
+
+            const domain = (value.split('@')[1] || '').trim();
+            if (domain === '' || blockedEmailDomains.has(domain)) {
+                emailInput.setCustomValidity('Usa un correo real y verificable.');
+                paintField('error', 'Usa un correo real y verificable.');
+                return;
+            }
+
+            emailInput.setCustomValidity('');
+            paintField('success', 'Formato de correo válido.');
+        }
+
+        emailInput.addEventListener('input', validateEmail);
+        emailInput.addEventListener('blur', validateEmail);
     }
 
     function bindPasswordRealtimeValidation(passwordId, confirmId, prefix, submitButtonId) {
@@ -218,6 +415,8 @@ include __DIR__ . '/includes/header.php';
         updateState();
     }
 
+    bindPhoneMaskValidation('telefono');
+    bindEmailValidation('email');
     bindPasswordRealtimeValidation('password', 'confirm_password', 'register', 'register-submit-btn');
 </script>
 

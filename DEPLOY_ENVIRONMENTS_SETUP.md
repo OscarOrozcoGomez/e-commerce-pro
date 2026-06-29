@@ -137,3 +137,52 @@ DROP TABLE pedidos;
 ```
 
 Usa este patron solo cuando realmente lo necesites, porque duplicar tablas grandes en produccion puede ser costoso.
+
+## 8) Troubleshooting: checksum invalido en migracion ya aplicada
+
+Si al correr migraciones ves este error:
+
+- `Checksum invalido en migracion ya aplicada: ...`
+
+significa que el archivo SQL de una migracion ya ejecutada no coincide con el checksum guardado en `migration_history`.
+
+### Regla principal
+
+- No editar migraciones antiguas ya aplicadas.
+- Para cambios nuevos, crear una migracion nueva.
+
+### Recuperacion segura en LOCAL (XAMPP)
+
+Solo para destrabar tu ambiente local cuando ya sabes que esa migracion historica no debe volver a ejecutarse:
+
+1. Calcula y sincroniza checksum local en BD para la version afectada.
+2. Vuelve a correr:
+    - `C:\xampp\php\php.exe scripts/migrate.php --dry-run`
+
+Ejemplo real usado para `20260628_000004`:
+
+```powershell
+@'
+<?php
+$version = '20260628_000004';
+$file = __DIR__ . '/database/migrations/20260628_000004_drop_schema_migrations_table.sql';
+$sql = trim((string) file_get_contents($file));
+$checksum = hash('sha256', $sql);
+$pdo = new PDO('mysql:host=127.0.0.1;dbname=beautyandwell_prod;charset=utf8mb4', 'root', '');
+$stmt = $pdo->prepare('UPDATE migration_history SET checksum = :checksum, filename = :filename WHERE version = :version');
+$stmt->execute([
+   ':checksum' => $checksum,
+   ':filename' => basename($file),
+   ':version' => $version,
+]);
+echo "Checksum actualizado para $version => $checksum", PHP_EOL;
+?>
+'@ | Set-Content -Path .tmp_repair_checksum.php
+C:\xampp\php\php.exe .tmp_repair_checksum.php
+Remove-Item .tmp_repair_checksum.php
+```
+
+Importante:
+
+- Esto se usa para reparar consistencia local del historial, no para "re-escribir" historia en produccion.
+- En produccion, investigar primero causa raiz antes de tocar `migration_history`.

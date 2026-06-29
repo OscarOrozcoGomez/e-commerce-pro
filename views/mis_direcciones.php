@@ -59,6 +59,22 @@ $stmt = $pdo->prepare("SELECT * FROM cliente_direcciones WHERE id_cliente = ? OR
 $stmt->execute([$idCliente]);
 $direcciones = $stmt->fetchAll();
 
+$prefillMode = isset($_GET['prefill']) && $_GET['prefill'] === '1';
+$prefillAlias = trim((string)($_GET['alias'] ?? ''));
+$prefillDireccion = trim((string)($_GET['direccion'] ?? ''));
+$prefillMapsLink = trim((string)($_GET['maps_link'] ?? ''));
+
+if ($prefillMode) {
+    if ($prefillAlias === '') {
+        $prefillAlias = 'Nueva dirección';
+    }
+    if ($prefillDireccion !== '') {
+        $success = $success !== ''
+            ? $success
+            : 'Hemos prellenado tu nueva dirección. Solo confirma para guardarla.';
+    }
+}
+
 $pageTitle = 'Mis Direcciones';
 include __DIR__ . '/includes/header.php';
 ?>
@@ -135,14 +151,14 @@ include __DIR__ . '/includes/header.php';
                         <?php echo csrfInput(); ?>
                         <input type="hidden" name="accion" id="form-accion" value="agregar">
                         <input type="hidden" name="id_direccion" id="form-id-dir" value="">
-                        <input type="hidden" name="maps_link" id="maps_link" value="">
+                        <input type="hidden" name="maps_link" id="maps_link" value="<?php echo esc($prefillMapsLink); ?>">
                         
                         <div class="input-field">
-                            <input type="text" id="alias" name="alias" required placeholder="Ej: Casa, Oficina, Mamá">
+                            <input type="text" id="alias" name="alias" required placeholder="Ej: Casa, Oficina, Mamá" value="<?php echo esc($prefillAlias); ?>">
                             <label for="alias">Alias / Nombre</label>
                         </div>
                         <div class="input-field">
-                            <textarea id="direccion" name="direccion" class="materialize-textarea" required placeholder="Detalles adicionales: Piso, apto, color de casa..."></textarea>
+                            <textarea id="direccion" name="direccion" class="materialize-textarea" required placeholder="Detalles adicionales: Piso, apto, color de casa..."><?php echo esc($prefillDireccion); ?></textarea>
                             <label for="direccion" class="active">Dirección Detallada</label>
                         </div>
                         <button type="submit" id="btn-submit" class="btn blue darken-4 w-100">Guardar Dirección</button>
@@ -257,6 +273,11 @@ function resetForm() {
 // También podemos asegurar la inicialización si el script cargara antes de que el DOM esté listo
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof google !== 'undefined') initAutocomplete();
+    M.updateTextFields();
+    const direccionEl = document.getElementById('direccion');
+    if (direccionEl && direccionEl.value.trim() !== '') {
+        M.textareaAutoResize(direccionEl);
+    }
 });
 </script>
 <style>
