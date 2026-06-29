@@ -1,5 +1,7 @@
 # Sistema POS Multi-Almacén
 
+[![CI](https://github.com/OscarOrozcoGomez/e-commerce-pro/actions/workflows/ci.yml/badge.svg)](https://github.com/OscarOrozcoGomez/e-commerce-pro/actions/workflows/ci.yml)
+
 ## Estructura del Proyecto
 
 ```
@@ -37,6 +39,34 @@ ecommerce/
     - `MAPS_KEY` o `GOOGLE_MAPS_API_KEY`
 3. Ejecutar `scripts/import_products.php` para cargar productos
 4. Acceder a `index.php` (requiere login)
+
+## Pruebas (local)
+
+Para correr la suite de pruebas sin depender del `phpunit` viejo de XAMPP:
+
+1. Instalar dependencias de desarrollo:
+    - `C:\xampp\php\php.exe composer.phar install`
+2. Ejecutar pruebas unitarias:
+    - `C:\xampp\php\php.exe composer.phar test`
+
+Notas:
+
+- El workflow de CI en GitHub instala dependencias y ejecuta estas pruebas automáticamente en cada Pull Request a `main`.
+- Las dependencias de pruebas (`vendor/`) y archivos de Composer están excluidos del despliegue al host de producción.
+
+### Troubleshooting
+
+- Si `composer install` falla por memoria:
+    - `C:\xampp\php\php.exe -d memory_limit=-1 composer.phar install`
+- Si falla por caché/lock corrupto:
+    - `C:\xampp\php\php.exe composer.phar clear-cache`
+    - Eliminar `vendor/` y volver a ejecutar install.
+- Si cambiaste de versión de PHP en XAMPP y aparecen conflictos de dependencias:
+    - Verifica versión activa: `C:\xampp\php\php.exe -v`
+    - Reinstala dependencias: `C:\xampp\php\php.exe composer.phar install`
+    - Si persiste, actualiza lock para tu versión local: `C:\xampp\php\php.exe composer.phar update --with-all-dependencies`
+- Si aparece `php is not recognized`:
+    - Usa siempre comandos con ruta completa de XAMPP (`C:\xampp\php\php.exe ...`) en lugar de `php`.
 
 ## Usuarios Iniciales
 

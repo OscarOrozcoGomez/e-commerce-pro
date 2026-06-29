@@ -21,12 +21,11 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
+          tools: composer:v2
           coverage: none
 
-      - name: Download PHPUnit PHAR
-        run: |
-          curl -Ls https://phar.phpunit.de/phpunit-11.phar -o phpunit.phar
-          php phpunit.phar --version
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
 
       - name: Run unit tests
         env:
@@ -36,4 +35,4 @@ jobs:
           DB_USER: root
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
-        run: php phpunit.phar -c phpunit.xml --testdox
+        run: composer test

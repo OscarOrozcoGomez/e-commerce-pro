@@ -106,19 +106,27 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">lock</i>
-                                <input id="password" name="password" type="password" required>
+                                <input id="password" name="password" type="password" required minlength="10">
                                 <label for="password">Contraseña</label>
                                 <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('password', this)">visibility</i>
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">lock_outline</i>
-                                <input id="confirm_password" name="confirm_password" type="password" required>
+                                <input id="confirm_password" name="confirm_password" type="password" required minlength="10">
                                 <label for="confirm_password">Confirmar Contraseña</label>
                                 <i class="material-icons" style="position: absolute; right: 10px; top: 15px; cursor: pointer; color: #9e9e9e;" onclick="togglePass('confirm_password', this)">visibility</i>
                             </div>
+                            <ul id="password-rules-register" style="margin-top: -6px; margin-bottom: 20px; padding-left: 18px;">
+                                <li id="register-rule-length" class="red-text text-darken-2">Al menos 10 caracteres</li>
+                                <li id="register-rule-upper" class="red-text text-darken-2">Al menos una mayúscula</li>
+                                <li id="register-rule-lower" class="red-text text-darken-2">Al menos una minúscula</li>
+                                <li id="register-rule-number" class="red-text text-darken-2">Al menos un número</li>
+                                <li id="register-rule-symbol" class="red-text text-darken-2">Al menos un símbolo (!@#$...)</li>
+                                <li id="register-rule-match" class="red-text text-darken-2">Las contraseñas coinciden</li>
+                            </ul>
                             
                             <div style="margin-top: 30px;">
-                                <button type="submit" class="btn-large blue darken-4 waves-effect waves-light w-100">
+                                <button type="submit" id="register-submit-btn" class="btn-large blue darken-4 waves-effect waves-light w-100" disabled>
                                     REGISTRARME
                                 </button>
                             </div>
@@ -148,6 +156,62 @@ include __DIR__ . '/includes/header.php';
             iconElement.innerText = 'visibility';
         }
     }
+
+    function bindPasswordRealtimeValidation(passwordId, confirmId, prefix, submitButtonId) {
+        const passwordInput = document.getElementById(passwordId);
+        const confirmInput = document.getElementById(confirmId);
+        const submitButton = document.getElementById(submitButtonId);
+        if (!passwordInput || !confirmInput) {
+            return;
+        }
+
+        const hasSymbol = (value) => /[!@#$%^&*(),.?":{}|<>]/.test(value);
+        const rules = [
+            { id: `${prefix}-rule-length`, test: (value) => value.length >= 10 },
+            { id: `${prefix}-rule-upper`, test: (value) => /[A-Z]/.test(value) },
+            { id: `${prefix}-rule-lower`, test: (value) => /[a-z]/.test(value) },
+            { id: `${prefix}-rule-number`, test: (value) => /[0-9]/.test(value) },
+            { id: `${prefix}-rule-symbol`, test: (value) => hasSymbol(value) }
+        ];
+
+        function paintRule(ruleId, ok) {
+            const el = document.getElementById(ruleId);
+            if (!el) {
+                return;
+            }
+            el.classList.remove('red-text', 'green-text', 'text-darken-2');
+            el.classList.add(ok ? 'green-text' : 'red-text', 'text-darken-2');
+        }
+
+        function updateState() {
+            const pass = passwordInput.value || '';
+            const confirm = confirmInput.value || '';
+
+            let allRulesOk = true;
+            rules.forEach((rule) => {
+                const ok = rule.test(pass);
+                paintRule(rule.id, ok);
+                if (!ok) {
+                    allRulesOk = false;
+                }
+            });
+
+            const matchOk = confirm.length > 0 && pass === confirm;
+            paintRule(`${prefix}-rule-match`, matchOk);
+
+            if (submitButton) {
+                const canSubmit = allRulesOk && matchOk;
+                submitButton.disabled = !canSubmit;
+                submitButton.classList.toggle('disabled', !canSubmit);
+            }
+        }
+
+        passwordInput.addEventListener('input', updateState);
+        confirmInput.addEventListener('input', updateState);
+        updateState();
+    }
+
+    bindPasswordRealtimeValidation('password', 'confirm_password', 'register', 'register-submit-btn');
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

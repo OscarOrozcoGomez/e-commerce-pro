@@ -48,6 +48,8 @@ jobs:
             **/.git/**
             **/.github/**
             **/.vscode/**
+            **/vendor/**
+            tests/**
             database.sql
             **/respaldos/**
             .gitignore
@@ -55,6 +57,11 @@ jobs:
             DEPLOY_ENVIRONMENTS_SETUP.md
             scripts/migrate.php
             core/app_secrets.*.example.php
+            composer.json
+            composer.lock
+            composer.phar
+            phpunit.xml
+            .phpunit.cache/**
             .ftp-deploy-sync-state.json
 
       - name: Validate migration automation config

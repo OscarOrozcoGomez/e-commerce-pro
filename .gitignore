@@ -12,6 +12,10 @@ app_error.log
 
 .vscode/sftp.json
 
+# Dependencias de desarrollo locales
+/vendor/
+composer.phar
+
 # Cache local de PHPUnit
 .phpunit.cache/
 

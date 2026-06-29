@@ -34,4 +34,28 @@ final class AuthUtilsTest extends TestCase
     {
         $this->assertSame('producto', slugify('***'));
     }
+
+    public function testResetPasswordWithTokenRejectsWeakPasswordBeforeTokenValidation(): void
+    {
+        $error = null;
+        $result = resetPasswordWithToken('123456', 'weakpass', $error);
+
+        $this->assertFalse($result);
+        $this->assertSame(
+            'La nueva contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.',
+            $error
+        );
+    }
+
+    public function testResetPasswordWithTokenRejectsTooShortPassword(): void
+    {
+        $error = null;
+        $result = resetPasswordWithToken('123456', 'Ab1!short', $error);
+
+        $this->assertFalse($result);
+        $this->assertSame(
+            'La nueva contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.',
+            $error
+        );
+    }
 }
