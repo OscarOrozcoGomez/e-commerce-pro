@@ -40,7 +40,6 @@ jobs:
           password: ${{ secrets.PTF_PASSWORD }}
           protocol: ftp
           port: 21
-          port-type: passive
           local-dir: ./
           server-dir: /public_html/
           state-name: .ftp-deploy-sync-state.json
