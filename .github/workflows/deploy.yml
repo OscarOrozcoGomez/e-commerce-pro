@@ -49,6 +49,7 @@ jobs:
             exit 1
           fi
 
+<<<<<<< HEAD
           PORT="${PTF_PORT:-22}"
           echo "Iniciando deploy SFTP a ${SFTP_HOST}:${PORT}..."
 
@@ -81,6 +82,12 @@ jobs:
             ./ /public_html/
           bye
 LFTP_CMDS
+=======
+          PORT="${PTF_PORT:-21}"
+          echo "Iniciando deploy FTP a ${SFTP_HOST}:${PORT}..."
+
+          lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -e "set ssl:verify-certificate no; set sftp:auto-confirm yes; set net:max-retries 2; set net:timeout 30; set net:reconnect-interval-base 5; set net:reconnect-interval-multiplier 1; mirror --reverse --verbose --only-newer --exclude-glob .git/ --exclude-glob .github/ --exclude-glob .vscode/ --exclude-glob vendor/ --exclude-glob tests/ --exclude-glob respaldos/ --exclude-glob .phpunit.cache/ --exclude-glob .ftp-deploy-sync-state.json --exclude-glob database.sql --exclude-glob .gitignore --exclude-glob README.md --exclude-glob DEPLOY_ENVIRONMENTS_SETUP.md --exclude-glob scripts/migrate.php --exclude-glob composer.json --exclude-glob composer.lock --exclude-glob composer.phar --exclude-glob phpunit.xml --exclude-glob core/app_secrets.*.example.php ./ /public_html/; bye"
+>>>>>>> main
 
       - name: Validate migration automation config
         run: |
