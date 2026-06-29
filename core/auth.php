@@ -136,7 +136,16 @@ function isCliente(): bool
  */
 function getCurrentAlmacenId(): ?int
 {
-    return $_SESSION['usuario']['id_almacen'] ?? null;
+    $almacen = $_SESSION['usuario']['id_almacen'] ?? null;
+    if ($almacen === null || $almacen === '') {
+        return null;
+    }
+
+    if (is_numeric($almacen)) {
+        return (int)$almacen;
+    }
+
+    return null;
 }
 
 /**
@@ -287,6 +296,11 @@ function authenticate(string $email, string $password): bool
  */
 function logout(): void
 {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        header('Location: ' . BASE_URL . 'views/login.php?logout=1');
+        exit;
+    }
+
     // Limpiar los datos de sesión en memoria
     $_SESSION = [];
     // Destruir la cookie de sesión en el navegador
@@ -340,14 +354,36 @@ function getPasswordResetRecord(string $token): ?array
     return $record !== false ? $record : null;
 }
 
-function resetPasswordWithToken(string $token, string $newPassword): bool
+function resetPasswordWithToken(string $token, string $newPassword, ?string &$errorMessage = null): bool
 {
+    $errorMessage = null;
+
+    if (!isPasswordSecure($newPassword)) {
+        $errorMessage = 'La nueva contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.';
+        return false;
+    }
+
     $record = getPasswordResetRecord($token);
     if (!$record) {
+        $errorMessage = 'El código es inválido o ha expirado.';
         return false;
     }
 
     $pdo = getPDO();
+    $stmtCurrent = $pdo->prepare('SELECT contrasena FROM usuarios WHERE email = :email LIMIT 1');
+    $stmtCurrent->execute([':email' => $record['email']]);
+    $currentHash = $stmtCurrent->fetchColumn();
+
+    if (!is_string($currentHash) || $currentHash === '') {
+        $errorMessage = 'No se encontró una cuenta activa para actualizar la contraseña.';
+        return false;
+    }
+
+    if (password_verify($newPassword, $currentHash)) {
+        $errorMessage = 'La nueva contraseña no puede ser igual a la contraseña anterior.';
+        return false;
+    }
+
     $passwordHash = password_hash($newPassword, PASSWORD_BCRYPT);
     $pdo->beginTransaction();
 
@@ -365,6 +401,7 @@ function resetPasswordWithToken(string $token, string $newPassword): bool
         return true;
     } catch (Throwable $e) {
         $pdo->rollBack();
+        $errorMessage = 'No fue posible actualizar la contraseña en este momento.';
         return false;
     }
 }
