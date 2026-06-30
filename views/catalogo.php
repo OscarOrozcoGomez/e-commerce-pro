@@ -39,12 +39,13 @@ if (!empty($categoriaSeleccionada)) {
 }
 
 if (!empty($busqueda)) {
-    $whereClauses[] = "(p.nombre LIKE :search OR p.codigo_barras LIKE :search OR p.nombre_variante LIKE :search_variant OR EXISTS (
+    $whereClauses[] = "(p.nombre LIKE :search_name OR p.codigo_barras LIKE :search_code OR p.nombre_variante LIKE :search_variant OR EXISTS (
         SELECT 1 FROM productos p_v 
         WHERE p_v.id_padre = p.id_producto 
           AND (p_v.nombre LIKE :search_ex OR p_v.codigo_barras LIKE :search_ex_code OR p_v.nombre_variante LIKE :search_ex_variant)
     ))";
-    $params[':search'] = '%' . $busqueda . '%';
+    $params[':search_name'] = '%' . $busqueda . '%';
+    $params[':search_code'] = '%' . $busqueda . '%';
     $params[':search_variant'] = '%' . $busqueda . '%';
     $params[':search_ex'] = '%' . $busqueda . '%';
     $params[':search_ex_code'] = '%' . $busqueda . '%';
