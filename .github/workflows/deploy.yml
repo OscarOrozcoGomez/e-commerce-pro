@@ -83,6 +83,17 @@ jobs:
             esac
           }
 
+          # Crear archivo temporal para consolidar los comandos de lftp en un solo lote
+          COMMANDS_FILE=$(mktemp)
+          echo "set ssl:verify-certificate no;" >> "${COMMANDS_FILE}"
+          echo "set ftp:ssl-allow yes;" >> "${COMMANDS_FILE}"
+          echo "set net:max-retries 2;" >> "${COMMANDS_FILE}"
+          echo "set net:timeout 30;" >> "${COMMANDS_FILE}"
+          echo "set net:reconnect-interval-base 5;" >> "${COMMANDS_FILE}"
+          echo "set net:reconnect-interval-multiplier 1;" >> "${COMMANDS_FILE}"
+
+          HAS_FILES_TO_UPLOAD=false
+
           while IFS= read -r file; do
             [ -z "${file}" ] && continue
 
@@ -103,9 +114,22 @@ jobs:
               remote_dir="/public_html/${remote_dir}"
             fi
 
-            echo "Subiendo ${file} -> ${remote_dir}/"
-            lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -e "set ssl:verify-certificate no; set ftp:ssl-allow yes; set net:max-retries 2; set net:timeout 30; set net:reconnect-interval-base 5; set net:reconnect-interval-multiplier 1; mkdir -p '${remote_dir}'; put -O '${remote_dir}' '${file}'; bye"
+            echo "Programando subida de: ${file} -> ${remote_dir}/"
+            echo "mkdir -p '${remote_dir}';" >> "${COMMANDS_FILE}"
+            echo "put -O '${remote_dir}' '${file}';" >> "${COMMANDS_FILE}"
+            HAS_FILES_TO_UPLOAD=true
           done <<< "${CHANGED_FILES}"
+
+          echo "bye" >> "${COMMANDS_FILE}"
+
+          if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
+            echo "Ejecutando lote completo de comandos en una sola sesion..."
+            lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -f "${COMMANDS_FILE}"
+          else
+            echo "No hay archivos validos despues de aplicar filtros de exclusion."
+          fi
+
+          rm -f "${COMMANDS_FILE}"
 
       - name: Validate migration automation config
         run: |
