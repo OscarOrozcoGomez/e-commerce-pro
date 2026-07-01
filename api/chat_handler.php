@@ -17,6 +17,50 @@ $soyStaff = !isCliente();
 
 $action = $_GET['action'] ?? '';
 
+// Función auxiliar para enviar notificaciones Push ruidosas al celular vía Telegram
+function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje): void {
+    $enabledRaw = strtolower((string) (getEnvVar('TELEGRAM_NOTIFICATIONS_ENABLED', '1') ?? '1'));
+    $notificationsEnabled = in_array($enabledRaw, ['1', 'true', 'yes', 'on'], true);
+    if (!$notificationsEnabled) {
+        return;
+    }
+
+    $botToken = getEnvVar('TELEGRAM_BOT_TOKEN');
+    $chatId = getEnvVar('TELEGRAM_CHAT_ID');
+    if ($botToken === null || $chatId === null) {
+        // No interrumpir el flujo del chat si faltan credenciales de Telegram.
+        return;
+    }
+
+    $textoAlerta = "💬 *¡Nuevo mensaje en bLife!*\n";
+    $textoAlerta .= "👤 *Cliente:* " . $nombreCliente . "\n";
+    $textoAlerta .= "📝 *Mensaje:* " . $textoMensaje;
+
+    $url = "https://api.telegram.org/bot" . $botToken . "/sendMessage";
+    $postData = [
+        'chat_id' => $chatId,
+        'text' => $textoAlerta
+    ];
+
+    if (!function_exists('curl_init')) {
+        error_log('WARNING: curl no disponible; no se pudo enviar notificacion a Telegram.');
+        return;
+    }
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postData));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    $response = curl_exec($ch);
+    if ($response === false) {
+        error_log('WARNING: fallo al enviar notificacion a Telegram.');
+    }
+    curl_close($ch);
+}
+
 try {
     if ($action === 'fetch') {
         // Si es staff, necesita el ID del cliente específico. Si es cliente, usa su propio ID.
@@ -66,7 +110,7 @@ try {
         // Verificar si la contraparte está escribiendo (hace menos de 6 segundos)
         $isTyping = false;
         if ($soyCliente) {
-            // El cliente solo ve si SU agente asignado está escribiendo
+            // El cliente solo ver si SU agente asignado está escribiendo
             $stmtT = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_usuario = ? AND tecleando_para = ? AND ultimo_tecleo > (NOW() - INTERVAL 6 SECOND)");
             $stmtT->execute([$asignado_a, $id_actual]);
             $isTyping = $stmtT->fetchColumn() > 0;
@@ -108,7 +152,6 @@ try {
 
     } elseif ($action === 'start' || $action === 'close') {
         $id_cliente = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
-        $nuevo_estado = ($action === 'start') ? 1 : 0;
         
         if ($id_cliente <= 0) throw new Exception("ID de usuario no válido.");
 
@@ -202,10 +245,12 @@ try {
             $id_cliente = $id_actual;
             $enviado_por = 'cliente';
             $id_staff = null;
+            $nombre_cliente = $usuario['nombre'] ?? 'Cliente bLife';
         } else {
             $id_cliente = (int)($data['id_cliente'] ?? 0);
             $enviado_por = 'staff';
             $id_staff = $id_actual;
+            $nombre_cliente = '';
         }
 
         if ($id_cliente <= 0) throw new Exception("Cliente inválido");
@@ -221,6 +266,17 @@ try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$id_cliente, $id_staff, $enviado_por, $tipo, $mensaje, $leido_cliente, $leido_staff]);
         
+        // 🔥 SI EL MENSAJE PROVIENE DE UN CLIENTE, DISPARAMOS LA ALERTA A TU CELULAR
+        if ($soyCliente) {
+            // Si el tipo es un objeto JSON de producto, mandamos solo el nombre del producto en la notificación
+            $textoNotificacion = $mensaje;
+            if ($tipo === 'producto') {
+                $pData = json_decode($mensaje, true);
+                $textoNotificacion = "📦 Envió una tarjeta de producto: " . ($pData['nombre'] ?? 'Ver en chat');
+            }
+            enviarNotificacionTelegram($nombre_cliente, $textoNotificacion);
+        }
+
         echo json_encode(['success' => true]);
     }
 } catch (Exception $e) {

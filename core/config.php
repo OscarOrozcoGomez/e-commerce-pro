@@ -25,9 +25,15 @@ ini_set('session.cookie_httponly', '1');
 ini_set('session.cookie_samesite', 'Lax');
 ini_set('session.cookie_secure', $isHttpsRequest ? '1' : '0');
 
+$sessionIdleTimeoutEnv = getenv('SESSION_IDLE_TIMEOUT');
+if ($sessionIdleTimeoutEnv === false) {
+    $sessionIdleTimeoutEnv = $_SERVER['SESSION_IDLE_TIMEOUT'] ?? $_ENV['SESSION_IDLE_TIMEOUT'] ?? null;
+}
+$sessionIdleTimeout = is_numeric($sessionIdleTimeoutEnv) ? (int)$sessionIdleTimeoutEnv : 604800;
+
 if (session_status() === PHP_SESSION_NONE) {
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => $sessionIdleTimeout,
         'path' => '/',
         'domain' => '',
         'secure' => $isHttpsRequest,
@@ -37,11 +43,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$sessionIdleTimeoutEnv = getenv('SESSION_IDLE_TIMEOUT');
-if ($sessionIdleTimeoutEnv === false) {
-    $sessionIdleTimeoutEnv = $_SERVER['SESSION_IDLE_TIMEOUT'] ?? $_ENV['SESSION_IDLE_TIMEOUT'] ?? null;
-}
-$sessionIdleTimeout = is_numeric($sessionIdleTimeoutEnv) ? (int)$sessionIdleTimeoutEnv : 1800;
+ini_set('session.gc_maxlifetime', (string) $sessionIdleTimeout);
+ini_set('session.cookie_lifetime', (string) $sessionIdleTimeout);
 
 $sessionRotateIntervalEnv = getenv('SESSION_ROTATE_INTERVAL');
 if ($sessionRotateIntervalEnv === false) {
@@ -56,6 +59,12 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario'])) {
     rotateSessionIdIfNeeded($sessionRotateInterval);
 }
+
+$gsmCacheTtlEnv = getenv('GSM_CACHE_TTL_SECONDS');
+if ($gsmCacheTtlEnv === false) {
+    $gsmCacheTtlEnv = $_SERVER['GSM_CACHE_TTL_SECONDS'] ?? $_ENV['GSM_CACHE_TTL_SECONDS'] ?? null;
+}
+$gsmCacheTtlSeconds = is_numeric($gsmCacheTtlEnv) ? (int)$gsmCacheTtlEnv : 604800;
 
 sendSecurityHeaders();
 
@@ -203,10 +212,13 @@ function preloadSecretSources(): void
             'DB_CHARSET' => ['DB_CHARSET'],
             'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
             'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
+            'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
+            'TELEGRAM_CHAT_ID' => ['TELEGRAM_CHAT_ID'],
+            'TELEGRAM_NOTIFICATIONS_ENABLED' => ['TELEGRAM_NOTIFICATIONS_ENABLED'],
         ];
 
         if (function_exists('gsmLoadSecretsCached')) {
-            $googleSecrets = gsmLoadSecretsCached($secretMapping, $googleDebug, 300);
+            $googleSecrets = gsmLoadSecretsCached($secretMapping, $googleDebug, $gsmCacheTtlSeconds);
         } else {
             $googleSecrets = gsmLoadSecrets($secretMapping, $googleDebug);
         }
@@ -253,6 +265,10 @@ function preloadSecretSources(): void
         if ($normalizedEnv === 'local' && !in_array('qa', $envSuffixCandidates, true)) {
             $envSuffixCandidates[] = 'qa';
         }
+    }
+
+    if (empty($envSuffixCandidates) && $isLocalContext) {
+        $envSuffixCandidates = ['qa', 'local'];
     }
 
     $baseCandidates = [
@@ -498,7 +514,7 @@ function enforceSessionInactivityTimeout(int $timeoutSeconds = 1800): void
             session_start();
         }
 
-        $_SESSION['session_expired'] = 1;
+        $_SESSION['session_notice'] = 'Tu sesión expiró por inactividad. Por tu seguridad, te invitamos a iniciar sesión de nuevo.';
         return;
     }
 

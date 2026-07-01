@@ -313,6 +313,8 @@ function logout(): void
         );
     }
     session_destroy();
+    session_start();
+    $_SESSION['session_notice'] = 'Tu sesión se cerró correctamente. Por tu seguridad, te invitamos a iniciar sesión de nuevo.';
     header('Location: ' . BASE_URL . 'views/login.php?logout=1');
     exit;
 }

@@ -8,8 +8,11 @@ if (isAuthenticated()) {
 }
 
 $error = '';
-if (!empty($_SESSION['session_expired'])) {
-    $error = 'Tu sesión expiró por inactividad. Inicia sesión nuevamente.';
+if (!empty($_SESSION['session_notice'])) {
+    $error = $_SESSION['session_notice'];
+    unset($_SESSION['session_notice']);
+} elseif (!empty($_SESSION['session_expired'])) {
+    $error = 'Tu sesión terminó. Por tu seguridad, te invitamos a iniciar sesión de nuevo.';
     unset($_SESSION['session_expired']);
 }
 
@@ -71,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="card-content">
                 <span class="card-title center-align">Iniciar Sesión</span>
                 <?php if ($error): ?>
-                    <div class="card-panel red lighten-4 red-text">
+                    <div class="card-panel green lighten-4 green-text text-darken-4">
                         <?php echo esc($error); ?>
                     </div>
                 <?php endif; ?>

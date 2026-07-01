@@ -124,6 +124,20 @@ Para mantener sincronizado el esquema entre XAMPP y el host remoto:
 - `MIGRATIONS_URL` (GitHub Secret): URL completa, por ejemplo:
     - `https://tu-dominio.com/api/run_migrations.php`
 
+### Telegram en producción
+
+Para activar notificaciones de Telegram en producción, configura estos secretos en el hosting o en Google Secret Manager:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_NOTIFICATIONS_ENABLED` = `1`
+
+Recomendación operativa:
+
+- Usa un grupo privado de Telegram con los dos responsables del negocio.
+- Agrega el bot al grupo y copia el `chat_id` del grupo para que ambos reciban las alertas.
+- Si más adelante quieres responder desde Telegram hacia la app, conviene mantener ese mismo grupo como punto de entrada.
+
 ## Ambientes de trabajo (QA local + Producción)
 
 El flujo actual está simplificado así:
@@ -144,6 +158,7 @@ Nota: En localhost/CLI ahora el valor por defecto de `APP_ENV` es `qa`.
 1. En hosting, configura `APP_ENV=production`.
 2. Configura variables reales de DB (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 3. Configura `MIGRATIONS_DEPLOY_TOKEN` con el mismo valor que en GitHub Secrets globales del repositorio.
+4. Configura `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` y, si quieres poder apagarlo sin tocar código, `TELEGRAM_NOTIFICATIONS_ENABLED=1`.
 
 ### GitHub Secrets globales requeridos
 

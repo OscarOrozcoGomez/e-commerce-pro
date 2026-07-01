@@ -4,11 +4,76 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
+function catalogDebugEnvEnabled(): bool
+{
+    $rawEnv = getenv('APP_ENV');
+    if ($rawEnv === false) {
+        $rawEnv = $_SERVER['APP_ENV'] ?? $_ENV['APP_ENV'] ?? '';
+    }
+
+    $env = strtolower(trim((string)$rawEnv));
+    if (in_array($env, ['local', 'dev', 'development', 'qa', 'test', 'testing'], true)) {
+        return true;
+    }
+
+    $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    return strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false;
+}
+
+function catalogClientContext(): array
+{
+    $ua = strtolower((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+    $device = 'desktop';
+    if ($ua !== '' && preg_match('/mobile|android|iphone|ipod|iemobile|blackberry|opera mini/', $ua)) {
+        $device = 'mobile';
+    } elseif ($ua !== '' && preg_match('/ipad|tablet|kindle|silk/', $ua)) {
+        $device = 'tablet';
+    }
+
+    $os = 'unknown';
+    if (strpos($ua, 'android') !== false) {
+        $os = 'android';
+    } elseif (strpos($ua, 'iphone') !== false || strpos($ua, 'ipad') !== false || strpos($ua, 'ipod') !== false) {
+        $os = 'ios';
+    } elseif (strpos($ua, 'windows') !== false) {
+        $os = 'windows';
+    } elseif (strpos($ua, 'mac os') !== false || strpos($ua, 'macintosh') !== false) {
+        $os = 'macos';
+    } elseif (strpos($ua, 'linux') !== false) {
+        $os = 'linux';
+    }
+
+    return [
+        'device' => $device,
+        'os' => $os,
+        'ua' => (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+    ];
+}
+
+function catalogDebugLog(string $event, array $data = []): void
+{
+    if (!catalogDebugEnvEnabled()) {
+        return;
+    }
+
+    $data['event'] = $event;
+    $data['uri'] = (string)($_SERVER['REQUEST_URI'] ?? '');
+    $data['ip'] = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    $data['client'] = catalogClientContext();
+    error_log('CATALOGO_DEBUG ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
 $busqueda = $_GET['search'] ?? '';
-$page = (int)($_GET['page'] ?? 1);
-$limit = 9;
-$offset = ($page - 1) * $limit;
+$page = max(1, (int)($_GET['page'] ?? 1));
+$itemsPerPage = 9;
+$isAjaxLoadMore = (($_GET['ajax'] ?? '') === '1');
+$isSearchRequest = trim((string)$busqueda) !== '';
+
+// En carga normal mostramos acumulado hasta la página actual para que un refresh
+// no "pierda" los productos ya visibles tras usar Cargar más.
+$limit = $isAjaxLoadMore ? $itemsPerPage : ($page * $itemsPerPage);
+$offset = $isAjaxLoadMore ? (($page - 1) * $itemsPerPage) : 0;
 $categorias = dbGetCategories();
 
 $catalogBaseUrl = 'catalogo.php';
@@ -63,17 +128,68 @@ if (!empty($categoriaSeleccionada)) {
 $sqlCount .= " WHERE " . implode(" AND ", $whereClauses);
 
 $stmtCount = $pdo->prepare($sqlCount);
-$stmtCount->execute($params);
-$totalProductos = (int)$stmtCount->fetchColumn();
+$countParams = [];
+foreach ($params as $key => $value) {
+    if (strpos($sqlCount, $key) !== false) {
+        $countParams[$key] = $value;
+    }
+}
+
+if ($isSearchRequest) {
+    catalogDebugLog('search_count_query', [
+        'page' => $page,
+        'is_ajax' => $isAjaxLoadMore,
+        'sql' => $sqlCount,
+        'params' => $countParams,
+    ]);
+}
+
+try {
+    $stmtCount->execute($countParams);
+    $totalProductos = (int)$stmtCount->fetchColumn();
+} catch (PDOException $e) {
+    if ($isSearchRequest) {
+        catalogDebugLog('search_count_query_error', [
+            'page' => $page,
+            'is_ajax' => $isAjaxLoadMore,
+            'error' => $e->getMessage(),
+            'code' => $e->getCode(),
+        ]);
+    }
+    throw $e;
+}
 
 // --- Aplicar orden y paginación a la consulta principal ---
 $sql .= " ORDER BY p.nombre ASC LIMIT :limit OFFSET :offset";
 
 try {
     $stmt = $pdo->prepare($sql);
-    $stmt->execute(array_merge($params, [':limit' => $limit, ':offset' => $offset]));
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value, PDO::PARAM_STR);
+    }
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+
+    if ($isSearchRequest) {
+        catalogDebugLog('search_main_query', [
+            'page' => $page,
+            'is_ajax' => $isAjaxLoadMore,
+            'sql' => $sql,
+            'params' => array_merge($params, [':limit' => $limit, ':offset' => $offset]),
+        ]);
+    }
+
+    $stmt->execute();
     $productos = $stmt->fetchAll();
 } catch (PDOException $e) {
+    if ($isSearchRequest) {
+        catalogDebugLog('search_main_query_error', [
+            'page' => $page,
+            'is_ajax' => $isAjaxLoadMore,
+            'error' => $e->getMessage(),
+            'code' => $e->getCode(),
+        ]);
+    }
     error_log("Error al cargar catálogo paginado: " . $e->getMessage());
     $productos = [];
 }
@@ -204,7 +320,7 @@ include __DIR__ . '/includes/header.php';
             </div>
 
             <!-- Botón Cargar Más -->
-            <?php if ($totalProductos > ($page * $limit)): ?>
+            <?php if ($totalProductos > ($page * $itemsPerPage)): ?>
                 <div class="row" id="load-more-container" style="margin-top: 30px;">
                     <div class="col s12 center-align">
                         <button id="load-more-btn" class="btn-large blue darken-4 waves-effect waves-light" style="width: 100%;">
@@ -242,7 +358,7 @@ clearSearchBtn.addEventListener('click', function() {
 
 let currentPage = <?php echo $page; ?>;
 const totalProducts = <?php echo $totalProductos; ?>;
-const limit = <?php echo $limit; ?>;
+const itemsPerPage = <?php echo $itemsPerPage; ?>;
 
 document.getElementById('load-more-btn')?.addEventListener('click', function() {
     const btn = this;
@@ -271,7 +387,7 @@ document.getElementById('load-more-btn')?.addEventListener('click', function() {
             });
 
             // Actualizar estado del botón
-            if ((currentPage * limit) >= totalProducts) {
+            if ((currentPage * itemsPerPage) >= totalProducts) {
                 container.remove(); // Ocultar el contenedor del botón si no hay más
             } else {
                 btn.style.display = 'block';
