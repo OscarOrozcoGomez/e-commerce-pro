@@ -118,13 +118,14 @@ jobs:
             echo "mkdir -p '${remote_dir}';" >> "${COMMANDS_FILE}"
             echo "put -O '${remote_dir}' '${file}';" >> "${COMMANDS_FILE}"
             HAS_FILES_TO_UPLOAD=true
-          done <<< "${CHANGED_FILES}"
+          } <<< "${CHANGED_FILES}"
 
           echo "bye" >> "${COMMANDS_FILE}"
 
           if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
             echo "Ejecutando lote completo de comandos en una sola sesion..."
-            lftp -u "${SFTP_USER}","${SFTP_PASS}" "ftp://${SFTP_HOST}:${PORT}" -f "${COMMANDS_FILE}"
+            # CORRECCIÓN AQUÍ: Se mueve el flag -f antes del host/protocolo
+            lftp -u "${SFTP_USER}","${SFTP_PASS}" -f "${COMMANDS_FILE}" "ftp://${SFTP_HOST}:${PORT}"
           else
             echo "No hay archivos validos despues de aplicar filtros de exclusion."
           fi
@@ -163,7 +164,7 @@ jobs:
               --silent \
               --output /tmp/migrations_response.json \
               --write-out "%{http_code}" \
-              "${MIGRATIONS_URL}" || true)
+              --encrypted-url "${MIGRATIONS_URL}" || true)
 
             if [ "${LAST_HTTP_CODE}" = "200" ]; then
               echo "Migraciones ejecutadas correctamente. Respuesta:"
