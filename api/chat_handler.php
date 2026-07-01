@@ -35,7 +35,7 @@ function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje)
 
     error_log('INFO: Telegram intento envio para cliente=' . $nombreCliente . ' chat_id=' . $chatId);
 
-    $textoAlerta = "💬 *¡Nuevo mensaje en bLife!*\n";
+    $textoAlerta = "💬 *¡Nuevo mensaje del sitio salud y bienestar!*\n";
     $textoAlerta .= "👤 *Cliente:* " . $nombreCliente . "\n";
     $textoAlerta .= "📝 *Mensaje:* " . $textoMensaje;
 
@@ -258,6 +258,89 @@ try {
         $stmt = $pdo->prepare("UPDATE usuarios SET ultimo_tecleo = NOW(), tecleando_para = ? WHERE id_usuario = ?");
         $stmt->execute([$target, $id_actual]);
         echo json_encode(['success' => true]);
+
+    } elseif ($action === 'debug_telegram') {
+        if (!isAdmin()) {
+            throw new Exception('No autorizado');
+        }
+
+        $enabledRaw = strtolower((string) (getEnvVar('TELEGRAM_NOTIFICATIONS_ENABLED', '1') ?? '1'));
+        $notificationsEnabled = in_array($enabledRaw, ['1', 'true', 'yes', 'on'], true);
+        $botToken = getEnvVar('TELEGRAM_BOT_TOKEN');
+        $chatId = getEnvVar('TELEGRAM_CHAT_ID');
+        $doSend = (string)($_GET['send'] ?? '0') === '1';
+
+        $result = [
+            'enabled_raw' => $enabledRaw,
+            'notifications_enabled' => $notificationsEnabled,
+            'token_loaded' => $botToken !== null,
+            'token_prefix' => $botToken !== null ? substr($botToken, 0, 10) : null,
+            'chat_id_loaded' => $chatId !== null,
+            'chat_id' => $chatId,
+            'curl_available' => function_exists('curl_init'),
+            'send_attempted' => false,
+            'send_ok' => null,
+            'http_code' => null,
+            'curl_error' => null,
+            'telegram_description' => null,
+            'telegram_body_snippet' => null,
+        ];
+
+        if ($doSend) {
+            $result['send_attempted'] = true;
+
+            if (!$notificationsEnabled) {
+                $result['send_ok'] = false;
+                $result['telegram_description'] = 'TELEGRAM_NOTIFICATIONS_ENABLED deshabilitado';
+            } elseif ($botToken === null || $chatId === null) {
+                $result['send_ok'] = false;
+                $result['telegram_description'] = 'Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID';
+            } elseif (!function_exists('curl_init')) {
+                $result['send_ok'] = false;
+                $result['telegram_description'] = 'curl no disponible';
+            } else {
+                $debugText = 'Debug Telegram bLife ' . date('Y-m-d H:i:s');
+                $url = 'https://api.telegram.org/bot' . $botToken . '/sendMessage';
+                $payload = http_build_query([
+                    'chat_id' => $chatId,
+                    'text' => $debugText,
+                ]);
+
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 12);
+                curl_setopt($ch, CURLOPT_HEADER, true);
+
+                $response = curl_exec($ch);
+                $curlError = curl_error($ch);
+                $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+                curl_close($ch);
+
+                $result['http_code'] = $httpCode;
+                $result['curl_error'] = $curlError !== '' ? $curlError : null;
+
+                if ($response === false) {
+                    $result['send_ok'] = false;
+                    $result['telegram_description'] = 'fallo de cURL';
+                } else {
+                    $body = substr($response, $headerSize);
+                    $parsed = json_decode($body, true);
+                    $ok = is_array($parsed) && !empty($parsed['ok']);
+                    $result['send_ok'] = $ok;
+                    $result['telegram_description'] = is_array($parsed) && isset($parsed['description']) && is_string($parsed['description'])
+                        ? $parsed['description']
+                        : null;
+                    $result['telegram_body_snippet'] = trim(substr((string)$body, 0, 300));
+                }
+            }
+        }
+
+        echo json_encode(['success' => true, 'debug' => $result]);
 
     } elseif ($action === 'send') {
         $data = json_decode(file_get_contents('php://input'), true);
