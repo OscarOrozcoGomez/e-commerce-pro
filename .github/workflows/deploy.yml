@@ -52,7 +52,9 @@ jobs:
           PORT="${PTF_PORT:-21}"
           echo "Preflight FTP: validando conectividad/autenticacion (max 30s) a ${SFTP_HOST}:${PORT}..."
 
-          if ! timeout 30 lftp -d -e "open -u '${SFTP_USER}','${SFTP_PASS}' 'ftp://${SFTP_HOST}:${PORT}'; set ftp:passive-mode true; set ssl:verify-certificate no; set ftp:ssl-allow no; ls; bye"; then
+          if timeout 30 lftp -d -e "open -u '${SFTP_USER}','${SFTP_PASS}' 'ftp://${SFTP_HOST}:${PORT}'; set ftp:passive-mode true; set ssl:verify-certificate no; set ftp:ssl-allow no; ls; bye"; then
+            echo "Preflight FTP OK."
+          else
             STATUS=$?
             if [ "${STATUS}" -eq 124 ]; then
               echo "::error::Preflight FTP timeout (30s). Posible bloqueo de red/firewall o host no accesible."
@@ -61,8 +63,6 @@ jobs:
             fi
             exit "${STATUS}"
           fi
-
-          echo "Preflight FTP OK."
 
   deploy:
     name: Upload changed files to Production via SFTP
@@ -198,7 +198,9 @@ jobs:
 
           if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
             echo "Ejecutando lote completo de comandos en una sola sesion..."
-            if ! timeout 360 lftp -d -f "${COMMANDS_FILE}"; then
+            if timeout 360 lftp -d -f "${COMMANDS_FILE}"; then
+              echo "Upload FTP completado."
+            else
               STATUS=$?
               if [ "${STATUS}" -eq 124 ]; then
                 echo "::error::Timeout en lftp (360s). Revisa conectividad FTP o credenciales."
