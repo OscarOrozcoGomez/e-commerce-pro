@@ -35,7 +35,18 @@ function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje)
 
     error_log('INFO: Telegram intento envio para cliente=' . $nombreCliente . ' chat_id=' . $chatId);
 
+    $appEnvRaw = defined('APP_ENV') ? strtolower((string) APP_ENV) : 'unknown';
+    $envLabel = 'DESCONOCIDO';
+    if (in_array($appEnvRaw, ['qa', 'test', 'testing'], true)) {
+        $envLabel = 'QA';
+    } elseif (in_array($appEnvRaw, ['production', 'prod'], true)) {
+        $envLabel = 'PRODUCCION';
+    } else {
+        $envLabel = strtoupper($appEnvRaw);
+    }
+
     $textoAlerta = "💬 *¡Nuevo mensaje del sitio salud y bienestar!*\n";
+    $textoAlerta .= "🏷️ *Ambiente:* " . $envLabel . "\n";
     $textoAlerta .= "👤 *Cliente:* " . $nombreCliente . "\n";
     $textoAlerta .= "📝 *Mensaje:* " . $textoMensaje;
 
