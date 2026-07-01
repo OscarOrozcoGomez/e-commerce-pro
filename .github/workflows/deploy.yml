@@ -86,14 +86,15 @@ jobs:
           # Crear archivo temporal para consolidar los comandos de lftp en un solo lote
           COMMANDS_FILE=$(mktemp)
           
-          # SOLUCIÓN AL CONFLICTO: Se inyecta la conexión implícita al principio del archivo de comandos
+          # AJUSTES DE RED ROBUSTOS: Modo Pasivo nativo y manejo de directivas SSL para Neubox
           echo "open -u '${SFTP_USER}','${SFTP_PASS}' 'ftp://${SFTP_HOST}:${PORT}';" >> "${COMMANDS_FILE}"
+          echo "set ftp:passive-mode true;" >> "${COMMANDS_FILE}"
           echo "set ssl:verify-certificate no;" >> "${COMMANDS_FILE}"
-          echo "set ftp:ssl-allow yes;" >> "${COMMANDS_FILE}"
-          echo "set net:max-retries 2;" >> "${COMMANDS_FILE}"
-          echo "set net:timeout 30;" >> "${COMMANDS_FILE}"
+          echo "set ftp:ssl-allow no;" >> "${COMMANDS_FILE}"
+          echo "set net:max-retries 4;" >> "${COMMANDS_FILE}"
+          echo "set net:timeout 20;" >> "${COMMANDS_FILE}"
           echo "set net:reconnect-interval-base 5;" >> "${COMMANDS_FILE}"
-          echo "set net:reconnect-interval-multiplier 1;" >> "${COMMANDS_FILE}"
+          echo "set net:reconnect-interval-multiplier 2;" >> "${COMMANDS_FILE}"
 
           HAS_FILES_TO_UPLOAD=false
 
@@ -135,7 +136,6 @@ jobs:
 
           if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
             echo "Ejecutando lote completo de comandos en una sola sesion..."
-            # Ahora lftp lee directamente el archivo estructurado sin chocar argumentos en la CLI
             lftp -f "${COMMANDS_FILE}"
           else
             echo "No hay archivos validos despues de aplicar filtros de exclusion."
