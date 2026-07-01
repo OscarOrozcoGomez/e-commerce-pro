@@ -4,11 +4,18 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       confirm_production:
         description: "Escribe DEPLOY para confirmar despliegue manual a produccion"
         required: true
+        default: ""
+      full_deploy:
+        description: "Escribe FULL para forzar subida completa de archivos (no solo cambios)"
+        required: false
         default: ""
 
 concurrency:
@@ -16,9 +23,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ftp_preflight:
+    name: FTP Preflight Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
+    env:
+      PTF_PORT: ${{ secrets.PTF_PORT }}
+    steps:
+      - name: Install FTP client (lftp)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
+      - name: Validate FTP connectivity/auth
+        env:
+          SFTP_HOST: ${{ secrets.PTF_HOST }}
+          SFTP_USER: ${{ secrets.PTF_USERNAME }}
+          SFTP_PASS: ${{ secrets.PTF_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SFTP_HOST}" ] || [ -z "${SFTP_USER}" ] || [ -z "${SFTP_PASS}" ]; then
+            echo "::error::Faltan PTF_HOST, PTF_USERNAME o PTF_PASSWORD en GitHub Secrets."
+            exit 1
+          fi
+
+          PORT="${PTF_PORT:-21}"
+          echo "Preflight FTP: validando conectividad/autenticacion (max 30s) a ${SFTP_HOST}:${PORT}..."
+
+          if ! timeout 30 lftp -d -e "open -u '${SFTP_USER}','${SFTP_PASS}' 'ftp://${SFTP_HOST}:${PORT}'; set ftp:passive-mode true; set ssl:verify-certificate no; set ftp:ssl-allow no; ls; bye"; then
+            STATUS=$?
+            if [ "${STATUS}" -eq 124 ]; then
+              echo "::error::Preflight FTP timeout (30s). Posible bloqueo de red/firewall o host no accesible."
+            else
+              echo "::error::Preflight FTP fallo con codigo ${STATUS}. Revisa host/usuario/password/puerto."
+            fi
+            exit "${STATUS}"
+          fi
+
+          echo "Preflight FTP OK."
+
   deploy:
     name: Upload changed files to Production via SFTP
+    needs: ftp_preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
     permissions:
       contents: read
@@ -39,11 +89,14 @@ jobs:
           sudo apt-get install -y lftp
 
       - name: Deploy changed files to Neubox via FTP
+        timeout-minutes: 12
         env:
           SFTP_HOST: ${{ secrets.PTF_HOST }}
           SFTP_USER: ${{ secrets.PTF_USERNAME }}
           SFTP_PASS: ${{ secrets.PTF_PASSWORD }}
         run: |
+          set -euo pipefail
+
           if [ -z "${SFTP_HOST}" ] || [ -z "${SFTP_USER}" ] || [ -z "${SFTP_PASS}" ]; then
             echo "Error: faltan PTF_HOST, PTF_USERNAME o PTF_PASSWORD en GitHub Secrets."
             exit 1
@@ -52,13 +105,19 @@ jobs:
           PORT="${PTF_PORT:-21}"
           echo "Iniciando deploy FTP optimizado a ${SFTP_HOST}:${PORT}..."
 
-          BASE_SHA="${{ github.event.before }}"
-          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
-            BASE_SHA="$(git rev-parse HEAD~1)"
-          fi
+          FORCE_FULL="${{ github.event.inputs.full_deploy || '' }}"
+          if [ "${FORCE_FULL}" = "FULL" ]; then
+            echo "Modo FULL activo: subiendo todos los archivos versionados (resync completo)."
+            CHANGED_FILES=$(git ls-files)
+          else
+            BASE_SHA="${{ github.event.before }}"
+            if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+              BASE_SHA="$(git rev-parse HEAD~1)"
+            fi
 
-          echo "Calculando cambios entre ${BASE_SHA} y ${GITHUB_SHA}"
-          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT "${BASE_SHA}" "${GITHUB_SHA}")
+            echo "Calculando cambios entre ${BASE_SHA} y ${GITHUB_SHA}"
+            CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT "${BASE_SHA}" "${GITHUB_SHA}")
+          fi
 
           if [ -z "${CHANGED_FILES}" ]; then
             echo "No hay archivos modificados para desplegar."
@@ -91,8 +150,11 @@ jobs:
           echo "set ftp:passive-mode true;" >> "${COMMANDS_FILE}"
           echo "set ssl:verify-certificate no;" >> "${COMMANDS_FILE}"
           echo "set ftp:ssl-allow no;" >> "${COMMANDS_FILE}"
+          echo "set cmd:fail-exit true;" >> "${COMMANDS_FILE}"
+          echo "set xfer:clobber true;" >> "${COMMANDS_FILE}"
           echo "set net:max-retries 4;" >> "${COMMANDS_FILE}"
           echo "set net:timeout 20;" >> "${COMMANDS_FILE}"
+          echo "set net:idle 20;" >> "${COMMANDS_FILE}"
           echo "set net:reconnect-interval-base 5;" >> "${COMMANDS_FILE}"
           echo "set net:reconnect-interval-multiplier 2;" >> "${COMMANDS_FILE}"
 
@@ -136,7 +198,15 @@ jobs:
 
           if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
             echo "Ejecutando lote completo de comandos en una sola sesion..."
-            lftp -f "${COMMANDS_FILE}"
+            if ! timeout 360 lftp -d -f "${COMMANDS_FILE}"; then
+              STATUS=$?
+              if [ "${STATUS}" -eq 124 ]; then
+                echo "::error::Timeout en lftp (360s). Revisa conectividad FTP o credenciales."
+              else
+                echo "::error::lftp fallo con codigo ${STATUS}."
+              fi
+              exit "${STATUS}"
+            fi
           else
             echo "No hay archivos validos despues de aplicar filtros de exclusion."
           fi
@@ -156,7 +226,10 @@ jobs:
           fi
 
       - name: Run remote DB migrations
+        timeout-minutes: 8
         run: |
+          set -euo pipefail
+
           ATTEMPTS=5
           DELAY_SECONDS=15
           LAST_HTTP_CODE=""
