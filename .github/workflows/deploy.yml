@@ -94,7 +94,8 @@ jobs:
 
           HAS_FILES_TO_UPLOAD=false
 
-          while IFS= read -r file; do
+          # Cambiado a tubería estándar para evitar el error de sintaxis en Bash
+          echo "${CHANGED_FILES}" | while IFS= read -r file; do
             [ -z "${file}" ] && continue
 
             if should_skip_file "${file}"; then
@@ -117,14 +118,20 @@ jobs:
             echo "Programando subida de: ${file} -> ${remote_dir}/"
             echo "mkdir -p '${remote_dir}';" >> "${COMMANDS_FILE}"
             echo "put -O '${remote_dir}' '${file}';" >> "${COMMANDS_FILE}"
+            
+            # Usamos un archivo bandera temporal para transferir el estado fuera del subshell del pipe
+            echo "true" > /tmp/has_files
+          done
+
+          if [ -f /tmp/has_files ]; then
             HAS_FILES_TO_UPLOAD=true
-          } <<< "${CHANGED_FILES}"
+            rm -f /tmp/has_files
+          fi
 
           echo "bye" >> "${COMMANDS_FILE}"
 
           if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
             echo "Ejecutando lote completo de comandos en una sola sesion..."
-            # CORRECCIÓN AQUÍ: Se mueve el flag -f antes del host/protocolo
             lftp -u "${SFTP_USER}","${SFTP_PASS}" -f "${COMMANDS_FILE}" "ftp://${SFTP_HOST}:${PORT}"
           else
             echo "No hay archivos validos despues de aplicar filtros de exclusion."
@@ -164,7 +171,7 @@ jobs:
               --silent \
               --output /tmp/migrations_response.json \
               --write-out "%{http_code}" \
-              --encrypted-url "${MIGRATIONS_URL}" || true)
+              "${MIGRATIONS_URL}" || true)
 
             if [ "${LAST_HTTP_CODE}" = "200" ]; then
               echo "Migraciones ejecutadas correctamente. Respuesta:"
