@@ -203,6 +203,9 @@ function preloadSecretSources(): void
             'DB_CHARSET' => ['DB_CHARSET'],
             'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
             'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
+            'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
+            'TELEGRAM_CHAT_ID' => ['TELEGRAM_CHAT_ID'],
+            'TELEGRAM_NOTIFICATIONS_ENABLED' => ['TELEGRAM_NOTIFICATIONS_ENABLED'],
         ];
 
         if (function_exists('gsmLoadSecretsCached')) {
@@ -253,6 +256,10 @@ function preloadSecretSources(): void
         if ($normalizedEnv === 'local' && !in_array('qa', $envSuffixCandidates, true)) {
             $envSuffixCandidates[] = 'qa';
         }
+    }
+
+    if (empty($envSuffixCandidates) && $isLocalContext) {
+        $envSuffixCandidates = ['qa', 'local'];
     }
 
     $baseCandidates = [
