@@ -126,13 +126,6 @@ try {
     if ($method === 'POST') {
         $payload = json_decode(file_get_contents('php://input'), true) ?: [];
         $action = (string)($payload['action'] ?? 'toggle');
-        $productId = (int)($payload['id_producto'] ?? 0);
-
-        if ($productId <= 0) {
-            http_response_code(400);
-            echo json_encode(['success' => false, 'error' => 'id_producto invalido']);
-            exit;
-        }
 
         if ($action !== 'toggle' && $action !== 'remove' && $action !== 'sync') {
             http_response_code(400);
@@ -165,6 +158,13 @@ try {
                 'success' => true,
                 'count' => favoritesCount($pdo, $userId),
             ]);
+            exit;
+        }
+
+        $productId = (int)($payload['id_producto'] ?? 0);
+        if ($productId <= 0) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'id_producto invalido']);
             exit;
         }
 

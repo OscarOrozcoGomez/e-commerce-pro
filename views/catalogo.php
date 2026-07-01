@@ -91,7 +91,7 @@ if (!empty($busqueda)) {
 
 // --- Lógica para obtener y filtrar productos ---
 $pdo = getPDO();
-$sql = "SELECT p.*,         COALESCE(p.imagen, (SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto) ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC LIMIT 1), p.imagen_url) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
+$sql = "SELECT p.*,         COALESCE(NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto) ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC LIMIT 1), ''), NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
         (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
         FROM productos p";
 $params = [];
@@ -297,7 +297,7 @@ include __DIR__ . '/includes/header.php';
                                 <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
                                     <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                                         <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
-                                        <img src="<?php echo $imgSrc; ?>" loading="lazy" style="max-height: 100%; width: auto; object-fit: contain;">
+                                        <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" style="max-height: 100%; width: auto; object-fit: contain;">
                                     </div>
                                     <div class="card-content" style="flex-grow: 1;">
                                         <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
