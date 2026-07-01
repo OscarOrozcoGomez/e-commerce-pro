@@ -22,15 +22,18 @@ function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje)
     $enabledRaw = strtolower((string) (getEnvVar('TELEGRAM_NOTIFICATIONS_ENABLED', '1') ?? '1'));
     $notificationsEnabled = in_array($enabledRaw, ['1', 'true', 'yes', 'on'], true);
     if (!$notificationsEnabled) {
+        error_log('INFO: Telegram notificaciones deshabilitadas por TELEGRAM_NOTIFICATIONS_ENABLED=' . $enabledRaw);
         return;
     }
 
     $botToken = getEnvVar('TELEGRAM_BOT_TOKEN');
     $chatId = getEnvVar('TELEGRAM_CHAT_ID');
     if ($botToken === null || $chatId === null) {
-        // No interrumpir el flujo del chat si faltan credenciales de Telegram.
+        error_log('WARNING: Telegram credenciales incompletas. token=' . ($botToken !== null ? 'set' : 'null') . ' chat_id=' . ($chatId !== null ? 'set' : 'null'));
         return;
     }
+
+    error_log('INFO: Telegram intento envio para cliente=' . $nombreCliente . ' chat_id=' . $chatId);
 
     $textoAlerta = "💬 *¡Nuevo mensaje en bLife!*\n";
     $textoAlerta .= "👤 *Cliente:* " . $nombreCliente . "\n";
@@ -54,11 +57,33 @@ function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje)
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    // Habilitamos encabezados para diagnostico de respuestas no JSON o proxys intermedios.
+    curl_setopt($ch, CURLOPT_HEADER, true);
     $response = curl_exec($ch);
-    if ($response === false) {
-        error_log('WARNING: fallo al enviar notificacion a Telegram.');
-    }
+    $curlError = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
     curl_close($ch);
+
+    if ($response === false) {
+        error_log('WARNING: fallo al enviar notificacion a Telegram. cURL=' . ($curlError !== '' ? $curlError : 'unknown'));
+        return;
+    }
+
+    $body = substr($response, $headerSize);
+    $parsed = json_decode($body, true);
+    $ok = is_array($parsed) && !empty($parsed['ok']);
+
+    if (!$ok) {
+        $description = is_array($parsed) && isset($parsed['description']) && is_string($parsed['description'])
+            ? $parsed['description']
+            : 'respuesta no valida';
+        $bodySnippet = trim(substr((string)$body, 0, 220));
+        error_log('WARNING: Telegram API rechazo notificacion. HTTP=' . $httpCode . ' DESC=' . $description . ' BODY=' . $bodySnippet);
+        return;
+    }
+
+    error_log('INFO: Telegram OK HTTP=' . $httpCode);
 }
 
 try {
