@@ -63,6 +63,13 @@ function catalogDebugLog(string $event, array $data = []): void
     error_log('CATALOGO_DEBUG ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }
 
+function catalogBindNamedParams(PDOStatement $stmt, array $params): void
+{
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+    }
+}
+
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
 $busqueda = $_GET['search'] ?? '';
 $page = max(1, (int)($_GET['page'] ?? 1));
@@ -84,7 +91,7 @@ if (!empty($busqueda)) {
 
 // --- Lógica para obtener y filtrar productos ---
 $pdo = getPDO();
-$sql = "SELECT p.*,         COALESCE(p.imagen, (SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto) ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC LIMIT 1), p.imagen_url) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
+$sql = "SELECT p.*,         COALESCE(NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto) ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC LIMIT 1), ''), NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
         (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
         FROM productos p";
 $params = [];
@@ -145,7 +152,8 @@ if ($isSearchRequest) {
 }
 
 try {
-    $stmtCount->execute($countParams);
+    catalogBindNamedParams($stmtCount, $countParams);
+    $stmtCount->execute();
     $totalProductos = (int)$stmtCount->fetchColumn();
 } catch (PDOException $e) {
     if ($isSearchRequest) {
@@ -273,6 +281,8 @@ include __DIR__ . '/includes/header.php';
             <h4 class="grey-text text-darken-3" style="font-weight: 300; margin-bottom: 30px;">
                 <?php echo empty($categoriaSeleccionada) ? 'Explorar Catálogo' : 'Categoría: ' . esc($categoriaSeleccionada); ?>
             </h4>
+
+            <div id="catalog-meta" data-total-products="<?php echo (int)$totalProductos; ?>" data-items-per-page="<?php echo (int)$itemsPerPage; ?>" style="display:none;"></div>
             
             <div class="row row-products">
                 <?php if (empty($productos)): ?>
@@ -287,7 +297,7 @@ include __DIR__ . '/includes/header.php';
                                 <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
                                     <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                                         <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
-                                        <img src="<?php echo $imgSrc; ?>" loading="lazy" style="max-height: 100%; width: auto; object-fit: contain;">
+                                        <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" style="max-height: 100%; width: auto; object-fit: contain;">
                                     </div>
                                     <div class="card-content" style="flex-grow: 1;">
                                         <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
@@ -339,6 +349,120 @@ include __DIR__ . '/includes/header.php';
 <script>
 const searchInput = document.getElementById('search-input');
 const clearSearchBtn = document.getElementById('clear-search-btn');
+const searchForm = searchInput ? searchInput.closest('form') : null;
+const initialSearchQuery = normalizeFilterText(searchInput ? searchInput.value : '');
+let lastRequestedQuery = initialSearchQuery;
+let searchDebounceTimer = null;
+let activeSearchController = null;
+
+function normalizeFilterText(value) {
+    return String(value || '').toLowerCase().trim();
+}
+
+function applyLiveCatalogFilter() {
+    const query = normalizeFilterText(searchInput.value);
+    const cards = document.querySelectorAll('.product-card-container');
+
+    cards.forEach(card => {
+        const name = normalizeFilterText(card.getAttribute('data-name'));
+        const sku = normalizeFilterText(card.getAttribute('data-sku'));
+        const matches = query === '' || name.includes(query) || sku.includes(query);
+        card.style.display = matches ? '' : 'none';
+    });
+}
+
+function triggerServerSearch() {
+    if (!searchForm || !searchInput) {
+        return;
+    }
+
+    const query = normalizeFilterText(searchInput.value);
+    if (query === lastRequestedQuery) {
+        return;
+    }
+
+    lastRequestedQuery = query;
+
+    const action = searchForm.getAttribute('action') || window.location.pathname;
+    const url = new URL(action, window.location.href);
+    const formData = new FormData(searchForm);
+
+    formData.forEach((value, key) => {
+        const normalized = String(value || '').trim();
+        if (normalized !== '') {
+            url.searchParams.set(key, normalized);
+        }
+    });
+
+    // Siempre reiniciamos al inicio en una nueva búsqueda.
+    url.searchParams.set('page', '1');
+    url.searchParams.delete('ajax');
+
+    if (activeSearchController) {
+        activeSearchController.abort();
+    }
+    activeSearchController = new AbortController();
+
+    const selectionStart = searchInput.selectionStart;
+    const selectionEnd = searchInput.selectionEnd;
+    const selectionDirection = searchInput.selectionDirection;
+    const currentValue = searchInput.value;
+
+    fetch(url.toString(), { signal: activeSearchController.signal })
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            const currentProductsRow = document.querySelector('.row-products');
+            const newProductsRow = doc.querySelector('.row-products');
+            if (currentProductsRow && newProductsRow) {
+                currentProductsRow.innerHTML = newProductsRow.innerHTML;
+            }
+
+            const currentMeta = document.getElementById('catalog-meta');
+            const newMeta = doc.getElementById('catalog-meta');
+            if (currentMeta && newMeta) {
+                currentMeta.dataset.totalProducts = newMeta.dataset.totalProducts || '0';
+                currentMeta.dataset.itemsPerPage = newMeta.dataset.itemsPerPage || currentMeta.dataset.itemsPerPage || '9';
+            }
+
+            const existingLoadMore = document.getElementById('load-more-container');
+            if (existingLoadMore) {
+                existingLoadMore.remove();
+            }
+
+            const newLoadMore = doc.getElementById('load-more-container');
+            const productsRow = document.querySelector('.row-products');
+            if (newLoadMore && productsRow && productsRow.parentNode) {
+                productsRow.parentNode.insertBefore(newLoadMore, productsRow.nextSibling);
+            }
+
+            currentPage = 1;
+            bindLoadMoreHandler();
+
+            const browserUrl = new URL(window.location.href);
+            browserUrl.searchParams.set('page', '1');
+            if (query === '') {
+                browserUrl.searchParams.delete('search');
+            } else {
+                browserUrl.searchParams.set('search', query);
+            }
+            window.history.replaceState({ path: browserUrl.href }, '', browserUrl.href);
+
+            searchInput.focus();
+            searchInput.value = currentValue;
+            if (selectionStart !== null && selectionEnd !== null) {
+                searchInput.setSelectionRange(selectionStart, selectionEnd, selectionDirection || 'none');
+            }
+        })
+        .catch(err => {
+            if (err && err.name === 'AbortError') {
+                return;
+            }
+            console.error('Error en búsqueda en vivo:', err);
+        });
+}
 
 function toggleClearButton() {
     if (searchInput.value.length > 0) {
@@ -348,7 +472,16 @@ function toggleClearButton() {
     }
 }
 
-searchInput.addEventListener('input', toggleClearButton);
+searchInput.addEventListener('input', function() {
+    toggleClearButton();
+    applyLiveCatalogFilter();
+
+    if (searchDebounceTimer) {
+        clearTimeout(searchDebounceTimer);
+    }
+
+    searchDebounceTimer = setTimeout(triggerServerSearch, 380);
+});
 
 clearSearchBtn.addEventListener('click', function() {
     searchInput.value = '';
@@ -357,13 +490,20 @@ clearSearchBtn.addEventListener('click', function() {
 });
 
 let currentPage = <?php echo $page; ?>;
-const totalProducts = <?php echo $totalProductos; ?>;
-const itemsPerPage = <?php echo $itemsPerPage; ?>;
 
-document.getElementById('load-more-btn')?.addEventListener('click', function() {
+function getCatalogMeta() {
+    const meta = document.getElementById('catalog-meta');
+    return {
+        totalProducts: parseInt(meta?.dataset.totalProducts || '0', 10) || 0,
+        itemsPerPage: parseInt(meta?.dataset.itemsPerPage || '<?php echo (int)$itemsPerPage; ?>', 10) || <?php echo (int)$itemsPerPage; ?>,
+    };
+}
+
+function handleLoadMoreClick() {
     const btn = this;
     const spinner = document.getElementById('load-more-spinner');
     const container = document.getElementById('load-more-container');
+    const meta = getCatalogMeta();
 
     btn.style.display = 'none';
     spinner.style.display = 'block';
@@ -387,7 +527,7 @@ document.getElementById('load-more-btn')?.addEventListener('click', function() {
             });
 
             // Actualizar estado del botón
-            if ((currentPage * itemsPerPage) >= totalProducts) {
+            if ((currentPage * meta.itemsPerPage) >= meta.totalProducts) {
                 container.remove(); // Ocultar el contenedor del botón si no hay más
             } else {
                 btn.style.display = 'block';
@@ -406,7 +546,16 @@ document.getElementById('load-more-btn')?.addEventListener('click', function() {
             spinner.style.display = 'none';
             currentPage--; // Revertir el incremento de página si falló
         });
-});
+}
+
+function bindLoadMoreHandler() {
+    const btn = document.getElementById('load-more-btn');
+    if (!btn) {
+        return;
+    }
+    btn.removeEventListener('click', handleLoadMoreClick);
+    btn.addEventListener('click', handleLoadMoreClick);
+}
 
 // Si el usuario usa los botones de atrás/adelante del navegador
 window.addEventListener('popstate', function(event) {
@@ -418,6 +567,7 @@ window.addEventListener('popstate', function(event) {
 });
 
 toggleClearButton(); // Ejecutar al cargar por si la página ya tiene un valor de búsqueda
+bindLoadMoreHandler();
 
 function handleAddToCart(event, id, nombre, precio) {
     // Detenemos la propagación para que no se active el enlace de la tarjeta

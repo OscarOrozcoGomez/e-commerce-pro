@@ -45,7 +45,7 @@ function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje)
         $envLabel = strtoupper($appEnvRaw);
     }
 
-    $textoAlerta = "💬 *¡Nuevo mensaje del sitio salud y bienestar!*\n";
+    $textoAlerta = "💬 *¡Nuevo mensaje de salud y bienestar!*\n";
     $textoAlerta .= "🏷️ *Ambiente:* " . $envLabel . "\n";
     $textoAlerta .= "👤 *Cliente:* " . $nombreCliente . "\n";
     $textoAlerta .= "📝 *Mensaje:* " . $textoMensaje;

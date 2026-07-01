@@ -32,6 +32,9 @@ if ($sessionIdleTimeoutEnv === false) {
 $sessionIdleTimeout = is_numeric($sessionIdleTimeoutEnv) ? (int)$sessionIdleTimeoutEnv : 604800;
 
 if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.gc_maxlifetime', (string) $sessionIdleTimeout);
+    ini_set('session.cookie_lifetime', (string) $sessionIdleTimeout);
+
     session_set_cookie_params([
         'lifetime' => $sessionIdleTimeout,
         'path' => '/',
@@ -42,9 +45,6 @@ if (session_status() === PHP_SESSION_NONE) {
     ]);
     session_start();
 }
-
-ini_set('session.gc_maxlifetime', (string) $sessionIdleTimeout);
-ini_set('session.cookie_lifetime', (string) $sessionIdleTimeout);
 
 $sessionRotateIntervalEnv = getenv('SESSION_ROTATE_INTERVAL');
 if ($sessionRotateIntervalEnv === false) {
