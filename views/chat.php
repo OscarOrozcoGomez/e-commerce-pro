@@ -867,7 +867,7 @@ function renderProductCard(p, isMe) {
     const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
-    const stock = parseInt(p.cantidad_actual) || 0;
+    const stock = Math.max(0, parseInt(p.chat_stock ?? p.total_stock ?? p.cantidad_actual) || 0);
     const isAvailable = stock > 0;
 
     return `

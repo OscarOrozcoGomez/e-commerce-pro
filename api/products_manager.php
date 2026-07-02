@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/chat_utils.php';
 
 header('Content-Type: application/json');
 
@@ -22,7 +23,8 @@ try {
             $sql = "SELECT p.*, 
                     (SELECT pi2.ruta_archivo FROM producto_imagenes pi2 WHERE pi2.id_producto = p.id_producto ORDER BY pi2.orden ASC LIMIT 1) as imagen,
                     GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids, 
-                    GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual 
+                    GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual,
+                    COALESCE((SELECT SUM(ia_total.cantidad_actual) FROM inventario_almacen ia_total WHERE ia_total.id_producto = p.id_producto), 0) as total_stock 
                     FROM productos p 
                     LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
                     LEFT JOIN producto_imagenes pi ON p.id_producto = pi.id_producto
@@ -32,7 +34,7 @@ try {
                     ORDER BY p.nombre";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':id_alm' => $id_alm]);
-            echo json_encode(['success' => true, 'data' => $stmt->fetchAll()]);
+            echo json_encode(['success' => true, 'data' => normalizeChatProductList($stmt->fetchAll())]);
         } 
         elseif ($action === 'get_dependencies') {
             // Carga almacenes y categorías para los dropdowns
