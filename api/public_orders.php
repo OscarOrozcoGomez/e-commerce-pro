@@ -62,6 +62,15 @@ if (!$data || empty($data['items'])) {
     exit;
 }
 
+// El checkout web solo esta disponible para cuentas de cliente.
+if (isAuthenticated() && !isCliente()) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Tu cuenta no tiene permisos para comprar en esta seccion. Usa una cuenta de cliente.',
+    ]);
+    exit;
+}
+
 // Si el usuario está logueado, vinculamos el pedido a su cuenta automáticamente
 if (isAuthenticated()) {
     $usuario = $_SESSION['usuario'];

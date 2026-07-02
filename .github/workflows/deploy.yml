@@ -41,6 +41,32 @@ jobs:
           echo "Changed files in this deployment (before -> after):"
           git diff --name-status "${{ github.event.before }}" "${{ github.sha }}"
 
+      - name: Guard migration immutability (push)
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          BEFORE_SHA="${{ github.event.before }}"
+          AFTER_SHA="${{ github.sha }}"
+
+          # Si es un push inicial sin before valido, no hay base para diff.
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "Push inicial detectado; se omite validacion de inmutabilidad por falta de base."
+            exit 0
+          fi
+
+          echo "Validando que no se editen ni borren migraciones historicas..."
+          CHANGED_NON_ADDED=$(git diff --name-status "$BEFORE_SHA" "$AFTER_SHA" -- database/migrations/*.sql | awk '$1 != "A" {print $0}')
+
+          if [ -n "$CHANGED_NON_ADDED" ]; then
+            echo "ERROR: Detectadas migraciones historicas modificadas o eliminadas."
+            echo "$CHANGED_NON_ADDED"
+            echo "Regla: en database/migrations solo se permiten archivos nuevos (A)."
+            echo "Crea una migracion nueva en lugar de editar una ya existente."
+            exit 1
+          fi
+
+          echo "OK: solo hay migraciones nuevas o sin cambios en historial."
+
       - name: Validate FTP settings
         run: |
           set -euo pipefail

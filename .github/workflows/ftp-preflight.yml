@@ -44,6 +44,26 @@ jobs:
           echo "Changed files in this PR (base -> head):"
           git diff --name-status "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
+      - name: Guard migration immutability (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          echo "Validando que no se editen ni borren migraciones historicas..."
+          CHANGED_NON_ADDED=$(git diff --name-status "$BASE_SHA" "$HEAD_SHA" -- database/migrations/*.sql | awk '$1 != "A" {print $0}')
+
+          if [ -n "$CHANGED_NON_ADDED" ]; then
+            echo "ERROR: Detectadas migraciones historicas modificadas o eliminadas."
+            echo "$CHANGED_NON_ADDED"
+            echo "Regla: en database/migrations solo se permiten archivos nuevos (A)."
+            echo "Crea una migracion nueva en lugar de editar una ya existente."
+            exit 1
+          fi
+
+          echo "OK: solo hay migraciones nuevas o sin cambios en historial."
+
       - name: Validate FTP settings
         run: |
           set -euo pipefail

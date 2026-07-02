@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS `sucursal_incentivos` (
   `activo` TINYINT(1) NOT NULL DEFAULT 1,
   `descuento_porcentaje` DECIMAL(6,2) NOT NULL DEFAULT 5.00,
   `descuento_fijo` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `descuento_por_piezas_json` JSON DEFAULT NULL,
   `subtotal_minimo` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `piezas_minimas` INT UNSIGNED NOT NULL DEFAULT 1,
   `tope_descuento` DECIMAL(10,2) NOT NULL DEFAULT 0.00,

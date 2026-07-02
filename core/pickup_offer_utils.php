@@ -2,7 +2,71 @@
 declare(strict_types=1);
 
 /**
- * @return array{activo:bool, descuento_porcentaje:float, descuento_fijo:float, subtotal_minimo:float, piezas_minimas:int, tope_descuento:float, mensaje_publico:string}
+ * @param mixed $raw
+ * @return array<int,float>
+ */
+function parsePickupPieceDiscountMap($raw): array
+{
+    $normalized = [];
+
+    if (is_string($raw)) {
+        $trimmed = trim($raw);
+        if ($trimmed !== '') {
+            $decoded = json_decode($trimmed, true);
+            if (is_array($decoded)) {
+                $raw = $decoded;
+            }
+        }
+    }
+
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    foreach ($raw as $piecesRaw => $discountRaw) {
+        $pieces = (int)$piecesRaw;
+        $discount = round(max(0.0, (float)$discountRaw), 2);
+        if ($pieces <= 0 || $discount <= 0) {
+            continue;
+        }
+        $normalized[$pieces] = $discount;
+    }
+
+    if (empty($normalized)) {
+        return [];
+    }
+
+    ksort($normalized, SORT_NUMERIC);
+    return $normalized;
+}
+
+/**
+ * @param array<int,float> $pieceDiscountMap
+ */
+function resolvePieceTierDiscountTotal(int $pieces, array $pieceDiscountMap): float
+{
+    if ($pieces <= 0 || empty($pieceDiscountMap)) {
+        return 0.0;
+    }
+
+    if (isset($pieceDiscountMap[$pieces])) {
+        return (float)$pieceDiscountMap[$pieces];
+    }
+
+    $eligibleDiscount = 0.0;
+    foreach ($pieceDiscountMap as $minPieces => $discountTotal) {
+        if ($pieces >= (int)$minPieces) {
+            $eligibleDiscount = (float)$discountTotal;
+            continue;
+        }
+        break;
+    }
+
+    return round(max(0.0, $eligibleDiscount), 2);
+}
+
+/**
+ * @return array{activo:bool, descuento_porcentaje:float, descuento_fijo:float, subtotal_minimo:float, piezas_minimas:int, tope_descuento:float, mensaje_publico:string, descuento_por_piezas_json:string, descuentos_por_pieza:array<int,float>}
  */
 function getPickupOfferSettings(PDO $pdo): array
 {
@@ -14,14 +78,18 @@ function getPickupOfferSettings(PDO $pdo): array
         'piezas_minimas' => 1,
         'tope_descuento' => 0.0,
         'mensaje_publico' => '',
+        'descuento_por_piezas_json' => '{}',
+        'descuentos_por_pieza' => [],
     ];
 
     try {
-        $stmt = $pdo->query("SELECT activo, descuento_porcentaje, descuento_fijo, subtotal_minimo, piezas_minimas, tope_descuento, mensaje_publico FROM sucursal_incentivos WHERE id_regla = 1 LIMIT 1");
+        $stmt = $pdo->query("SELECT activo, descuento_porcentaje, descuento_fijo, subtotal_minimo, piezas_minimas, tope_descuento, mensaje_publico, descuento_por_piezas_json FROM sucursal_incentivos WHERE id_regla = 1 LIMIT 1");
         $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
         if (!$row) {
             return $defaults;
         }
+
+        $pieceMap = parsePickupPieceDiscountMap($row['descuento_por_piezas_json'] ?? '{}');
 
         return [
             'activo' => ((int)($row['activo'] ?? 0)) === 1,
@@ -31,6 +99,8 @@ function getPickupOfferSettings(PDO $pdo): array
             'piezas_minimas' => max(1, (int)($row['piezas_minimas'] ?? 1)),
             'tope_descuento' => max(0.0, (float)($row['tope_descuento'] ?? 0)),
             'mensaje_publico' => trim((string)($row['mensaje_publico'] ?? '')) ?: $defaults['mensaje_publico'],
+            'descuento_por_piezas_json' => json_encode($pieceMap, JSON_UNESCAPED_UNICODE),
+            'descuentos_por_pieza' => $pieceMap,
         ];
     } catch (Throwable $e) {
         return $defaults;
@@ -38,7 +108,7 @@ function getPickupOfferSettings(PDO $pdo): array
 }
 
 /**
- * @param array{activo:bool, descuento_porcentaje:float, descuento_fijo:float, subtotal_minimo:float, piezas_minimas:int, tope_descuento:float, mensaje_publico:string} $settings
+ * @param array{activo:bool, descuento_porcentaje:float, descuento_fijo:float, subtotal_minimo:float, piezas_minimas:int, tope_descuento:float, mensaje_publico:string, descuento_por_piezas_json?:string, descuentos_por_pieza?:array<int,float>} $settings
  * @return array{subtotal:float, piezas:int, elegible:bool, ahorro:float, total_sucursal:float, faltante_subtotal:float, faltante_piezas:int}
  */
 function calculatePickupOffer(float $subtotal, int $pieces, array $settings): array
@@ -46,18 +116,13 @@ function calculatePickupOffer(float $subtotal, int $pieces, array $settings): ar
     $subtotal = max(0.0, round($subtotal, 2));
     $pieces = max(0, $pieces);
 
-    $faltanteSubtotal = max(0.0, round(((float)$settings['subtotal_minimo']) - $subtotal, 2));
-    $faltantePiezas = max(0, ((int)$settings['piezas_minimas']) - $pieces);
-    $elegible = (bool)$settings['activo'] && $faltanteSubtotal <= 0 && $faltantePiezas <= 0;
+    $pieceMap = parsePickupPieceDiscountMap($settings['descuentos_por_pieza'] ?? ($settings['descuento_por_piezas_json'] ?? []));
+    $hasDiscountMap = !empty($pieceMap);
+    $elegible = (bool)$settings['activo'] && $hasDiscountMap;
 
     $ahorro = 0.0;
     if ($elegible) {
-        $ahorroPorcentaje = round($subtotal * ((float)$settings['descuento_porcentaje'] / 100), 2);
-        $ahorro = $ahorroPorcentaje + (float)$settings['descuento_fijo'];
-        $tope = (float)$settings['tope_descuento'];
-        if ($tope > 0) {
-            $ahorro = min($ahorro, $tope);
-        }
+        $ahorro = resolvePieceTierDiscountTotal($pieces, $pieceMap);
         $ahorro = min($ahorro, $subtotal);
         $ahorro = round(max(0.0, $ahorro), 2);
     }
@@ -68,7 +133,7 @@ function calculatePickupOffer(float $subtotal, int $pieces, array $settings): ar
         'elegible' => $elegible,
         'ahorro' => $ahorro,
         'total_sucursal' => round(max(0.0, $subtotal - $ahorro), 2),
-        'faltante_subtotal' => $faltanteSubtotal,
-        'faltante_piezas' => $faltantePiezas,
+        'faltante_subtotal' => 0.0,
+        'faltante_piezas' => 0,
     ];
 }

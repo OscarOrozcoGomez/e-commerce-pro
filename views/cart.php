@@ -6,6 +6,7 @@ require_once __DIR__ . '/../core/pickup_offer_utils.php';
 $pageTitle = 'Mi Carrito de Compras';
 $usuarioLogueado = $_SESSION['usuario'] ?? null;
 $isUserAuthenticated = isAuthenticated(); // Obtener el estado de autenticación de PHP
+$isClienteRole = $isUserAuthenticated && isCliente();
 
 $direcciones = [];
 if ($isUserAuthenticated && isCliente()) {
@@ -295,39 +296,68 @@ include __DIR__ . '/includes/header.php';
         });
 
         document.getElementById('cart-total-display').textContent = total.toFixed(2);
-    renderPickupOfferBanner(total, totalPieces, cart.length > 0);
+        renderPickupOfferBanner(total, totalPieces, cart.length > 0);
 
         // Mostrar u ocultar el botón de vaciar según si hay items
         const btnEmpty = document.getElementById('btn-empty-cart');
         if (btnEmpty) btnEmpty.style.display = cart.length > 0 ? 'inline-block' : 'none';
     }
 
+    function resolvePieceTierDiscountClient(pieces, settings) {
+        const source = settings?.descuentos_por_pieza;
+        if (!source || typeof source !== 'object') return 0;
+
+        const tiers = Object.entries(source)
+            .map(([qty, discount]) => ({
+                qty: parseInt(qty, 10),
+                discount: Math.max(0, parseFloat(discount) || 0)
+            }))
+            .filter((tier) => Number.isInteger(tier.qty) && tier.qty > 0 && tier.discount > 0)
+            .sort((a, b) => a.qty - b.qty);
+
+        if (tiers.length === 0) return 0;
+
+        const exact = tiers.find((tier) => tier.qty === pieces);
+        if (exact) return exact.discount;
+
+        let fallback = 0;
+        tiers.forEach((tier) => {
+            if (pieces >= tier.qty) fallback = tier.discount;
+        });
+        return fallback;
+    }
+
+    function resolveMissingPiecesForFirstTier(pieces, settings) {
+        const source = settings?.descuentos_por_pieza;
+        if (!source || typeof source !== 'object') return 0;
+
+        const tiers = Object.keys(source)
+            .map((qty) => parseInt(qty, 10))
+            .filter((qty) => Number.isInteger(qty) && qty > 0)
+            .sort((a, b) => a - b);
+
+        if (tiers.length === 0) return 0;
+        return Math.max(0, tiers[0] - Math.max(0, parseInt(pieces, 10) || 0));
+    }
+
     function calculatePickupOfferClient(subtotal, pieces, settings) {
         const subtotalNum = Math.max(0, parseFloat(subtotal) || 0);
         const piezasNum = Math.max(0, parseInt(pieces, 10) || 0);
-        const minSubtotal = Math.max(0, parseFloat(settings.subtotal_minimo) || 0);
-        const minPiezas = Math.max(1, parseInt(settings.piezas_minimas, 10) || 1);
-        const percent = Math.max(0, parseFloat(settings.descuento_porcentaje) || 0);
-        const fixed = Math.max(0, parseFloat(settings.descuento_fijo) || 0);
-        const cap = Math.max(0, parseFloat(settings.tope_descuento) || 0);
         const activo = !!settings.activo;
-
-        const faltanteSubtotal = Math.max(0, +(minSubtotal - subtotalNum).toFixed(2));
-        const faltantePiezas = Math.max(0, minPiezas - piezasNum);
-        const elegible = activo && faltanteSubtotal <= 0 && faltantePiezas <= 0;
+        const tierDiscount = resolvePieceTierDiscountClient(piezasNum, settings);
+        const faltantePiezas = resolveMissingPiecesForFirstTier(piezasNum, settings);
+        const elegible = activo && tierDiscount > 0;
 
         let ahorro = 0;
         if (elegible) {
-            ahorro = +(subtotalNum * (percent / 100) + fixed).toFixed(2);
-            if (cap > 0) ahorro = Math.min(ahorro, cap);
-            ahorro = Math.min(ahorro, subtotalNum);
+            ahorro = Math.min(+tierDiscount.toFixed(2), subtotalNum);
         }
 
         return {
             elegible,
             ahorro: +ahorro.toFixed(2),
             totalSucursal: +(subtotalNum - ahorro).toFixed(2),
-            faltanteSubtotal,
+            faltanteSubtotal: 0,
             faltantePiezas
         };
     }
@@ -337,9 +367,14 @@ include __DIR__ . '/includes/header.php';
         const text = document.getElementById('pickup-offer-message');
         if (!banner || !text) return;
 
-        const percent = Math.max(0, parseFloat(PICKUP_OFFER_SETTINGS?.descuento_porcentaje) || 0);
-        const fixed = Math.max(0, parseFloat(PICKUP_OFFER_SETTINGS?.descuento_fijo) || 0);
-        const hasDiscountConfig = percent > 0 || fixed > 0;
+        const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaActual !== 'Domicilio') {
+            banner.style.display = 'none';
+            return;
+        }
+
+        const tierDiscount = resolvePieceTierDiscountClient(Math.max(1, parseInt(pieces, 10) || 1), PICKUP_OFFER_SETTINGS);
+        const hasDiscountConfig = tierDiscount > 0 || resolveMissingPiecesForFirstTier(pieces, PICKUP_OFFER_SETTINGS) > 0;
 
         if (!CAN_VIEW_PICKUP_OFFER || !hasItems || !PICKUP_OFFER_SETTINGS || !PICKUP_OFFER_SETTINGS.activo || !hasDiscountConfig) {
             banner.style.display = 'none';
@@ -347,7 +382,7 @@ include __DIR__ . '/includes/header.php';
         }
 
         const calc = calculatePickupOfferClient(subtotal, pieces, PICKUP_OFFER_SETTINGS);
-        const msgBase = (PICKUP_OFFER_SETTINGS.mensaje_publico || 'Si recoges en sucursal, obtienes mejor precio en este pedido.').trim();
+        const msgBase = 'Si recoges en sucursal, obtienes mejor precio en este pedido.';
 
         if (calc.elegible && calc.ahorro > 0) {
             text.innerHTML = `<strong>${msgBase}</strong><br>Si este pedido lo recoges en sucursal, te costaría <strong>$${calc.totalSucursal.toFixed(2)}</strong> en lugar de $${subtotal.toFixed(2)}. Ahorras <strong>$${calc.ahorro.toFixed(2)}</strong>.`;
@@ -356,9 +391,6 @@ include __DIR__ . '/includes/header.php';
         }
 
         const faltantes = [];
-        if (calc.faltanteSubtotal > 0) {
-            faltantes.push(`te faltan $${calc.faltanteSubtotal.toFixed(2)} de subtotal`);
-        }
         if (calc.faltantePiezas > 0) {
             faltantes.push(`te faltan ${calc.faltantePiezas} pieza(s)`);
         }
@@ -456,6 +488,17 @@ include __DIR__ . '/includes/header.php';
                 } else if (result.dismiss === Swal.DismissReason.cancel) {
                     window.location.href = 'register.php';
                 }
+            });
+            return;
+        }
+
+        if (!<?php echo json_encode($isClienteRole); ?>) {
+            Swal.fire({
+                title: 'Compra no disponible para este perfil',
+                text: 'Las cuentas internas (admin, encargado, vendedor o repartidor) no pueden comprar en el checkout web. Inicia sesión con una cuenta cliente.',
+                icon: 'warning',
+                confirmButtonText: 'Entendido',
+                confirmButtonColor: '#0d47a1'
             });
             return;
         }
@@ -684,7 +727,10 @@ include __DIR__ . '/includes/header.php';
         }
     }
 
-    tipoEntrega.addEventListener('change', function() { aplicarModoEntrega(this.value); });
+    tipoEntrega.addEventListener('change', function() {
+        aplicarModoEntrega(this.value);
+        renderCart();
+    });
 
     document.getElementById('select_direccion')?.addEventListener('change', function() {
         if (this.value === '__other__') {
