@@ -29,7 +29,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                 $id_repartidor = intval($_POST['id_repartidor']);
                 $fecha = $_POST['fecha_entrega'] ?? null;
                 // El repartidor cobra al momento de entregar, no se requiere pago previo
-                $stmt = $pdo->prepare("UPDATE pedidos SET id_repartidor = :rep, fecha_entrega_programada = :fecha WHERE id_pedido = :pedido AND estado IN ('pendiente_pago','pagado')");
+                $hasPedidosTipoEntrega = false;
+                $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
+                $stmtMeta->execute();
+                $hasPedidosTipoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
+                if ($hasPedidosTipoEntrega) {
+                    $sqlUpdate = "UPDATE pedidos
+                                  SET id_repartidor = :rep, fecha_entrega_programada = :fecha
+                                  WHERE id_pedido = :pedido
+                                    AND estado IN ('pendiente_pago','pagado')
+                                    AND tipo_entrega = 'Domicilio'";
+                } else {
+                    $sqlUpdate = "UPDATE pedidos
+                                  SET id_repartidor = :rep, fecha_entrega_programada = :fecha
+                                  WHERE id_pedido = :pedido
+                                    AND estado IN ('pendiente_pago','pagado')
+                                    AND observaciones LIKE '%ENTREGA: Domicilio%'";
+                }
+
+                $stmt = $pdo->prepare($sqlUpdate);
                 $stmt->execute([
                     ':rep' => $id_repartidor,
                     ':fecha' => $fecha ?: null,
@@ -52,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
 try {
     $hasClientesDireccion = false;
     $hasClienteDireccionesTable = false;
+    $hasPedidosTipoEntrega = false;
 
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'direccion'");
     $stmtMeta->execute();
@@ -60,6 +80,10 @@ try {
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones'");
     $stmtMeta->execute();
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosTipoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
 
     if ($hasClientesDireccion && $hasClienteDireccionesTable) {
         $direccionExpr = "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS direccion";
@@ -71,10 +95,19 @@ try {
         $direccionExpr = "NULL AS direccion";
     }
 
+    if ($hasPedidosTipoEntrega) {
+        $deliveryFilter = "p.tipo_entrega = 'Domicilio'";
+    } else {
+        // Compatibilidad con esquemas antiguos: tipo de entrega embebido en observaciones.
+        $deliveryFilter = "p.observaciones LIKE '%ENTREGA: Domicilio%'";
+    }
+
     $sql = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
-            WHERE p.estado IN ('pendiente_pago','pagado') AND p.id_repartidor IS NULL
+            WHERE p.estado IN ('pendiente_pago','pagado')
+              AND p.id_repartidor IS NULL
+              AND {$deliveryFilter}
             ORDER BY p.fecha_creacion DESC";
     $pedidos = $pdo->query($sql)->fetchAll();
 

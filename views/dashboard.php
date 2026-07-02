@@ -62,6 +62,15 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l3">
+                <div class="card deep-orange lighten-1">
+                    <div class="card-content white-text">
+                        <span class="card-title">Retiros Sucursal</span>
+                        <p class="display-metric" id="stat-pickup-pendientes">0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- SECCIÓN 1: GESTIÓN COMERCIAL Y CONTENIDO -->
@@ -72,15 +81,16 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content">
                         <span class="card-title">Ingresos Mes</span>
                         <p class="display-metric" id="stat-ingresos-mes">$ 0.00</p>
+                        <p class="text-small">Ventas registradas del mes</p>
                     </div>
                 </div>
             </div>
             <div class="col s12 m6 l4">
                 <div class="card red darken-4">
                     <div class="card-content white-text">
-                        <span class="card-title">Auditoría: Incompletos</span>
+                        <span class="card-title">Productos sin configuración</span>
                         <p class="display-metric" id="stat-incompletos">0</p>
-                        <p class="text-small">Sin precio, costo o stock registrado</p>
+                        <p class="text-small">Sin precio, costo o inventario base</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/analytics.php" class="white-text">Ver Detalles</a>
@@ -96,6 +106,110 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="white-text">Gestionar Blogs</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12 m6 l4">
+                <div class="card green darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Utilidad Bruta Mes</span>
+                        <p class="display-metric" id="stat-utilidad-mes">$ 0.00</p>
+                        <p class="text-small">Ingresos menos costo histórico</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card amber darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Costo Mes</span>
+                        <p class="display-metric" id="stat-costo-mes">$ 0.00</p>
+                        <p class="text-small">Costo de mercancía vendida</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card blue darken-3">
+                    <div class="card-content white-text">
+                        <span class="card-title">Margen Bruto</span>
+                        <p class="display-metric" id="stat-margen-mes">0%</p>
+                        <p class="text-small">Utilidad / ingresos</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Desglose Diario del Mes</span>
+                        <div style="overflow-x:auto;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th class="right-align">Ingresos</th>
+                                        <th class="right-align">Costo</th>
+                                        <th class="right-align">Utilidad</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="finance-daily-body">
+                                    <tr><td colspan="4" class="center grey-text">Cargando desglose financiero...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Rendimiento de Vendedores por Sucursal (Mes Actual)</span>
+                        <div style="overflow-x:auto; margin-bottom: 18px;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Sucursal</th>
+                                        <th class="right-align">Vendedores</th>
+                                        <th class="right-align">Ventas Hoy</th>
+                                        <th class="right-align">Ventas Mes</th>
+                                        <th class="right-align">Comision Mes</th>
+                                        <th class="right-align">Entregado</th>
+                                        <th class="right-align">Pendiente</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-branch-summary-body">
+                                    <tr><td colspan="7" class="center grey-text">Cargando resumen por sucursal...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <span class="card-title" style="font-size:1.4rem; margin-top: 8px; display:block;">Detalle por Vendedor</span>
+                        <div style="overflow-x:auto;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Sucursal</th>
+                                        <th>Vendedor</th>
+                                        <th class="right-align">Ventas Hoy</th>
+                                        <th class="right-align">Ventas Mes</th>
+                                        <th class="right-align">Piezas Mes</th>
+                                        <th class="right-align">Comision Mes</th>
+                                        <th class="right-align">Entregado</th>
+                                        <th class="right-align">Pendiente</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-seller-summary-body">
+                                    <tr><td colspan="8" class="center grey-text">Cargando detalle de vendedores...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -195,6 +309,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones Pickup</span>
+                        <p>Ver y dar seguimiento a pedidos para recoger en sucursal</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Gestionar</a>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
@@ -282,6 +407,15 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l3">
+                <div class="card deep-orange lighten-1">
+                    <div class="card-content white-text">
+                        <span class="card-title">Retiros Sucursal</span>
+                        <p class="display-metric" id="stat-pickup-pendientes">0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Atención</h5></div></div>
@@ -316,6 +450,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones Pickup</span>
+                        <p>Seguimiento de pedidos por recoger y reabasto de sucursal</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Atender</a>
                     </div>
                 </div>
             </div>
@@ -415,6 +560,15 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <div class="col s12 m6 l4">
+                <div class="card cyan darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Ventas Mes</span>
+                        <p class="display-metric" id="stat-ventas-mes-total">0</p>
+                        <p class="text-small" id="stat-ventas-mes-monto">$ 0.00</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
                 <div class="card blue lighten-2">
                     <div class="card-content white-text">
                         <span class="card-title">Clientes Este Mes</span>
@@ -427,6 +581,88 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Ingresos Mes</span>
                         <p class="display-metric" id="stat-ingresos-mes">$ 0.00</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col s12 m6 l3">
+                <div class="card amber darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Piezas Hoy</span>
+                        <p class="display-metric" id="stat-piezas-hoy">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l3">
+                <div class="card deep-orange darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Comision Hoy</span>
+                        <p class="display-metric" id="stat-comision-hoy">$ 0.00</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l3">
+                <div class="card light-blue darken-3">
+                    <div class="card-content white-text">
+                        <span class="card-title">Comision Mes</span>
+                        <p class="display-metric" id="stat-comision-mes">$ 0.00</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l3">
+                <div class="card brown darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Por Entregar Hoy</span>
+                        <p class="display-metric" id="stat-entrega-hoy">$ 0.00</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Liquidacion de Ganancias</span>
+                        <p class="grey-text" style="margin-top:0;">Tarifa fija para vendedor: <strong id="stat-tarifa-comision">$ 50.00</strong> por producto vendido.</p>
+
+                        <div class="row" style="margin-bottom:0;">
+                            <div class="col s12 m6">
+                                <div class="card-panel orange lighten-5">
+                                    <h6 style="margin-top:0;">Corte del Dia</h6>
+                                    <p style="margin: 6px 0;"><strong>Monto sugerido a entregar:</strong> <span id="stat-sugerido-dia">$ 0.00</span></p>
+                                    <p style="margin: 6px 0;"><strong>Ultima declaracion:</strong> <span id="stat-declaracion-dia">Sin declarar</span></p>
+                                    <div class="input-field" style="margin-top: 12px;">
+                                        <input type="number" id="input-entregado-dia" min="0" step="0.01" placeholder="Monto entregado hoy">
+                                        <label for="input-entregado-dia" class="active">Monto entregado hoy (opcional)</label>
+                                    </div>
+                                    <div class="input-field" style="margin-top: 4px;">
+                                        <input type="text" id="input-observaciones-dia" maxlength="255" placeholder="Notas del corte del dia">
+                                        <label for="input-observaciones-dia" class="active">Observaciones (opcional)</label>
+                                    </div>
+                                    <button type="button" id="btn-liquidar-dia" class="btn orange darken-3 waves-effect waves-light">Declarar Entrega del Dia</button>
+                                </div>
+                            </div>
+
+                            <div class="col s12 m6">
+                                <div class="card-panel teal lighten-5">
+                                    <h6 style="margin-top:0;">Corte del Mes</h6>
+                                    <p style="margin: 6px 0;"><strong>Monto sugerido a entregar:</strong> <span id="stat-sugerido-mes">$ 0.00</span></p>
+                                    <p style="margin: 6px 0;"><strong>Ultima declaracion:</strong> <span id="stat-declaracion-mes">Sin declarar</span></p>
+                                    <div class="input-field" style="margin-top: 12px;">
+                                        <input type="number" id="input-entregado-mes" min="0" step="0.01" placeholder="Monto entregado mes">
+                                        <label for="input-entregado-mes" class="active">Monto entregado mes (opcional)</label>
+                                    </div>
+                                    <div class="input-field" style="margin-top: 4px;">
+                                        <input type="text" id="input-observaciones-mes" maxlength="255" placeholder="Notas del corte del mes">
+                                        <label for="input-observaciones-mes" class="active">Observaciones (opcional)</label>
+                                    </div>
+                                    <button type="button" id="btn-liquidar-mes" class="btn teal darken-2 waves-effect waves-light">Declarar Entrega del Mes</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -498,38 +734,189 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        fetch('<?php echo BASE_URL; ?>api/dashboard_data.php')
+        const csrfToken = '<?php echo esc(getCsrfToken()); ?>';
+
+        const currency = (value) => '$ ' + parseFloat(value || 0).toFixed(2);
+        const fmtDateTime = (value) => {
+            if (!value) return 'Sin declarar';
+            const d = new Date(String(value).replace(' ', 'T'));
+            if (Number.isNaN(d.getTime())) return 'Sin declarar';
+            return d.toLocaleString('es-MX');
+        };
+
+        const updateEl = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+
+        const renderAdminSellers = (d) => {
+            const branchBody = document.getElementById('admin-branch-summary-body');
+            const sellerBody = document.getElementById('admin-seller-summary-body');
+
+            if (branchBody && Array.isArray(d.resumen_vendedores_sucursal)) {
+                if (d.resumen_vendedores_sucursal.length === 0) {
+                    branchBody.innerHTML = '<tr><td colspan="7" class="center grey-text">Sin informacion de vendedores por sucursal.</td></tr>';
+                } else {
+                    branchBody.innerHTML = d.resumen_vendedores_sucursal.map(row => `
+                        <tr>
+                            <td>${row.sucursal || 'Sin sucursal'}</td>
+                            <td class="right-align">${parseInt(row.vendedores || 0, 10)}</td>
+                            <td class="right-align">${currency(row.ventas_hoy)}</td>
+                            <td class="right-align">${currency(row.ventas_mes)}</td>
+                            <td class="right-align">${currency(row.comision_mes)}</td>
+                            <td class="right-align">${currency(row.entregado_mes)}</td>
+                            <td class="right-align">${currency(row.pendiente_mes)}</td>
+                        </tr>`).join('');
+                }
+            }
+
+            if (sellerBody && Array.isArray(d.detalle_vendedores_admin)) {
+                if (d.detalle_vendedores_admin.length === 0) {
+                    sellerBody.innerHTML = '<tr><td colspan="8" class="center grey-text">Sin vendedores activos.</td></tr>';
+                } else {
+                    sellerBody.innerHTML = d.detalle_vendedores_admin.map(row => `
+                        <tr>
+                            <td>${row.sucursal || 'Sin sucursal'}</td>
+                            <td>${row.vendedor || 'N/A'}</td>
+                            <td class="right-align">${currency(row.ventas_hoy)}</td>
+                            <td class="right-align">${currency(row.ventas_mes)}</td>
+                            <td class="right-align">${parseInt(row.piezas_mes || 0, 10)}</td>
+                            <td class="right-align">${currency(row.comision_mes)}</td>
+                            <td class="right-align">${currency(row.entregado_mes)}</td>
+                            <td class="right-align">${currency(row.pendiente_mes)}</td>
+                        </tr>`).join('');
+                }
+            }
+        };
+
+        const renderSellerSettlement = (d) => {
+            if (!d.comisiones) return;
+
+            updateEl('stat-piezas-hoy', parseInt(d.comisiones.piezas_hoy || 0, 10));
+            updateEl('stat-comision-hoy', currency(d.comisiones.comision_hoy));
+            updateEl('stat-comision-mes', currency(d.comisiones.comision_mes));
+            updateEl('stat-entrega-hoy', currency(d.comisiones.monto_a_entregar_hoy));
+            updateEl('stat-tarifa-comision', currency(d.comisiones.tarifa_por_pieza));
+            updateEl('stat-sugerido-dia', currency(d.comisiones.monto_a_entregar_hoy));
+            updateEl('stat-sugerido-mes', currency(d.comisiones.monto_a_entregar_mes));
+
+            updateEl('stat-declaracion-dia', fmtDateTime(d.liquidacion_hoy?.fecha_declaracion || d.liquidacion_hoy?.fecha_entrega_ganancias));
+            updateEl('stat-declaracion-mes', fmtDateTime(d.liquidacion_mes?.fecha_declaracion || d.liquidacion_mes?.fecha_entrega_ganancias));
+
+            const inputDia = document.getElementById('input-entregado-dia');
+            if (inputDia && !inputDia.value) {
+                inputDia.value = parseFloat(d.comisiones.monto_a_entregar_hoy || 0).toFixed(2);
+            }
+
+            const inputMes = document.getElementById('input-entregado-mes');
+            if (inputMes && !inputMes.value) {
+                inputMes.value = parseFloat(d.comisiones.monto_a_entregar_mes || 0).toFixed(2);
+            }
+        };
+
+        const loadDashboardData = () => fetch('<?php echo BASE_URL; ?>api/dashboard_data.php')
             .then(r => r.json())
             .then(res => {
                 if (!res.success) throw new Error(res.message);
                 const d = res.data;
-
-                // Función auxiliar para actualizar texto solo si el elemento existe
-                const updateEl = (id, value) => {
-                    const el = document.getElementById(id);
-                    if (el) el.textContent = value;
-                };
                 
                 if (d.ventas_hoy) {
                     updateEl('stat-ventas-hoy-total', d.ventas_hoy.total || 0);
-                    updateEl('stat-ventas-hoy-monto', '$ ' + parseFloat(d.ventas_hoy.monto || 0).toFixed(2));
+                    updateEl('stat-ventas-hoy-monto', currency(d.ventas_hoy.monto));
                 }
                 
                 if (d.clientes) updateEl('stat-clientes', d.clientes.total || 0);
                 if (d.clientes_mes) updateEl('stat-clientes', d.clientes_mes.total || 0); // Para el vendedor
                 if (d.productos) updateEl('stat-productos', d.productos.total || 0);
                 if (d.usuarios) updateEl('stat-usuarios', d.usuarios.total || 0);
-                if (d.ingresos_mes) updateEl('stat-ingresos-mes', '$ ' + parseFloat(d.ingresos_mes.total || 0).toFixed(2));
+                if (d.ingresos_mes) updateEl('stat-ingresos-mes', currency(d.ingresos_mes.total));
+                if (d.utilidad_mes) updateEl('stat-utilidad-mes', currency(d.utilidad_mes.total));
+                if (d.costo_mes) updateEl('stat-costo-mes', currency(d.costo_mes.total));
+                if (d.finanzas_mes) updateEl('stat-margen-mes', (parseFloat(d.finanzas_mes.margen || 0)).toFixed(2) + '%');
                 if (d.blogs) updateEl('stat-blogs', d.blogs.total || 0);
                 if (d.incompletos) updateEl('stat-incompletos', d.incompletos.total || 0);
                 if (d.stock_bajo) updateEl('stat-stock-bajo', d.stock_bajo.total || 0);
                 if (d.por_entregar) updateEl('stat-por-entregar', d.por_entregar.total || 0);
                 if (d.entregas_hoy) updateEl('stat-entregas-hoy', d.entregas_hoy.total || 0);
+                if (d.pickup_pendientes) updateEl('stat-pickup-pendientes', d.pickup_pendientes.total || 0);
+                if (d.pickup_metrics) {
+                    updateEl(
+                        'stat-pickup-breakdown',
+                        'Nuevas: ' + (d.pickup_metrics.nuevas || 0)
+                        + ' | Vistas: ' + (d.pickup_metrics.vistas || 0)
+                        + ' | Atendidas hoy: ' + (d.pickup_metrics.atendidas_hoy || 0)
+                    );
+                }
+                if (d.ventas_mes) updateEl('stat-ventas-mes-total', d.ventas_mes.total || 0);
+                if (d.ventas_mes) updateEl('stat-ventas-mes-monto', currency(d.ventas_mes.monto));
+
+                renderAdminSellers(d);
+                renderSellerSettlement(d);
+
+                if (d.finanzas_mes?.diario) {
+                    const tbody = document.getElementById('finance-daily-body');
+                    if (tbody) {
+                        tbody.innerHTML = '';
+                        d.finanzas_mes.diario.forEach(row => {
+                            const date = new Date(row.fecha + 'T00:00:00');
+                            const fechaTxt = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+                            tbody.innerHTML += `
+                                <tr>
+                                    <td>${fechaTxt}</td>
+                                    <td class="right-align">${currency(row.ingresos)}</td>
+                                    <td class="right-align">${currency(row.costos)}</td>
+                                    <td class="right-align">${currency(row.utilidad)}</td>
+                                </tr>`;
+                        });
+                    }
+                }
             })
             .catch(err => {
                 M.toast({html: 'Error cargando estadísticas', classes: 'red'});
                 console.error(err);
             });
+
+        const declararLiquidacion = (periodo) => {
+            const montoInput = document.getElementById(periodo === 'dia' ? 'input-entregado-dia' : 'input-entregado-mes');
+            const obsInput = document.getElementById(periodo === 'dia' ? 'input-observaciones-dia' : 'input-observaciones-mes');
+
+            const formData = new FormData();
+            formData.append('csrf_token', csrfToken);
+            formData.append('periodo', periodo);
+            if (montoInput && montoInput.value !== '') {
+                formData.append('monto_entregado', montoInput.value);
+            }
+            if (obsInput && obsInput.value !== '') {
+                formData.append('observaciones', obsInput.value);
+            }
+
+            fetch('<?php echo BASE_URL; ?>api/vendor_settlement.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) throw new Error(res.message || 'No se pudo declarar la liquidacion.');
+                M.toast({html: res.message || 'Liquidacion registrada', classes: 'green'});
+                return loadDashboardData();
+            })
+            .catch(err => {
+                M.toast({html: err.message || 'Error al declarar liquidacion', classes: 'red'});
+                console.error(err);
+            });
+        };
+
+        const btnDia = document.getElementById('btn-liquidar-dia');
+        if (btnDia) {
+            btnDia.addEventListener('click', () => declararLiquidacion('dia'));
+        }
+
+        const btnMes = document.getElementById('btn-liquidar-mes');
+        if (btnMes) {
+            btnMes.addEventListener('click', () => declararLiquidacion('mes'));
+        }
+
+        loadDashboardData();
     });
 
     function cleanupStock() {

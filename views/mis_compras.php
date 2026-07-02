@@ -9,22 +9,26 @@ requireAuth();
 $pageTitle = 'Mis Compras';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
+$canViewPurchases = isCliente();
 
 // Obtener los pedidos asociados a este usuario a través de la tabla clientes
-try {
-    $sql = "SELECT p.*, a.nombre as almacen_nombre,
-                   (SELECT COUNT(*) FROM detalle_pedidos dp0 WHERE dp0.id_pedido = p.id_pedido AND dp0.cantidad <= 0) AS items_liberados,
-                   (SELECT COUNT(*) FROM detalle_pedidos dp1 WHERE dp1.id_pedido = p.id_pedido AND dp1.cantidad > 0) AS items_activos
-            FROM pedidos p 
-            JOIN clientes c ON p.id_cliente = c.id_cliente 
-            LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
-            WHERE c.id_usuario = :id_usuario 
-            ORDER BY p.fecha_creacion DESC";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':id_usuario' => (int)$usuario['id_usuario']]);
-    $compras = $stmt->fetchAll();
-} catch (PDOException $e) {
-    $compras = [];
+$compras = [];
+if ($canViewPurchases) {
+    try {
+        $sql = "SELECT p.*, a.nombre as almacen_nombre,
+                       (SELECT COUNT(*) FROM detalle_pedidos dp0 WHERE dp0.id_pedido = p.id_pedido AND dp0.cantidad <= 0) AS items_liberados,
+                       (SELECT COUNT(*) FROM detalle_pedidos dp1 WHERE dp1.id_pedido = p.id_pedido AND dp1.cantidad > 0) AS items_activos
+                FROM pedidos p 
+                JOIN clientes c ON p.id_cliente = c.id_cliente 
+                LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
+                WHERE c.id_usuario = :id_usuario 
+                ORDER BY p.fecha_creacion DESC";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':id_usuario' => (int)$usuario['id_usuario']]);
+        $compras = $stmt->fetchAll();
+    } catch (PDOException $e) {
+        $compras = [];
+    }
 }
 
 function getStatusBadge(string $status): string {
@@ -51,7 +55,14 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="row">
-        <?php if (empty($compras)): ?>
+        <?php if (!$canViewPurchases): ?>
+            <div class="col s12">
+                <div class="card-panel amber lighten-5 amber-text text-darken-4">
+                    <i class="material-icons left">info</i>
+                    Esta seccion solo esta disponible para cuentas con rol cliente. Si deseas comprar, inicia sesion con una cuenta cliente.
+                </div>
+            </div>
+        <?php elseif (empty($compras)): ?>
             <div class="col s12 center-align" style="padding: 50px;">
                 <i class="material-icons grey-text" style="font-size: 5rem;">sentiment_dissatisfied</i>
                 <h5>Aún no tienes ninguna compra.</h5>

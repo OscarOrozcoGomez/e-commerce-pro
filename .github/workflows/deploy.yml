@@ -25,13 +25,13 @@ jobs:
       FTP_HOST: ${{ secrets.PTF_HOST }}
       FTP_USERNAME: ${{ secrets.PTF_USERNAME }}
       FTP_PASSWORD: ${{ secrets.PTF_PASSWORD }}
-      FTP_PORT: "21"
-      FTP_PROTOCOL: ftp
+      FTP_PORT: ${{ secrets.PTF_PORT || '21' }}
+      FTP_PROTOCOL: ${{ secrets.PTF_PROTOCOL || 'ftp' }}
       FTP_REMOTE_PATH: /public_html/
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0 # Trae todo el historial para que pueda comparar cambios correctamente
 
@@ -40,6 +40,32 @@ jobs:
         run: |
           echo "Changed files in this deployment (before -> after):"
           git diff --name-status "${{ github.event.before }}" "${{ github.sha }}"
+
+      - name: Guard migration immutability (push)
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          BEFORE_SHA="${{ github.event.before }}"
+          AFTER_SHA="${{ github.sha }}"
+
+          # Si es un push inicial sin before valido, no hay base para diff.
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "Push inicial detectado; se omite validacion de inmutabilidad por falta de base."
+            exit 0
+          fi
+
+          echo "Validando que no se editen ni borren migraciones historicas..."
+          CHANGED_NON_ADDED=$(git diff --name-status "$BEFORE_SHA" "$AFTER_SHA" -- database/migrations/*.sql | awk '$1 != "A" {print $0}')
+
+          if [ -n "$CHANGED_NON_ADDED" ]; then
+            echo "ERROR: Detectadas migraciones historicas modificadas o eliminadas."
+            echo "$CHANGED_NON_ADDED"
+            echo "Regla: en database/migrations solo se permiten archivos nuevos (A)."
+            echo "Crea una migracion nueva en lugar de editar una ya existente."
+            exit 1
+          fi
+
+          echo "OK: solo hay migraciones nuevas o sin cambios en historial."
 
       - name: Validate FTP settings
         run: |
@@ -51,7 +77,7 @@ jobs:
           echo "FTP config OK -> protocol=${FTP_PROTOCOL}, port=${FTP_PORT}, remote=${FTP_REMOTE_PATH}"
 
       - name: Sync Changed Files via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
           server: ${{ env.FTP_HOST }}
           username: ${{ env.FTP_USERNAME }}
@@ -64,6 +90,7 @@ jobs:
           state-name: .ftp-deploy-sync-state.json
           dangerous-clean-slate: false
           log-level: standard
+          timeout: 120000
           # Excluimos exactamente lo mismo que tienes en tu VS Code + archivos de desarrollo
           exclude: |
             **/.git/**

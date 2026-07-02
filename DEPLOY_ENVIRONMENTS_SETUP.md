@@ -71,6 +71,12 @@ El endpoint responde JSON con:
 
 Si una migracion aplicada se modifica, el checksum falla y bloquea el deploy.
 
+Ademas, el pipeline ahora valida esto antes de desplegar:
+
+- Si detecta archivos en `database/migrations` con estado Modificado o Eliminado, falla el workflow.
+- Solo se permiten migraciones nuevas (archivos agregados).
+- Esto evita que llegue a Produccion un cambio de migracion historica por accidente.
+
 ## 6) Tabla oficial de historial
 
 - La tabla oficial del sistema es `migration_history`.
@@ -188,3 +194,14 @@ Importante:
 
 - Esto se usa para reparar consistencia local del historial, no para "re-escribir" historia en produccion.
 - En produccion, investigar primero causa raiz antes de tocar `migration_history`.
+
+## 9) Nota clave para Produccion
+
+Si sigues el flujo normal (crear migraciones nuevas y no editar antiguas), este problema no deberia ocurrir en Produccion.
+
+El error aparece cuando se modifica una migracion ya existente en el repositorio. Con la proteccion agregada en workflows:
+
+- El PR/preflight falla si una migracion historica fue editada o eliminada.
+- El deploy a main tambien falla con la misma regla.
+
+Resultado: se reduce mucho el riesgo de romper despliegues por checksum invalido en remoto.

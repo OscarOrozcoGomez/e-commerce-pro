@@ -28,13 +28,13 @@ jobs:
       FTP_HOST: ${{ secrets.PTF_HOST }}
       FTP_USERNAME: ${{ secrets.PTF_USERNAME }}
       FTP_PASSWORD: ${{ secrets.PTF_PASSWORD }}
-      FTP_PORT: "21"
-      FTP_PROTOCOL: ftp
+      FTP_PORT: ${{ secrets.PTF_PORT || '21' }}
+      FTP_PROTOCOL: ${{ secrets.PTF_PROTOCOL || 'ftp' }}
       FTP_REMOTE_PATH: /public_html/
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -43,6 +43,26 @@ jobs:
         run: |
           echo "Changed files in this PR (base -> head):"
           git diff --name-status "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Guard migration immutability (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          echo "Validando que no se editen ni borren migraciones historicas..."
+          CHANGED_NON_ADDED=$(git diff --name-status "$BASE_SHA" "$HEAD_SHA" -- database/migrations/*.sql | awk '$1 != "A" {print $0}')
+
+          if [ -n "$CHANGED_NON_ADDED" ]; then
+            echo "ERROR: Detectadas migraciones historicas modificadas o eliminadas."
+            echo "$CHANGED_NON_ADDED"
+            echo "Regla: en database/migrations solo se permiten archivos nuevos (A)."
+            echo "Crea una migracion nueva en lugar de editar una ya existente."
+            exit 1
+          fi
+
+          echo "OK: solo hay migraciones nuevas o sin cambios en historial."
 
       - name: Validate FTP settings
         run: |
@@ -53,8 +73,10 @@ jobs:
           fi
           echo "FTP config OK -> protocol=${FTP_PROTOCOL}, port=${FTP_PORT}, remote=${FTP_REMOTE_PATH}"
 
-      - name: Validate FTP connectivity and deploy plan (dry-run)
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      - name: Validate FTP connectivity and deploy plan (dry-run) - attempt 1
+        id: ftp_dry_run_attempt_1
+        continue-on-error: true
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
           server: ${{ env.FTP_HOST }}
           username: ${{ env.FTP_USERNAME }}
@@ -67,6 +89,41 @@ jobs:
           state-name: .ftp-deploy-sync-state.json
           dangerous-clean-slate: false
           log-level: standard
+          timeout: 120000
+          exclude: |
+            **/.git/**
+            **/.github/**
+            **/.vscode/**
+            **/scratch/**
+            **/Exportaciones/**
+            **/test_*.php
+            **/IMPLEMENTATION_SUMMARY.md
+            **/TESTING_GUIDE.md
+            **/core/env.sample.php
+            **/core/config.php
+            **/views/migracion_productos.md
+            **/mail_log.txt
+            .gitignore
+            .htaccess-local
+            database.sql
+            README.md
+
+      - name: Retry FTP dry-run once when timeout/intermittent failure occurs
+        if: steps.ftp_dry_run_attempt_1.outcome == 'failure'
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ env.FTP_HOST }}
+          username: ${{ env.FTP_USERNAME }}
+          password: ${{ env.FTP_PASSWORD }}
+          port: ${{ env.FTP_PORT }}
+          protocol: ${{ env.FTP_PROTOCOL }}
+          local-dir: ./
+          server-dir: ${{ env.FTP_REMOTE_PATH }}
+          dry-run: true
+          state-name: .ftp-deploy-sync-state.json
+          dangerous-clean-slate: false
+          log-level: standard
+          timeout: 120000
           exclude: |
             **/.git/**
             **/.github/**

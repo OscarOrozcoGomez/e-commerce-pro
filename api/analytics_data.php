@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/finance_utils.php';
 
 header('Content-Type: application/json');
 
@@ -25,7 +26,7 @@ try {
     }
 
     // 2. Top 10 Productos
-    $sqlTop = "SELECT p.nombre, SUM(dp.cantidad) as cantidad 
+    $sqlTop = "SELECT p.id_producto, p.nombre, SUM(dp.cantidad) as cantidad 
                FROM detalle_pedidos dp 
                JOIN productos p ON dp.id_producto = p.id_producto 
                GROUP BY dp.id_producto ORDER BY cantidad DESC LIMIT 10";
@@ -35,7 +36,7 @@ try {
     $totalDiasResult = $pdo->query("SELECT DATEDIFF(NOW(), MIN(fecha_creacion)) + 1 FROM pedidos")->fetchColumn();
     $totalDias = ($totalDiasResult && $totalDiasResult > 0) ? (int)$totalDiasResult : 1;
 
-    $sqlPred = "SELECT p.nombre, p.precio_venta, p.precio_costo, ia.cantidad_actual,
+    $sqlPred = "SELECT p.id_producto, p.nombre, p.precio_venta, p.precio_costo, ia.cantidad_actual,
                        COALESCE(ventas.total_qty, 0) as ventas_totales,
                        (COALESCE(ventas.total_qty, 0) / $totalDias) as promedio_diario
                 FROM productos p
@@ -54,16 +55,33 @@ try {
     $predicciones = [];
     foreach ($rawPredicciones as $p) {
         $promedio = (float)$p['promedio_diario'];
-        $dias = $promedio > 0 ? floor($p['cantidad_actual'] / $promedio) : '∞';
-        $incompleto = ((float)$p['precio_venta'] <= 0 || (float)$p['precio_costo'] <= 0);
+        $stock = (int)$p['cantidad_actual'];
+        $ventasTotales = (int)$p['ventas_totales'];
+        $dias = $ventasTotales > 0 && $promedio > 0 ? floor($stock / $promedio) : '—';
+        $sinConfig = ((float)$p['precio_venta'] <= 0 || (float)$p['precio_costo'] <= 0);
+        $estado = 'Abastecido';
+
+        if ($sinConfig) {
+            $estado = 'Sin configuración';
+        } elseif ($ventasTotales <= 0) {
+            $estado = $stock > 0 ? 'Sin histórico' : 'Sin rotación';
+        } elseif ($stock <= 0) {
+            $estado = 'Agotado';
+        } elseif ($dias !== '—' && $dias < 7) {
+            $estado = 'Crítico';
+        } elseif ($dias !== '—' && $dias < 15) {
+            $estado = 'Reabastecer pronto';
+        }
 
         $predicciones[] = [
+            'id_producto' => (int) $p['id_producto'],
             'nombre' => $p['nombre'],
-            'stock' => (int)$p['cantidad_actual'],
-            'ventas' => (int)$p['ventas_totales'],
+            'stock' => $stock,
+            'ventas' => $ventasTotales,
             'promedio' => round($promedio, 2),
             'dias_restantes' => $dias,
-            'incompleto' => $incompleto
+            'sin_configuracion' => $sinConfig,
+            'estado' => $estado
         ];
     }
 

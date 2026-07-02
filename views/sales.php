@@ -10,6 +10,8 @@ requirePermission('realizar_ventas', BASE_URL . 'views/dashboard.php');
 $pageTitle = 'Realizar Venta';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
+$isAdminUser = isAdmin();
+$pickupOfferSettings = getPickupOfferSettings($pdo);
 $error = '';
 $success = '';
 
@@ -134,7 +136,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="input-field col s12 m6">
                                 <select name="id_metodo_pago" required>
                                     <option value="">-- Selecciona método de pago --</option>
-                                    <option value="1">Efectivo</option>
+                                    <option value="1" selected>Efectivo</option>
                                     <option value="2">Transferencia Bancaria</option>
                                     <option value="3">Tarjeta</option>
                                     <option value="4">Cheque</option>
@@ -143,8 +145,11 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             
                             <div class="input-field col s12 m6">
-                                <input type="number" id="descuento-{{id}}" class="descuento" name="descuento" step="0.01" value="0" min="0" oninput="actualizarTotal('{{id}}')">
+                                <input type="number" id="descuento-{{id}}" class="descuento" name="descuento" step="0.01" value="0" min="0" oninput="actualizarTotal('{{id}}')" <?php echo $isAdminUser ? '' : 'readonly'; ?>>
                                 <label for="descuento-{{id}}" class="active">Descuento</label>
+                                <?php if (!$isAdminUser): ?>
+                                    <span class="helper-text">Para vendedor, el descuento manual esta bloqueado. Se aplica incentivo automatico por sucursal.</span>
+                                <?php endif; ?>
                             </div>
                         </div>
 
@@ -171,7 +176,15 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s6 right-align">$<span class="subtotal-val">0.00</span></div>
                         </div>
                         <div class="row" style="margin-bottom: 5px;">
-                            <div class="col s6">Descuento:</div>
+                            <div class="col s6">Cuenta sin descuento/incentivo:</div>
+                            <div class="col s6 right-align">$<span class="base-total-val">0.00</span></div>
+                        </div>
+                        <div class="row" style="margin-bottom: 5px;">
+                            <div class="col s6">Incentivo Sucursal:</div>
+                            <div class="col s6 right-align" style="color:#80cbc4;">-$<span class="incentivo-total-val">0.00</span></div>
+                        </div>
+                        <div class="row" style="margin-bottom: 5px;">
+                            <div class="col s6">Descuento manual:</div>
                             <div class="col s6 right-align text-red">-$<span class="descuento-total-val">0.00</span></div>
                         </div>
                         <div class="divider" style="background: rgba(255,255,255,0.2); margin: 10px 0;"></div>
@@ -179,6 +192,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s4">Total:</div>
                             <div class="col s8 right-align">$<span class="total-venta-val">0.00</span></div>
                         </div>
+                        <div class="card-panel amber lighten-4 incentivo-banner" style="display:none; margin:10px 0 0 0; padding:10px; border-left:4px solid #ff8f00; color:#6d4c41;"></div>
                         <div class="divider" style="background: rgba(255,255,255,0.2); margin: 10px 0;"></div>
                         
                         <!-- Calculadora de Cambio -->
@@ -229,6 +243,7 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     const productosDisponibles = <?php echo json_encode($productos); ?>;
+    const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
     let tabCount = 0;
     let productoIndex = 0;
     const productMap = {};
@@ -524,12 +539,36 @@ include __DIR__ . '/includes/header.php';
             itemsTotales += cantidad;
         });
         
-        const descuento = parseFloat(context.querySelector('.descuento').value) || 0;
-        const total = subtotal - descuento;
+        const descuentoManual = parseFloat(context.querySelector('.descuento').value) || 0;
+        const incentivoCalc = calculatePickupOfferClient(subtotal, itemsTotales, PICKUP_OFFER_SETTINGS);
+        const descuentoIncentivo = incentivoCalc.elegible ? incentivoCalc.ahorro : 0;
+        const descuentoTotal = descuentoManual + descuentoIncentivo;
+        const total = Math.max(0, subtotal - descuentoTotal);
         
         context.querySelector('.subtotal-val').textContent = subtotal.toFixed(2);
-        context.querySelector('.descuento-total-val').textContent = descuento.toFixed(2);
+        context.querySelector('.base-total-val').textContent = subtotal.toFixed(2);
+        context.querySelector('.incentivo-total-val').textContent = descuentoIncentivo.toFixed(2);
+        context.querySelector('.descuento-total-val').textContent = descuentoManual.toFixed(2);
         context.querySelector('.total-venta-val').textContent = total.toFixed(2);
+
+        const banner = context.querySelector('.incentivo-banner');
+        if (banner) {
+            if (descuentoIncentivo > 0) {
+                const porPieza = incentivoCalc.descuentoPorPieza || 0;
+                banner.innerHTML = `<strong>Incentivo de sucursal activo:</strong> descuento de <strong>$${porPieza.toFixed(2)}</strong> por pieza (${itemsTotales} pieza(s)), ahorro total <strong>$${descuentoIncentivo.toFixed(2)}</strong>.`;
+                banner.style.display = 'block';
+            } else if (PICKUP_OFFER_SETTINGS && PICKUP_OFFER_SETTINGS.activo) {
+                const faltante = resolveMissingPiecesForFirstTier(itemsTotales, PICKUP_OFFER_SETTINGS);
+                if (faltante > 0) {
+                    banner.innerHTML = `<strong>Incentivo disponible:</strong> agrega ${faltante} pieza(s) mas para activar descuento por sucursal.`;
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } else {
+                banner.style.display = 'none';
+            }
+        }
 
         const pagoCon = parseFloat(context.querySelector('.pago-con').value) || 0;
         const cambio = pagoCon > 0 ? (pagoCon - total) : 0;
@@ -539,6 +578,64 @@ include __DIR__ . '/includes/header.php';
         container.style.color = (pagoCon > 0 && pagoCon < total) ? '#ef5350' : '#81c784';
         
         actualizarTituloTab(tabId, context.querySelector('.cliente_nombre').value);
+    }
+
+    function resolvePieceTierDiscountClient(pieces, settings) {
+        const source = settings?.descuentos_por_pieza;
+        if (!source || typeof source !== 'object') return 0;
+
+        const tiers = Object.entries(source)
+            .map(([qty, discount]) => ({
+                qty: parseInt(qty, 10),
+                discount: Math.max(0, parseFloat(discount) || 0)
+            }))
+            .filter((tier) => Number.isInteger(tier.qty) && tier.qty > 0 && tier.discount > 0)
+            .sort((a, b) => a.qty - b.qty);
+
+        if (tiers.length === 0) return 0;
+
+        const exact = tiers.find((tier) => tier.qty === pieces);
+        if (exact) return exact.discount;
+
+        let fallback = 0;
+        tiers.forEach((tier) => {
+            if (pieces >= tier.qty) fallback = tier.discount;
+        });
+
+        return fallback;
+    }
+
+    function resolveMissingPiecesForFirstTier(pieces, settings) {
+        const source = settings?.descuentos_por_pieza;
+        if (!source || typeof source !== 'object') return 0;
+
+        const tiers = Object.keys(source)
+            .map((qty) => parseInt(qty, 10))
+            .filter((qty) => Number.isInteger(qty) && qty > 0)
+            .sort((a, b) => a - b);
+
+        if (tiers.length === 0) return 0;
+        return Math.max(0, tiers[0] - Math.max(0, parseInt(pieces, 10) || 0));
+    }
+
+    function calculatePickupOfferClient(subtotal, pieces, settings) {
+        const subtotalNum = Math.max(0, parseFloat(subtotal) || 0);
+        const piezasNum = Math.max(0, parseInt(pieces, 10) || 0);
+        const activo = !!settings?.activo;
+        const descuentoPorPieza = resolvePieceTierDiscountClient(piezasNum, settings);
+        const elegible = activo && descuentoPorPieza > 0 && piezasNum > 0;
+
+        let ahorro = 0;
+        if (elegible) {
+            ahorro = Math.min(+(descuentoPorPieza * piezasNum).toFixed(2), subtotalNum);
+        }
+
+        return {
+            elegible,
+            descuentoPorPieza: +descuentoPorPieza.toFixed(2),
+            ahorro: +ahorro.toFixed(2),
+            totalSucursal: +(subtotalNum - ahorro).toFixed(2)
+        };
     }
 
     function eliminarProducto(btn, tabId) {

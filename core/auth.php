@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/pickup_offer_utils.php';
+
 /**
  * Verifica si el usuario está autenticado.
  *
@@ -461,24 +463,57 @@ function dbCreatePublicOrder(array $data): array {
     try {
         $pdo->beginTransaction();
         
-        // Definir el almacén de despacho (por defecto 1, o podrías obtenerlo de la configuración)
-        $id_almacen_despacho = $data['id_almacen'] ?? 1;
+        // Definir el almacén de despacho: si no llega explícito, resolver automáticamente
+        // un almacén que pueda surtir todos los productos del carrito.
+        $id_almacen_despacho = resolveCheckoutWarehouse($pdo, $data['items'] ?? [], $data['id_almacen'] ?? null);
         $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
         $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | Dir: {$data['cliente']['direccion']}";
-        $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ($i['precio'] * $i['quantity']), 0);
+        $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ((float)($i['precio'] ?? 0) * (int)($i['quantity'] ?? 0)), 0.0);
+        $subtotal = round(max(0.0, (float)$subtotal), 2);
+        $totalPiezas = (int)array_reduce($data['items'], fn($s, $i) => $s + max(0, (int)($i['quantity'] ?? 0)), 0);
+
+        $pickupOffer = calculatePickupOffer($subtotal, $totalPiezas, getPickupOfferSettings($pdo));
+        $aplicarIncentivoSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0
+            && !empty($pickupOffer['elegible'])
+            && ((float)($pickupOffer['ahorro'] ?? 0.0) > 0.0);
+
+        $descuentoTotal = $aplicarIncentivoSucursal ? round((float)$pickupOffer['ahorro'], 2) : 0.0;
+        $totalPedido = round(max(0.0, $subtotal - $descuentoTotal), 2);
+
+        if ($aplicarIncentivoSucursal) {
+            $infoCliente .= " | INCENTIVO_SUCURSAL: -$" . number_format($descuentoTotal, 2, '.', '');
+        }
+
         $numero_pedido = 'WEB-' . strtoupper(uniqid());
 
         // Corregido: id_usuario no puede ser NULL según la estructura de la tabla pedidos
-        $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_cliente, id_almacen, id_metodo_pago, estado, subtotal, total, observaciones) VALUES (?, ?, ?, ?, 1, 'pendiente_pago', ?, ?, ?)");
-        $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_despacho, $subtotal, $subtotal, $infoCliente]);
+        $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_cliente, id_almacen, id_metodo_pago, estado, subtotal, descuento_total, total, observaciones) VALUES (?, ?, ?, ?, 1, 'pendiente_pago', ?, ?, ?, ?)");
+        $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_despacho, $subtotal, $descuentoTotal, $totalPedido, $infoCliente]);
         $id_pedido = $pdo->lastInsertId();
 
-        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?)");
+        if (strcasecmp((string)$entrega, 'Sucursal') === 0) {
+            dbCreatePickupNotification($pdo, [
+                'id_pedido' => (int)$id_pedido,
+                'id_almacen' => (int)$id_almacen_despacho,
+                'id_cliente' => $id_cliente !== null ? (int)$id_cliente : null,
+                'numero_pedido' => (string)$numero_pedido,
+                'cliente_nombre' => (string)($data['cliente']['nombre'] ?? 'Cliente sin nombre'),
+                'cliente_telefono' => (string)($data['cliente']['telefono'] ?? ''),
+                'direccion' => (string)($data['cliente']['direccion'] ?? ''),
+                'observaciones' => (string)$infoCliente,
+            ]);
+        }
+
+        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, monto_descuento, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?");
         $stmtStockCheck = $pdo->prepare("SELECT COALESCE(cantidad_actual, 0) FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ? FOR UPDATE");
+        $stmtCosto = $pdo->prepare("SELECT COALESCE(precio_costo, 0) FROM productos WHERE id_producto = ?");
+
+        $remainingDiscountCents = (int)round($descuentoTotal * 100);
+        $remainingPiecesForDiscount = max(0, $totalPiezas);
 
         foreach ($data['items'] as $item) {
             $idProducto = (int)($item['id_producto'] ?? 0);
@@ -495,8 +530,30 @@ function dbCreatePublicOrder(array $data): array {
                 throw new Exception('Stock insuficiente para uno o más productos.');
             }
 
-            $lineTotal = $precio * $cantidad;
-            $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $precio, $lineTotal]);
+            $stmtCosto->execute([$idProducto]);
+            $costoUnitario = (float)($stmtCosto->fetchColumn() ?: 0);
+
+            $lineGross = round($precio * $cantidad, 2);
+            $lineDiscountCents = 0;
+
+            if ($remainingDiscountCents > 0 && $remainingPiecesForDiscount > 0) {
+                $basePerPieceCents = intdiv($remainingDiscountCents, $remainingPiecesForDiscount);
+                $remainderCents = $remainingDiscountCents % $remainingPiecesForDiscount;
+                $extraForLine = min($cantidad, $remainderCents);
+                $lineDiscountCents = ($cantidad * $basePerPieceCents) + $extraForLine;
+
+                $lineGrossCents = (int)round($lineGross * 100);
+                $lineDiscountCents = min($lineDiscountCents, $lineGrossCents);
+
+                $remainingDiscountCents -= $lineDiscountCents;
+                $remainingPiecesForDiscount -= $cantidad;
+            }
+
+            $lineDiscount = round($lineDiscountCents / 100, 2);
+            $lineNet = round(max(0.0, $lineGross - $lineDiscount), 2);
+            $netUnitPrice = $cantidad > 0 ? round($lineNet / $cantidad, 2) : $precio;
+
+            $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $netUnitPrice, $costoUnitario, $lineDiscount, $lineNet]);
             $stmtStock->execute([$cantidad, $idProducto, $id_almacen_despacho]);
         }
 
@@ -518,6 +575,132 @@ function dbCreatePublicOrder(array $data): array {
         }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
     }
+}
+
+/**
+ * Verifica existencia de la tabla de notificaciones de pickup.
+ */
+function dbPickupNotificationsTableExists(PDO $pdo): bool
+{
+    static $existsCache = null;
+    if ($existsCache !== null) {
+        return $existsCache;
+    }
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+    $stmt->execute();
+    $existsCache = ((int)$stmt->fetchColumn()) > 0;
+    return $existsCache;
+}
+
+/**
+ * Crea alerta formal para sucursal cuando un pedido es pickup.
+ */
+function dbCreatePickupNotification(PDO $pdo, array $data): void
+{
+    try {
+        if (!dbPickupNotificationsTableExists($pdo)) {
+            return;
+        }
+
+        $idPedido = (int)($data['id_pedido'] ?? 0);
+        $idAlmacen = (int)($data['id_almacen'] ?? 0);
+        if ($idPedido <= 0 || $idAlmacen <= 0) {
+            return;
+        }
+
+        $numeroPedido = trim((string)($data['numero_pedido'] ?? ''));
+        $clienteNombre = trim((string)($data['cliente_nombre'] ?? 'Cliente'));
+        $telefono = trim((string)($data['cliente_telefono'] ?? ''));
+        $direccion = trim((string)($data['direccion'] ?? ''));
+
+        $mensaje = 'Pickup en sucursal: Pedido ' . $numeroPedido . ' a nombre de ' . $clienteNombre;
+        if ($telefono !== '') {
+            $mensaje .= ' | Tel: ' . $telefono;
+        }
+        if ($direccion !== '') {
+            $mensaje .= ' | Ref: ' . $direccion;
+        }
+
+        $stmt = $pdo->prepare("INSERT INTO pickup_notificaciones
+            (id_pedido, id_almacen, id_cliente, estado, mensaje, notas_seguimiento, creado_en, actualizado_en)
+            VALUES
+            (:id_pedido, :id_almacen, :id_cliente, 'nueva', :mensaje, :notas, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                estado = 'nueva',
+                mensaje = VALUES(mensaje),
+                notas_seguimiento = VALUES(notas_seguimiento),
+                actualizado_en = NOW()");
+
+        $stmt->execute([
+            ':id_pedido' => $idPedido,
+            ':id_almacen' => $idAlmacen,
+            ':id_cliente' => isset($data['id_cliente']) ? (int)$data['id_cliente'] : null,
+            ':mensaje' => $mensaje,
+            ':notas' => (string)($data['observaciones'] ?? ''),
+        ]);
+    } catch (Throwable $e) {
+        error_log('Error creando notificacion pickup: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Resuelve el almacén para surtir checkout web.
+ *
+ * Prioridad:
+ * 1) Si el frontend envía id_almacen válido, se respeta.
+ * 2) Buscar un almacén que cubra todos los productos requeridos.
+ * 3) Si no existe uno que cubra todo, devolver 1 y dejar que la validación de stock responda error.
+ */
+function resolveCheckoutWarehouse(PDO $pdo, array $items, mixed $requestedWarehouseId = null): int
+{
+    $requestedId = (int)($requestedWarehouseId ?? 0);
+    if ($requestedId > 0) {
+        return $requestedId;
+    }
+
+    $required = [];
+    foreach ($items as $item) {
+        $idProducto = (int)($item['id_producto'] ?? 0);
+        $cantidad = max(0, (int)($item['quantity'] ?? 0));
+        if ($idProducto <= 0 || $cantidad <= 0) {
+            continue;
+        }
+        $required[$idProducto] = ($required[$idProducto] ?? 0) + $cantidad;
+    }
+
+    if (empty($required)) {
+        return 1;
+    }
+
+    $selects = [];
+    $params = [];
+    foreach ($required as $idProducto => $cantidadRequerida) {
+        $selects[] = 'SELECT ? AS id_producto, ? AS cantidad_requerida';
+        $params[] = $idProducto;
+        $params[] = $cantidadRequerida;
+    }
+
+    $requiredSql = implode(' UNION ALL ', $selects);
+    $requiredCount = count($required);
+
+    $sql = "
+        SELECT ia.id_almacen,
+               SUM(CASE WHEN ia.cantidad_actual >= req.cantidad_requerida THEN 1 ELSE 0 END) AS cubiertos,
+               SUM(ia.cantidad_actual) AS stock_total
+        FROM inventario_almacen ia
+        INNER JOIN ({$requiredSql}) req ON req.id_producto = ia.id_producto
+        GROUP BY ia.id_almacen
+        HAVING cubiertos = ?
+        ORDER BY stock_total DESC, ia.id_almacen ASC
+        LIMIT 1";
+
+    $params[] = $requiredCount;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $warehouseId = (int)($stmt->fetchColumn() ?: 0);
+
+    return $warehouseId > 0 ? $warehouseId : 1;
 }
 
 /**

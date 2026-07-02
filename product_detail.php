@@ -391,7 +391,7 @@ include __DIR__ . '/views/includes/header.php';
                 } else {
                     cart.push({
                         id_producto: currentProduct.id_producto,
-                        nombre: currentProduct.nombre + (currentProduct.nombre_variante ? ` (${currentProduct.nombre_variante})` : ''),
+                        nombre: currentProduct.display_cart_name || currentProduct.nombre,
                         precio: currentProduct.precio_venta,
                         quantity: qty
                     });
@@ -438,7 +438,7 @@ include __DIR__ . '/views/includes/header.php';
 
     function renderProduct(product) {
         // Textos
-        const fullName = product.nombre_variante ? `${product.nombre} | ${product.nombre_variante}` : product.nombre;
+        const fullName = product.display_cart_name || product.nombre;
         document.getElementById('product-title').textContent = fullName;
         document.getElementById('bread-name').textContent = fullName;
         document.getElementById('bread-cat').textContent = product.categoria || 'Catálogo';
@@ -581,8 +581,8 @@ include __DIR__ . '/views/includes/header.php';
                 pill.className = 'variant-pill' + (v.id_producto == product.id_producto ? ' active' : '');
                 
                 // Combinar valor (ej: 120) con unidad (ej: Cápsulas, Tomas, Porciones)
-                let variantText = v.nombre_variante || '';
-                const unitText = v.unidad || '';
+                let variantText = v.display_nombre_variante || v.nombre_variante || '';
+                const unitText = v.display_unidad || v.unidad || '';
                 
                 // Si el nombre es solo un número o no contiene la unidad, la agregamos
                 if (variantText && unitText && !variantText.toLowerCase().includes(unitText.toLowerCase())) {
@@ -606,7 +606,7 @@ include __DIR__ . '/views/includes/header.php';
                         priceHtml += ` <span class="grey-text" style="text-decoration: line-through; font-size: 1.2rem; margin-left: 15px;">$ ${parseFloat(v.precio_comparacion).toFixed(2)}</span>`;
                     }
                     document.getElementById('product-price').innerHTML = priceHtml;
-                    document.getElementById('product-title').textContent = `${product.nombre} | ${v.nombre_variante}`;
+                    document.getElementById('product-title').textContent = product.display_cart_name || `${product.nombre}${variantText ? ' | ' + variantText : ''}`;
 
                     // 3. Cambiar URL y cargar datos pesados (stock, galería, tabla)
                     const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?id=' + v.id_producto;

@@ -867,7 +867,7 @@ function renderProductCard(p, isMe) {
     const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
-    const stock = parseInt(p.cantidad_actual) || 0;
+    const stock = Math.max(0, parseInt(p.stock ?? p.chat_stock ?? p.total_stock ?? p.cantidad_actual) || 0);
     const isAvailable = stock > 0;
 
     return `
@@ -926,7 +926,8 @@ function enviarProducto(p) {
         id_producto: p.id_producto,
         nombre: nombreCompleto,
         precio_venta: p.precio_venta,
-        imagen: p.imagen
+        imagen: p.imagen,
+        stock: Math.max(0, parseInt(p.chat_stock ?? p.total_stock ?? p.cantidad_actual) || 0)
     });
     enviarMensaje('producto', pData);
     document.getElementById('chat-product-autocomplete').value = '';

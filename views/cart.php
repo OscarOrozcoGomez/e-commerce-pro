@@ -1,10 +1,12 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/pickup_offer_utils.php';
 
 $pageTitle = 'Mi Carrito de Compras';
 $usuarioLogueado = $_SESSION['usuario'] ?? null;
 $isUserAuthenticated = isAuthenticated(); // Obtener el estado de autenticación de PHP
+$isClienteRole = $isUserAuthenticated && isCliente();
 
 $direcciones = [];
 if ($isUserAuthenticated && isCliente()) {
@@ -16,6 +18,8 @@ if ($isUserAuthenticated && isCliente()) {
 
 $telefonoGuardado = $usuarioLogueado['telefono_cliente'] ?? '';
 $hasSavedAddresses = !empty($direcciones);
+$pickupOfferSettings = getPickupOfferSettings(getPDO());
+$canViewPickupOffer = !isAuthenticated() || isCliente() || isAdmin();
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -45,6 +49,9 @@ include __DIR__ . '/includes/header.php';
                             <i class="material-icons left">delete_sweep</i> VACIAR CARRITO
                         </button>
                         <h5 style="margin: 0; font-weight: bold;">Total: $<span id="cart-total-display">0.00</span></h5>
+                    </div>
+                    <div id="pickup-offer-banner" class="card-panel amber lighten-5" style="display:none; margin-top: 16px; border-left: 5px solid #ff8f00;">
+                        <p id="pickup-offer-message" style="margin: 0; color: #6d4c41;"></p>
                     </div>
                 </div>
             </div>
@@ -171,6 +178,8 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     let mapCart, markerCart;
+    const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
+    const CAN_VIEW_PICKUP_OFFER = <?php echo $canViewPickupOffer ? 'true' : 'false'; ?>;
 
     function initAutocompleteCart() {
         if (typeof google === 'undefined') {
@@ -256,6 +265,7 @@ include __DIR__ . '/includes/header.php';
         const cart = getCart();
         const tbody = document.getElementById('cart-table-body');
         let total = 0;
+        let totalPieces = 0;
         
         tbody.innerHTML = cart.length === 0 ? '<tr><td colspan="5" class="center">El carrito está vacío</td></tr>' : '';
 
@@ -268,10 +278,16 @@ include __DIR__ . '/includes/header.php';
                 return; // Ignorar items corruptos del error anterior
             }
 
+            const cleanName = String(item.nombre)
+                .replace(/\s*\(Unidades\)\s*$/i, '')
+                .replace(/\s*[\-||]\s*Unidades\s*$/i, '')
+                .trim();
+
             total += subtotal;
+            totalPieces += (parseInt(item.quantity, 10) || 0);
             tbody.innerHTML += `
                 <tr>
-                    <td>${item.nombre}</td>
+                    <td>${cleanName}</td>
                     <td>$${price.toFixed(2)}</td>
                     <td>${item.quantity}</td>
                     <td>$${subtotal.toFixed(2)}</td>
@@ -280,10 +296,112 @@ include __DIR__ . '/includes/header.php';
         });
 
         document.getElementById('cart-total-display').textContent = total.toFixed(2);
+        renderPickupOfferBanner(total, totalPieces, cart.length > 0);
 
         // Mostrar u ocultar el botón de vaciar según si hay items
         const btnEmpty = document.getElementById('btn-empty-cart');
         if (btnEmpty) btnEmpty.style.display = cart.length > 0 ? 'inline-block' : 'none';
+    }
+
+    function resolvePieceTierDiscountClient(pieces, settings) {
+        const source = settings?.descuentos_por_pieza;
+        if (!source || typeof source !== 'object') return 0;
+
+        const tiers = Object.entries(source)
+            .map(([qty, discount]) => ({
+                qty: parseInt(qty, 10),
+                discount: Math.max(0, parseFloat(discount) || 0)
+            }))
+            .filter((tier) => Number.isInteger(tier.qty) && tier.qty > 0 && tier.discount > 0)
+            .sort((a, b) => a.qty - b.qty);
+
+        if (tiers.length === 0) return 0;
+
+        const exact = tiers.find((tier) => tier.qty === pieces);
+        if (exact) return exact.discount;
+
+        let fallback = 0;
+        tiers.forEach((tier) => {
+            if (pieces >= tier.qty) fallback = tier.discount;
+        });
+        return fallback;
+    }
+
+    function resolveMissingPiecesForFirstTier(pieces, settings) {
+        const source = settings?.descuentos_por_pieza;
+        if (!source || typeof source !== 'object') return 0;
+
+        const tiers = Object.keys(source)
+            .map((qty) => parseInt(qty, 10))
+            .filter((qty) => Number.isInteger(qty) && qty > 0)
+            .sort((a, b) => a - b);
+
+        if (tiers.length === 0) return 0;
+        return Math.max(0, tiers[0] - Math.max(0, parseInt(pieces, 10) || 0));
+    }
+
+    function calculatePickupOfferClient(subtotal, pieces, settings) {
+        const subtotalNum = Math.max(0, parseFloat(subtotal) || 0);
+        const piezasNum = Math.max(0, parseInt(pieces, 10) || 0);
+        const activo = !!settings.activo;
+        const tierDiscount = resolvePieceTierDiscountClient(piezasNum, settings);
+        const faltantePiezas = resolveMissingPiecesForFirstTier(piezasNum, settings);
+        const elegible = activo && tierDiscount > 0;
+
+        let ahorro = 0;
+        if (elegible) {
+            ahorro = Math.min(+tierDiscount.toFixed(2), subtotalNum);
+        }
+
+        return {
+            elegible,
+            ahorro: +ahorro.toFixed(2),
+            totalSucursal: +(subtotalNum - ahorro).toFixed(2),
+            faltanteSubtotal: 0,
+            faltantePiezas
+        };
+    }
+
+    function renderPickupOfferBanner(subtotal, pieces, hasItems) {
+        const banner = document.getElementById('pickup-offer-banner');
+        const text = document.getElementById('pickup-offer-message');
+        if (!banner || !text) return;
+
+        const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaActual !== 'Domicilio') {
+            banner.style.display = 'none';
+            return;
+        }
+
+        const tierDiscount = resolvePieceTierDiscountClient(Math.max(1, parseInt(pieces, 10) || 1), PICKUP_OFFER_SETTINGS);
+        const hasDiscountConfig = tierDiscount > 0 || resolveMissingPiecesForFirstTier(pieces, PICKUP_OFFER_SETTINGS) > 0;
+
+        if (!CAN_VIEW_PICKUP_OFFER || !hasItems || !PICKUP_OFFER_SETTINGS || !PICKUP_OFFER_SETTINGS.activo || !hasDiscountConfig) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        const calc = calculatePickupOfferClient(subtotal, pieces, PICKUP_OFFER_SETTINGS);
+        const msgBase = 'Si recoges en sucursal, obtienes mejor precio en este pedido.';
+
+        if (calc.elegible && calc.ahorro > 0) {
+            text.innerHTML = `<strong>${msgBase}</strong><br>Si este pedido lo recoges en sucursal, te costaría <strong>$${calc.totalSucursal.toFixed(2)}</strong> en lugar de $${subtotal.toFixed(2)}. Ahorras <strong>$${calc.ahorro.toFixed(2)}</strong>.`;
+            banner.style.display = 'block';
+            return;
+        }
+
+        const faltantes = [];
+        if (calc.faltantePiezas > 0) {
+            faltantes.push(`te faltan ${calc.faltantePiezas} pieza(s)`);
+        }
+
+        if (faltantes.length === 0) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        text.innerHTML = `<strong>${msgBase}</strong><br>Aún no aplica el incentivo de sucursal: ${faltantes.join(' y ')}.`;
+        banner.style.display = 'block';
     }
 
     function removeItem(index) {
@@ -370,6 +488,17 @@ include __DIR__ . '/includes/header.php';
                 } else if (result.dismiss === Swal.DismissReason.cancel) {
                     window.location.href = 'register.php';
                 }
+            });
+            return;
+        }
+
+        if (!<?php echo json_encode($isClienteRole); ?>) {
+            Swal.fire({
+                title: 'Compra no disponible para este perfil',
+                text: 'Las cuentas internas (admin, encargado, vendedor o repartidor) no pueden comprar en el checkout web. Inicia sesión con una cuenta cliente.',
+                icon: 'warning',
+                confirmButtonText: 'Entendido',
+                confirmButtonColor: '#0d47a1'
             });
             return;
         }
@@ -598,7 +727,10 @@ include __DIR__ . '/includes/header.php';
         }
     }
 
-    tipoEntrega.addEventListener('change', function() { aplicarModoEntrega(this.value); });
+    tipoEntrega.addEventListener('change', function() {
+        aplicarModoEntrega(this.value);
+        renderCart();
+    });
 
     document.getElementById('select_direccion')?.addEventListener('change', function() {
         if (this.value === '__other__') {
