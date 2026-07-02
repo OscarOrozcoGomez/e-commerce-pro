@@ -272,6 +272,8 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     let cacheProductosPadre = [];
+    const editProductIdFromUrl = new URLSearchParams(window.location.search).get('id_producto');
+    let pendingEditProductId = editProductIdFromUrl ? String(editProductIdFromUrl) : '';
 
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
     let colaImagenes = []; // { type: 'local'|'server', file: File|null, path: string|null, preview: string }
@@ -682,10 +684,26 @@ include __DIR__ . '/includes/header.php';
                 });
                 tbody.innerHTML = html;
                 aplicarFiltros();
+                autoOpenPendingEdit(res.data);
             })
             .catch(err => {
                 tbody.innerHTML = `<tr><td colspan="8" class="center red-text">${err.message}</td></tr>`;
             });
+    }
+
+    function autoOpenPendingEdit(products) {
+        if (!pendingEditProductId || !Array.isArray(products)) return;
+
+        const product = products.find(p => String(p.id_producto) === pendingEditProductId);
+        if (!product) return;
+
+        pendingEditProductId = '';
+        abrirEditar(product);
+
+        const targetCard = document.getElementById('form-title');
+        if (targetCard) {
+            targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     }
 
     // Ayudante JS para resolver la URL de la imagen similar a la función de PHP

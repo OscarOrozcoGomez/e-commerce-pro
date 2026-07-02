@@ -72,15 +72,16 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content">
                         <span class="card-title">Ingresos Mes</span>
                         <p class="display-metric" id="stat-ingresos-mes">$ 0.00</p>
+                        <p class="text-small">Ventas registradas del mes</p>
                     </div>
                 </div>
             </div>
             <div class="col s12 m6 l4">
                 <div class="card red darken-4">
                     <div class="card-content white-text">
-                        <span class="card-title">Auditoría: Incompletos</span>
+                        <span class="card-title">Productos sin configuración</span>
                         <p class="display-metric" id="stat-incompletos">0</p>
-                        <p class="text-small">Sin precio, costo o stock registrado</p>
+                        <p class="text-small">Sin precio, costo o inventario base</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/analytics.php" class="white-text">Ver Detalles</a>
@@ -96,6 +97,61 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="white-text">Gestionar Blogs</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12 m6 l4">
+                <div class="card green darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Utilidad Bruta Mes</span>
+                        <p class="display-metric" id="stat-utilidad-mes">$ 0.00</p>
+                        <p class="text-small">Ingresos menos costo histórico</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card amber darken-2">
+                    <div class="card-content white-text">
+                        <span class="card-title">Costo Mes</span>
+                        <p class="display-metric" id="stat-costo-mes">$ 0.00</p>
+                        <p class="text-small">Costo de mercancía vendida</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card blue darken-3">
+                    <div class="card-content white-text">
+                        <span class="card-title">Margen Bruto</span>
+                        <p class="display-metric" id="stat-margen-mes">0%</p>
+                        <p class="text-small">Utilidad / ingresos</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Desglose Diario del Mes</span>
+                        <div style="overflow-x:auto;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha</th>
+                                        <th class="right-align">Ingresos</th>
+                                        <th class="right-align">Costo</th>
+                                        <th class="right-align">Utilidad</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="finance-daily-body">
+                                    <tr><td colspan="4" class="center grey-text">Cargando desglose financiero...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -520,11 +576,32 @@ include __DIR__ . '/includes/header.php';
                 if (d.productos) updateEl('stat-productos', d.productos.total || 0);
                 if (d.usuarios) updateEl('stat-usuarios', d.usuarios.total || 0);
                 if (d.ingresos_mes) updateEl('stat-ingresos-mes', '$ ' + parseFloat(d.ingresos_mes.total || 0).toFixed(2));
+                if (d.utilidad_mes) updateEl('stat-utilidad-mes', '$ ' + parseFloat(d.utilidad_mes.total || 0).toFixed(2));
+                if (d.costo_mes) updateEl('stat-costo-mes', '$ ' + parseFloat(d.costo_mes.total || 0).toFixed(2));
+                if (d.finanzas_mes) updateEl('stat-margen-mes', (parseFloat(d.finanzas_mes.margen || 0)).toFixed(2) + '%');
                 if (d.blogs) updateEl('stat-blogs', d.blogs.total || 0);
                 if (d.incompletos) updateEl('stat-incompletos', d.incompletos.total || 0);
                 if (d.stock_bajo) updateEl('stat-stock-bajo', d.stock_bajo.total || 0);
                 if (d.por_entregar) updateEl('stat-por-entregar', d.por_entregar.total || 0);
                 if (d.entregas_hoy) updateEl('stat-entregas-hoy', d.entregas_hoy.total || 0);
+
+                if (d.finanzas_mes?.diario) {
+                    const tbody = document.getElementById('finance-daily-body');
+                    if (tbody) {
+                        tbody.innerHTML = '';
+                        d.finanzas_mes.diario.forEach(row => {
+                            const date = new Date(row.fecha + 'T00:00:00');
+                            const fechaTxt = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+                            tbody.innerHTML += `
+                                <tr>
+                                    <td>${fechaTxt}</td>
+                                    <td class="right-align">$ ${parseFloat(row.ingresos || 0).toFixed(2)}</td>
+                                    <td class="right-align">$ ${parseFloat(row.costos || 0).toFixed(2)}</td>
+                                    <td class="right-align">$ ${parseFloat(row.utilidad || 0).toFixed(2)}</td>
+                                </tr>`;
+                        });
+                    }
+                }
             })
             .catch(err => {
                 M.toast({html: 'Error cargando estadísticas', classes: 'red'});

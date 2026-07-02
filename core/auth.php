@@ -476,9 +476,10 @@ function dbCreatePublicOrder(array $data): array {
         $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_despacho, $subtotal, $subtotal, $infoCliente]);
         $id_pedido = $pdo->lastInsertId();
 
-        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?");
         $stmtStockCheck = $pdo->prepare("SELECT COALESCE(cantidad_actual, 0) FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ? FOR UPDATE");
+        $stmtCosto = $pdo->prepare("SELECT COALESCE(precio_costo, 0) FROM productos WHERE id_producto = ?");
 
         foreach ($data['items'] as $item) {
             $idProducto = (int)($item['id_producto'] ?? 0);
@@ -495,8 +496,11 @@ function dbCreatePublicOrder(array $data): array {
                 throw new Exception('Stock insuficiente para uno o más productos.');
             }
 
+            $stmtCosto->execute([$idProducto]);
+            $costoUnitario = (float)($stmtCosto->fetchColumn() ?: 0);
+
             $lineTotal = $precio * $cantidad;
-            $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $precio, $lineTotal]);
+            $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $precio, $costoUnitario, $lineTotal]);
             $stmtStock->execute([$cantidad, $idProducto, $id_almacen_despacho]);
         }
 

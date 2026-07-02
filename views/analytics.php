@@ -62,6 +62,7 @@ include __DIR__ . '/includes/header.php';
                                 <th>Promedio Diario</th>
                                 <th>Días Restantes (Est.)</th>
                                 <th>Estado</th>
+                                <th>Acción</th>
                             </tr>
                         </thead>
                         <tbody id="table-predicciones">
@@ -149,24 +150,36 @@ include __DIR__ . '/includes/header.php';
         const tbody = document.getElementById('table-predicciones');
         list.forEach(p => {
             let color = 'green-text';
-            let label = 'Abastecido';
-            let rowClass = p.incompleto ? 'red lighten-5' : '';
+            let label = p.estado || 'Abastecido';
+            let rowClass = p.sin_configuracion ? 'red lighten-5' : '';
 
-            if (p.incompleto) {
-                color = 'red-text text-darken-4'; label = 'INCOMPLETO';
-            } else if (p.dias_restantes !== '∞') {
-                if (p.dias_restantes < 7) { color = 'red-text'; label = 'CRÍTICO'; }
+            if (p.sin_configuracion) {
+                color = 'red-text text-darken-4';
+                label = 'Sin configuración';
+            } else if (p.estado === 'Agotado') {
+                color = 'red-text text-darken-4';
+            } else if (p.estado === 'Sin rotación') {
+                color = 'blue-text text-darken-2';
+            } else if (p.estado === 'Sin histórico') {
+                color = 'grey-text text-darken-2';
+            } else if (p.dias_restantes !== '—') {
+                if (p.dias_restantes < 7) { color = 'red-text'; label = 'Crítico'; }
                 else if (p.dias_restantes < 15) { color = 'orange-text'; label = 'Reabastecer pronto'; }
             }
 
             tbody.innerHTML += `
                 <tr class="${rowClass}">
-                    <td><strong>${p.nombre}</strong>${p.incompleto ? '<br><small class="red-text">Falta configurar precio/costo</small>' : ''}</td>
+                    <td><strong>${p.nombre}</strong>${p.sin_configuracion ? '<br><small class="red-text">Falta configurar precio/costo</small>' : ''}</td>
                     <td>${p.stock}</td>
                     <td>${p.ventas}</td>
                     <td>${p.promedio}</td>
                     <td class="center-align ${color}" style="font-weight: bold; font-size: 1.2rem;">${p.dias_restantes}</td>
                     <td class="${color} font-weight-bold">${label}</td>
+                    <td class="center-align">
+                        <a href="<?php echo BASE_URL; ?>views/products.php?id_producto=${p.id_producto}" class="btn-small blue darken-3 waves-effect waves-light" title="Abrir en productos">
+                            <i class="material-icons" style="font-size: 1rem;">edit</i>
+                        </a>
+                    </td>
                 </tr>`;
         });
     }

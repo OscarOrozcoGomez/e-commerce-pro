@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/finance_utils.php';
 
 header('Content-Type: application/json');
 if (!isAuthenticated()) {
@@ -18,6 +19,44 @@ $idUsuario = $usuario['id_usuario'];
 try {
     $stats = [];
 
+    $scopeSql = '';
+    $scopeParams = [];
+    if ($rol === 'encargado') {
+        $scopeSql = ' AND pe.id_almacen = ?';
+        $scopeParams[] = $idAlmacen;
+    } elseif ($rol === 'vendedor') {
+        $scopeSql = ' AND pe.id_usuario = ?';
+        $scopeParams[] = $idUsuario;
+    }
+
+    $financeSql = "
+        SELECT DATE(pe.fecha_creacion) AS fecha,
+               COALESCE(SUM(dp.subtotal), 0) AS ingresos,
+               COALESCE(SUM(dp.cantidad * COALESCE(dp.costo_unitario, p.precio_costo, 0)), 0) AS costos
+        FROM pedidos pe
+        JOIN detalle_pedidos dp ON pe.id_pedido = dp.id_pedido
+        JOIN productos p ON dp.id_producto = p.id_producto
+        WHERE pe.estado != 'cancelado'
+          AND YEAR(pe.fecha_creacion) = YEAR(NOW())
+          AND MONTH(pe.fecha_creacion) = MONTH(NOW())
+          {$scopeSql}
+        GROUP BY DATE(pe.fecha_creacion)
+        ORDER BY fecha ASC";
+
+    $financeStmt = $pdo->prepare($financeSql);
+    $financeStmt->execute($scopeParams);
+    $financeRows = $financeStmt->fetchAll(PDO::FETCH_ASSOC);
+    $monthStart = (new DateTimeImmutable('first day of this month'))->format('Y-m-d');
+    $monthEnd = (new DateTimeImmutable('last day of this month'))->format('Y-m-d');
+    $dailyFinance = financeBuildDailySeries($financeRows, $monthStart, $monthEnd);
+    $monthIncome = 0.0;
+    $monthCost = 0.0;
+    foreach ($dailyFinance as $day) {
+        $monthIncome += (float) $day['ingresos'];
+        $monthCost += (float) $day['costos'];
+    }
+    $monthProfit = financeCalculateGrossProfit($monthIncome, $monthCost);
+
     if ($rol === 'admin') {
         // Ventas hoy
         $stmt = $pdo->query("SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto FROM pedidos WHERE DATE(fecha_creacion) = CURDATE() AND estado != 'cancelado'");
@@ -28,8 +67,16 @@ try {
         $stats['usuarios'] = $pdo->query("SELECT COUNT(*) as total FROM usuarios WHERE estado = 'activo'")->fetch();
         $stats['productos'] = $pdo->query("SELECT COUNT(*) as total FROM productos WHERE estado = 'activo'")->fetch();
         
-        // Ingresos mes
-        $stats['ingresos_mes'] = $pdo->query("SELECT COALESCE(SUM(total), 0) as total FROM pedidos WHERE YEAR(fecha_creacion) = YEAR(NOW()) AND MONTH(fecha_creacion) = MONTH(NOW()) AND estado != 'cancelado'")->fetch();
+        $stats['finanzas_mes'] = [
+            'ingresos' => $monthIncome,
+            'costo' => $monthCost,
+            'utilidad' => $monthProfit,
+            'margen' => $monthIncome > 0 ? round(($monthProfit / $monthIncome) * 100, 2) : 0,
+            'diario' => $dailyFinance,
+        ];
+        $stats['ingresos_mes'] = ['total' => $monthIncome];
+        $stats['utilidad_mes'] = ['total' => $monthProfit];
+        $stats['costo_mes'] = ['total' => $monthCost];
         
         // Stock bajo
         $stats['stock_bajo'] = $pdo->query("SELECT COUNT(*) as total FROM inventario_almacen ia JOIN productos p ON ia.id_producto = p.id_producto WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'")->fetch();
@@ -49,9 +96,16 @@ try {
         $stmt->execute([$idAlmacen]);
         $stats['productos'] = $stmt->fetch();
 
-        $stats['ingresos_mes'] = $pdo->prepare("SELECT COALESCE(SUM(total), 0) as total FROM pedidos WHERE id_almacen = ? AND YEAR(fecha_creacion) = YEAR(NOW()) AND MONTH(fecha_creacion) = MONTH(NOW()) AND estado != 'cancelado'");
-        $stats['ingresos_mes']->execute([$idAlmacen]);
-        $stats['ingresos_mes'] = $stats['ingresos_mes']->fetch();
+        $stats['finanzas_mes'] = [
+            'ingresos' => $monthIncome,
+            'costo' => $monthCost,
+            'utilidad' => $monthProfit,
+            'margen' => $monthIncome > 0 ? round(($monthProfit / $monthIncome) * 100, 2) : 0,
+            'diario' => $dailyFinance,
+        ];
+        $stats['ingresos_mes'] = ['total' => $monthIncome];
+        $stats['utilidad_mes'] = ['total' => $monthProfit];
+        $stats['costo_mes'] = ['total' => $monthCost];
 
         $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM inventario_almacen ia JOIN productos p ON ia.id_producto = p.id_producto WHERE ia.id_almacen = ? AND ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'");
         $stmt->execute([$idAlmacen]);
@@ -78,6 +132,8 @@ try {
         $stmt = $pdo->prepare("SELECT COALESCE(SUM(total), 0) as total FROM pedidos WHERE id_usuario = ? AND YEAR(fecha_creacion) = YEAR(NOW()) AND MONTH(fecha_creacion) = MONTH(NOW()) AND estado != 'cancelado'");
         $stmt->execute([$idUsuario]);
         $stats['ingresos_mes'] = $stmt->fetch();
+        $stats['utilidad_mes'] = ['total' => 0];
+        $stats['costo_mes'] = ['total' => 0];
     }
 
     echo json_encode(['success' => true, 'data' => $stats]);

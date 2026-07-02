@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS `detalle_pedidos` (
   `cantidad` INT NOT NULL DEFAULT 1,
   `precio_original` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `precio_unitario` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `costo_unitario` DECIMAL(12,2) DEFAULT NULL,
   `porcentaje_descuento` DECIMAL(5,2) DEFAULT NULL,
   `monto_descuento` DECIMAL(12,2) DEFAULT NULL,
   `subtotal` DECIMAL(12,2) NOT NULL DEFAULT 0.00,

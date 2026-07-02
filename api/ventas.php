@@ -98,10 +98,14 @@ try {
 
         // Insertar detalles de pedido y actualizar inventario
         foreach ($productos as $prod) {
+            $stmtCosto = $pdo->prepare("SELECT COALESCE(precio_costo, 0) FROM productos WHERE id_producto = ?");
+            $stmtCosto->execute([$prod['id_producto']]);
+            $costoUnitario = (float)($stmtCosto->fetchColumn() ?: 0);
+
             // Insertar detalle
             $sql = "INSERT INTO detalle_pedidos 
-                    (id_pedido, id_producto, cantidad, precio_original, precio_unitario, subtotal) 
-                    VALUES (:pedido, :producto, :cantidad, :precio_original, :precio_unitario, :subtotal)";
+                    (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, subtotal) 
+                    VALUES (:pedido, :producto, :cantidad, :precio_original, :precio_unitario, :costo_unitario, :subtotal)";
             
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
@@ -110,6 +114,7 @@ try {
                 ':cantidad' => $prod['cantidad'],
                 ':precio_original' => $prod['precio_unitario'],
                 ':precio_unitario' => $prod['precio_unitario'],
+                ':costo_unitario' => $costoUnitario,
                 ':subtotal' => $prod['subtotal'],
             ]);
 
