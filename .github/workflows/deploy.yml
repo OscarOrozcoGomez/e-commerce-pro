@@ -25,8 +25,8 @@ jobs:
       FTP_HOST: ${{ secrets.PTF_HOST }}
       FTP_USERNAME: ${{ secrets.PTF_USERNAME }}
       FTP_PASSWORD: ${{ secrets.PTF_PASSWORD }}
-      FTP_PORT: "21"
-      FTP_PROTOCOL: ftp
+      FTP_PORT: ${{ secrets.PTF_PORT || '21' }}
+      FTP_PROTOCOL: ${{ secrets.PTF_PROTOCOL || 'ftp' }}
       FTP_REMOTE_PATH: /public_html/
     
     steps:
@@ -90,6 +90,7 @@ jobs:
           state-name: .ftp-deploy-sync-state.json
           dangerous-clean-slate: false
           log-level: standard
+          timeout: 120000
           # Excluimos exactamente lo mismo que tienes en tu VS Code + archivos de desarrollo
           exclude: |
             **/.git/**
