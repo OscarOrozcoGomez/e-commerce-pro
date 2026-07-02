@@ -494,6 +494,19 @@ function dbCreatePublicOrder(array $data): array {
         $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_despacho, $subtotal, $descuentoTotal, $totalPedido, $infoCliente]);
         $id_pedido = $pdo->lastInsertId();
 
+        if (strcasecmp((string)$entrega, 'Sucursal') === 0) {
+            dbCreatePickupNotification($pdo, [
+                'id_pedido' => (int)$id_pedido,
+                'id_almacen' => (int)$id_almacen_despacho,
+                'id_cliente' => $id_cliente !== null ? (int)$id_cliente : null,
+                'numero_pedido' => (string)$numero_pedido,
+                'cliente_nombre' => (string)($data['cliente']['nombre'] ?? 'Cliente sin nombre'),
+                'cliente_telefono' => (string)($data['cliente']['telefono'] ?? ''),
+                'direccion' => (string)($data['cliente']['direccion'] ?? ''),
+                'observaciones' => (string)$infoCliente,
+            ]);
+        }
+
         $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, monto_descuento, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?");
         $stmtStockCheck = $pdo->prepare("SELECT COALESCE(cantidad_actual, 0) FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ? FOR UPDATE");
@@ -561,6 +574,73 @@ function dbCreatePublicOrder(array $data): array {
             return ['success' => false, 'message' => 'Hay productos inválidos en tu carrito. Actualiza la página e intenta de nuevo.'];
         }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
+    }
+}
+
+/**
+ * Verifica existencia de la tabla de notificaciones de pickup.
+ */
+function dbPickupNotificationsTableExists(PDO $pdo): bool
+{
+    static $existsCache = null;
+    if ($existsCache !== null) {
+        return $existsCache;
+    }
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+    $stmt->execute();
+    $existsCache = ((int)$stmt->fetchColumn()) > 0;
+    return $existsCache;
+}
+
+/**
+ * Crea alerta formal para sucursal cuando un pedido es pickup.
+ */
+function dbCreatePickupNotification(PDO $pdo, array $data): void
+{
+    try {
+        if (!dbPickupNotificationsTableExists($pdo)) {
+            return;
+        }
+
+        $idPedido = (int)($data['id_pedido'] ?? 0);
+        $idAlmacen = (int)($data['id_almacen'] ?? 0);
+        if ($idPedido <= 0 || $idAlmacen <= 0) {
+            return;
+        }
+
+        $numeroPedido = trim((string)($data['numero_pedido'] ?? ''));
+        $clienteNombre = trim((string)($data['cliente_nombre'] ?? 'Cliente'));
+        $telefono = trim((string)($data['cliente_telefono'] ?? ''));
+        $direccion = trim((string)($data['direccion'] ?? ''));
+
+        $mensaje = 'Pickup en sucursal: Pedido ' . $numeroPedido . ' a nombre de ' . $clienteNombre;
+        if ($telefono !== '') {
+            $mensaje .= ' | Tel: ' . $telefono;
+        }
+        if ($direccion !== '') {
+            $mensaje .= ' | Ref: ' . $direccion;
+        }
+
+        $stmt = $pdo->prepare("INSERT INTO pickup_notificaciones
+            (id_pedido, id_almacen, id_cliente, estado, mensaje, notas_seguimiento, creado_en, actualizado_en)
+            VALUES
+            (:id_pedido, :id_almacen, :id_cliente, 'nueva', :mensaje, :notas, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                estado = 'nueva',
+                mensaje = VALUES(mensaje),
+                notas_seguimiento = VALUES(notas_seguimiento),
+                actualizado_en = NOW()");
+
+        $stmt->execute([
+            ':id_pedido' => $idPedido,
+            ':id_almacen' => $idAlmacen,
+            ':id_cliente' => isset($data['id_cliente']) ? (int)$data['id_cliente'] : null,
+            ':mensaje' => $mensaje,
+            ':notas' => (string)($data['observaciones'] ?? ''),
+        ]);
+    } catch (Throwable $e) {
+        error_log('Error creando notificacion pickup: ' . $e->getMessage());
     }
 }
 

@@ -18,17 +18,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     } else {
         $id = (int)($_POST['id_blog'] ?? 0);
         $titulo = trim($_POST['titulo'] ?? '');
-        $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $titulo)));
+        $slugInput = trim((string)($_POST['slug'] ?? ''));
+        $slugBase = $slugInput !== '' ? $slugInput : $titulo;
+        $slug = strtolower(trim((string)preg_replace('/[^a-zA-Z0-9-]+/', '-', $slugBase), '-'));
         $extracto = trim($_POST['extracto'] ?? '');
         $contenido = $_POST['contenido'] ?? ''; 
         $estado = $_POST['estado'] ?? 'publicado';
 
-        if ($_POST['accion'] === 'guardar') {
-            $res = dbSaveBlog([
-                'id' => $id, 'id_usuario' => $usuario_id, 'titulo' => $titulo,
-                'slug' => $slug, 'extracto' => $extracto, 'contenido' => $contenido, 'estado' => $estado
-            ]);
-            if ($res) $success = 'Operación exitosa.'; else $error = 'Error al guardar.';
+        if ($titulo === '') {
+            $error = 'El titulo es obligatorio.';
+        } elseif ($slug === '') {
+            $error = 'El slug (branch/url) es invalido. Usa letras, numeros y guiones.';
+        }
+
+        if ($error === '' && $_POST['accion'] === 'guardar') {
+            try {
+                $res = dbSaveBlog([
+                    'id' => $id, 'id_usuario' => $usuario_id, 'titulo' => $titulo,
+                    'slug' => $slug, 'extracto' => $extracto, 'contenido' => $contenido, 'estado' => $estado
+                ]);
+                if ($res) {
+                    $success = 'Operacion exitosa.';
+                } else {
+                    $error = 'Error al guardar.';
+                }
+            } catch (PDOException $e) {
+                if ((int)$e->getCode() === 23000) {
+                    $error = 'Ya existe un articulo con ese slug. Usa otro.';
+                } else {
+                    $error = 'Error al guardar: ' . $e->getMessage();
+                }
+            }
         } elseif ($_POST['accion'] === 'eliminar') {
             $pdo->prepare("DELETE FROM blogs WHERE id_blog = ?")->execute([$id]); // Solo para simplificar el ejemplo
             $success = 'Artículo eliminado.';
@@ -69,6 +89,11 @@ include __DIR__ . '/includes/header.php';
                         <div class="input-field">
                             <input type="text" name="titulo" id="titulo" required>
                             <label for="titulo">Título del Post</label>
+                        </div>
+                        <div class="input-field">
+                            <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+">
+                            <label for="slug">Slug / Branch URL</label>
+                            <small class="grey-text">Se usa en la URL del blog. Puedes editarlo manualmente.</small>
                         </div>
                         <div class="input-field">
                             <textarea name="extracto" id="extracto" class="materialize-textarea" placeholder="Breve resumen que aparece en la lista..."></textarea>
@@ -130,6 +155,15 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+    let slugEditedManually = false;
+
+    function slugify(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+    }
+
     tinymce.init({
         selector: '#editor-html',
         plugins: 'link image lists code table',
@@ -138,13 +172,36 @@ include __DIR__ . '/includes/header.php';
         menubar: false
     });
 
+    document.addEventListener('DOMContentLoaded', function() {
+        const tituloInput = document.getElementById('titulo');
+        const slugInput = document.getElementById('slug');
+
+        if (!tituloInput || !slugInput) return;
+
+        tituloInput.addEventListener('input', function() {
+            if (!slugEditedManually) {
+                slugInput.value = slugify(tituloInput.value);
+            }
+        });
+
+        slugInput.addEventListener('input', function() {
+            const normalized = slugify(slugInput.value);
+            slugEditedManually = slugInput.value !== '';
+            if (slugInput.value !== normalized) {
+                slugInput.value = normalized;
+            }
+        });
+    });
+
     function cargarArticulo(art) {
         document.getElementById('id_blog').value = art.id_blog;
         document.getElementById('titulo').value = art.titulo;
+        document.getElementById('slug').value = art.slug;
         document.getElementById('extracto').value = art.extracto;
         document.getElementById('estado').value = art.estado;
         tinymce.get('editor-html').setContent(art.contenido);
         document.getElementById('form-title').textContent = 'Editando Artículo';
+        slugEditedManually = true;
         M.updateTextFields();
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -152,8 +209,10 @@ include __DIR__ . '/includes/header.php';
     function resetForm() {
         document.getElementById('form-blog').reset();
         document.getElementById('id_blog').value = '';
+        document.getElementById('slug').value = '';
         tinymce.get('editor-html').setContent('');
         document.getElementById('form-title').textContent = 'Escribir Artículo';
+        slugEditedManually = false;
     }
 </script>
 <style>.w-100 { width: 100%; }</style>

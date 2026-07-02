@@ -16,22 +16,104 @@ $pdo = getPDO();
 $error = '';
 $success = '';
 
+$hasDireccion = false;
+$hasUbicacion = false;
+$hasTelefono = false;
+
+try {
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'almacenes' AND COLUMN_NAME = 'direccion'");
+    $stmtMeta->execute();
+    $hasDireccion = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'almacenes' AND COLUMN_NAME = 'ubicacion'");
+    $stmtMeta->execute();
+    $hasUbicacion = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'almacenes' AND COLUMN_NAME = 'telefono'");
+    $stmtMeta->execute();
+    $hasTelefono = ((int)$stmtMeta->fetchColumn()) > 0;
+} catch (Throwable $e) {
+    $error = 'No se pudo verificar el esquema de sucursales: ' . $e->getMessage();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Token CSRF inválido.';
     } else {
         $accion = $_POST['accion'];
-        $nombre = htmlspecialchars(trim($_POST['nombre'] ?? ''));
-        $direccion = htmlspecialchars(trim($_POST['direccion'] ?? ''));
-        $telefono = htmlspecialchars(trim($_POST['telefono'] ?? ''));
+        $nombre = trim((string)($_POST['nombre'] ?? ''));
+        $direccion = trim((string)($_POST['direccion'] ?? ''));
+        $telefono = trim((string)($_POST['telefono'] ?? ''));
+        $idAlmacen = (int)($_POST['id_almacen'] ?? 0);
 
-        if ($accion === 'agregar') {
+        if ($nombre === '' && in_array($accion, ['agregar', 'actualizar'], true)) {
+            $error = 'El nombre de sucursal es obligatorio.';
+        }
+
+        if ($error === '' && $accion === 'agregar') {
             try {
-                $stmt = $pdo->prepare("INSERT INTO almacenes (nombre, direccion, telefono) VALUES (?, ?, ?)");
-                $stmt->execute([$nombre, $direccion, $telefono]);
+                $insertColumns = ['nombre'];
+                $insertParams = [':nombre' => $nombre];
+                if ($hasDireccion) {
+                    $insertColumns[] = 'direccion';
+                    $insertParams[':direccion'] = $direccion !== '' ? $direccion : null;
+                } elseif ($hasUbicacion) {
+                    $insertColumns[] = 'ubicacion';
+                    $insertParams[':ubicacion'] = $direccion !== '' ? $direccion : null;
+                }
+                if ($hasTelefono) {
+                    $insertColumns[] = 'telefono';
+                    $insertParams[':telefono'] = $telefono !== '' ? $telefono : null;
+                }
+
+                $placeholders = array_map(static fn(string $col): string => ':' . $col, $insertColumns);
+                $sqlInsert = 'INSERT INTO almacenes (' . implode(', ', $insertColumns) . ') VALUES (' . implode(', ', $placeholders) . ')';
+                $stmt = $pdo->prepare($sqlInsert);
+                $stmt->execute($insertParams);
                 $success = "Sucursal '$nombre' creada correctamente.";
             } catch (PDOException $e) {
                 $error = "Error al crear sucursal: " . $e->getMessage();
+            }
+        } elseif ($error === '' && $accion === 'actualizar') {
+            if ($idAlmacen <= 0) {
+                $error = 'Sucursal invalida para actualizar.';
+            } else {
+                try {
+                    $setParts = ['nombre = :nombre'];
+                    $params = [':nombre' => $nombre, ':id_almacen' => $idAlmacen];
+
+                    if ($hasDireccion) {
+                        $setParts[] = 'direccion = :direccion';
+                        $params[':direccion'] = $direccion !== '' ? $direccion : null;
+                    } elseif ($hasUbicacion) {
+                        $setParts[] = 'ubicacion = :ubicacion';
+                        $params[':ubicacion'] = $direccion !== '' ? $direccion : null;
+                    }
+
+                    if ($hasTelefono) {
+                        $setParts[] = 'telefono = :telefono';
+                        $params[':telefono'] = $telefono !== '' ? $telefono : null;
+                    }
+
+                    $stmt = $pdo->prepare('UPDATE almacenes SET ' . implode(', ', $setParts) . ' WHERE id_almacen = :id_almacen');
+                    $stmt->execute($params);
+                    $success = 'Sucursal actualizada correctamente.';
+                } catch (PDOException $e) {
+                    $error = 'Error al actualizar sucursal: ' . $e->getMessage();
+                }
+            }
+        } elseif ($error === '' && $accion === 'cambiar_estado') {
+            if ($idAlmacen <= 0) {
+                $error = 'Sucursal invalida para actualizar estado.';
+            } else {
+                $nuevoEstado = ($_POST['nuevo_estado'] ?? '') === 'inactivo' ? 'inactivo' : 'activo';
+                try {
+                    $stmt = $pdo->prepare("UPDATE almacenes SET estado = ? WHERE id_almacen = ?");
+                    $stmt->execute([$nuevoEstado, $idAlmacen]);
+                    $success = 'Estado de sucursal actualizado.';
+                } catch (PDOException $e) {
+                    $error = 'Error al cambiar estado: ' . $e->getMessage();
+                }
             }
         } elseif ($accion === 'guardar_incentivo') {
             $activo = isset($_POST['activo']) ? 1 : 0;
@@ -76,7 +158,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 }
 
 // Obtener sucursales actuales
-$sucursales = $pdo->query("SELECT * FROM almacenes ORDER BY nombre ASC")->fetchAll();
+$locationSelect = $hasDireccion
+    ? 'a.direccion'
+    : ($hasUbicacion ? 'a.ubicacion' : 'NULL');
+$phoneSelect = $hasTelefono ? 'a.telefono' : 'NULL';
+$sqlSucursales = "SELECT a.*, {$locationSelect} AS direccion_visible, {$phoneSelect} AS telefono_visible FROM almacenes a ORDER BY a.nombre ASC";
+$sucursales = $pdo->query($sqlSucursales)->fetchAll();
+
+$editSucursal = null;
+$editId = (int)($_GET['editar'] ?? 0);
+if ($editId > 0) {
+    $sqlEdit = "SELECT a.*, {$locationSelect} AS direccion_visible, {$phoneSelect} AS telefono_visible FROM almacenes a WHERE a.id_almacen = :id LIMIT 1";
+    $stmtEdit = $pdo->prepare($sqlEdit);
+    try {
+        $stmtEdit->execute([':id' => $editId]);
+        $editSucursal = $stmtEdit->fetch() ?: null;
+        if (!$editSucursal) {
+            $error = 'No se encontro la sucursal seleccionada para editar.';
+        }
+    } catch (Throwable $e) {
+        $error = 'No se pudo cargar la sucursal para editar: ' . $e->getMessage();
+    }
+}
+
 $pickupOffer = getPickupOfferSettings($pdo);
 
 include __DIR__ . '/includes/header.php';
@@ -103,23 +207,27 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12 m5">
             <div class="card">
                 <div class="card-content">
-                    <span class="card-title">Nueva Sucursal</span>
+                    <span class="card-title"><?php echo $editSucursal ? 'Editar Sucursal' : 'Nueva Sucursal'; ?></span>
                     <form method="POST">
                         <?php echo csrfInput(); ?>
-                        <input type="hidden" name="accion" value="agregar">
+                        <input type="hidden" name="accion" value="<?php echo $editSucursal ? 'actualizar' : 'agregar'; ?>">
+                        <input type="hidden" name="id_almacen" value="<?php echo (int)($editSucursal['id_almacen'] ?? 0); ?>">
                         <div class="input-field">
-                            <input type="text" name="nombre" id="nombre" required>
+                            <input type="text" name="nombre" id="nombre" required value="<?php echo esc((string)($editSucursal['nombre'] ?? '')); ?>">
                             <label for="nombre">Nombre de la Sucursal</label>
                         </div>
                         <div class="input-field">
-                            <input type="text" name="direccion" id="direccion">
+                            <input type="text" name="direccion" id="direccion" value="<?php echo esc((string)($editSucursal['direccion_visible'] ?? '')); ?>">
                             <label for="direccion">Dirección</label>
                         </div>
                         <div class="input-field">
-                            <input type="text" name="telefono" id="telefono">
+                            <input type="text" name="telefono" id="telefono" value="<?php echo esc((string)($editSucursal['telefono_visible'] ?? '')); ?>">
                             <label for="telefono">Teléfono</label>
                         </div>
-                        <button type="submit" class="btn blue darken-4 w-100">Crear Sucursal</button>
+                        <button type="submit" class="btn blue darken-4 w-100"><?php echo $editSucursal ? 'Guardar Cambios' : 'Crear Sucursal'; ?></button>
+                        <?php if ($editSucursal): ?>
+                            <a href="manage_branches.php" class="btn-flat w-100 center" style="margin-top: 6px;">Cancelar Edicion</a>
+                        <?php endif; ?>
                     </form>
                 </div>
             </div>
@@ -198,19 +306,36 @@ include __DIR__ . '/includes/header.php';
                         <thead>
                             <tr>
                                 <th>Nombre</th>
+                                <th>Dirección</th>
                                 <th>Teléfono</th>
                                 <th>Estado</th>
+                                <th>Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($sucursales as $s): ?>
                                 <tr>
-                                    <td><strong><?php echo esc($s['nombre']); ?></strong><br><small><?php echo esc($s['direccion']); ?></small></td>
-                                    <td><?php echo esc($s['telefono']); ?></td>
+                                    <td><strong><?php echo esc($s['nombre']); ?></strong></td>
+                                    <td><?php echo esc((string)($s['direccion_visible'] ?? '')); ?></td>
+                                    <td><?php echo esc((string)($s['telefono_visible'] ?? '')); ?></td>
                                     <td>
                                         <span class="badge <?php echo $s['estado'] === 'activo' ? 'green' : 'red'; ?> white-text" style="float:none;">
                                             <?php echo strtoupper($s['estado']); ?>
                                         </span>
+                                    </td>
+                                    <td style="white-space: nowrap;">
+                                        <a href="manage_branches.php?editar=<?php echo (int)$s['id_almacen']; ?>" class="btn-small blue waves-effect waves-light" title="Editar sucursal">
+                                            <i class="material-icons">edit</i>
+                                        </a>
+                                        <form method="POST" style="display:inline; margin-left:4px;">
+                                            <?php echo csrfInput(); ?>
+                                            <input type="hidden" name="accion" value="cambiar_estado">
+                                            <input type="hidden" name="id_almacen" value="<?php echo (int)$s['id_almacen']; ?>">
+                                            <input type="hidden" name="nuevo_estado" value="<?php echo $s['estado'] === 'activo' ? 'inactivo' : 'activo'; ?>">
+                                            <button type="submit" class="btn-small <?php echo $s['estado'] === 'activo' ? 'orange darken-3' : 'green darken-2'; ?> waves-effect waves-light" title="Cambiar estado">
+                                                <i class="material-icons"><?php echo $s['estado'] === 'activo' ? 'pause' : 'check'; ?></i>
+                                            </button>
+                                        </form>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>

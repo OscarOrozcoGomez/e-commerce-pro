@@ -20,10 +20,15 @@ $comisionPorPieza = 50.0;
 try {
     $stats = [];
     $hasVendedorLiquidaciones = false;
+    $hasPickupNotificaciones = false;
 
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vendedor_liquidaciones'");
     $stmtMeta->execute();
     $hasVendedorLiquidaciones = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+    $stmtMeta->execute();
+    $hasPickupNotificaciones = ((int)$stmtMeta->fetchColumn()) > 0;
 
     $scopeSql = '';
     $scopeParams = [];
@@ -63,10 +68,64 @@ try {
     }
     $monthProfit = financeCalculateGrossProfit($monthIncome, $monthCost);
 
+    $getPickupMetrics = static function (PDO $pdo, bool $hasPickupNotificaciones, ?int $scopeAlmacen = null): array {
+        if ($hasPickupNotificaciones) {
+            $where = '1=1';
+            $params = [];
+            if ($scopeAlmacen !== null && $scopeAlmacen > 0) {
+                $where .= ' AND id_almacen = ?';
+                $params[] = $scopeAlmacen;
+            }
+
+            $sql = "SELECT
+                        COALESCE(SUM(CASE WHEN estado IN ('nueva','vista') THEN 1 ELSE 0 END), 0) AS pendientes,
+                        COALESCE(SUM(CASE WHEN estado = 'nueva' THEN 1 ELSE 0 END), 0) AS nuevas,
+                        COALESCE(SUM(CASE WHEN estado = 'vista' THEN 1 ELSE 0 END), 0) AS vistas,
+                        COALESCE(SUM(CASE WHEN estado = 'atendida' THEN 1 ELSE 0 END), 0) AS atendidas,
+                        COALESCE(SUM(CASE WHEN estado = 'atendida' AND DATE(fecha_atendida) = CURDATE() THEN 1 ELSE 0 END), 0) AS atendidas_hoy
+                    FROM pickup_notificaciones
+                    WHERE {$where}";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            return [
+                'pendientes' => (int)($row['pendientes'] ?? 0),
+                'nuevas' => (int)($row['nuevas'] ?? 0),
+                'vistas' => (int)($row['vistas'] ?? 0),
+                'atendidas' => (int)($row['atendidas'] ?? 0),
+                'atendidas_hoy' => (int)($row['atendidas_hoy'] ?? 0),
+            ];
+        }
+
+        $where = "estado IN ('pendiente_pago','pagado') AND observaciones LIKE '%ENTREGA: Sucursal%'";
+        $params = [];
+        if ($scopeAlmacen !== null && $scopeAlmacen > 0) {
+            $where .= ' AND id_almacen = ?';
+            $params[] = $scopeAlmacen;
+        }
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) AS total FROM pedidos WHERE {$where}");
+        $stmt->execute($params);
+        $total = (int)$stmt->fetchColumn();
+
+        return [
+            'pendientes' => $total,
+            'nuevas' => $total,
+            'vistas' => 0,
+            'atendidas' => 0,
+            'atendidas_hoy' => 0,
+        ];
+    };
+
     if ($rol === 'admin') {
         // Ventas hoy
         $stmt = $pdo->query("SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto FROM pedidos WHERE DATE(fecha_creacion) = CURDATE() AND estado != 'cancelado'");
         $stats['ventas_hoy'] = $stmt->fetch();
+
+        $pickupMetrics = $getPickupMetrics($pdo, $hasPickupNotificaciones);
+        $stats['pickup_metrics'] = $pickupMetrics;
+        $stats['pickup_pendientes'] = ['total' => $pickupMetrics['pendientes']];
 
         // Clientes y Usuarios
         $stats['clientes'] = $pdo->query("SELECT COUNT(*) as total FROM clientes WHERE estado = 'activo'")->fetch();
@@ -97,6 +156,10 @@ try {
         $stmt = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto FROM pedidos WHERE id_almacen = ? AND DATE(fecha_creacion) = CURDATE() AND estado != 'cancelado'");
         $stmt->execute([$idAlmacen]);
         $stats['ventas_hoy'] = $stmt->fetch();
+
+        $pickupMetrics = $getPickupMetrics($pdo, $hasPickupNotificaciones, (int)$idAlmacen);
+        $stats['pickup_metrics'] = $pickupMetrics;
+        $stats['pickup_pendientes'] = ['total' => $pickupMetrics['pendientes']];
 
         $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM inventario_almacen WHERE id_almacen = ?");
         $stmt->execute([$idAlmacen]);

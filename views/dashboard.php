@@ -62,6 +62,15 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l3">
+                <div class="card deep-orange lighten-1">
+                    <div class="card-content white-text">
+                        <span class="card-title">Retiros Sucursal</span>
+                        <p class="display-metric" id="stat-pickup-pendientes">0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- SECCIÓN 1: GESTIÓN COMERCIAL Y CONTENIDO -->
@@ -300,6 +309,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones Pickup</span>
+                        <p>Ver y dar seguimiento a pedidos para recoger en sucursal</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Gestionar</a>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
@@ -387,6 +407,15 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l3">
+                <div class="card deep-orange lighten-1">
+                    <div class="card-content white-text">
+                        <span class="card-title">Retiros Sucursal</span>
+                        <p class="display-metric" id="stat-pickup-pendientes">0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Atención</h5></div></div>
@@ -421,6 +450,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones Pickup</span>
+                        <p>Seguimiento de pedidos por recoger y reabasto de sucursal</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Atender</a>
                     </div>
                 </div>
             </div>
@@ -798,6 +838,15 @@ include __DIR__ . '/includes/header.php';
                 if (d.stock_bajo) updateEl('stat-stock-bajo', d.stock_bajo.total || 0);
                 if (d.por_entregar) updateEl('stat-por-entregar', d.por_entregar.total || 0);
                 if (d.entregas_hoy) updateEl('stat-entregas-hoy', d.entregas_hoy.total || 0);
+                if (d.pickup_pendientes) updateEl('stat-pickup-pendientes', d.pickup_pendientes.total || 0);
+                if (d.pickup_metrics) {
+                    updateEl(
+                        'stat-pickup-breakdown',
+                        'Nuevas: ' + (d.pickup_metrics.nuevas || 0)
+                        + ' | Vistas: ' + (d.pickup_metrics.vistas || 0)
+                        + ' | Atendidas hoy: ' + (d.pickup_metrics.atendidas_hoy || 0)
+                    );
+                }
                 if (d.ventas_mes) updateEl('stat-ventas-mes-total', d.ventas_mes.total || 0);
                 if (d.ventas_mes) updateEl('stat-ventas-mes-monto', currency(d.ventas_mes.monto));
 
