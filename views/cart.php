@@ -268,10 +268,15 @@ include __DIR__ . '/includes/header.php';
                 return; // Ignorar items corruptos del error anterior
             }
 
+            const cleanName = String(item.nombre)
+                .replace(/\s*\(Unidades\)\s*$/i, '')
+                .replace(/\s*[\-||]\s*Unidades\s*$/i, '')
+                .trim();
+
             total += subtotal;
             tbody.innerHTML += `
                 <tr>
-                    <td>${item.nombre}</td>
+                    <td>${cleanName}</td>
                     <td>$${price.toFixed(2)}</td>
                     <td>${item.quantity}</td>
                     <td>$${subtotal.toFixed(2)}</td>

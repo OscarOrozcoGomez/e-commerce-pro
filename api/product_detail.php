@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/product_display_utils.php';
 
 header('Content-Type: application/json');
 
@@ -44,6 +45,7 @@ try {
     // Definir la imagen principal como la primera de la galería
     $product['imagen'] = !empty($imagenes) ? $imagenes[0] : '';
     $product['galeria'] = $imagenes;
+    $product = normalizeProductDisplayRow($product);
 
     // =========================================================================
     // 3. Obtener variantes por Nombre Exacto (Resistente a errores de id_padre)
@@ -70,7 +72,7 @@ try {
         $v_id = (int)$v['id_producto'];
         if (!in_array($v_id, $ids_vistos)) {
             $ids_vistos[] = $v_id;
-            $variantes_unicas[] = $v;
+            $variantes_unicas[] = normalizeProductDisplayRow($v);
         }
     }
     
