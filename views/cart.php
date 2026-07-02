@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/pickup_offer_utils.php';
 
 $pageTitle = 'Mi Carrito de Compras';
 $usuarioLogueado = $_SESSION['usuario'] ?? null;
@@ -16,6 +17,8 @@ if ($isUserAuthenticated && isCliente()) {
 
 $telefonoGuardado = $usuarioLogueado['telefono_cliente'] ?? '';
 $hasSavedAddresses = !empty($direcciones);
+$pickupOfferSettings = getPickupOfferSettings(getPDO());
+$canViewPickupOffer = !isAuthenticated() || isCliente() || isAdmin();
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -45,6 +48,9 @@ include __DIR__ . '/includes/header.php';
                             <i class="material-icons left">delete_sweep</i> VACIAR CARRITO
                         </button>
                         <h5 style="margin: 0; font-weight: bold;">Total: $<span id="cart-total-display">0.00</span></h5>
+                    </div>
+                    <div id="pickup-offer-banner" class="card-panel amber lighten-5" style="display:none; margin-top: 16px; border-left: 5px solid #ff8f00;">
+                        <p id="pickup-offer-message" style="margin: 0; color: #6d4c41;"></p>
                     </div>
                 </div>
             </div>
@@ -171,6 +177,8 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     let mapCart, markerCart;
+    const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
+    const CAN_VIEW_PICKUP_OFFER = <?php echo $canViewPickupOffer ? 'true' : 'false'; ?>;
 
     function initAutocompleteCart() {
         if (typeof google === 'undefined') {
@@ -256,6 +264,7 @@ include __DIR__ . '/includes/header.php';
         const cart = getCart();
         const tbody = document.getElementById('cart-table-body');
         let total = 0;
+        let totalPieces = 0;
         
         tbody.innerHTML = cart.length === 0 ? '<tr><td colspan="5" class="center">El carrito está vacío</td></tr>' : '';
 
@@ -274,6 +283,7 @@ include __DIR__ . '/includes/header.php';
                 .trim();
 
             total += subtotal;
+            totalPieces += (parseInt(item.quantity, 10) || 0);
             tbody.innerHTML += `
                 <tr>
                     <td>${cleanName}</td>
@@ -285,10 +295,81 @@ include __DIR__ . '/includes/header.php';
         });
 
         document.getElementById('cart-total-display').textContent = total.toFixed(2);
+    renderPickupOfferBanner(total, totalPieces, cart.length > 0);
 
         // Mostrar u ocultar el botón de vaciar según si hay items
         const btnEmpty = document.getElementById('btn-empty-cart');
         if (btnEmpty) btnEmpty.style.display = cart.length > 0 ? 'inline-block' : 'none';
+    }
+
+    function calculatePickupOfferClient(subtotal, pieces, settings) {
+        const subtotalNum = Math.max(0, parseFloat(subtotal) || 0);
+        const piezasNum = Math.max(0, parseInt(pieces, 10) || 0);
+        const minSubtotal = Math.max(0, parseFloat(settings.subtotal_minimo) || 0);
+        const minPiezas = Math.max(1, parseInt(settings.piezas_minimas, 10) || 1);
+        const percent = Math.max(0, parseFloat(settings.descuento_porcentaje) || 0);
+        const fixed = Math.max(0, parseFloat(settings.descuento_fijo) || 0);
+        const cap = Math.max(0, parseFloat(settings.tope_descuento) || 0);
+        const activo = !!settings.activo;
+
+        const faltanteSubtotal = Math.max(0, +(minSubtotal - subtotalNum).toFixed(2));
+        const faltantePiezas = Math.max(0, minPiezas - piezasNum);
+        const elegible = activo && faltanteSubtotal <= 0 && faltantePiezas <= 0;
+
+        let ahorro = 0;
+        if (elegible) {
+            ahorro = +(subtotalNum * (percent / 100) + fixed).toFixed(2);
+            if (cap > 0) ahorro = Math.min(ahorro, cap);
+            ahorro = Math.min(ahorro, subtotalNum);
+        }
+
+        return {
+            elegible,
+            ahorro: +ahorro.toFixed(2),
+            totalSucursal: +(subtotalNum - ahorro).toFixed(2),
+            faltanteSubtotal,
+            faltantePiezas
+        };
+    }
+
+    function renderPickupOfferBanner(subtotal, pieces, hasItems) {
+        const banner = document.getElementById('pickup-offer-banner');
+        const text = document.getElementById('pickup-offer-message');
+        if (!banner || !text) return;
+
+        const percent = Math.max(0, parseFloat(PICKUP_OFFER_SETTINGS?.descuento_porcentaje) || 0);
+        const fixed = Math.max(0, parseFloat(PICKUP_OFFER_SETTINGS?.descuento_fijo) || 0);
+        const hasDiscountConfig = percent > 0 || fixed > 0;
+
+        if (!CAN_VIEW_PICKUP_OFFER || !hasItems || !PICKUP_OFFER_SETTINGS || !PICKUP_OFFER_SETTINGS.activo || !hasDiscountConfig) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        const calc = calculatePickupOfferClient(subtotal, pieces, PICKUP_OFFER_SETTINGS);
+        const msgBase = (PICKUP_OFFER_SETTINGS.mensaje_publico || 'Si recoges en sucursal, obtienes mejor precio en este pedido.').trim();
+
+        if (calc.elegible && calc.ahorro > 0) {
+            text.innerHTML = `<strong>${msgBase}</strong><br>Si este pedido lo recoges en sucursal, te costaría <strong>$${calc.totalSucursal.toFixed(2)}</strong> en lugar de $${subtotal.toFixed(2)}. Ahorras <strong>$${calc.ahorro.toFixed(2)}</strong>.`;
+            banner.style.display = 'block';
+            return;
+        }
+
+        const faltantes = [];
+        if (calc.faltanteSubtotal > 0) {
+            faltantes.push(`te faltan $${calc.faltanteSubtotal.toFixed(2)} de subtotal`);
+        }
+        if (calc.faltantePiezas > 0) {
+            faltantes.push(`te faltan ${calc.faltantePiezas} pieza(s)`);
+        }
+
+        if (faltantes.length === 0) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        text.innerHTML = `<strong>${msgBase}</strong><br>Aún no aplica el incentivo de sucursal: ${faltantes.join(' y ')}.`;
+        banner.style.display = 'block';
     }
 
     function removeItem(index) {

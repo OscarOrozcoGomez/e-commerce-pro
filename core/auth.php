@@ -461,8 +461,9 @@ function dbCreatePublicOrder(array $data): array {
     try {
         $pdo->beginTransaction();
         
-        // Definir el almacén de despacho (por defecto 1, o podrías obtenerlo de la configuración)
-        $id_almacen_despacho = $data['id_almacen'] ?? 1;
+        // Definir el almacén de despacho: si no llega explícito, resolver automáticamente
+        // un almacén que pueda surtir todos los productos del carrito.
+        $id_almacen_despacho = resolveCheckoutWarehouse($pdo, $data['items'] ?? [], $data['id_almacen'] ?? null);
         $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
@@ -522,6 +523,65 @@ function dbCreatePublicOrder(array $data): array {
         }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
     }
+}
+
+/**
+ * Resuelve el almacén para surtir checkout web.
+ *
+ * Prioridad:
+ * 1) Si el frontend envía id_almacen válido, se respeta.
+ * 2) Buscar un almacén que cubra todos los productos requeridos.
+ * 3) Si no existe uno que cubra todo, devolver 1 y dejar que la validación de stock responda error.
+ */
+function resolveCheckoutWarehouse(PDO $pdo, array $items, mixed $requestedWarehouseId = null): int
+{
+    $requestedId = (int)($requestedWarehouseId ?? 0);
+    if ($requestedId > 0) {
+        return $requestedId;
+    }
+
+    $required = [];
+    foreach ($items as $item) {
+        $idProducto = (int)($item['id_producto'] ?? 0);
+        $cantidad = max(0, (int)($item['quantity'] ?? 0));
+        if ($idProducto <= 0 || $cantidad <= 0) {
+            continue;
+        }
+        $required[$idProducto] = ($required[$idProducto] ?? 0) + $cantidad;
+    }
+
+    if (empty($required)) {
+        return 1;
+    }
+
+    $selects = [];
+    $params = [];
+    foreach ($required as $idProducto => $cantidadRequerida) {
+        $selects[] = 'SELECT ? AS id_producto, ? AS cantidad_requerida';
+        $params[] = $idProducto;
+        $params[] = $cantidadRequerida;
+    }
+
+    $requiredSql = implode(' UNION ALL ', $selects);
+    $requiredCount = count($required);
+
+    $sql = "
+        SELECT ia.id_almacen,
+               SUM(CASE WHEN ia.cantidad_actual >= req.cantidad_requerida THEN 1 ELSE 0 END) AS cubiertos,
+               SUM(ia.cantidad_actual) AS stock_total
+        FROM inventario_almacen ia
+        INNER JOIN ({$requiredSql}) req ON req.id_producto = ia.id_producto
+        GROUP BY ia.id_almacen
+        HAVING cubiertos = ?
+        ORDER BY stock_total DESC, ia.id_almacen ASC
+        LIMIT 1";
+
+    $params[] = $requiredCount;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $warehouseId = (int)($stmt->fetchColumn() ?: 0);
+
+    return $warehouseId > 0 ? $warehouseId : 1;
 }
 
 /**
