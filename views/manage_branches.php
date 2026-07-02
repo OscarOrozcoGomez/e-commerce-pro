@@ -127,7 +127,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title"><i class="material-icons left">local_offer</i> Incentivo Sucursal</span>
-                    <p class="grey-text" style="margin-top: 0;">Define incentivo por piezas con un JSON de tramos. Solo se usa esta configuración.</p>
+                    <p class="grey-text" style="margin-top: 0;">Define incentivo por piezas con un JSON de tramos. El valor configurado se aplica como descuento por pieza.</p>
                     <form method="POST">
                         <?php echo csrfInput(); ?>
                         <input type="hidden" name="accion" value="guardar_incentivo">
@@ -141,9 +141,9 @@ include __DIR__ . '/includes/header.php';
 
                         <div class="input-field">
                             <textarea class="materialize-textarea" name="descuento_por_piezas" id="descuento_por_piezas" rows="3"><?php echo esc((string)($pickupOffer['descuento_por_piezas_json'] ?? '{}')); ?></textarea>
-                            <label for="descuento_por_piezas" class="active">Descuento por piezas (JSON)</label>
+                            <label for="descuento_por_piezas" class="active">Descuento por pieza segun tramo (JSON)</label>
                             <div class="helper-text" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom: 6px;">
-                                <span>Configura el descuento total según cantidad de piezas.</span>
+                                <span>Configura cuanto se descuenta por cada pieza segun la cantidad total del ticket.</span>
                                 <span class="discount-help-icon" data-tip="Pasa el mouse para ayuda rápida. Da clic abajo para ver ejemplos." aria-label="Ayuda de descuento por piezas" title="Ayuda de descuento por piezas">
                                     <i class="material-icons tiny">priority_high</i>
                                 </span>
@@ -155,13 +155,13 @@ include __DIR__ . '/includes/header.php';
                                     <ul class="discount-examples-list" style="margin:0; padding-left:0; list-style:none;">
                                         <li class="discount-example-item">
                                             <code>{"1":15,"2":30,"3":45}</code>
-                                            <span class="discount-example-text">Escalado lineal básico.</span>
+                                            <span class="discount-example-text">Escalado lineal por pieza (2 piezas = 30 x 2 = 60).</span>
                                             <button type="button" class="btn-flat blue-text text-darken-3 discount-example-action" data-action="use" data-example='{"1":15,"2":30,"3":45}'>Usar</button>
                                             <button type="button" class="btn-flat teal-text text-darken-3 discount-example-action" data-action="copy" data-example='{"1":15,"2":30,"3":45}'>Copiar</button>
                                         </li>
                                         <li class="discount-example-item">
                                             <code>{"1":10,"3":35,"5":70}</code>
-                                            <span class="discount-example-text">Escalado por tramos (2 piezas usa 10, 4 usa 35).</span>
+                                            <span class="discount-example-text">Escalado por tramos por pieza (2 piezas usa 10 c/u, 4 usa 35 c/u).</span>
                                             <button type="button" class="btn-flat blue-text text-darken-3 discount-example-action" data-action="use" data-example='{"1":10,"3":35,"5":70}'>Usar</button>
                                             <button type="button" class="btn-flat teal-text text-darken-3 discount-example-action" data-action="copy" data-example='{"1":10,"3":35,"5":70}'>Copiar</button>
                                         </li>
@@ -178,7 +178,7 @@ include __DIR__ . '/includes/header.php';
                                             <button type="button" class="btn-flat teal-text text-darken-3 discount-example-action" data-action="copy" data-example='{"1":12.5,"2":27.5,"6":90}'>Copiar</button>
                                         </li>
                                     </ul>
-                                    <p style="margin:8px 0 0 0; font-size:0.85rem; color:#555;">Tip: si no existe un tramo exacto, se usa el tramo menor más cercano.</p>
+                                    <p style="margin:8px 0 0 0; font-size:0.85rem; color:#555;">Tip: si no existe tramo exacto, se usa el tramo menor mas cercano. Total incentivo = descuento por pieza x piezas.</p>
                                 </div>
                             </details>
                         </div>

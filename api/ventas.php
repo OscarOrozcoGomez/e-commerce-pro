@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/pickup_offer_utils.php';
 
 // Validar autenticación y permisos
 requireAuth();
@@ -26,14 +27,15 @@ try {
 
     // Obtener y validar datos
     $id_metodo_pago = intval($_POST['id_metodo_pago'] ?? 0);
-    $descuento = floatval($_POST['descuento'] ?? 0);
+    $descuentoManualInput = floatval($_POST['descuento'] ?? 0);
+    $descuentoManual = isAdmin() ? $descuentoManualInput : 0.0;
     $observaciones = htmlspecialchars($_POST['observaciones'] ?? '');
     
     if ($id_metodo_pago <= 0) {
         throw new Exception('Debe seleccionar un método de pago');
     }
 
-    if ($descuento < 0) {
+    if ($descuentoManualInput < 0) {
         throw new Exception('El descuento no puede ser negativo');
     }
 
@@ -64,6 +66,38 @@ try {
         throw new Exception('Debe agregar al menos un producto a la venta');
     }
 
+    $totalPiezas = (int)array_reduce($productos, static fn($acc, $item) => $acc + max(0, (int)$item['cantidad']), 0);
+    $pickupSettings = getPickupOfferSettings($pdo);
+    $pieceMap = parsePickupPieceDiscountMap($pickupSettings['descuentos_por_pieza'] ?? ($pickupSettings['descuento_por_piezas_json'] ?? []));
+
+    $resolveTierDiscountPerPiece = static function (int $pieces, array $map): float {
+        if ($pieces <= 0 || empty($map)) {
+            return 0.0;
+        }
+
+        if (isset($map[$pieces])) {
+            return (float)$map[$pieces];
+        }
+
+        $eligible = 0.0;
+        foreach ($map as $minPieces => $discountPerPiece) {
+            if ($pieces >= (int)$minPieces) {
+                $eligible = (float)$discountPerPiece;
+                continue;
+            }
+            break;
+        }
+
+        return round(max(0.0, $eligible), 2);
+    };
+
+    $descuentoPorPieza = (!empty($pickupSettings['activo']) && $totalPiezas > 0)
+        ? $resolveTierDiscountPerPiece($totalPiezas, $pieceMap)
+        : 0.0;
+    $descuentoIncentivoBruto = round($descuentoPorPieza * $totalPiezas, 2);
+    $descuentoIncentivo = round(min($descuentoIncentivoBruto, (float)$subtotal), 2);
+
+    $descuento = round($descuentoManual + $descuentoIncentivo, 2);
     $total = $subtotal - $descuento;
 
     if ($total < 0) {
@@ -83,6 +117,12 @@ try {
                 VALUES (:numero_pedido, :usuario, :almacen, :metodo_pago, 'pagado', :subtotal, :descuento, :total, :observaciones)";
         
         $stmt = $pdo->prepare($sql);
+        $observacionesFinales = $observaciones;
+        if ($descuentoIncentivo > 0) {
+            $tagIncentivo = sprintf('Incentivo sucursal aplicado: -$%.2f ($%.2f por pieza x %d pieza(s))', $descuentoIncentivo, $descuentoPorPieza, $totalPiezas);
+            $observacionesFinales = $observacionesFinales !== '' ? ($tagIncentivo . '. ' . $observacionesFinales) : $tagIncentivo;
+        }
+
         $stmt->execute([
             ':numero_pedido' => $numero_pedido,
             ':usuario' => $usuario['id_usuario'],
@@ -91,7 +131,7 @@ try {
             ':subtotal' => $subtotal,
             ':descuento' => $descuento,
             ':total' => $total,
-            ':observaciones' => $observaciones,
+            ':observaciones' => $observacionesFinales,
         ]);
 
         $id_pedido = $pdo->lastInsertId();
@@ -161,6 +201,11 @@ try {
         $response['message'] = 'Venta registrada correctamente: ' . $numero_pedido;
         $response['id_pedido'] = $id_pedido;
         $response['numero_pedido'] = $numero_pedido;
+        $response['descuento_manual'] = round($descuentoManual, 2);
+        $response['descuento_por_pieza'] = round($descuentoPorPieza, 2);
+        $response['descuento_incentivo'] = round($descuentoIncentivo, 2);
+        $response['descuento_total'] = round($descuento, 2);
+        $response['total'] = round($total, 2);
 
     } catch (Exception $e) {
         $pdo->rollBack();
