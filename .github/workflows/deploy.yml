@@ -1,21 +1,14 @@
-name: Deploy to Neubox (SFTP)
+name: Deploy to Neubox (FTP Production)
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       confirm_production:
-        description: "Escribe DEPLOY para confirmar despliegue manual a produccion"
+        description: "Escribe DEPLOY para confirmar despliegue manual"
         required: true
-        default: ""
-      full_deploy:
-        description: "Escribe FULL para forzar subida completa de archivos (no solo cambios)"
-        required: false
         default: ""
 
 concurrency:
@@ -23,250 +16,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ftp_preflight:
-    name: FTP Preflight Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
-    env:
-      PTF_PORT: ${{ secrets.PTF_PORT }}
-    steps:
-      - name: Install FTP client (lftp)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lftp
-
-      - name: Validate FTP connectivity/auth
-        env:
-          SFTP_HOST: ${{ secrets.PTF_HOST }}
-          SFTP_USER: ${{ secrets.PTF_USERNAME }}
-          SFTP_PASS: ${{ secrets.PTF_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SFTP_HOST}" ] || [ -z "${SFTP_USER}" ] || [ -z "${SFTP_PASS}" ]; then
-            echo "::error::Faltan PTF_HOST, PTF_USERNAME o PTF_PASSWORD en GitHub Secrets."
-            exit 1
-          fi
-
-          PORT="${PTF_PORT:-21}"
-          echo "Preflight FTP: validando conectividad/autenticacion (max 30s) a ${SFTP_HOST}:${PORT}..."
-
-          if ! timeout 30 lftp -d -e "open -u '${SFTP_USER}','${SFTP_PASS}' 'ftp://${SFTP_HOST}:${PORT}'; set ftp:passive-mode true; set ssl:verify-certificate no; set ftp:ssl-allow no; ls; bye"; then
-            STATUS=$?
-            if [ "${STATUS}" -eq 124 ]; then
-              echo "::error::Preflight FTP timeout (30s). Posible bloqueo de red/firewall o host no accesible."
-            else
-              echo "::error::Preflight FTP fallo con codigo ${STATUS}. Revisa host/usuario/password/puerto."
-            fi
-            exit "${STATUS}"
-          fi
-
-          echo "Preflight FTP OK."
-
   deploy:
-    name: Upload changed files to Production via SFTP
-    needs: ftp_preflight
+    name: Upload changed files to Production
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_production == 'DEPLOY')
-    permissions:
-      contents: read
-    env:
-      MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
-      MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
-      PTF_PORT: ${{ secrets.PTF_PORT }}
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Trae todo el historial para que pueda comparar cambios correctamente
 
-      - name: Install SFTP client (lftp)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lftp
-
-      - name: Deploy changed files to Neubox via FTP
-        timeout-minutes: 12
-        env:
-          SFTP_HOST: ${{ secrets.PTF_HOST }}
-          SFTP_USER: ${{ secrets.PTF_USERNAME }}
-          SFTP_PASS: ${{ secrets.PTF_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SFTP_HOST}" ] || [ -z "${SFTP_USER}" ] || [ -z "${SFTP_PASS}" ]; then
-            echo "Error: faltan PTF_HOST, PTF_USERNAME o PTF_PASSWORD en GitHub Secrets."
-            exit 1
-          fi
-
-          PORT="${PTF_PORT:-21}"
-          echo "Iniciando deploy FTP optimizado a ${SFTP_HOST}:${PORT}..."
-
-          FORCE_FULL="${{ github.event.inputs.full_deploy || '' }}"
-          if [ "${FORCE_FULL}" = "FULL" ]; then
-            echo "Modo FULL activo: subiendo todos los archivos versionados (resync completo)."
-            CHANGED_FILES=$(git ls-files)
-          else
-            BASE_SHA="${{ github.event.before }}"
-            if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
-              BASE_SHA="$(git rev-parse HEAD~1)"
-            fi
-
-            echo "Calculando cambios entre ${BASE_SHA} y ${GITHUB_SHA}"
-            CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT "${BASE_SHA}" "${GITHUB_SHA}")
-          fi
-
-          if [ -z "${CHANGED_FILES}" ]; then
-            echo "No hay archivos modificados para desplegar."
-            exit 0
-          fi
-
-          should_skip_file() {
-            local path="$1"
-            case "${path}" in
-              .git/*|.github/*|.vscode/*|vendor/*|tests/*|respaldos/*|.phpunit.cache/*)
-                return 0
-                ;;
-              database.sql|.gitignore|README.md|DEPLOY_ENVIRONMENTS_SETUP.md|scripts/migrate.php|composer.json|composer.lock|composer.phar|phpunit.xml)
-                return 0
-                ;;
-              core/app_secrets.*.example.php)
-                return 0
-                ;;
-              *)
-                return 1
-                ;;
-            esac
-          }
-
-          # Crear archivo temporal para consolidar los comandos de lftp en un solo lote
-          COMMANDS_FILE=$(mktemp)
-          
-          # AJUSTES DE RED ROBUSTOS: Modo Pasivo nativo y manejo de directivas SSL para Neubox
-          echo "open -u '${SFTP_USER}','${SFTP_PASS}' 'ftp://${SFTP_HOST}:${PORT}';" >> "${COMMANDS_FILE}"
-          echo "set ftp:passive-mode true;" >> "${COMMANDS_FILE}"
-          echo "set ssl:verify-certificate no;" >> "${COMMANDS_FILE}"
-          echo "set ftp:ssl-allow no;" >> "${COMMANDS_FILE}"
-          echo "set cmd:fail-exit true;" >> "${COMMANDS_FILE}"
-          echo "set xfer:clobber true;" >> "${COMMANDS_FILE}"
-          echo "set net:max-retries 4;" >> "${COMMANDS_FILE}"
-          echo "set net:timeout 20;" >> "${COMMANDS_FILE}"
-          echo "set net:idle 20;" >> "${COMMANDS_FILE}"
-          echo "set net:reconnect-interval-base 5;" >> "${COMMANDS_FILE}"
-          echo "set net:reconnect-interval-multiplier 2;" >> "${COMMANDS_FILE}"
-
-          HAS_FILES_TO_UPLOAD=false
-
-          # Procesamiento optimizado del pipeline para evitar errores sintácticos de Bash
-          echo "${CHANGED_FILES}" | while IFS= read -r file; do
-            [ -z "${file}" ] && continue
-
-            if should_skip_file "${file}"; then
-              echo "Omitiendo (exclusion): ${file}"
-              continue
-            fi
-
-            if [ ! -f "${file}" ]; then
-              echo "Omitiendo (no existe localmente): ${file}"
-              continue
-            fi
-
-            remote_dir="$(dirname "${file}")"
-            if [ "${remote_dir}" = "." ]; then
-              remote_dir="/public_html"
-            else
-              remote_dir="/public_html/${remote_dir}"
-            fi
-
-            echo "Programando subida de: ${file} -> ${remote_dir}/"
-            echo "mkdir -p '${remote_dir}';" >> "${COMMANDS_FILE}"
-            echo "put -O '${remote_dir}' '${file}';" >> "${COMMANDS_FILE}"
-            
-            # Bandera temporal para sacar el estado del subshell del bucle
-            echo "true" > /tmp/has_files
-          done
-
-          if [ -f /tmp/has_files ]; then
-            HAS_FILES_TO_UPLOAD=true
-            rm -f /tmp/has_files
-          fi
-
-          echo "bye" >> "${COMMANDS_FILE}"
-
-          if [ "${HAS_FILES_TO_UPLOAD}" = true ]; then
-            echo "Ejecutando lote completo de comandos en una sola sesion..."
-            if ! timeout 360 lftp -d -f "${COMMANDS_FILE}"; then
-              STATUS=$?
-              if [ "${STATUS}" -eq 124 ]; then
-                echo "::error::Timeout en lftp (360s). Revisa conectividad FTP o credenciales."
-              else
-                echo "::error::lftp fallo con codigo ${STATUS}."
-              fi
-              exit "${STATUS}"
-            fi
-          else
-            echo "No hay archivos validos despues de aplicar filtros de exclusion."
-          fi
-
-          rm -f "${COMMANDS_FILE}"
-
-      - name: Validate migration automation config
-        run: |
-          if [ -z "${MIGRATIONS_URL}" ]; then
-            echo "Error: MIGRATIONS_URL no esta definido en GitHub Secrets."
-            exit 1
-          fi
-
-          if [ -z "${MIGRATIONS_DEPLOY_TOKEN}" ]; then
-            echo "Error: MIGRATIONS_DEPLOY_TOKEN no esta definido en GitHub Secrets."
-            exit 1
-          fi
+      - name: Sync Changed Files via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.PTF_HOST }}
+          username: ${{ secrets.PTF_USERNAME }}
+          password: ${{ secrets.PTF_PASSWORD }}
+          port: 21
+          protocol: ftp
+          local-dir: ./
+          server-dir: /public_html/
+          # Excluimos exactamente lo mismo que tienes en tu VS Code + archivos de desarrollo
+          exclude: |
+            **/.git/**
+            **/.github/**
+            **/.vscode/**
+            **/scratch/**
+            **/Exportaciones/**
+            **/test_*.php
+            **/IMPLEMENTATION_SUMMARY.md
+            **/TESTING_GUIDE.md
+            **/core/env.sample.php
+            **/core/config.php
+            **/views/migracion_productos.md
+            **/mail_log.txt
+            .gitignore
+            .htaccess-local
+            database.sql
+            README.md
 
       - name: Run remote DB migrations
-        timeout-minutes: 8
+        timeout-minutes: 5
+        env:
+          MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
+          MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
         run: |
           set -euo pipefail
-
-          ATTEMPTS=5
-          DELAY_SECONDS=15
-          LAST_HTTP_CODE=""
-
-          for attempt in $(seq 1 ${ATTEMPTS}); do
-            echo "Intento ${attempt}/${ATTEMPTS}: ejecutando migraciones remotas..."
-
-            LAST_HTTP_CODE=$(curl \
-              --request POST \
-              --header "Content-Type: application/json" \
-              --header "X-Migrations-Token: ${MIGRATIONS_DEPLOY_TOKEN}" \
-              --data '{"dry_run":false}' \
-              --connect-timeout 15 \
-              --max-time 90 \
-              --show-error \
-              --silent \
-              --output /tmp/migrations_response.json \
-              --write-out "%{http_code}" \
-              "${MIGRATIONS_URL}" || true)
-
-            if [ "${LAST_HTTP_CODE}" = "200" ]; then
-              echo "Migraciones ejecutadas correctamente. Respuesta:"
-              cat /tmp/migrations_response.json
-              exit 0
-            fi
-
-            echo "::warning::Fallo en intento ${attempt}/${ATTEMPTS}. HTTP=${LAST_HTTP_CODE:-curl_error}"
-            if [ -s /tmp/migrations_response.json ]; then
-              echo "Respuesta parcial del endpoint:"
-              cat /tmp/migrations_response.json
-            fi
-
-            if [ "${attempt}" -lt "${ATTEMPTS}" ]; then
-              echo "Reintentando en ${DELAY_SECONDS}s..."
-              sleep "${DELAY_SECONDS}"
-            fi
-          done
-
-          echo "::error::No fue posible ejecutar migraciones remotas tras ${ATTEMPTS} intentos. Ultimo HTTP=${LAST_HTTP_CODE:-curl_error}."
-          exit 1
+          if [ -z "${MIGRATIONS_URL}" ] || [ -z "${MIGRATIONS_DEPLOY_TOKEN}" ]; then
+            echo "Error: Faltan secretos de migraciones."
+            exit 1
+          fi
+          
+          echo "Disparando migraciones en la base de datos remota..."
+          curl --request POST \
+            --header "Content-Type: application/json" \
+            --header "X-Migrations-Token: ${MIGRATIONS_DEPLOY_TOKEN}" \
+            --data '{"dry_run":false}' \
+            --connect-timeout 15 \
+            --max-time 90 \
+            --show-error \
+            "${MIGRATIONS_URL}"
