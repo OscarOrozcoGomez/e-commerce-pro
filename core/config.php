@@ -199,6 +199,14 @@ function preloadSecretSources(): void
     $allowGsmLocalEnv = $parseBool(getenv('ALLOW_GSM_LOCAL') !== false ? getenv('ALLOW_GSM_LOCAL') : ($_SERVER['ALLOW_GSM_LOCAL'] ?? $_ENV['ALLOW_GSM_LOCAL'] ?? null));
     $disableGsm = $disableGsmEnv ?? $isLocalContext;
     $allowGsmLocal = $allowGsmLocalEnv ?? false;
+    $gsmCacheTtlSeconds = $GLOBALS['gsmCacheTtlSeconds'] ?? null;
+    if (!is_int($gsmCacheTtlSeconds) || $gsmCacheTtlSeconds <= 0) {
+        $gsmCacheTtlEnv = getenv('GSM_CACHE_TTL_SECONDS');
+        if ($gsmCacheTtlEnv === false) {
+            $gsmCacheTtlEnv = $_SERVER['GSM_CACHE_TTL_SECONDS'] ?? $_ENV['GSM_CACHE_TTL_SECONDS'] ?? null;
+        }
+        $gsmCacheTtlSeconds = is_numeric($gsmCacheTtlEnv) ? (int) $gsmCacheTtlEnv : 604800;
+    }
 
     $googleLoadedCount = 0;
     $googleDebug = [];
