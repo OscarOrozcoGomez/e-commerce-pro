@@ -1,0 +1,25 @@
+-- Migracion: crear tabla de liquidaciones de vendedor para dashboard
+CREATE TABLE IF NOT EXISTS vendedor_liquidaciones (
+  id_liquidacion INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  id_vendedor INT UNSIGNED NOT NULL,
+  id_almacen INT UNSIGNED NOT NULL,
+  tipo_periodo ENUM('dia','mes') NOT NULL,
+  periodo_inicio DATE NOT NULL,
+  periodo_fin DATE NOT NULL,
+  ventas_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  piezas_total INT UNSIGNED NOT NULL DEFAULT 0,
+  comision_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  monto_a_entregar DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  monto_entregado DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  entregado TINYINT(1) NOT NULL DEFAULT 0,
+  fecha_declaracion DATETIME DEFAULT NULL,
+  fecha_entrega_ganancias DATETIME DEFAULT NULL,
+  observaciones VARCHAR(255) DEFAULT NULL,
+  creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_liquidacion),
+  UNIQUE KEY uq_liquidacion_vendedor_periodo (id_vendedor, tipo_periodo, periodo_inicio),
+  KEY idx_liquidacion_almacen_periodo (id_almacen, tipo_periodo, periodo_inicio),
+  CONSTRAINT fk_liquidacion_vendedor FOREIGN KEY (id_vendedor) REFERENCES usuarios(id_usuario) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_liquidacion_almacen FOREIGN KEY (id_almacen) REFERENCES almacenes(id_almacen) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
