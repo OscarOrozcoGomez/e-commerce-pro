@@ -593,7 +593,7 @@ function handleAddToCart(event, id, nombre, precio) {
     }
     
     localStorage.setItem('cart', JSON.stringify(cart));
-    M.toast({html: 'Producto añadido al carrito', classes: 'green rounded'});
+    M.toast({html: '🛒 <b>' + nombre + '</b> añadido al carrito', classes: 'green rounded'});
     
     if (typeof updateCartBadge === 'function') {
         updateCartBadge();

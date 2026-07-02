@@ -720,10 +720,15 @@ include __DIR__ . '/includes/header.php';
         return '';
     }
 
+    function getNormalizedProductStock(p) {
+        return Math.max(0, parseInt(p?.chat_stock ?? p?.total_stock ?? p?.cantidad_actual) || 0);
+    }
+
     function renderRow(p) {
         let imgSrc = getProductImgUrl(p.imagen);
         const hasImg = !!imgSrc;
-        const isLow = (parseInt(p.cantidad_actual) || 0) <= (parseInt(p.stock_minimo) || 2);
+        const stockActual = getNormalizedProductStock(p);
+        const isLow = stockActual <= (parseInt(p.stock_minimo) || 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
@@ -741,7 +746,7 @@ include __DIR__ . '/includes/header.php';
                 </td>
                 <td class="center-align">
                     <span class="badge ${isLow ? 'red white-text' : 'green lighten-4 green-text text-darken-4'}" style="float: none; font-weight: bold; border-radius: 4px;">
-                        ${p.cantidad_actual || 0}
+                        ${stockActual}
                     </span>
                 </td>
                 <td class="center-align">
@@ -762,7 +767,7 @@ include __DIR__ . '/includes/header.php';
 
     function renderGroupedRow(variants) {
         const p = variants[0]; // Producto base para datos genéricos
-        const totalStock = variants.reduce((sum, v) => sum + (parseInt(v.cantidad_actual) || 0), 0);
+        const totalStock = variants.reduce((sum, v) => sum + getNormalizedProductStock(v), 0);
         const minP = Math.min(...variants.map(v => parseFloat(v.precio_venta)));
         const maxP = Math.max(...variants.map(v => parseFloat(v.precio_venta)));
         const priceRange = minP === maxP ? `$${minP.toFixed(2)}` : `$${minP.toFixed(2)} - $${maxP.toFixed(2)}`;
@@ -787,7 +792,7 @@ include __DIR__ . '/includes/header.php';
 
             variantsHtml += `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding-bottom:2px; border-bottom:1px dashed #eee;">
-                    <span style="font-size:0.75rem; color:#444;">${label} (${v.cantidad_actual})</span>
+                    <span style="font-size:0.75rem; color:#444;">${label} (${getNormalizedProductStock(v)})</span>
                     <div>
                         <button type="button" class="btn-flat btn-small blue-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='abrirEditar(${jsonV})'>EDITAR</button>
                         <button type="button" class="btn-flat btn-small red-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='eliminarProducto(${v.id_producto})'>BORRAR</button>
