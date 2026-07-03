@@ -15,13 +15,13 @@ $pickupOfferSettings = getPickupOfferSettings($pdo);
 $error = '';
 $success = '';
 
-// Manejo de sucursal para Admins (pueden cambiar el contexto de venta)
-$id_almacen_actual = $usuario['id_almacen'] ?? (int)($_GET['sucursal'] ?? 0);
+$id_almacen_actual = resolveSalesWarehouseId($pdo);
+$almacenActualNombre = '';
 
-// Si es Admin y no hay sucursal, intentamos tomar la primera disponible
-if (isAdmin() && !$id_almacen_actual) {
-    $stmtSuc = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' LIMIT 1");
-    $id_almacen_actual = (int)$stmtSuc->fetchColumn();
+if ($id_almacen_actual > 0) {
+    $stmtSucursal = $pdo->prepare('SELECT nombre FROM almacenes WHERE id_almacen = ? LIMIT 1');
+    $stmtSucursal->execute([$id_almacen_actual]);
+    $almacenActualNombre = (string)($stmtSucursal->fetchColumn() ?: '');
 }
 
 if (!$id_almacen_actual) {
@@ -78,6 +78,9 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <div class="col s12">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 15px; border-bottom: 2px solid #e0e0e0; padding-bottom: 5px;">
+                <div class="chip blue lighten-5 blue-text text-darken-4" style="margin: 0 10px 0 0;">
+                    Sucursal de venta: <strong><?php echo esc($almacenActualNombre !== '' ? $almacenActualNombre : 'Sin asignar'); ?></strong>
+                </div>
                 <ul id="ventas-tabs" class="tabs" style="background: transparent; height: 45px; overflow-x: auto; overflow-y: hidden;">
                     <!-- Las pestañas se generan aquí dinámicamente -->
                 </ul>

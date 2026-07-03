@@ -14,6 +14,7 @@ header('Content-Type: application/json');
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $response = ['success' => false, 'message' => ''];
+$almacenVentaId = resolveSalesWarehouseId($pdo);
 
 try {
     // Validar método POST
@@ -123,10 +124,14 @@ try {
             $observacionesFinales = $observacionesFinales !== '' ? ($tagIncentivo . '. ' . $observacionesFinales) : $tagIncentivo;
         }
 
+        if ($almacenVentaId <= 0) {
+            throw new Exception('No tienes una sucursal asignada para registrar la venta.');
+        }
+
         $stmt->execute([
             ':numero_pedido' => $numero_pedido,
             ':usuario' => $usuario['id_usuario'],
-            ':almacen' => $usuario['id_almacen'],
+            ':almacen' => $almacenVentaId,
             ':metodo_pago' => $id_metodo_pago,
             ':subtotal' => $subtotal,
             ':descuento' => $descuento,
@@ -169,7 +174,7 @@ try {
                 ':cantidad1' => $prod['cantidad'],
                 ':cantidad2' => $prod['cantidad'],
                 ':producto' => $prod['id_producto'],
-                ':almacen' => $usuario['id_almacen'],
+                ':almacen' => $almacenVentaId,
             ]);
 
             if ($stmt->rowCount() === 0) {
@@ -184,7 +189,7 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 ':producto' => $prod['id_producto'],
-                ':almacen' => $usuario['id_almacen'],
+                ':almacen' => $almacenVentaId,
                 ':cantidad' => $prod['cantidad'],
                 ':usuario' => $usuario['id_usuario'],
                 ':observacion' => 'Venta ' . $numero_pedido,

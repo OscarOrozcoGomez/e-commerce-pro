@@ -45,11 +45,11 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12">
             <h4 style="display: inline-block;">Reportes del Sistema</h4>
             <div class="right-align no-print" style="display: inline-block; float: right; margin-top: 20px;">
-                <a href="<?php echo BASE_URL; ?>api/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>" 
+                <a href="<?php echo BASE_URL; ?>views/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>" 
                    class="btn green waves-effect waves-light">
                     Excel <i class="material-icons right">description</i>
                 </a>
-                <button onclick="window.print()" class="btn red waves-effect waves-light">
+                <button type="button" onclick="window.print()" class="btn red waves-effect waves-light">
                     PDF <i class="material-icons right">picture_as_pdf</i>
                 </button>
             </div>

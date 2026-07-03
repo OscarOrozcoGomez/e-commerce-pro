@@ -151,6 +151,27 @@ function getCurrentAlmacenId(): ?int
 }
 
 /**
+ * Resuelve la sucursal desde la cual debe operar una venta.
+ *
+ * - Vendedores/encargados usan siempre su sucursal asignada en sesión.
+ * - Si un admin no tiene sucursal asignada, se toma la primera sucursal activa.
+ */
+function resolveSalesWarehouseId(PDO $pdo): int
+{
+    $almacenId = getCurrentAlmacenId();
+    if ($almacenId !== null && $almacenId > 0) {
+        return $almacenId;
+    }
+
+    if (isAdmin()) {
+        $stmt = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1");
+        return (int)($stmt->fetchColumn() ?: 0);
+    }
+
+    return 0;
+}
+
+/**
  * Redirige si no está autenticado.
  *
  * @param string $redirectUrl
