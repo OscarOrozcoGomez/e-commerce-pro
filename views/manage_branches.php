@@ -146,12 +146,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $stmt = $pdo->prepare("INSERT INTO sucursal_incentivos
-                    (id_regla, activo, descuento_porcentaje, descuento_fijo, subtotal_minimo, piezas_minimas, tope_descuento, mensaje_publico, descuento_por_piezas_json)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id_regla, activo, descuento_por_piezas_json)
+                    VALUES (1, ?, ?)
                     ON DUPLICATE KEY UPDATE
                       activo = VALUES(activo),
                       descuento_por_piezas_json = VALUES(descuento_por_piezas_json)");
-                $stmt->execute([$activo, 0.0, 0.0, 0.0, 1, 0.0, '', $descuentoPorPiezasJson]);
+                $stmt->execute([$activo, $descuentoPorPiezasJson]);
                 $success = 'Configuración de incentivo para sucursal actualizada.';
             } catch (Throwable $e) {
                 $error = 'Error al guardar incentivo: ' . $e->getMessage();

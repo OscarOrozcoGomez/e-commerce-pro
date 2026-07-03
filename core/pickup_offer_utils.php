@@ -83,7 +83,7 @@ function getPickupOfferSettings(PDO $pdo): array
     ];
 
     try {
-        $stmt = $pdo->query("SELECT activo, descuento_porcentaje, descuento_fijo, subtotal_minimo, piezas_minimas, tope_descuento, mensaje_publico, descuento_por_piezas_json FROM sucursal_incentivos WHERE id_regla = 1 LIMIT 1");
+        $stmt = $pdo->query("SELECT activo, descuento_por_piezas_json FROM sucursal_incentivos WHERE id_regla = 1 LIMIT 1");
         $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
         if (!$row) {
             return $defaults;
@@ -93,12 +93,12 @@ function getPickupOfferSettings(PDO $pdo): array
 
         return [
             'activo' => ((int)($row['activo'] ?? 0)) === 1,
-            'descuento_porcentaje' => max(0.0, (float)($row['descuento_porcentaje'] ?? 0)),
-            'descuento_fijo' => max(0.0, (float)($row['descuento_fijo'] ?? 0)),
-            'subtotal_minimo' => max(0.0, (float)($row['subtotal_minimo'] ?? 0)),
-            'piezas_minimas' => max(1, (int)($row['piezas_minimas'] ?? 1)),
-            'tope_descuento' => max(0.0, (float)($row['tope_descuento'] ?? 0)),
-            'mensaje_publico' => trim((string)($row['mensaje_publico'] ?? '')) ?: $defaults['mensaje_publico'],
+            'descuento_porcentaje' => $defaults['descuento_porcentaje'],
+            'descuento_fijo' => $defaults['descuento_fijo'],
+            'subtotal_minimo' => $defaults['subtotal_minimo'],
+            'piezas_minimas' => $defaults['piezas_minimas'],
+            'tope_descuento' => $defaults['tope_descuento'],
+            'mensaje_publico' => $defaults['mensaje_publico'],
             'descuento_por_piezas_json' => json_encode($pieceMap, JSON_UNESCAPED_UNICODE),
             'descuentos_por_pieza' => $pieceMap,
         ];
