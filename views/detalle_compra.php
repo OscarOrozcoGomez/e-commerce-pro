@@ -183,9 +183,9 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                         ?>
                             <li class="collection-item avatar <?php echo $isReleased ? 'released-item' : ''; ?>" style="border-bottom: 1px solid #f0f0f0; padding-left: 85px; min-height: 100px;">
                                 <?php if ($imgSrc): ?>
-                                    <img src="<?php echo $imgSrc; ?>" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
+                                    <img src="<?php echo $imgSrc; ?>" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
                                 <?php else: ?>
-                                    <img src="<?php echo BASE_URL; ?>assets/img/products/default-product.svg" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
+                                    <img src="<?php echo getDefaultProductImageUrl(); ?>" class="circle" style="width: 60px; height: 60px; border-radius: 4px; left: 10px; background: #f9f9f9; object-fit: contain;">
                                 <?php endif; ?>
                                 
                                 <span class="title" style="font-weight: bold;"><?php echo esc($item['nombre'] . ($item['nombre_variante'] ? " - " . $item['nombre_variante'] : "")); ?></span>

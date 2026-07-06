@@ -1059,6 +1059,17 @@ function slugify(string $text): string {
     return empty($slug) ? 'producto' : $slug;
 }
 
+function getDefaultProductImageUrl(): string {
+    static $dataUri = null;
+
+    if ($dataUri === null) {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" role="img" aria-labelledby="title desc"><title>Producto sin imagen</title><desc>Placeholder para productos sin imagen disponible</desc><rect width="600" height="600" rx="32" fill="#f4f4f4"/><rect x="90" y="120" width="420" height="300" rx="24" fill="#e0e0e0"/><circle cx="205" cy="225" r="42" fill="#c7c7c7"/><path d="M140 380 240 280l70 70 60-55 90 85H140z" fill="#b5b5b5"/><path d="M210 470h180" stroke="#b0b0b0" stroke-width="18" stroke-linecap="round"/><text x="300" y="525" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#8a8a8a">Sin imagen</text></svg>';
+        $dataUri = 'data:image/svg+xml;utf8,' . rawurlencode($svg);
+    }
+
+    return $dataUri;
+}
+
 /**
  * Resuelve la URL de la imagen de un producto de forma robusta.
  */
@@ -1229,7 +1240,7 @@ function getProductImageUrl(?string $imgData, ?int $productId = null): string {
         if ($byIdUrl !== null) {
             return $byIdUrl;
         }
-        return BASE_URL . 'assets/img/products/default-product.svg';
+        return getDefaultProductImageUrl();
     }
 
     // Normaliza referencias antiguas al placeholder en PNG/JPG.
@@ -1238,7 +1249,7 @@ function getProductImageUrl(?string $imgData, ?int $productId = null): string {
         if ($byIdUrl !== null) {
             return $byIdUrl;
         }
-        return BASE_URL . 'assets/img/products/default-product.svg';
+        return getDefaultProductImageUrl();
     }
 
     // Si ya es una URL completa (http o https), devolverla tal cual

@@ -171,7 +171,7 @@ function catalogRenderProductCard(array $p): string
             <div class="card hoverable border-radius-8" style="height: 360px; display: flex; flex-direction: column;">
                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
                     <?php $imgSrc = getProductImageUrl($p['imagen'], (int)($p['id_producto'] ?? 0)); ?>
-                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" style="max-height: 100%; width: auto; object-fit: contain;">
+                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" style="max-height: 100%; width: auto; object-fit: contain;">
                 </div>
                 <div class="card-content" style="flex-grow: 1;">
                     <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">

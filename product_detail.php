@@ -245,7 +245,7 @@ include __DIR__ . '/views/includes/header.php';
         <!-- Columna Izquierda: Galería -->
         <div class="col s12 m7">
             <div class="main-img-viewer" id="zoom-container">
-                <img id="main-image" src="<?php echo BASE_URL; ?>assets/img/products/default-product.svg" alt="Producto">
+                <img id="main-image" src="<?php echo getDefaultProductImageUrl(); ?>" alt="Producto">
                 <div class="nav-arrow prev" onclick="moveSlide(-1, event)"><i class="material-icons">chevron_left</i></div>
                 <div class="nav-arrow next" onclick="moveSlide(1, event)"><i class="material-icons">chevron_right</i></div>
             </div>
@@ -337,7 +337,7 @@ include __DIR__ . '/views/includes/header.php';
 
 <script>
     const PDP_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
-    const PDP_DEFAULT_PRODUCT_IMAGE = '<?php echo BASE_URL; ?>assets/img/products/default-product.svg';
+    const PDP_DEFAULT_PRODUCT_IMAGE = '<?php echo getDefaultProductImageUrl(); ?>';
     const PDP_FAVORITES_API_URL = (typeof FAVORITES_API_URL !== 'undefined')
         ? FAVORITES_API_URL
         : '<?php echo BASE_URL; ?>api/favorites.php';
