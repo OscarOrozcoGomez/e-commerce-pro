@@ -100,6 +100,7 @@ include __DIR__ . '/includes/header.php';
                         <th>Nombre</th>
                         <th>Email</th>
                         <th>Origen</th>
+                        <th>Sucursal Origen</th>
                         <th>Acceso Web</th>
                         <th>Estado</th>
                         <th class="center-align">Acciones</th>
@@ -121,11 +122,16 @@ include __DIR__ . '/includes/header.php';
                             <?php if ($origenRegistro === 'sitio_web'): ?>
                                 <span class="new badge teal" data-badge-caption="Sitio Web"></span>
                             <?php else: ?>
-                                <?php if ($sucursalOrigen !== ''): ?>
-                                    <span class="new badge indigo" data-badge-caption="Sucursal: <?php echo esc($sucursalOrigen); ?>"></span>
-                                <?php else: ?>
-                                    <span class="new badge indigo" data-badge-caption="Sucursal"></span>
-                                <?php endif; ?>
+                                <span class="new badge indigo" data-badge-caption="Sucursal"></span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($origenRegistro === 'sitio_web'): ?>
+                                <span class="grey-text text-darken-1">N/A</span>
+                            <?php elseif ($sucursalOrigen !== ''): ?>
+                                <span><?php echo esc($sucursalOrigen); ?></span>
+                            <?php else: ?>
+                                <span class="grey-text text-darken-1">Sin sucursal detectada</span>
                             <?php endif; ?>
                         </td>
                         <td>
