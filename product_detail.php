@@ -337,6 +337,7 @@ include __DIR__ . '/views/includes/header.php';
 
 <script>
     const PDP_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+    const PDP_DEFAULT_PRODUCT_IMAGE = '<?php echo BASE_URL; ?>assets/img/products/default-product.svg';
     const PDP_FAVORITES_API_URL = (typeof FAVORITES_API_URL !== 'undefined')
         ? FAVORITES_API_URL
         : '<?php echo BASE_URL; ?>api/favorites.php';
@@ -351,6 +352,25 @@ include __DIR__ . '/views/includes/header.php';
     // Variables para el Zoom
     const zoomContainer = document.getElementById('zoom-container');
     const mainImg = document.getElementById('main-image');
+
+    if (mainImg) {
+        mainImg.addEventListener('error', () => {
+            if (!Array.isArray(galleryImages) || galleryImages.length === 0) {
+                mainImg.onerror = null;
+                mainImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
+                return;
+            }
+
+            if (currentSlide < galleryImages.length - 1) {
+                currentSlide += 1;
+                updateGalleryUI();
+                return;
+            }
+
+            mainImg.onerror = null;
+            mainImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
+        });
+    }
 
     document.addEventListener('DOMContentLoaded', function() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -523,14 +543,16 @@ include __DIR__ . '/views/includes/header.php';
         const thumbContainer = document.getElementById('thumb-container');
         thumbContainer.innerHTML = '';
         
-        galleryImages = product.galeria && product.galeria.length > 0 ? product.galeria : ['https://via.placeholder.com/600x600?text=Sin+Imagen'];
+        galleryImages = Array.isArray(product.galeria) && product.galeria.length > 0
+            ? [...new Set(product.galeria.filter(Boolean))]
+            : [PDP_DEFAULT_PRODUCT_IMAGE];
         currentSlide = 0;
         mainImg.src = galleryImages[0];
 
         galleryImages.forEach((imgSrc, index) => {
             const thumb = document.createElement('div');
             thumb.className = 'thumb-item' + (index === 0 ? ' active' : '');
-            thumb.innerHTML = `<img src="${imgSrc}">`;
+            thumb.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null;this.src='${PDP_DEFAULT_PRODUCT_IMAGE}';">`;
             thumb.onclick = () => {
                 currentSlide = index;
                 updateGalleryUI();
@@ -639,7 +661,7 @@ include __DIR__ . '/views/includes/header.php';
     }
 
     function updateGalleryUI() {
-        mainImg.src = galleryImages[currentSlide];
+        mainImg.src = galleryImages[currentSlide] || PDP_DEFAULT_PRODUCT_IMAGE;
         
         // Actualizar miniaturas
         const thumbs = document.querySelectorAll('.thumb-item');

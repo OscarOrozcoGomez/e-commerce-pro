@@ -70,6 +70,47 @@ function catalogBindNamedParams(PDOStatement $stmt, array $params): void
     }
 }
 
+function catalogRenderProductCard(array $p): string
+{
+    ob_start();
+    ?>
+    <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
+        <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int)$p['id_producto']; ?>" class="card-link">
+            <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
+                <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
+                    <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
+                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" style="max-height: 100%; width: auto; object-fit: contain;">
+                </div>
+                <div class="card-content" style="flex-grow: 1;">
+                    <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
+                        <?php echo esc($p['nombre']); ?>
+                    </span>
+                    <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
+                        <?php if ((int)($p['total_variantes'] ?? 0) > 1): ?>Desde <?php endif; ?>
+                        $<?php echo number_format((float)($p['precio_desde'] ?? 0), 2); ?>
+                        <?php if ((int)($p['total_variantes'] ?? 0) > 1): ?>
+                            <span style="font-size: 0.8rem; display: block; color: #757575;">
+                                (<?php echo (int)$p['total_variantes']; ?> opciones)
+                            </span>
+                        <?php endif; ?>
+                    </p>
+                    <p class="grey-text truncate-3-lines" style="font-size: 0.9rem;">
+                        <?php echo esc($p['descripcion'] ?? 'Sin descripcion disponible.'); ?>
+                    </p>
+                </div>
+                <div class="card-action center-align" style="border-top: 1px solid #eee;">
+                    <button class="btn blue darken-4 waves-effect waves-light"
+                            onclick="handleAddToCart(event, <?php echo (int)$p['id_producto']; ?>, '<?php echo addslashes(esc($p['nombre'])); ?>', <?php echo (float)($p['precio_venta'] ?? 0); ?>)">
+                        <i class="material-icons">add_shopping_cart</i>
+                    </button>
+                </div>
+            </div>
+        </a>
+    </div>
+    <?php
+    return (string)ob_get_clean();
+}
+
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
 $busqueda = $_GET['search'] ?? '';
 $page = max(1, (int)($_GET['page'] ?? 1));
@@ -77,11 +118,16 @@ $itemsPerPage = 9;
 $isAjaxLoadMore = (($_GET['ajax'] ?? '') === '1');
 $isSearchRequest = trim((string)$busqueda) !== '';
 
+if ($isAjaxLoadMore && session_status() === PHP_SESSION_ACTIVE) {
+    // Evita bloquear requests paralelos del mismo usuario (ej. log_activity + cargar mas).
+    session_write_close();
+}
+
 // En carga normal mostramos acumulado hasta la página actual para que un refresh
 // no "pierda" los productos ya visibles tras usar Cargar más.
 $limit = $isAjaxLoadMore ? $itemsPerPage : ($page * $itemsPerPage);
 $offset = $isAjaxLoadMore ? (($page - 1) * $itemsPerPage) : 0;
-$categorias = dbGetCategories();
+$categorias = $isAjaxLoadMore ? [] : dbGetCategories();
 
 $catalogBaseUrl = 'catalogo.php';
 $catalogBaseParams = [];
@@ -127,44 +173,47 @@ if (!empty($busqueda)) {
 $sql .= " WHERE " . implode(" AND ", $whereClauses);
 
 // --- Conteo de total de productos para paginación ---
-$sqlCount = "SELECT COUNT(DISTINCT p.id_producto) FROM productos p";
-if (!empty($categoriaSeleccionada)) {
-    $sqlCount .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
-                   JOIN categorias c ON pc.id_categoria = c.id_categoria ";
-}
-$sqlCount .= " WHERE " . implode(" AND ", $whereClauses);
-
-$stmtCount = $pdo->prepare($sqlCount);
-$countParams = [];
-foreach ($params as $key => $value) {
-    if (strpos($sqlCount, $key) !== false) {
-        $countParams[$key] = $value;
+$totalProductos = 0;
+if (!$isAjaxLoadMore) {
+    $sqlCount = "SELECT COUNT(DISTINCT p.id_producto) FROM productos p";
+    if (!empty($categoriaSeleccionada)) {
+        $sqlCount .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
+                       JOIN categorias c ON pc.id_categoria = c.id_categoria ";
     }
-}
+    $sqlCount .= " WHERE " . implode(" AND ", $whereClauses);
 
-if ($isSearchRequest) {
-    catalogDebugLog('search_count_query', [
-        'page' => $page,
-        'is_ajax' => $isAjaxLoadMore,
-        'sql' => $sqlCount,
-        'params' => $countParams,
-    ]);
-}
+    $stmtCount = $pdo->prepare($sqlCount);
+    $countParams = [];
+    foreach ($params as $key => $value) {
+        if (strpos($sqlCount, $key) !== false) {
+            $countParams[$key] = $value;
+        }
+    }
 
-try {
-    catalogBindNamedParams($stmtCount, $countParams);
-    $stmtCount->execute();
-    $totalProductos = (int)$stmtCount->fetchColumn();
-} catch (PDOException $e) {
     if ($isSearchRequest) {
-        catalogDebugLog('search_count_query_error', [
+        catalogDebugLog('search_count_query', [
             'page' => $page,
             'is_ajax' => $isAjaxLoadMore,
-            'error' => $e->getMessage(),
-            'code' => $e->getCode(),
+            'sql' => $sqlCount,
+            'params' => $countParams,
         ]);
     }
-    throw $e;
+
+    try {
+        catalogBindNamedParams($stmtCount, $countParams);
+        $stmtCount->execute();
+        $totalProductos = (int)$stmtCount->fetchColumn();
+    } catch (PDOException $e) {
+        if ($isSearchRequest) {
+            catalogDebugLog('search_count_query_error', [
+                'page' => $page,
+                'is_ajax' => $isAjaxLoadMore,
+                'error' => $e->getMessage(),
+                'code' => $e->getCode(),
+            ]);
+        }
+        throw $e;
+    }
 }
 
 // --- Aplicar orden y paginación a la consulta principal ---
@@ -200,6 +249,21 @@ try {
     }
     error_log("Error al cargar catálogo paginado: " . $e->getMessage());
     $productos = [];
+}
+
+if ($isAjaxLoadMore) {
+    header('Content-Type: text/html; charset=UTF-8');
+    if (empty($productos)) {
+        echo '<div class="col s12 center-align" style="padding: 50px;">'
+            . '<i class="material-icons large grey-text lighten-2">inventory_2</i>'
+            . '<p class="grey-text">No se encontraron productos disponibles en este momento.</p>'
+            . '</div>';
+    } else {
+        foreach ($productos as $p) {
+            echo catalogRenderProductCard($p);
+        }
+    }
+    exit;
 }
 
 $pageTitle = 'Catálogo de Productos';
@@ -292,39 +356,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 <?php else: ?>
                     <?php foreach ($productos as $p): ?>
-                        <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
-                            <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo $p['id_producto']; ?>" class="card-link">
-                                <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
-                                    <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                                        <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
-                                        <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" style="max-height: 100%; width: auto; object-fit: contain;">
-                                    </div>
-                                    <div class="card-content" style="flex-grow: 1;">
-                                        <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
-                                            <?php echo esc($p['nombre']); ?>
-                                        </span>
-                                        <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
-                                            <?php if ($p['total_variantes'] > 1): ?>Desde <?php endif; ?>
-                                            $<?php echo number_format((float)$p['precio_desde'], 2); ?>
-                                            <?php if ($p['total_variantes'] > 1): ?>
-                                                <span style="font-size: 0.8rem; display: block; color: #757575;">
-                                                    (<?php echo $p['total_variantes']; ?> opciones)
-                                                </span>
-                                            <?php endif; ?>
-                                        </p>
-                                        <p class="grey-text truncate-3-lines" style="font-size: 0.9rem;">
-                                            <?php echo esc($p['descripcion'] ?? 'Sin descripción disponible.'); ?>
-                                        </p>
-                                    </div>
-                                    <div class="card-action center-align" style="border-top: 1px solid #eee;">
-                                        <button class="btn blue darken-4 waves-effect waves-light" 
-                                                onclick="handleAddToCart(event, <?php echo (int)$p['id_producto']; ?>, '<?php echo addslashes(esc($p['nombre'])); ?>', <?php echo (float)$p['precio_venta']; ?>)">
-                                            <i class="material-icons">add_shopping_cart</i>
-                                        </button>
-                                    </div>
-                                </div>
-                            </a>
-                        </div>
+                        <?php echo catalogRenderProductCard($p); ?>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
