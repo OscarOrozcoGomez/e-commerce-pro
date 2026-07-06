@@ -40,3 +40,9 @@ app_secrets.qa.php
 app_secrets.local.php
 .app_secrets.qa.php
 .app_secrets.local.php
+
+# Diagnosticos locales temporales
+scripts/_img_diag.php
+scripts/_img_diag_after.php
+scripts/_img_diag_after_report.txt
+scripts/_tmp_*.php

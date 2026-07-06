@@ -354,8 +354,26 @@ include __DIR__ . '/views/includes/header.php';
     const zoomContainer = document.getElementById('zoom-container');
     const mainImg = document.getElementById('main-image');
 
+    function addCacheBuster(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            parsed.searchParams.set('img_retry', String(Date.now()));
+            return parsed.toString();
+        } catch (e) {
+            const sep = String(url).includes('?') ? '&' : '?';
+            return `${url}${sep}img_retry=${Date.now()}`;
+        }
+    }
+
     function handleMainImageError() {
         if (!mainImg) return;
+
+        // Reintento unico para fallos intermitentes de red/cache.
+        if (!mainImg.dataset.retryTried) {
+            mainImg.dataset.retryTried = '1';
+            mainImg.src = addCacheBuster(mainImg.src);
+            return;
+        }
 
         if (Array.isArray(galleryImages) && currentSlide < (galleryImages.length - 1)) {
             currentSlide += 1;
@@ -555,12 +573,27 @@ include __DIR__ . '/views/includes/header.php';
             : [PDP_DEFAULT_PRODUCT_IMAGE];
         currentSlide = 0;
         mainImageFallbackApplied = false;
+        delete mainImg.dataset.retryTried;
         mainImg.src = galleryImages[0];
 
         galleryImages.forEach((imgSrc, index) => {
             const thumb = document.createElement('div');
             thumb.className = 'thumb-item' + (index === 0 ? ' active' : '');
-            thumb.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null;this.src='${PDP_DEFAULT_PRODUCT_IMAGE}';">`;
+            const thumbImg = document.createElement('img');
+            thumbImg.src = imgSrc;
+            thumbImg.loading = 'lazy';
+            thumbImg.decoding = 'async';
+            thumbImg.addEventListener('error', function onThumbError() {
+                if (!thumbImg.dataset.retryTried) {
+                    thumbImg.dataset.retryTried = '1';
+                    thumbImg.src = addCacheBuster(imgSrc);
+                    return;
+                }
+
+                thumbImg.removeEventListener('error', onThumbError);
+                thumbImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
+            });
+            thumb.appendChild(thumbImg);
             thumb.onclick = () => {
                 currentSlide = index;
                 updateGalleryUI();
@@ -669,6 +702,9 @@ include __DIR__ . '/views/includes/header.php';
     }
 
     function updateGalleryUI() {
+        if (mainImg) {
+            delete mainImg.dataset.retryTried;
+        }
         mainImg.src = galleryImages[currentSlide] || PDP_DEFAULT_PRODUCT_IMAGE;
         
         // Actualizar miniaturas
