@@ -291,7 +291,12 @@ try {
     }
 
     // Definir la imagen principal como la primera imagen válida
-    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : getProductImageUrl((string)($product['imagen'] ?? ''), $currentId);
+    $principalImage = getProductImageUrl((string)($product['imagen'] ?? ''), $currentId);
+    if ($principalImage !== '') {
+        $imagenes = array_values(array_unique(array_merge([$principalImage], $imagenes)));
+    }
+
+    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : $principalImage;
     $product['galeria'] = $imagenes;
     $product = normalizeProductDisplayRow($product);
 

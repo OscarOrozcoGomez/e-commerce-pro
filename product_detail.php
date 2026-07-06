@@ -245,7 +245,7 @@ include __DIR__ . '/views/includes/header.php';
         <!-- Columna Izquierda: Galería -->
         <div class="col s12 m7">
             <div class="main-img-viewer" id="zoom-container">
-                <img id="main-image" src="<?php echo getDefaultProductImageUrl(); ?>" alt="Producto">
+                <img id="main-image" src="<?php echo getDefaultProductImageUrl(); ?>" alt="Producto" loading="eager" fetchpriority="high" decoding="async">
                 <div class="nav-arrow prev" onclick="moveSlide(-1, event)"><i class="material-icons">chevron_left</i></div>
                 <div class="nav-arrow next" onclick="moveSlide(1, event)"><i class="material-icons">chevron_right</i></div>
             </div>
@@ -353,6 +353,11 @@ include __DIR__ . '/views/includes/header.php';
     // Variables para el Zoom
     const zoomContainer = document.getElementById('zoom-container');
     const mainImg = document.getElementById('main-image');
+    if (mainImg) {
+        mainImg.loading = 'eager';
+        mainImg.fetchPriority = 'high';
+        mainImg.decoding = 'async';
+    }
 
     function addCacheBuster(url) {
         try {
@@ -574,6 +579,11 @@ include __DIR__ . '/views/includes/header.php';
         currentSlide = 0;
         mainImageFallbackApplied = false;
         delete mainImg.dataset.retryTried;
+        if (mainImg) {
+            mainImg.loading = 'eager';
+            mainImg.fetchPriority = 'high';
+            mainImg.decoding = 'async';
+        }
         mainImg.src = galleryImages[0];
 
         galleryImages.forEach((imgSrc, index) => {
