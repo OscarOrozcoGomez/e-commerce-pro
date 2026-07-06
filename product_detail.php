@@ -245,7 +245,7 @@ include __DIR__ . '/views/includes/header.php';
         <!-- Columna Izquierda: Galería -->
         <div class="col s12 m7">
             <div class="main-img-viewer" id="zoom-container">
-                <img id="main-image" src="https://via.placeholder.com/600x600?text=Cargando" alt="Producto">
+                <img id="main-image" src="<?php echo BASE_URL; ?>assets/img/products/default-product.svg" alt="Producto">
                 <div class="nav-arrow prev" onclick="moveSlide(-1, event)"><i class="material-icons">chevron_left</i></div>
                 <div class="nav-arrow next" onclick="moveSlide(1, event)"><i class="material-icons">chevron_right</i></div>
             </div>

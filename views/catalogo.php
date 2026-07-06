@@ -463,7 +463,7 @@ include __DIR__ . '/includes/header.php';
             <?php if ($totalProductos > ($page * $itemsPerPage)): ?>
                 <div class="row" id="load-more-container" style="margin-top: 30px;">
                     <div class="col s12 center-align">
-                        <button id="load-more-btn" class="btn-large blue darken-4 waves-effect waves-light" style="width: 100%;">
+                        <button id="load-more-btn" type="button" data-no-track="1" class="btn-large blue darken-4 waves-effect waves-light" style="width: 100%;">
                             Cargar más productos
                         </button>
                         <div class="preloader-wrapper small" id="load-more-spinner" style="display: none; margin-top: 20px;">
