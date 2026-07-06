@@ -627,16 +627,30 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content">
                         <span class="card-title">Liquidacion de Ganancias</span>
                         <p class="grey-text" style="margin-top:0;">Tarifa fija para vendedor: <strong id="stat-tarifa-comision">$ 50.00</strong> por producto vendido.</p>
-                        <p class="grey-text text-small" style="margin: 4px 0;"><strong>Te corresponde hoy:</strong> <span id="stat-corresponde-vendedor-hoy">$ 0.00</span> (<span id="stat-corresponde-vendedor-hoy-piezas">0</span> pieza(s) hoy).</p>
-                        <p class="grey-text text-small" style="margin: 4px 0 12px 0;"><strong>Te corresponde acumulado sin corte:</strong> <span id="stat-corresponde-vendedor-acumulado">$ 0.00</span> (<span id="stat-corresponde-vendedor-acumulado-piezas">0</span> pieza(s) acumuladas).</p>
 
                         <div class="row" style="margin-bottom:0;">
                             <div class="col s12 m6">
                                 <div class="card-panel orange lighten-5">
                                     <h6 style="margin-top:0;">Corte del Dia</h6>
-                                    <p style="margin: 6px 0;"><strong>Monto sugerido a entregar:</strong> <span id="stat-sugerido-dia">$ 0.00</span></p>
-                                    <p class="grey-text text-small" id="stat-formula-dia" style="margin: 0 0 8px 0;">Calculo automatico: $ 0.00 ventas - $ 0.00 comision = $ 0.00</p>
-                                    <p class="grey-text text-small" id="stat-acumulado-pendiente" style="margin: 0 0 8px 0;">Acumulado pendiente desde ultimo corte: $ 0.00</p>
+                                    <div class="liquidacion-summary-grid">
+                                        <div class="liquidacion-summary-card liquidacion-summary-card--comision">
+                                            <div class="liquidacion-summary-label">Mi Comision de Hoy</div>
+                                            <div class="liquidacion-summary-amount" id="stat-comision-card-hoy">$ 0.00</div>
+                                            <div class="liquidacion-summary-note"><span id="stat-comision-card-piezas">0</span> piezas x <span id="stat-tarifa-comision-card">$ 50.00</span></div>
+                                        </div>
+                                        <div class="liquidacion-summary-card liquidacion-summary-card--entrega">
+                                            <div class="liquidacion-summary-label">Dinero a Entregar al Dueno</div>
+                                            <div class="liquidacion-summary-amount" id="stat-entrega-card-hoy">$ 0.00</div>
+                                            <div class="liquidacion-summary-note">Monto neto de hoy</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="grey-text text-small" style="margin: 0 0 10px 0; line-height: 1.5;">
+                                        <div>Total de Ventas Brutas: <strong id="stat-resumen-ventas-acum">$ 0.00</strong></div>
+                                        <div>(-) Tu Comision Automatica: <strong id="stat-resumen-comision-acum">-$ 0.00</strong> (<span id="stat-corresponde-vendedor-acumulado-piezas">0</span> piezas)</div>
+                                        <div>Total Neto a Entregar Hoy: <strong id="stat-resumen-pendiente">$ 0.00</strong></div>
+                                        <div class="text-small" style="margin-top:4px;">Entregado anteriormente: <strong id="stat-resumen-entregado-previo">$ 0.00</strong></div>
+                                    </div>
                                     <p style="margin: 6px 0;"><strong>Ultima declaracion:</strong> <span id="stat-declaracion-dia">Sin declarar</span></p>
                                     <div class="input-field" style="margin-top: 12px;">
                                         <input type="number" id="input-entregado-dia" min="0" step="0.01" placeholder="Monto entregado hoy" readonly>
@@ -646,7 +660,7 @@ include __DIR__ . '/includes/header.php';
                                         <input type="text" id="input-observaciones-dia" maxlength="255" placeholder="Notas del corte del dia">
                                         <label for="input-observaciones-dia" class="active">Observaciones (opcional)</label>
                                     </div>
-                                    <button type="button" id="btn-liquidar-dia" class="btn orange darken-3 waves-effect waves-light">Declarar Entrega del Dia</button>
+                                    <button type="button" id="btn-liquidar-dia" class="btn orange darken-3 waves-effect waves-light liquidacion-main-btn">DECLARAR Y ENTREGAR $ 0.00</button>
                                 </div>
                             </div>
 
@@ -801,6 +815,62 @@ include __DIR__ . '/includes/header.php';
     .dashboard-metrics-row .card-title {
         line-height: 1.3;
     }
+
+    .liquidacion-summary-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin: 8px 0 12px;
+    }
+
+    .liquidacion-summary-card {
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid transparent;
+    }
+
+    .liquidacion-summary-card--comision {
+        background: #e8f5e9;
+        border-color: #66bb6a;
+        color: #1b5e20;
+    }
+
+    .liquidacion-summary-card--entrega {
+        background: #fff3e0;
+        border-color: #ff9800;
+        color: #e65100;
+    }
+
+    .liquidacion-summary-label {
+        font-size: 0.84rem;
+        font-weight: 700;
+        letter-spacing: .02em;
+        text-transform: uppercase;
+    }
+
+    .liquidacion-summary-amount {
+        font-size: 1.9rem;
+        font-weight: 800;
+        line-height: 1.1;
+        margin: 6px 0;
+    }
+
+    .liquidacion-summary-note {
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+
+    .liquidacion-main-btn {
+        width: 100%;
+        font-weight: 800;
+        letter-spacing: .02em;
+    }
+
+    @media only screen and (min-width: 900px) {
+        .liquidacion-summary-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+    }
 </style>
 
 <script>
@@ -910,33 +980,37 @@ include __DIR__ . '/includes/header.php';
 
             const ventasBaseDia = parseFloat(d.comisiones.ventas_base_corte_dia || 0);
             const comisionBaseDia = parseFloat(d.comisiones.comision_base_corte_dia || 0);
+            const pendienteDia = parseFloat(d.comisiones.monto_a_entregar_hoy || 0);
+            const entregadoPrevioDia = Math.max(0, ventasBaseDia - comisionBaseDia - pendienteDia);
 
             updateEl('stat-piezas-hoy', parseInt(d.comisiones.piezas_hoy || 0, 10));
             updateEl('stat-comision-hoy', currency(d.comisiones.comision_hoy));
             updateEl('stat-comision-mes', currency(d.comisiones.comision_mes));
-            updateEl('stat-entrega-hoy', currency(d.comisiones.monto_a_entregar_hoy));
+            updateEl('stat-entrega-hoy', currency(pendienteDia));
             updateEl('stat-tarifa-comision', currency(d.comisiones.tarifa_por_pieza));
-            updateEl('stat-sugerido-dia', currency(d.comisiones.monto_a_entregar_hoy));
-            updateEl('stat-corresponde-vendedor-hoy', currency(d.comisiones.comision_hoy));
-            updateEl('stat-corresponde-vendedor-acumulado', currency(d.comisiones.comision_base_corte_dia));
-            updateEl('stat-corresponde-vendedor-hoy-piezas', parseInt(d.comisiones.piezas_hoy || 0, 10));
+            updateEl('stat-sugerido-dia', currency(pendienteDia));
+            updateEl('stat-comision-card-hoy', currency(d.comisiones.comision_hoy));
+            updateEl('stat-comision-card-piezas', parseInt(d.comisiones.piezas_hoy || 0, 10));
+            updateEl('stat-tarifa-comision-card', currency(d.comisiones.tarifa_por_pieza));
+            updateEl('stat-entrega-card-hoy', currency(pendienteDia));
+            updateEl('stat-resumen-ventas-acum', currency(ventasBaseDia));
+            updateEl('stat-resumen-comision-acum', '- ' + currency(comisionBaseDia));
+            updateEl('stat-resumen-entregado-previo', currency(entregadoPrevioDia));
+            updateEl('stat-resumen-pendiente', currency(pendienteDia));
             updateEl('stat-corresponde-vendedor-acumulado-piezas', parseInt(d.comisiones.piezas_base_corte_dia || 0, 10));
 
-            settlementSuggested.dia = parseFloat(d.comisiones.monto_a_entregar_hoy || 0);
-
-            updateEl(
-                'stat-formula-dia',
-                'Calculo automatico: ' + currency(ventasBaseDia)
-                + ' ventas acumuladas - ' + currency(comisionBaseDia)
-                + ' comision = ' + currency(settlementSuggested.dia)
-            );
-            updateEl('stat-acumulado-pendiente', 'Acumulado pendiente desde ultimo corte: ' + currency(settlementSuggested.dia));
+            settlementSuggested.dia = pendienteDia;
 
             updateEl('stat-declaracion-dia', fmtDateTime(d.liquidacion_hoy?.fecha_declaracion || d.liquidacion_hoy?.fecha_entrega_ganancias));
 
             const inputDia = document.getElementById('input-entregado-dia');
             if (inputDia) {
                 inputDia.value = settlementSuggested.dia.toFixed(2);
+            }
+
+            const btnDia = document.getElementById('btn-liquidar-dia');
+            if (btnDia) {
+                btnDia.textContent = 'DECLARAR Y ENTREGAR ' + currency(settlementSuggested.dia);
             }
         };
 
