@@ -291,7 +291,7 @@ try {
             }
         }
 
-        $stmt = $pdo->prepare("SELECT COUNT(DISTINCT id_cliente) as total FROM pedidos WHERE id_usuario = ? AND MONTH(fecha_creacion) = MONTH(NOW())");
+        $stmt = $pdo->prepare("SELECT COUNT(DISTINCT id_cliente) as total FROM pedidos WHERE id_usuario = ? AND id_cliente IS NOT NULL AND YEAR(fecha_creacion) = YEAR(NOW()) AND MONTH(fecha_creacion) = MONTH(NOW()) AND estado != 'cancelado'");
         $stmt->execute([$idUsuario]);
         $stats['clientes_mes'] = $stmt->fetch();
 
@@ -323,7 +323,7 @@ try {
         foreach ($ventasRecientes as &$venta) {
             $obs = (string)($venta['observaciones'] ?? '');
             $clienteReferencia = 'Sin referencia';
-            if (preg_match('/Cliente:\s*(.+?)(?:\.\s|$)/u', $obs, $matches)) {
+            if (preg_match('/Cliente:\s*([^|\.]+)/u', $obs, $matches)) {
                 $clienteReferencia = trim((string)($matches[1] ?? ''));
                 if ($clienteReferencia === '') {
                     $clienteReferencia = 'Sin referencia';
@@ -347,7 +347,7 @@ try {
                 COALESCE(vh.total_ventas_hoy, 0) AS ventas_hoy,
                 COALESCE(vm.total_ventas_mes, 0) AS ventas_mes,
                 COALESCE(pm.piezas_mes, 0) AS piezas_mes,
-                COALESCE(lm.monto_entregado, 0) AS entregado_mes,
+            COALESCE(lm.monto_entregado_mes, 0) AS entregado_mes,
                 lm.fecha_entrega_ganancias
             FROM usuarios u
             INNER JOIN roles r ON u.id_rol = r.id_rol AND r.nombre = 'vendedor'
@@ -371,10 +371,22 @@ try {
                 WHERE YEAR(pe.fecha_creacion) = YEAR(NOW()) AND MONTH(pe.fecha_creacion) = MONTH(NOW()) AND pe.estado != 'cancelado'
                 GROUP BY pe.id_usuario
             ) pm ON pm.id_usuario = u.id_usuario
-            LEFT JOIN vendedor_liquidaciones lm
-                ON lm.id_vendedor = u.id_usuario
-               AND lm.tipo_periodo = 'mes'
-               AND lm.periodo_inicio = DATE_FORMAT(CURDATE(), '%Y-%m-01')
+            LEFT JOIN (
+                SELECT
+                    id_vendedor,
+                    COALESCE(SUM(monto_entregado), 0) AS monto_entregado_mes,
+                    MAX(fecha_entrega_ganancias) AS fecha_entrega_ganancias
+                FROM vendedor_liquidaciones
+                WHERE (
+                    tipo_periodo = 'dia'
+                    AND periodo_inicio BETWEEN DATE_FORMAT(CURDATE(), '%Y-%m-01') AND LAST_DAY(CURDATE())
+                )
+                OR (
+                    tipo_periodo = 'mes'
+                    AND periodo_inicio = DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                )
+                GROUP BY id_vendedor
+            ) lm ON lm.id_vendedor = u.id_usuario
             WHERE u.estado = 'activo'
             ORDER BY a.nombre ASC, u.nombre ASC";
         if ($hasVendedorLiquidaciones) {

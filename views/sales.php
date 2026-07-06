@@ -72,6 +72,20 @@ try {
     $ventasRecientes = [];
 }
 
+// Obtener clientes activos para autocompletar en venta de mostrador
+try {
+    $sql = "SELECT id_cliente, nombre, COALESCE(telefono, '') AS telefono
+            FROM clientes
+            WHERE estado = 'activo'
+            ORDER BY nombre ASC
+            LIMIT 500";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute();
+    $clientesActivos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $clientesActivos = [];
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -89,6 +103,9 @@ include __DIR__ . '/includes/header.php';
                 <button type="button" onclick="nuevaVenta()" class="btn-floating btn-small waves-effect waves-light indigo sales-new-tab-btn" title="Atender otro cliente" style="margin-left: 10px;">
                     <i class="material-icons">add</i>
                 </button>
+                <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn waves-effect waves-light blue darken-3 z-depth-1 sales-back-dashboard-btn" title="Volver al dashboard" style="margin-left: 10px;">
+                    <i class="material-icons left">dashboard</i>Volver al Dashboard
+                </a>
             </div>
         </div>
     </div>
@@ -108,12 +125,19 @@ include __DIR__ . '/includes/header.php';
                         <?php echo csrfInput(); ?>
                         
                         <div class="row">
-                            <div class="input-field col s12">
+                            <div class="input-field col s12 m7">
                                 <i class="material-icons prefix">person_outline</i>
                                 <input type="text" class="cliente_nombre" name="cliente_nombre" 
-                                       placeholder="Ej: Juan Pérez / Pedido Urgente" 
+                                       placeholder="Ej: Juan Perez" 
                                        oninput="actualizarTituloTab('{{id}}', this.value)" autocomplete="off">
-                                <label class="active">Nombre del Cliente / Referencia (Opcional)</label>
+                                <label class="active">Nombre del Cliente (Opcional)</label>
+                                <span class="helper-text">Escribe para buscar cliente existente y autocompletar telefono.</span>
+                            </div>
+                            <div class="input-field col s12 m5">
+                                <i class="material-icons prefix">phone</i>
+                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
+                                <label class="active">Telefono (Opcional)</label>
+                                <span class="helper-text">Si se captura, se enlaza/crea cliente para historial.</span>
                             </div>
                         </div>
 
@@ -273,12 +297,15 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     const productosDisponibles = <?php echo json_encode($productos); ?>;
+    const clientesActivos = <?php echo json_encode($clientesActivos, JSON_UNESCAPED_UNICODE); ?>;
     const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
     const SHOW_INCENTIVO_DETAILS = <?php echo $showIncentivoDetails ? 'true' : 'false'; ?>;
     let tabCount = 0;
     let productoIndex = 0;
     const productMap = {};
     const autocompleteData = {};
+    const customerMap = {};
+    const customerAutocompleteData = {};
 
     function resolveProductImageSrc(rawImage) {
         if (!rawImage) {
@@ -332,6 +359,16 @@ include __DIR__ . '/includes/header.php';
             productMap[label.toLowerCase()] = p;
         });
 
+        clientesActivos.forEach((c) => {
+            const nombre = String(c.nombre || '').trim();
+            const telefono = String(c.telefono || '').trim();
+            if (nombre === '') return;
+
+            const label = telefono !== '' ? `${nombre} (${telefono})` : nombre;
+            customerAutocompleteData[label] = null;
+            customerMap[label.toLowerCase()] = { nombre, telefono };
+        });
+
         const selects = document.querySelectorAll('select');
         M.FormSelect.init(selects);
 
@@ -378,6 +415,29 @@ include __DIR__ . '/includes/header.php';
         // 4. Configurar el buscador Autocomplete
         const buscador = context.querySelector('.buscador-producto');
         if (!buscador) return;
+
+        // 4.1 Configurar autocompletado de cliente en el campo nombre
+        const clienteNombreInput = context.querySelector('.cliente_nombre');
+        const clienteTelefonoInput = context.querySelector('.cliente_telefono');
+        if (clienteNombreInput) {
+            M.Autocomplete.init(clienteNombreInput, {
+                data: customerAutocompleteData,
+                limit: 8,
+                minLength: 1,
+                onAutocomplete: function(val) {
+                    const cliente = customerMap[String(val || '').toLowerCase()];
+                    if (!cliente) return;
+
+                    clienteNombreInput.value = cliente.nombre;
+                    if (clienteTelefonoInput && (!clienteTelefonoInput.value || clienteTelefonoInput.value.trim() === '')) {
+                        clienteTelefonoInput.value = cliente.telefono || '';
+                    }
+
+                    actualizarTituloTab(id, cliente.nombre);
+                    M.updateTextFields();
+                }
+            });
+        }
 
         const instance = M.Autocomplete.init(buscador, {
             data: autocompleteData,
@@ -461,6 +521,8 @@ include __DIR__ . '/includes/header.php';
             // Limpiar instancias de Materialize antes de remover del DOM
             const auto = M.Autocomplete.getInstance(context.querySelector('.buscador-producto'));
             if (auto) auto.destroy();
+            const autoCustomer = M.Autocomplete.getInstance(context.querySelector('.cliente_nombre'));
+            if (autoCustomer) autoCustomer.destroy();
             context.remove();
         }
 
@@ -698,8 +760,14 @@ include __DIR__ . '/includes/header.php';
         submitButton.innerHTML = 'Procesando...';
 
         const nombreCliente = context.querySelector('.cliente_nombre').value.trim();
+        const telefonoCliente = (context.querySelector('.cliente_telefono')?.value || '').trim();
         const obsField = context.querySelector('.observaciones');
-        if (nombreCliente) obsField.value = `Cliente: ${nombreCliente}. ${obsField.value}`;
+        if (nombreCliente || telefonoCliente) {
+            const headerCliente = nombreCliente
+                ? (`Cliente: ${nombreCliente}` + (telefonoCliente ? ` | Tel: ${telefonoCliente}` : ''))
+                : (`Cliente: Mostrador | Tel: ${telefonoCliente}`);
+            obsField.value = `${headerCliente}. ${obsField.value}`;
+        }
 
         const formData = new FormData(form);
         fetch(form.action, { method: 'POST', body: formData })

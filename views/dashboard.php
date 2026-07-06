@@ -170,7 +170,8 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Rendimiento de Vendedores por Sucursal (Mes Actual)</span>
+                        <span class="card-title">Rendimiento de Vendedores (Mes Actual)</span>
+                        <p class="grey-text text-small" style="margin-top: 4px; margin-bottom: 16px;">La primera tabla muestra totales por sucursal. La segunda, el detalle por cada vendedor.</p>
                         <div style="overflow-x:auto; margin-bottom: 18px;">
                             <table class="striped highlight">
                                 <thead>
@@ -181,7 +182,7 @@ include __DIR__ . '/includes/header.php';
                                         <th class="right-align">Ventas Mes</th>
                                         <th class="right-align">Comision Mes</th>
                                         <th class="right-align">Entregado</th>
-                                        <th class="right-align">Pendiente</th>
+                                        <th class="right-align">Saldo por Entregar</th>
                                     </tr>
                                 </thead>
                                 <tbody id="admin-branch-summary-body">
@@ -191,6 +192,7 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <span class="card-title" style="font-size:1.4rem; margin-top: 8px; display:block;">Detalle por Vendedor</span>
+                        <p class="grey-text text-small" style="margin-top: 0; margin-bottom: 16px;">Saldo por entregar = Ventas del mes - Comisión del mes - Monto ya entregado en cortes del mes.</p>
                         <div style="overflow-x:auto;">
                             <table class="striped highlight">
                                 <thead>
@@ -202,7 +204,7 @@ include __DIR__ . '/includes/header.php';
                                         <th class="right-align">Piezas Mes</th>
                                         <th class="right-align">Comision Mes</th>
                                         <th class="right-align">Entregado</th>
-                                        <th class="right-align">Pendiente</th>
+                                        <th class="right-align">Saldo por Entregar</th>
                                     </tr>
                                 </thead>
                                 <tbody id="admin-seller-summary-body">
@@ -647,7 +649,9 @@ include __DIR__ . '/includes/header.php';
 
                                     <div class="grey-text text-small liquidacion-desglose" style="margin: 0 0 12px 0; line-height: 1.6;">
                                         <div>Total de Ventas Brutas: <strong id="stat-resumen-ventas-acum">$ 0.00</strong></div>
-                                        <div>(-) Tu Comision Automatica: <strong id="stat-resumen-comision-acum">-$ 0.00</strong> (<span id="stat-corresponde-vendedor-acumulado-piezas">0</span> piezas)</div>
+                                        <div>(-) Tu Comision Automatica Acumulada: <strong id="stat-resumen-comision-acum">-$ 0.00</strong> (<span id="stat-corresponde-vendedor-acumulado-piezas">0</span> piezas)</div>
+                                        <div>Comision al Ultimo Corte: <strong id="stat-resumen-comision-ultimo-corte">$ 0.00</strong> (<span id="stat-resumen-piezas-ultimo-corte">0</span> piezas)</div>
+                                        <div>Comision Nueva Desde Ultimo Corte: <strong id="stat-resumen-comision-nueva">$ 0.00</strong> (<span id="stat-resumen-piezas-nuevas">0</span> piezas)</div>
                                         <div>Total Neto a Entregar Hoy: <strong id="stat-resumen-pendiente">$ 0.00</strong></div>
                                         <div class="text-small" style="margin-top:4px;">Entregado anteriormente: <strong id="stat-resumen-entregado-previo">$ 0.00</strong></div>
                                     </div>
@@ -1011,6 +1015,11 @@ include __DIR__ . '/includes/header.php';
 
             const ventasBaseDia = parseFloat(d.comisiones.ventas_base_corte_dia || 0);
             const comisionBaseDia = parseFloat(d.comisiones.comision_base_corte_dia || 0);
+            const piezasBaseDia = parseInt(d.comisiones.piezas_base_corte_dia || 0, 10);
+            const comisionUltimoCorteDia = Math.max(0, parseFloat(d.liquidacion_hoy?.comision_total || 0));
+            const piezasUltimoCorteDia = Math.max(0, parseInt(d.liquidacion_hoy?.piezas_total || 0, 10) || 0);
+            const comisionNuevaDesdeUltimoCorte = Math.max(0, comisionBaseDia - comisionUltimoCorteDia);
+            const piezasNuevasDesdeUltimoCorte = Math.max(0, piezasBaseDia - piezasUltimoCorteDia);
             const pendienteDia = parseFloat(d.comisiones.monto_a_entregar_hoy || 0);
             const entregadoPrevioDia = Math.max(0, ventasBaseDia - comisionBaseDia - pendienteDia);
 
@@ -1028,7 +1037,11 @@ include __DIR__ . '/includes/header.php';
             updateEl('stat-resumen-comision-acum', '- ' + currency(comisionBaseDia));
             updateEl('stat-resumen-entregado-previo', currency(entregadoPrevioDia));
             updateEl('stat-resumen-pendiente', currency(pendienteDia));
-            updateEl('stat-corresponde-vendedor-acumulado-piezas', parseInt(d.comisiones.piezas_base_corte_dia || 0, 10));
+            updateEl('stat-corresponde-vendedor-acumulado-piezas', piezasBaseDia);
+            updateEl('stat-resumen-comision-ultimo-corte', currency(comisionUltimoCorteDia));
+            updateEl('stat-resumen-piezas-ultimo-corte', piezasUltimoCorteDia);
+            updateEl('stat-resumen-comision-nueva', currency(comisionNuevaDesdeUltimoCorte));
+            updateEl('stat-resumen-piezas-nuevas', piezasNuevasDesdeUltimoCorte);
 
             settlementSuggested.dia = pendienteDia;
 
