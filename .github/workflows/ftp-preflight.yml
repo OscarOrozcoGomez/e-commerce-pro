@@ -71,6 +71,10 @@ jobs:
             echo "Error: Faltan secretos FTP (PTF_HOST, PTF_USERNAME o PTF_PASSWORD)."
             exit 1
           fi
+          if [ "${FTP_PROTOCOL}" = "sftp" ]; then
+            echo "Error: SamKirkland/FTP-Deploy-Action no soporta SFTP. Usa FTP o FTPS en PTF_PROTOCOL."
+            exit 1
+          fi
           echo "FTP config OK -> protocol=${FTP_PROTOCOL}, port=${FTP_PORT}, remote=${FTP_REMOTE_PATH}"
 
       - name: Validate FTP connectivity and deploy plan (dry-run) - attempt 1
@@ -89,7 +93,7 @@ jobs:
           state-name: .ftp-deploy-sync-state.json
           dangerous-clean-slate: false
           log-level: standard
-          timeout: 120000
+          timeout: 300000
           exclude: |
             **/.git/**
             **/.github/**
@@ -108,7 +112,9 @@ jobs:
             README.md
 
       - name: Retry FTP dry-run once when timeout/intermittent failure occurs
+        id: ftp_dry_run_attempt_2
         if: steps.ftp_dry_run_attempt_1.outcome == 'failure'
+        continue-on-error: true
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
           server: ${{ env.FTP_HOST }}
@@ -122,7 +128,40 @@ jobs:
           state-name: .ftp-deploy-sync-state.json
           dangerous-clean-slate: false
           log-level: standard
-          timeout: 120000
+          timeout: 300000
+          exclude: |
+            **/.git/**
+            **/.github/**
+            **/.vscode/**
+            **/scratch/**
+            **/Exportaciones/**
+            **/test_*.php
+            **/IMPLEMENTATION_SUMMARY.md
+            **/TESTING_GUIDE.md
+            **/core/env.sample.php
+            **/views/migracion_productos.md
+            **/mail_log.txt
+            .gitignore
+            .htaccess-local
+            database.sql
+            README.md
+
+      - name: Final retry FTP dry-run (attempt 3)
+        if: steps.ftp_dry_run_attempt_2.outcome == 'failure'
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ env.FTP_HOST }}
+          username: ${{ env.FTP_USERNAME }}
+          password: ${{ env.FTP_PASSWORD }}
+          port: ${{ env.FTP_PORT }}
+          protocol: ${{ env.FTP_PROTOCOL }}
+          local-dir: ./
+          server-dir: ${{ env.FTP_REMOTE_PATH }}
+          dry-run: true
+          state-name: .ftp-deploy-sync-state.json
+          dangerous-clean-slate: false
+          log-level: standard
+          timeout: 300000
           exclude: |
             **/.git/**
             **/.github/**

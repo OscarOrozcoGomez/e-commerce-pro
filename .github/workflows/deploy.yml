@@ -74,6 +74,10 @@ jobs:
             echo "Error: Faltan secretos FTP (PTF_HOST, PTF_USERNAME o PTF_PASSWORD)."
             exit 1
           fi
+          if [ "${FTP_PROTOCOL}" = "sftp" ]; then
+            echo "Error: SamKirkland/FTP-Deploy-Action no soporta SFTP. Usa FTP o FTPS en PTF_PROTOCOL."
+            exit 1
+          fi
           echo "FTP config OK -> protocol=${FTP_PROTOCOL}, port=${FTP_PORT}, remote=${FTP_REMOTE_PATH}"
 
       - name: Sync Changed Files via FTP
@@ -90,7 +94,7 @@ jobs:
           state-name: .ftp-deploy-sync-state.json
           dangerous-clean-slate: false
           log-level: standard
-          timeout: 120000
+          timeout: 300000
           # Excluimos exactamente lo mismo que tienes en tu VS Code + archivos de desarrollo
           exclude: |
             **/.git/**
