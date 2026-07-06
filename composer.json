@@ -1,7 +1,9 @@
 {
     "name": "e-commerce-pro/app",
     "type": "project",
-    "require": {},
+    "require": {
+        "dompdf/dompdf": "^3.0"
+    },
     "require-dev": {
         "phpunit/phpunit": "^10.5"
     },
