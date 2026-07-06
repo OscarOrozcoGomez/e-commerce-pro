@@ -20,7 +20,7 @@ try {
         if ($action === 'list') {
             $id_alm = (int)($_GET['almacen_id'] ?? 1);
             $sql = "SELECT p.*, 
-                COALESCE(NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), ''), (SELECT pi2.ruta_archivo FROM producto_imagenes pi2 WHERE pi2.id_producto = p.id_producto ORDER BY pi2.orden ASC LIMIT 1)) as imagen,
+                    (SELECT pi2.ruta_archivo FROM producto_imagenes pi2 WHERE pi2.id_producto = p.id_producto ORDER BY pi2.orden ASC LIMIT 1) as imagen,
                     GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids, 
                     GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths, ia.stock_minimo, ia.stock_maximo, ia.cantidad_actual,
                     COALESCE((SELECT SUM(ia_total.cantidad_actual) FROM inventario_almacen ia_total WHERE ia_total.id_producto = p.id_producto), 0) as total_stock 
@@ -230,20 +230,12 @@ try {
                 $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
                 
                 if (!empty($finalPaths)) {
-                    $principalImage = $finalPaths[0] ?? null;
-
                     // Insertar todas en la galería (la primera será la principal por orden 0)
                     for ($i = 0; $i < count($finalPaths); $i++) {
                         if ($i >= 6) break; // Límite de 6 imágenes
                         $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
                             ->execute([$id, $finalPaths[$i], $i]);
                     }
-
-                    $stmtPrincipal = $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?");
-                    $stmtPrincipal->execute([$principalImage, $id]);
-                } else {
-                    $stmtPrincipal = $pdo->prepare("UPDATE productos SET imagen = NULL WHERE id_producto = ?");
-                    $stmtPrincipal->execute([$id]);
                 }
             }
 

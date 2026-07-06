@@ -327,8 +327,8 @@ try {
             $ids_vistos[] = $v_id;
             $resolvedVariantImage = getProductImageUrl((string)($v['imagen'] ?? ''), (int)($v['id_producto'] ?? 0));
             if (!$localProductAssetExists($resolvedVariantImage)) {
-                $variantName = trim((string)($v['nombre'] ?? ''));
-                $variantPreferredFolder = slugify($variantName) . '-' . $v_id;
+                    $variantName = trim((string)($v['nombre'] ?? ''));
+                    $variantPreferredFolder = slugify($variantName) . '-' . $v_id;
                 $fallbackFolderImages = $collectFolderImagesByProductId($v_id, $variantPreferredFolder);
                 if (!empty($fallbackFolderImages)) {
                     $resolvedVariantImage = getProductImageUrl($fallbackFolderImages[0], $v_id);
