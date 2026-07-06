@@ -14,6 +14,22 @@ header('Content-Type: application/json');
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $response = ['success' => false, 'message' => ''];
+$almacenVentaId = resolveSalesWarehouseId($pdo);
+
+$normalizeCounterPhone = static function (string $phone): ?string {
+    $digits = preg_replace('/\D+/', '', $phone);
+    if (!is_string($digits)) {
+        return null;
+    }
+    if ($digits === '') {
+        return '';
+    }
+    if (strlen($digits) !== 10) {
+        return null;
+    }
+
+    return sprintf('(%s) - %s - %s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+};
 
 try {
     // Validar método POST
@@ -29,6 +45,9 @@ try {
     $id_metodo_pago = intval($_POST['id_metodo_pago'] ?? 0);
     $descuentoManualInput = floatval($_POST['descuento'] ?? 0);
     $descuentoManual = isAdmin() ? $descuentoManualInput : 0.0;
+    $clienteNombre = trim((string)($_POST['cliente_nombre'] ?? ''));
+    $clienteTelefonoRaw = trim((string)($_POST['cliente_telefono'] ?? ''));
+    $clienteTelefono = $normalizeCounterPhone($clienteTelefonoRaw);
     $observaciones = htmlspecialchars($_POST['observaciones'] ?? '');
     
     if ($id_metodo_pago <= 0) {
@@ -37,6 +56,10 @@ try {
 
     if ($descuentoManualInput < 0) {
         throw new Exception('El descuento no puede ser negativo');
+    }
+
+    if ($clienteTelefono === null) {
+        throw new Exception('Si capturas telefono, debe tener 10 digitos.');
     }
 
     // Validar que exista al menos un producto
@@ -108,13 +131,40 @@ try {
     $pdo->beginTransaction();
 
     try {
+        $idCliente = null;
+
+        if ($clienteNombre !== '' || $clienteTelefono !== '') {
+            if ($clienteTelefono !== '') {
+                $stmtCliente = $pdo->prepare("SELECT id_cliente, nombre FROM clientes WHERE telefono = ? ORDER BY id_cliente DESC LIMIT 1");
+                $stmtCliente->execute([$clienteTelefono]);
+                $existingCliente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                if ($existingCliente) {
+                    $idCliente = (int)($existingCliente['id_cliente'] ?? 0);
+
+                    // Solo actualizar si llega nombre y el guardado esta vacio.
+                    if ($idCliente > 0 && $clienteNombre !== '' && trim((string)($existingCliente['nombre'] ?? '')) === '') {
+                        $pdo->prepare("UPDATE clientes SET nombre = ? WHERE id_cliente = ?")
+                            ->execute([$clienteNombre, $idCliente]);
+                    }
+                }
+            }
+
+            if ($idCliente === null) {
+                $nombreFinal = $clienteNombre !== '' ? $clienteNombre : 'Cliente Mostrador';
+                $stmtInsCliente = $pdo->prepare("INSERT INTO clientes (nombre, telefono, estado) VALUES (?, ?, 'activo')");
+                $stmtInsCliente->execute([$nombreFinal, $clienteTelefono !== '' ? $clienteTelefono : null]);
+                $idCliente = (int)$pdo->lastInsertId();
+            }
+        }
+
         // Generar número de pedido único
         $numero_pedido = 'PED-' . date('YmdHis') . '-' . substr(uniqid(), -4);
 
         // Insertar pedido
         $sql = "INSERT INTO pedidos 
-                (numero_pedido, id_usuario, id_almacen, id_metodo_pago, estado, subtotal, descuento_total, total, observaciones) 
-                VALUES (:numero_pedido, :usuario, :almacen, :metodo_pago, 'pagado', :subtotal, :descuento, :total, :observaciones)";
+                (numero_pedido, id_cliente, id_usuario, id_almacen, id_metodo_pago, estado, subtotal, descuento_total, total, observaciones) 
+                VALUES (:numero_pedido, :id_cliente, :usuario, :almacen, :metodo_pago, 'pagado', :subtotal, :descuento, :total, :observaciones)";
         
         $stmt = $pdo->prepare($sql);
         $observacionesFinales = $observaciones;
@@ -123,10 +173,15 @@ try {
             $observacionesFinales = $observacionesFinales !== '' ? ($tagIncentivo . '. ' . $observacionesFinales) : $tagIncentivo;
         }
 
+        if ($almacenVentaId <= 0) {
+            throw new Exception('No tienes una sucursal asignada para registrar la venta.');
+        }
+
         $stmt->execute([
             ':numero_pedido' => $numero_pedido,
+            ':id_cliente' => $idCliente,
             ':usuario' => $usuario['id_usuario'],
-            ':almacen' => $usuario['id_almacen'],
+            ':almacen' => $almacenVentaId,
             ':metodo_pago' => $id_metodo_pago,
             ':subtotal' => $subtotal,
             ':descuento' => $descuento,
@@ -169,7 +224,7 @@ try {
                 ':cantidad1' => $prod['cantidad'],
                 ':cantidad2' => $prod['cantidad'],
                 ':producto' => $prod['id_producto'],
-                ':almacen' => $usuario['id_almacen'],
+                ':almacen' => $almacenVentaId,
             ]);
 
             if ($stmt->rowCount() === 0) {
@@ -184,7 +239,7 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 ':producto' => $prod['id_producto'],
-                ':almacen' => $usuario['id_almacen'],
+                ':almacen' => $almacenVentaId,
                 ':cantidad' => $prod['cantidad'],
                 ':usuario' => $usuario['id_usuario'],
                 ':observacion' => 'Venta ' . $numero_pedido,
@@ -200,6 +255,7 @@ try {
         $response['success'] = true;
         $response['message'] = 'Venta registrada correctamente: ' . $numero_pedido;
         $response['id_pedido'] = $id_pedido;
+        $response['id_cliente'] = $idCliente;
         $response['numero_pedido'] = $numero_pedido;
         $response['descuento_manual'] = round($descuentoManual, 2);
         $response['descuento_por_pieza'] = round($descuentoPorPieza, 2);

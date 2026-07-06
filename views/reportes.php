@@ -45,13 +45,15 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12">
             <h4 style="display: inline-block;">Reportes del Sistema</h4>
             <div class="right-align no-print" style="display: inline-block; float: right; margin-top: 20px;">
-                <a href="<?php echo BASE_URL; ?>api/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>" 
+                <a href="<?php echo BASE_URL; ?>views/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>" 
                    class="btn green waves-effect waves-light">
                     Excel <i class="material-icons right">description</i>
                 </a>
-                <button onclick="window.print()" class="btn red waves-effect waves-light">
+                     <a href="<?php echo BASE_URL; ?>views/export_reports_pdf.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>"
+                         target="_blank" rel="noopener noreferrer"
+                   class="btn red waves-effect waves-light">
                     PDF <i class="material-icons right">picture_as_pdf</i>
-                </button>
+                </a>
             </div>
         </div>
     </div>
@@ -127,17 +129,33 @@ include __DIR__ . '/includes/header.php';
                                         <th>Vendedor</th>
                                         <th>Almacén</th>
                                         <th>Método</th>
+                                        <th>Productos vendidos</th>
                                         <th>Monto</th>
                                         <th>Fecha</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($ventas as $venta): ?>
+                                        <?php
+                                            $productosRaw = (string)($venta['productos_vendidos'] ?? '');
+                                            $productosLista = array_values(array_filter(array_map('trim', explode('|', $productosRaw))));
+                                        ?>
                                         <tr>
                                             <td><?php echo esc($venta['numero_pedido']); ?></td>
                                             <td><?php echo esc($venta['vendedor']); ?></td>
                                             <td><?php echo esc($venta['almacen']); ?></td>
                                             <td><?php echo esc($venta['metodo'] ?? 'N/A'); ?></td>
+                                            <td style="max-width: 360px; white-space: normal; line-height: 1.4;">
+                                                <?php if (empty($productosLista)): ?>
+                                                    Sin detalle
+                                                <?php else: ?>
+                                                    <ul style="margin: 0; padding-left: 18px;">
+                                                        <?php foreach ($productosLista as $productoItem): ?>
+                                                            <li><?php echo esc($productoItem); ?></li>
+                                                        <?php endforeach; ?>
+                                                    </ul>
+                                                <?php endif; ?>
+                                            </td>
                                             <td>$<?php echo number_format((float)$venta['total'], 2); ?></td>
                                             <td><?php echo date('d/m/Y H:i', strtotime($venta['fecha_creacion'])); ?></td>
                                         </tr>

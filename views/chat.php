@@ -25,6 +25,13 @@ include __DIR__ . '/includes/header.php';
 <audio id="chat-notification-sound" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3" preload="auto"></audio>
 
 <div class="container" style="margin-top: 20px;">
+    <div class="row" style="margin-bottom: 10px;">
+        <div class="col s12">
+            <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn waves-effect waves-light blue darken-3 z-depth-1">
+                <i class="material-icons left">dashboard</i>Volver al Dashboard
+            </a>
+        </div>
+    </div>
     <div class="row">
         <?php if (!$soyCliente): ?>
             <!-- Barra lateral para el Personal -->

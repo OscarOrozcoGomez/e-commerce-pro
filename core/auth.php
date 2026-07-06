@@ -151,6 +151,27 @@ function getCurrentAlmacenId(): ?int
 }
 
 /**
+ * Resuelve la sucursal desde la cual debe operar una venta.
+ *
+ * - Vendedores/encargados usan siempre su sucursal asignada en sesión.
+ * - Si un admin no tiene sucursal asignada, se toma la primera sucursal activa.
+ */
+function resolveSalesWarehouseId(PDO $pdo): int
+{
+    $almacenId = getCurrentAlmacenId();
+    if ($almacenId !== null && $almacenId > 0) {
+        return $almacenId;
+    }
+
+    if (isAdmin()) {
+        $stmt = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1");
+        return (int)($stmt->fetchColumn() ?: 0);
+    }
+
+    return 0;
+}
+
+/**
  * Redirige si no está autenticado.
  *
  * @param string $redirectUrl
@@ -1053,7 +1074,23 @@ function dbGetCatalogFiltered(string $categoria = '', string $busqueda = ''): ar
  */
 function dbGetSalesReport(string $inicio, string $fin, ?int $idAlmacen = null, ?int $idUsuario = null, bool $isAdmin = false): array {
     $pdo = getPDO();
-    $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo
+    $sql = "SELECT p.id_pedido, p.numero_pedido, p.total, p.fecha_creacion, u.nombre as vendedor, a.nombre as almacen, mp.nombre as metodo,
+                   COALESCE((
+                       SELECT GROUP_CONCAT(
+                           CONCAT(
+                               pr.nombre,
+                               CASE
+                                   WHEN COALESCE(pr.nombre_variante, '') <> '' THEN CONCAT(' - ', pr.nombre_variante)
+                                   ELSE ''
+                               END,
+                               ' x', dp.cantidad
+                           )
+                           ORDER BY dp.id_detalle SEPARATOR ' | '
+                       )
+                       FROM detalle_pedidos dp
+                       INNER JOIN productos pr ON dp.id_producto = pr.id_producto
+                       WHERE dp.id_pedido = p.id_pedido
+                   ), 'Sin detalle') as productos_vendidos
             FROM pedidos p
             JOIN usuarios u ON p.id_usuario = u.id_usuario
             JOIN almacenes a ON p.id_almacen = a.id_almacen

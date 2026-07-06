@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/finance_utils.php';
+require_once __DIR__ . '/../core/settlement_utils.php';
 
 header('Content-Type: application/json');
 if (!isAuthenticated()) {
@@ -190,6 +191,34 @@ try {
         $stats['entregas_hoy'] = ['total' => $stmt->fetchColumn()];
 
     } elseif ($rol === 'vendedor') {
+        $fechaInicioVentas = trim((string)($_GET['ventas_fecha_inicio'] ?? ''));
+        $fechaFinVentas = trim((string)($_GET['ventas_fecha_fin'] ?? ''));
+        $estadoVentas = trim((string)($_GET['ventas_estado'] ?? ''));
+        $allowedEstados = ['pendiente_pago', 'pagado', 'en_reparto', 'entregado', 'apartado', 'cancelado'];
+
+        $fechaValida = static function (string $value): bool {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return false;
+            }
+            $dt = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+            return $dt !== false && $dt->format('Y-m-d') === $value;
+        };
+
+        if ($fechaInicioVentas !== '' && !$fechaValida($fechaInicioVentas)) {
+            $fechaInicioVentas = '';
+        }
+        if ($fechaFinVentas !== '' && !$fechaValida($fechaFinVentas)) {
+            $fechaFinVentas = '';
+        }
+
+        if ($fechaInicioVentas !== '' && $fechaFinVentas !== '' && $fechaInicioVentas > $fechaFinVentas) {
+            [$fechaInicioVentas, $fechaFinVentas] = [$fechaFinVentas, $fechaInicioVentas];
+        }
+
+        if ($estadoVentas !== '' && !in_array($estadoVentas, $allowedEstados, true)) {
+            $estadoVentas = '';
+        }
+
         $stmt = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto FROM pedidos WHERE id_usuario = ? AND DATE(fecha_creacion) = CURDATE() AND estado != 'cancelado'");
         $stmt->execute([$idUsuario]);
         $stats['ventas_hoy'] = $stmt->fetch();
@@ -211,13 +240,36 @@ try {
         $comisionHoy = round($piezasHoy * $comisionPorPieza, 2);
         $comisionMes = round($piezasMes * $comisionPorPieza, 2);
 
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(total), 0) FROM pedidos WHERE id_usuario = ? AND estado != 'cancelado'");
+        $stmt->execute([$idUsuario]);
+        $ventasAcumuladasDia = round((float)$stmt->fetchColumn(), 2);
+
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(dp.cantidad), 0) FROM pedidos pe JOIN detalle_pedidos dp ON pe.id_pedido = dp.id_pedido WHERE pe.id_usuario = ? AND pe.estado != 'cancelado'");
+        $stmt->execute([$idUsuario]);
+        $piezasAcumuladasDia = (int)$stmt->fetchColumn();
+
+        $comisionAcumuladaDia = round($piezasAcumuladasDia * $comisionPorPieza, 2);
+        $montoBaseAcumuladoDia = settlementCalculateBaseAmount($ventasAcumuladasDia, $piezasAcumuladasDia, $comisionPorPieza);
+
+        $entregadoAcumuladoDia = 0.0;
+        if ($hasVendedorLiquidaciones) {
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(monto_entregado), 0) FROM vendedor_liquidaciones WHERE id_vendedor = ? AND tipo_periodo = 'dia'");
+            $stmt->execute([$idUsuario]);
+            $entregadoAcumuladoDia = round((float)$stmt->fetchColumn(), 2);
+        }
+
+        $pendienteAcumuladoDia = settlementCalculatePendingAmount($montoBaseAcumuladoDia, $entregadoAcumuladoDia);
+
         $stats['comisiones'] = [
             'tarifa_por_pieza' => $comisionPorPieza,
             'piezas_hoy' => $piezasHoy,
             'piezas_mes' => $piezasMes,
+            'piezas_base_corte_dia' => $piezasAcumuladasDia,
             'comision_hoy' => $comisionHoy,
             'comision_mes' => $comisionMes,
-            'monto_a_entregar_hoy' => round(max(0.0, $montoHoy - $comisionHoy), 2),
+            'ventas_base_corte_dia' => $ventasAcumuladasDia,
+            'comision_base_corte_dia' => $comisionAcumuladaDia,
+            'monto_a_entregar_hoy' => $pendienteAcumuladoDia,
             'monto_a_entregar_mes' => round(max(0.0, $montoMes - $comisionMes), 2),
         ];
 
@@ -225,21 +277,21 @@ try {
         $stats['liquidacion_mes'] = null;
 
         if ($hasVendedorLiquidaciones) {
-            $stmt = $pdo->prepare("SELECT tipo_periodo, ventas_total, piezas_total, comision_total, monto_a_entregar, monto_entregado, fecha_declaracion, fecha_entrega_ganancias FROM vendedor_liquidaciones WHERE id_vendedor = ? AND ((tipo_periodo = 'dia' AND periodo_inicio = CURDATE()) OR (tipo_periodo = 'mes' AND periodo_inicio = DATE_FORMAT(CURDATE(), '%Y-%m-01'))) ORDER BY tipo_periodo ASC");
+            $stmt = $pdo->prepare("SELECT tipo_periodo, ventas_total, piezas_total, comision_total, monto_a_entregar, monto_entregado, fecha_declaracion, fecha_entrega_ganancias FROM vendedor_liquidaciones WHERE id_vendedor = ? AND tipo_periodo IN ('dia','mes') ORDER BY fecha_declaracion DESC");
             $stmt->execute([$idUsuario]);
             $liquidaciones = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($liquidaciones as $liq) {
-                if (($liq['tipo_periodo'] ?? '') === 'dia') {
+                if (($liq['tipo_periodo'] ?? '') === 'dia' && $stats['liquidacion_hoy'] === null) {
                     $stats['liquidacion_hoy'] = $liq;
                 }
-                if (($liq['tipo_periodo'] ?? '') === 'mes') {
+                if (($liq['tipo_periodo'] ?? '') === 'mes' && $stats['liquidacion_mes'] === null) {
                     $stats['liquidacion_mes'] = $liq;
                 }
             }
         }
 
-        $stmt = $pdo->prepare("SELECT COUNT(DISTINCT id_cliente) as total FROM pedidos WHERE id_usuario = ? AND MONTH(fecha_creacion) = MONTH(NOW())");
+        $stmt = $pdo->prepare("SELECT COUNT(DISTINCT id_cliente) as total FROM pedidos WHERE id_usuario = ? AND id_cliente IS NOT NULL AND YEAR(fecha_creacion) = YEAR(NOW()) AND MONTH(fecha_creacion) = MONTH(NOW()) AND estado != 'cancelado'");
         $stmt->execute([$idUsuario]);
         $stats['clientes_mes'] = $stmt->fetch();
 
@@ -248,6 +300,42 @@ try {
         $stats['ingresos_mes'] = $stmt->fetch();
         $stats['utilidad_mes'] = ['total' => 0];
         $stats['costo_mes'] = ['total' => 0];
+
+        $ventasWhere = "id_usuario = ?";
+        $ventasParams = [$idUsuario];
+        if ($fechaInicioVentas !== '') {
+            $ventasWhere .= " AND DATE(fecha_creacion) >= ?";
+            $ventasParams[] = $fechaInicioVentas;
+        }
+        if ($fechaFinVentas !== '') {
+            $ventasWhere .= " AND DATE(fecha_creacion) <= ?";
+            $ventasParams[] = $fechaFinVentas;
+        }
+        if ($estadoVentas !== '') {
+            $ventasWhere .= " AND estado = ?";
+            $ventasParams[] = $estadoVentas;
+        }
+
+        $stmt = $pdo->prepare("SELECT numero_pedido, total, fecha_creacion, estado, observaciones FROM pedidos WHERE {$ventasWhere} ORDER BY fecha_creacion DESC LIMIT 100");
+        $stmt->execute($ventasParams);
+        $ventasRecientes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($ventasRecientes as &$venta) {
+            $obs = (string)($venta['observaciones'] ?? '');
+            $clienteReferencia = 'Sin referencia';
+            if (preg_match('/Cliente:\s*([^|\.]+)/u', $obs, $matches)) {
+                $clienteReferencia = trim((string)($matches[1] ?? ''));
+                if ($clienteReferencia === '') {
+                    $clienteReferencia = 'Sin referencia';
+                }
+            }
+
+            $venta['cliente_referencia'] = $clienteReferencia;
+            unset($venta['observaciones']);
+        }
+        unset($venta);
+
+        $stats['ventas_recientes_vendedor'] = $ventasRecientes;
     }
 
     if ($rol === 'admin') {
@@ -259,7 +347,7 @@ try {
                 COALESCE(vh.total_ventas_hoy, 0) AS ventas_hoy,
                 COALESCE(vm.total_ventas_mes, 0) AS ventas_mes,
                 COALESCE(pm.piezas_mes, 0) AS piezas_mes,
-                COALESCE(lm.monto_entregado, 0) AS entregado_mes,
+            COALESCE(lm.monto_entregado_mes, 0) AS entregado_mes,
                 lm.fecha_entrega_ganancias
             FROM usuarios u
             INNER JOIN roles r ON u.id_rol = r.id_rol AND r.nombre = 'vendedor'
@@ -283,10 +371,22 @@ try {
                 WHERE YEAR(pe.fecha_creacion) = YEAR(NOW()) AND MONTH(pe.fecha_creacion) = MONTH(NOW()) AND pe.estado != 'cancelado'
                 GROUP BY pe.id_usuario
             ) pm ON pm.id_usuario = u.id_usuario
-            LEFT JOIN vendedor_liquidaciones lm
-                ON lm.id_vendedor = u.id_usuario
-               AND lm.tipo_periodo = 'mes'
-               AND lm.periodo_inicio = DATE_FORMAT(CURDATE(), '%Y-%m-01')
+            LEFT JOIN (
+                SELECT
+                    id_vendedor,
+                    COALESCE(SUM(monto_entregado), 0) AS monto_entregado_mes,
+                    MAX(fecha_entrega_ganancias) AS fecha_entrega_ganancias
+                FROM vendedor_liquidaciones
+                WHERE (
+                    tipo_periodo = 'dia'
+                    AND periodo_inicio BETWEEN DATE_FORMAT(CURDATE(), '%Y-%m-01') AND LAST_DAY(CURDATE())
+                )
+                OR (
+                    tipo_periodo = 'mes'
+                    AND periodo_inicio = DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                )
+                GROUP BY id_vendedor
+            ) lm ON lm.id_vendedor = u.id_usuario
             WHERE u.estado = 'activo'
             ORDER BY a.nombre ASC, u.nombre ASC";
         if ($hasVendedorLiquidaciones) {

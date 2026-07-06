@@ -16,25 +16,11 @@ $pdo = getPDO();
 $error = '';
 $success = '';
 
+// Esquema confirmado de almacenes en este proyecto:
+// id_almacen, nombre, ubicacion, estado, fecha_creacion.
 $hasDireccion = false;
-$hasUbicacion = false;
-$hasTelefono = false;
-
-try {
-    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'almacenes' AND COLUMN_NAME = 'direccion'");
-    $stmtMeta->execute();
-    $hasDireccion = ((int)$stmtMeta->fetchColumn()) > 0;
-
-    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'almacenes' AND COLUMN_NAME = 'ubicacion'");
-    $stmtMeta->execute();
-    $hasUbicacion = ((int)$stmtMeta->fetchColumn()) > 0;
-
-    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'almacenes' AND COLUMN_NAME = 'telefono'");
-    $stmtMeta->execute();
-    $hasTelefono = ((int)$stmtMeta->fetchColumn()) > 0;
-} catch (Throwable $e) {
-    $error = 'No se pudo verificar el esquema de sucursales: ' . $e->getMessage();
-}
+$hasUbicacion = true;
+$hasTelefono = true;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -45,6 +31,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         $direccion = trim((string)($_POST['direccion'] ?? ''));
         $telefono = trim((string)($_POST['telefono'] ?? ''));
         $idAlmacen = (int)($_POST['id_almacen'] ?? 0);
+        $telefonoDigits = preg_replace('/\D+/', '', $telefono);
+        $telefonoDigits = is_string($telefonoDigits) ? substr($telefonoDigits, 0, 10) : '';
+
+        if ($telefonoDigits !== '' && strlen($telefonoDigits) !== 10) {
+            $error = 'El teléfono debe tener 10 dígitos.';
+        }
+
+        if ($telefonoDigits !== '' && strlen($telefonoDigits) === 10) {
+            $telefono = sprintf(
+                '(%s) - %s - %s',
+                substr($telefonoDigits, 0, 3),
+                substr($telefonoDigits, 3, 3),
+                substr($telefonoDigits, 6, 4)
+            );
+        } else {
+            $telefono = '';
+        }
 
         if ($nombre === '' && in_array($accion, ['agregar', 'actualizar'], true)) {
             $error = 'El nombre de sucursal es obligatorio.';
@@ -143,12 +146,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $stmt = $pdo->prepare("INSERT INTO sucursal_incentivos
-                    (id_regla, activo, descuento_porcentaje, descuento_fijo, subtotal_minimo, piezas_minimas, tope_descuento, mensaje_publico, descuento_por_piezas_json)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id_regla, activo, descuento_por_piezas_json)
+                    VALUES (1, ?, ?)
                     ON DUPLICATE KEY UPDATE
                       activo = VALUES(activo),
                       descuento_por_piezas_json = VALUES(descuento_por_piezas_json)");
-                $stmt->execute([$activo, 0.0, 0.0, 0.0, 1, 0.0, '', $descuentoPorPiezasJson]);
+                $stmt->execute([$activo, $descuentoPorPiezasJson]);
                 $success = 'Configuración de incentivo para sucursal actualizada.';
             } catch (Throwable $e) {
                 $error = 'Error al guardar incentivo: ' . $e->getMessage();
@@ -221,8 +224,9 @@ include __DIR__ . '/includes/header.php';
                             <label for="direccion">Dirección</label>
                         </div>
                         <div class="input-field">
-                            <input type="text" name="telefono" id="telefono" value="<?php echo esc((string)($editSucursal['telefono_visible'] ?? '')); ?>">
+                            <input type="tel" name="telefono" id="telefono" value="<?php echo esc((string)($editSucursal['telefono_visible'] ?? '')); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
                             <label for="telefono">Teléfono</label>
+                            <span class="helper-text">Formato: 10 dígitos.</span>
                         </div>
                         <button type="submit" class="btn blue darken-4 w-100"><?php echo $editSucursal ? 'Guardar Cambios' : 'Crear Sucursal'; ?></button>
                         <?php if ($editSucursal): ?>
@@ -349,6 +353,44 @@ include __DIR__ . '/includes/header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const phoneInput = document.getElementById('telefono');
+
+    function formatPhoneMx(digits) {
+        if (!digits) return '';
+        if (digits.length <= 3) return `(${digits}`;
+        if (digits.length <= 6) return `(${digits.slice(0, 3)}) - ${digits.slice(3)}`;
+        return `(${digits.slice(0, 3)}) - ${digits.slice(3, 6)} - ${digits.slice(6, 10)}`;
+    }
+
+    function validatePhone() {
+        if (!phoneInput) return true;
+        const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+        if (digits.length > 0 && digits.length !== 10) {
+            phoneInput.setCustomValidity('El teléfono debe tener 10 dígitos.');
+            return false;
+        }
+        phoneInput.setCustomValidity('');
+        return true;
+    }
+
+    if (phoneInput) {
+        phoneInput.addEventListener('input', function() {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = formatPhoneMx(digits);
+            validatePhone();
+        });
+
+        phoneInput.addEventListener('blur', function() {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = formatPhoneMx(digits);
+            validatePhone();
+        });
+
+        const initialDigits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+        phoneInput.value = formatPhoneMx(initialDigits);
+        validatePhone();
+    }
+
     const textarea = document.getElementById('descuento_por_piezas');
     if (!textarea) {
         return;
