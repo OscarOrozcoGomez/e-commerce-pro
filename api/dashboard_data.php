@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/finance_utils.php';
+require_once __DIR__ . '/../core/settlement_utils.php';
 
 header('Content-Type: application/json');
 if (!isAuthenticated()) {
@@ -211,13 +212,35 @@ try {
         $comisionHoy = round($piezasHoy * $comisionPorPieza, 2);
         $comisionMes = round($piezasMes * $comisionPorPieza, 2);
 
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(total), 0) FROM pedidos WHERE id_usuario = ? AND estado != 'cancelado'");
+        $stmt->execute([$idUsuario]);
+        $ventasAcumuladasDia = round((float)$stmt->fetchColumn(), 2);
+
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(dp.cantidad), 0) FROM pedidos pe JOIN detalle_pedidos dp ON pe.id_pedido = dp.id_pedido WHERE pe.id_usuario = ? AND pe.estado != 'cancelado'");
+        $stmt->execute([$idUsuario]);
+        $piezasAcumuladasDia = (int)$stmt->fetchColumn();
+
+        $comisionAcumuladaDia = round($piezasAcumuladasDia * $comisionPorPieza, 2);
+        $montoBaseAcumuladoDia = settlementCalculateBaseAmount($ventasAcumuladasDia, $piezasAcumuladasDia, $comisionPorPieza);
+
+        $entregadoAcumuladoDia = 0.0;
+        if ($hasVendedorLiquidaciones) {
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(monto_entregado), 0) FROM vendedor_liquidaciones WHERE id_vendedor = ? AND tipo_periodo = 'dia'");
+            $stmt->execute([$idUsuario]);
+            $entregadoAcumuladoDia = round((float)$stmt->fetchColumn(), 2);
+        }
+
+        $pendienteAcumuladoDia = settlementCalculatePendingAmount($montoBaseAcumuladoDia, $entregadoAcumuladoDia);
+
         $stats['comisiones'] = [
             'tarifa_por_pieza' => $comisionPorPieza,
             'piezas_hoy' => $piezasHoy,
             'piezas_mes' => $piezasMes,
             'comision_hoy' => $comisionHoy,
             'comision_mes' => $comisionMes,
-            'monto_a_entregar_hoy' => round(max(0.0, $montoHoy - $comisionHoy), 2),
+            'ventas_base_corte_dia' => $ventasAcumuladasDia,
+            'comision_base_corte_dia' => $comisionAcumuladaDia,
+            'monto_a_entregar_hoy' => $pendienteAcumuladoDia,
             'monto_a_entregar_mes' => round(max(0.0, $montoMes - $comisionMes), 2),
         ];
 
@@ -225,15 +248,15 @@ try {
         $stats['liquidacion_mes'] = null;
 
         if ($hasVendedorLiquidaciones) {
-            $stmt = $pdo->prepare("SELECT tipo_periodo, ventas_total, piezas_total, comision_total, monto_a_entregar, monto_entregado, fecha_declaracion, fecha_entrega_ganancias FROM vendedor_liquidaciones WHERE id_vendedor = ? AND ((tipo_periodo = 'dia' AND periodo_inicio = CURDATE()) OR (tipo_periodo = 'mes' AND periodo_inicio = DATE_FORMAT(CURDATE(), '%Y-%m-01'))) ORDER BY tipo_periodo ASC");
+            $stmt = $pdo->prepare("SELECT tipo_periodo, ventas_total, piezas_total, comision_total, monto_a_entregar, monto_entregado, fecha_declaracion, fecha_entrega_ganancias FROM vendedor_liquidaciones WHERE id_vendedor = ? AND tipo_periodo IN ('dia','mes') ORDER BY fecha_declaracion DESC");
             $stmt->execute([$idUsuario]);
             $liquidaciones = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($liquidaciones as $liq) {
-                if (($liq['tipo_periodo'] ?? '') === 'dia') {
+                if (($liq['tipo_periodo'] ?? '') === 'dia' && $stats['liquidacion_hoy'] === null) {
                     $stats['liquidacion_hoy'] = $liq;
                 }
-                if (($liq['tipo_periodo'] ?? '') === 'mes') {
+                if (($liq['tipo_periodo'] ?? '') === 'mes' && $stats['liquidacion_mes'] === null) {
                     $stats['liquidacion_mes'] = $liq;
                 }
             }
@@ -248,6 +271,10 @@ try {
         $stats['ingresos_mes'] = $stmt->fetch();
         $stats['utilidad_mes'] = ['total' => 0];
         $stats['costo_mes'] = ['total' => 0];
+
+        $stmt = $pdo->prepare("SELECT numero_pedido, total, fecha_creacion, estado FROM pedidos WHERE id_usuario = ? ORDER BY fecha_creacion DESC LIMIT 10");
+        $stmt->execute([$idUsuario]);
+        $stats['ventas_recientes_vendedor'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     if ($rol === 'admin') {

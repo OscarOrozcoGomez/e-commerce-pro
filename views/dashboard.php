@@ -28,7 +28,7 @@ include __DIR__ . '/includes/header.php';
 
     <?php if (isAdmin()): ?>
         <!-- DASHBOARD ADMIN -->
-        <div class="row">
+        <div class="row dashboard-metrics-row">
             <div class="col s12 m6 l3">
                 <div class="card teal lighten-2">
                     <div class="card-content white-text">
@@ -373,7 +373,7 @@ include __DIR__ . '/includes/header.php';
 
     <?php elseif (isEncargado()): ?>
         <!-- DASHBOARD ENCARGADO -->
-        <div class="row">
+        <div class="row dashboard-metrics-row">
             <div class="col s12 m6 l3">
                 <div class="card teal lighten-2">
                     <div class="card-content white-text">
@@ -531,7 +531,7 @@ include __DIR__ . '/includes/header.php';
 
     <?php elseif (isRepartidor()): ?>
         <!-- DASHBOARD REPARTIDOR -->
-        <div class="row">
+        <div class="row dashboard-metrics-row">
             <div class="col s12">
                 <div class="card indigo lighten-1">
                     <div class="card-content white-text center-align">
@@ -549,7 +549,7 @@ include __DIR__ . '/includes/header.php';
 
     <?php elseif (isVendedor()): ?>
         <!-- DASHBOARD VENDEDOR -->
-        <div class="row">
+        <div class="row dashboard-metrics-row">
             <div class="col s12 m6 l4">
                 <div class="card teal lighten-2">
                     <div class="card-content white-text">
@@ -633,10 +633,12 @@ include __DIR__ . '/includes/header.php';
                                 <div class="card-panel orange lighten-5">
                                     <h6 style="margin-top:0;">Corte del Dia</h6>
                                     <p style="margin: 6px 0;"><strong>Monto sugerido a entregar:</strong> <span id="stat-sugerido-dia">$ 0.00</span></p>
+                                    <p class="grey-text text-small" id="stat-formula-dia" style="margin: 0 0 8px 0;">Calculo automatico: $ 0.00 ventas - $ 0.00 comision = $ 0.00</p>
+                                    <p class="grey-text text-small" id="stat-acumulado-pendiente" style="margin: 0 0 8px 0;">Acumulado pendiente desde ultimo corte: $ 0.00</p>
                                     <p style="margin: 6px 0;"><strong>Ultima declaracion:</strong> <span id="stat-declaracion-dia">Sin declarar</span></p>
                                     <div class="input-field" style="margin-top: 12px;">
-                                        <input type="number" id="input-entregado-dia" min="0" step="0.01" placeholder="Monto entregado hoy">
-                                        <label for="input-entregado-dia" class="active">Monto entregado hoy (opcional)</label>
+                                        <input type="number" id="input-entregado-dia" min="0" step="0.01" placeholder="Monto entregado hoy" readonly>
+                                        <label for="input-entregado-dia" class="active">Monto entregado hoy (calculado automaticamente)</label>
                                     </div>
                                     <div class="input-field" style="margin-top: 4px;">
                                         <input type="text" id="input-observaciones-dia" maxlength="255" placeholder="Notas del corte del dia">
@@ -646,22 +648,6 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                             </div>
 
-                            <div class="col s12 m6">
-                                <div class="card-panel teal lighten-5">
-                                    <h6 style="margin-top:0;">Corte del Mes</h6>
-                                    <p style="margin: 6px 0;"><strong>Monto sugerido a entregar:</strong> <span id="stat-sugerido-mes">$ 0.00</span></p>
-                                    <p style="margin: 6px 0;"><strong>Ultima declaracion:</strong> <span id="stat-declaracion-mes">Sin declarar</span></p>
-                                    <div class="input-field" style="margin-top: 12px;">
-                                        <input type="number" id="input-entregado-mes" min="0" step="0.01" placeholder="Monto entregado mes">
-                                        <label for="input-entregado-mes" class="active">Monto entregado mes (opcional)</label>
-                                    </div>
-                                    <div class="input-field" style="margin-top: 4px;">
-                                        <input type="text" id="input-observaciones-mes" maxlength="255" placeholder="Notas del corte del mes">
-                                        <label for="input-observaciones-mes" class="active">Observaciones (opcional)</label>
-                                    </div>
-                                    <button type="button" id="btn-liquidar-mes" class="btn teal darken-2 waves-effect waves-light">Declarar Entrega del Mes</button>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -669,6 +655,31 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Catálogo</h5></div></div>
+        <div class="row dashboard-actions">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Mis Ventas Recientes</span>
+                        <div style="overflow-x:auto;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Pedido</th>
+                                        <th>Fecha</th>
+                                        <th class="right-align">Total</th>
+                                        <th>Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="seller-recent-sales-body">
+                                    <tr><td colspan="4" class="center grey-text">Cargando ventas recientes...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="row dashboard-actions">
             <div class="col s12 m6 l6">
                 <div class="card">
@@ -730,11 +741,43 @@ include __DIR__ . '/includes/header.php';
     .dashboard-actions .card-action .btn {
         width: 100%;
     }
+
+    .dashboard-metrics-row {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 0;
+    }
+
+    .dashboard-metrics-row .col {
+        float: none !important;
+        width: auto !important;
+        margin-left: 0 !important;
+        left: auto !important;
+        right: auto !important;
+        min-width: 0;
+        display: flex;
+    }
+
+    .dashboard-metrics-row .card {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .dashboard-metrics-row .card-content {
+        flex: 1;
+        min-height: 152px;
+    }
+
+    .dashboard-metrics-row .card-title {
+        line-height: 1.3;
+    }
 </style>
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const csrfToken = '<?php echo esc(getCsrfToken()); ?>';
+        const settlementSuggested = { dia: 0 };
 
         const currency = (value) => '$ ' + parseFloat(value || 0).toFixed(2);
         const fmtDateTime = (value) => {
@@ -792,26 +835,53 @@ include __DIR__ . '/includes/header.php';
         const renderSellerSettlement = (d) => {
             if (!d.comisiones) return;
 
+            const ventasBaseDia = parseFloat(d.comisiones.ventas_base_corte_dia || 0);
+            const comisionBaseDia = parseFloat(d.comisiones.comision_base_corte_dia || 0);
+
             updateEl('stat-piezas-hoy', parseInt(d.comisiones.piezas_hoy || 0, 10));
             updateEl('stat-comision-hoy', currency(d.comisiones.comision_hoy));
             updateEl('stat-comision-mes', currency(d.comisiones.comision_mes));
             updateEl('stat-entrega-hoy', currency(d.comisiones.monto_a_entregar_hoy));
             updateEl('stat-tarifa-comision', currency(d.comisiones.tarifa_por_pieza));
             updateEl('stat-sugerido-dia', currency(d.comisiones.monto_a_entregar_hoy));
-            updateEl('stat-sugerido-mes', currency(d.comisiones.monto_a_entregar_mes));
+
+            settlementSuggested.dia = parseFloat(d.comisiones.monto_a_entregar_hoy || 0);
+
+            updateEl(
+                'stat-formula-dia',
+                'Calculo automatico: ' + currency(ventasBaseDia)
+                + ' ventas acumuladas - ' + currency(comisionBaseDia)
+                + ' comision = ' + currency(settlementSuggested.dia)
+            );
+            updateEl('stat-acumulado-pendiente', 'Acumulado pendiente desde ultimo corte: ' + currency(settlementSuggested.dia));
 
             updateEl('stat-declaracion-dia', fmtDateTime(d.liquidacion_hoy?.fecha_declaracion || d.liquidacion_hoy?.fecha_entrega_ganancias));
-            updateEl('stat-declaracion-mes', fmtDateTime(d.liquidacion_mes?.fecha_declaracion || d.liquidacion_mes?.fecha_entrega_ganancias));
 
             const inputDia = document.getElementById('input-entregado-dia');
-            if (inputDia && !inputDia.value) {
-                inputDia.value = parseFloat(d.comisiones.monto_a_entregar_hoy || 0).toFixed(2);
+            if (inputDia) {
+                inputDia.value = settlementSuggested.dia.toFixed(2);
+            }
+        };
+
+        const renderSellerRecentSales = (d) => {
+            const body = document.getElementById('seller-recent-sales-body');
+            if (!body) return;
+
+            if (!Array.isArray(d.ventas_recientes_vendedor) || d.ventas_recientes_vendedor.length === 0) {
+                body.innerHTML = '<tr><td colspan="4" class="center grey-text">No hay ventas registradas.</td></tr>';
+                return;
             }
 
-            const inputMes = document.getElementById('input-entregado-mes');
-            if (inputMes && !inputMes.value) {
-                inputMes.value = parseFloat(d.comisiones.monto_a_entregar_mes || 0).toFixed(2);
-            }
+            body.innerHTML = d.ventas_recientes_vendedor.map(row => {
+                const fecha = row.fecha_creacion ? fmtDateTime(row.fecha_creacion) : 'N/A';
+                return `
+                    <tr>
+                        <td>${row.numero_pedido || 'N/A'}</td>
+                        <td>${fecha}</td>
+                        <td class="right-align">${currency(row.total)}</td>
+                        <td>${row.estado || 'N/A'}</td>
+                    </tr>`;
+            }).join('');
         };
 
         const loadDashboardData = () => fetch('<?php echo BASE_URL; ?>api/dashboard_data.php')
@@ -852,6 +922,7 @@ include __DIR__ . '/includes/header.php';
 
                 renderAdminSellers(d);
                 renderSellerSettlement(d);
+                renderSellerRecentSales(d);
 
                 if (d.finanzas_mes?.diario) {
                     const tbody = document.getElementById('finance-daily-body');
@@ -883,8 +954,17 @@ include __DIR__ . '/includes/header.php';
             const formData = new FormData();
             formData.append('csrf_token', csrfToken);
             formData.append('periodo', periodo);
-            if (montoInput && montoInput.value !== '') {
-                formData.append('monto_entregado', montoInput.value);
+            if (montoInput) {
+                const suggested = parseFloat(settlementSuggested[periodo] || 0);
+                const montoToSend = Number.isNaN(suggested) ? 0 : suggested;
+
+                if (montoToSend <= 0) {
+                    M.toast({html: 'No hay monto pendiente para declarar en este periodo.', classes: 'orange darken-3'});
+                    return;
+                }
+
+                montoInput.value = montoToSend.toFixed(2);
+                formData.append('monto_entregado', String(montoToSend));
             }
             if (obsInput && obsInput.value !== '') {
                 formData.append('observaciones', obsInput.value);
@@ -909,11 +989,6 @@ include __DIR__ . '/includes/header.php';
         const btnDia = document.getElementById('btn-liquidar-dia');
         if (btnDia) {
             btnDia.addEventListener('click', () => declararLiquidacion('dia'));
-        }
-
-        const btnMes = document.getElementById('btn-liquidar-mes');
-        if (btnMes) {
-            btnMes.addEventListener('click', () => declararLiquidacion('mes'));
         }
 
         loadDashboardData();

@@ -11,6 +11,8 @@ $pageTitle = 'Realizar Venta';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $isAdminUser = isAdmin();
+$isSellerUser = isVendedor();
+$showIncentivoDetails = !$isSellerUser;
 $pickupOfferSettings = getPickupOfferSettings($pdo);
 $error = '';
 $success = '';
@@ -77,14 +79,15 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 15px; border-bottom: 2px solid #e0e0e0; padding-bottom: 5px;">
-                <div class="chip blue lighten-5 blue-text text-darken-4" style="margin: 0 10px 0 0;">
-                    Sucursal de venta: <strong><?php echo esc($almacenActualNombre !== '' ? $almacenActualNombre : 'Sin asignar'); ?></strong>
+            <div class="sales-toolbar" style="display: flex; align-items: center; justify-content: space-between; margin-top: 15px; border-bottom: 2px solid #e0e0e0; padding-bottom: 5px;">
+                <div class="chip blue lighten-5 blue-text text-darken-4 sales-warehouse-chip" style="margin: 0 10px 0 0;">
+                    <span>Sucursal de venta:</span>
+                    <strong class="sales-warehouse-name"><?php echo esc($almacenActualNombre !== '' ? $almacenActualNombre : 'Sin asignar'); ?></strong>
                 </div>
-                <ul id="ventas-tabs" class="tabs" style="background: transparent; height: 45px; overflow-x: auto; overflow-y: hidden;">
+                <ul id="ventas-tabs" class="tabs sales-tabs" style="background: transparent; height: 45px; overflow-x: auto; overflow-y: hidden;">
                     <!-- Las pestañas se generan aquí dinámicamente -->
                 </ul>
-                <button type="button" onclick="nuevaVenta()" class="btn-floating btn-small waves-effect waves-light indigo" title="Atender otro cliente" style="margin-left: 10px;">
+                <button type="button" onclick="nuevaVenta()" class="btn-floating btn-small waves-effect waves-light indigo sales-new-tab-btn" title="Atender otro cliente" style="margin-left: 10px;">
                     <i class="material-icons">add</i>
                 </button>
             </div>
@@ -151,7 +154,7 @@ include __DIR__ . '/includes/header.php';
                                 <input type="number" id="descuento-{{id}}" class="descuento" name="descuento" step="0.01" value="0" min="0" oninput="actualizarTotal('{{id}}')" <?php echo $isAdminUser ? '' : 'readonly'; ?>>
                                 <label for="descuento-{{id}}" class="active">Descuento</label>
                                 <?php if (!$isAdminUser): ?>
-                                    <span class="helper-text">Para vendedor, el descuento manual esta bloqueado. Se aplica incentivo automatico por sucursal.</span>
+                                    <span class="helper-text">El descuento manual esta bloqueado para tu perfil.</span>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -178,6 +181,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s6">Subtotal:</div>
                             <div class="col s6 right-align">$<span class="subtotal-val">0.00</span></div>
                         </div>
+                            <?php if ($showIncentivoDetails): ?>
                         <div class="row" style="margin-bottom: 5px;">
                             <div class="col s6">Cuenta sin descuento/incentivo:</div>
                             <div class="col s6 right-align">$<span class="base-total-val">0.00</span></div>
@@ -190,12 +194,15 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s6">Descuento manual:</div>
                             <div class="col s6 right-align text-red">-$<span class="descuento-total-val">0.00</span></div>
                         </div>
+                            <?php endif; ?>
                         <div class="divider" style="background: rgba(255,255,255,0.2); margin: 10px 0;"></div>
                         <div class="row" style="font-size: 1.8rem; font-weight: bold;">
                             <div class="col s4">Total:</div>
                             <div class="col s8 right-align">$<span class="total-venta-val">0.00</span></div>
                         </div>
-                        <div class="card-panel amber lighten-4 incentivo-banner" style="display:none; margin:10px 0 0 0; padding:10px; border-left:4px solid #ff8f00; color:#6d4c41;"></div>
+                            <?php if ($showIncentivoDetails): ?>
+                                <div class="card-panel amber lighten-4 incentivo-banner" style="display:none; margin:10px 0 0 0; padding:10px; border-left:4px solid #ff8f00; color:#6d4c41;"></div>
+                            <?php endif; ?>
                         <div class="divider" style="background: rgba(255,255,255,0.2); margin: 10px 0;"></div>
                         
                         <!-- Calculadora de Cambio -->
@@ -217,6 +224,27 @@ include __DIR__ . '/includes/header.php';
 </template>
 
 <style>
+    .sales-toolbar {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .sales-warehouse-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+        flex: 0 0 auto;
+    }
+    .sales-warehouse-name {
+        white-space: nowrap;
+    }
+    .sales-tabs {
+        flex: 1 1 260px;
+        min-width: 220px;
+    }
+    .sales-new-tab-btn {
+        flex: 0 0 auto;
+    }
     .tabs .tab a { display: flex; align-items: center; padding: 0 15px; text-transform: none; font-weight: 500; }
     .tabs .tab a i.close-tab { margin-left: 10px; font-size: 16px; cursor: pointer; color: #9e9e9e; }
     .tabs .tab a i.close-tab:hover { color: #f44336; }
@@ -247,6 +275,7 @@ include __DIR__ . '/includes/header.php';
 <script>
     const productosDisponibles = <?php echo json_encode($productos); ?>;
     const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
+    const SHOW_INCENTIVO_DETAILS = <?php echo $showIncentivoDetails ? 'true' : 'false'; ?>;
     let tabCount = 0;
     let productoIndex = 0;
     const productMap = {};
@@ -549,13 +578,16 @@ include __DIR__ . '/includes/header.php';
         const total = Math.max(0, subtotal - descuentoTotal);
         
         context.querySelector('.subtotal-val').textContent = subtotal.toFixed(2);
-        context.querySelector('.base-total-val').textContent = subtotal.toFixed(2);
-        context.querySelector('.incentivo-total-val').textContent = descuentoIncentivo.toFixed(2);
-        context.querySelector('.descuento-total-val').textContent = descuentoManual.toFixed(2);
+        const baseTotalEl = context.querySelector('.base-total-val');
+        if (baseTotalEl) baseTotalEl.textContent = subtotal.toFixed(2);
+        const incentivoEl = context.querySelector('.incentivo-total-val');
+        if (incentivoEl) incentivoEl.textContent = descuentoIncentivo.toFixed(2);
+        const descuentoEl = context.querySelector('.descuento-total-val');
+        if (descuentoEl) descuentoEl.textContent = descuentoManual.toFixed(2);
         context.querySelector('.total-venta-val').textContent = total.toFixed(2);
 
         const banner = context.querySelector('.incentivo-banner');
-        if (banner) {
+        if (banner && SHOW_INCENTIVO_DETAILS) {
             if (descuentoIncentivo > 0) {
                 const porPieza = incentivoCalc.descuentoPorPieza || 0;
                 banner.innerHTML = `<strong>Incentivo de sucursal activo:</strong> descuento de <strong>$${porPieza.toFixed(2)}</strong> por pieza (${itemsTotales} pieza(s)), ahorro total <strong>$${descuentoIncentivo.toFixed(2)}</strong>.`;
@@ -571,6 +603,8 @@ include __DIR__ . '/includes/header.php';
             } else {
                 banner.style.display = 'none';
             }
+        } else if (banner) {
+            banner.style.display = 'none';
         }
 
         const pagoCon = parseFloat(context.querySelector('.pago-con').value) || 0;
