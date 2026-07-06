@@ -115,6 +115,18 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<div id="modal-cerrar-venta" class="modal" style="max-width: 520px;">
+    <div class="modal-content">
+        <h5 style="margin-top: 0;">Cerrar pestaña de venta</h5>
+        <p>Esta pestaña tiene datos del ticket, cliente o venta.</p>
+        <p class="grey-text text-darken-1" style="margin-bottom: 0;">Si la cierras, perderás esta información no guardada.</p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect waves-grey btn-flat">Cancelar</a>
+        <a href="#!" id="btn-confirmar-cerrar-venta" class="waves-effect waves-light btn red darken-2">Sí, cerrar pestaña</a>
+    </div>
+</div>
+
 <!-- Template para nueva venta -->
 <template id="venta-template">
     <div id="venta-{{id}}" class="row animated fadeIn venta-context" style="margin-top: 20px;">
@@ -300,12 +312,17 @@ include __DIR__ . '/includes/header.php';
     const clientesActivos = <?php echo json_encode($clientesActivos, JSON_UNESCAPED_UNICODE); ?>;
     const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
     const SHOW_INCENTIVO_DETAILS = <?php echo $showIncentivoDetails ? 'true' : 'false'; ?>;
+    const SALES_TABS_STORAGE_KEY = 'sales_tabs_draft_v1';
     let tabCount = 0;
     let productoIndex = 0;
     const productMap = {};
     const autocompleteData = {};
     const customerMap = {};
     const customerAutocompleteData = {};
+    let salesDraftSaveTimer = null;
+    let isRestoringDrafts = false;
+    let pendingCloseVentaId = null;
+    let closeVentaModalInstance = null;
 
     function resolveProductImageSrc(rawImage) {
         if (!rawImage) {
@@ -333,10 +350,130 @@ include __DIR__ . '/includes/header.php';
         return `data:image/jpeg;base64,${value}`;
     }
 
-    // Función para prevenir pérdida de datos al cerrar pestaña
+    function hasVentaData(context) {
+        if (!context) return false;
+
+        const hasItems = context.querySelectorAll('.producto-item').length > 0;
+        const clienteNombre = (context.querySelector('.cliente_nombre')?.value || '').trim();
+        const clienteTelefono = (context.querySelector('.cliente_telefono')?.value || '').trim();
+        const observaciones = (context.querySelector('.observaciones')?.value || '').trim();
+        const descuento = parseFloat(context.querySelector('.descuento')?.value || '0') || 0;
+
+        return hasItems || clienteNombre !== '' || clienteTelefono !== '' || observaciones !== '' || descuento > 0;
+    }
+
+    function getCurrentSalesDraft() {
+        const tabs = [];
+        const contexts = Array.from(document.querySelectorAll('.venta-context'));
+
+        contexts.forEach((context) => {
+            const id = String(context.id || '').replace('venta-', '');
+            if (!id) return;
+
+            const productos = Array.from(context.querySelectorAll('.producto-item')).map((item) => {
+                const idProducto = parseInt(item.dataset.id || '0', 10) || 0;
+                const cantidad = parseInt(item.querySelector('.cantidad')?.value || '0', 10) || 0;
+                const precioUnitario = parseFloat(item.querySelector('.precio-unitario')?.value || '0') || 0;
+                return {
+                    id_producto: idProducto,
+                    cantidad,
+                    precio_unitario: precioUnitario
+                };
+            }).filter((p) => p.id_producto > 0 && p.cantidad > 0);
+
+            tabs.push({
+                id,
+                cliente_nombre: (context.querySelector('.cliente_nombre')?.value || '').trim(),
+                cliente_telefono: (context.querySelector('.cliente_telefono')?.value || '').trim(),
+                id_metodo_pago: String(context.querySelector('select[name="id_metodo_pago"]')?.value || '1'),
+                descuento: parseFloat(context.querySelector('.descuento')?.value || '0') || 0,
+                observaciones: (context.querySelector('.observaciones')?.value || '').trim(),
+                pago_con: parseFloat(context.querySelector('.pago-con')?.value || '0') || 0,
+                productos
+            });
+        });
+
+        const activeTab = document.querySelector('#ventas-tabs .tab a.active');
+        const activeHref = activeTab?.getAttribute('href') || '';
+        const activeTabId = activeHref.startsWith('#venta-') ? activeHref.replace('#venta-', '') : null;
+
+        return {
+            version: 1,
+            saved_at: Date.now(),
+            active_tab_id: activeTabId,
+            tabs
+        };
+    }
+
+    function saveSalesDraftNow() {
+        if (isRestoringDrafts) return;
+
+        try {
+            const draft = getCurrentSalesDraft();
+            if (!draft.tabs || draft.tabs.length === 0) {
+                localStorage.removeItem(SALES_TABS_STORAGE_KEY);
+                return;
+            }
+            localStorage.setItem(SALES_TABS_STORAGE_KEY, JSON.stringify(draft));
+        } catch (err) {
+            console.warn('No se pudo guardar borrador de ventas:', err);
+        }
+    }
+
+    function scheduleSalesDraftSave() {
+        if (isRestoringDrafts) return;
+        if (salesDraftSaveTimer) clearTimeout(salesDraftSaveTimer);
+        salesDraftSaveTimer = setTimeout(saveSalesDraftNow, 250);
+    }
+
+    function clearSalesDraftIfEmpty() {
+        const hasTabs = document.querySelectorAll('.venta-context').length > 0;
+        if (!hasTabs) {
+            try {
+                localStorage.removeItem(SALES_TABS_STORAGE_KEY);
+            } catch (err) {
+                console.warn('No se pudo limpiar borrador de ventas:', err);
+            }
+        }
+    }
+
+    function restoreSalesDrafts() {
+        let parsed;
+        try {
+            const raw = localStorage.getItem(SALES_TABS_STORAGE_KEY);
+            if (!raw) return false;
+            parsed = JSON.parse(raw);
+        } catch (err) {
+            console.warn('No se pudo leer borrador de ventas:', err);
+            return false;
+        }
+
+        if (!parsed || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) {
+            return false;
+        }
+
+        isRestoringDrafts = true;
+        parsed.tabs.forEach((draftTab) => nuevaVenta(draftTab));
+        isRestoringDrafts = false;
+
+        const activeTabId = String(parsed.active_tab_id || '').trim();
+        if (activeTabId !== '') {
+            const tabsUl = document.getElementById('ventas-tabs');
+            const tabsInstance = M.Tabs.getInstance(tabsUl);
+            if (tabsInstance && document.getElementById(`venta-${activeTabId}`)) {
+                tabsInstance.select(`venta-${activeTabId}`);
+            }
+        }
+
+        scheduleSalesDraftSave();
+        return true;
+    }
+
+    // Función para prevenir pérdida de datos al cerrar pestaña/recargar
     const prevenirCierre = (e) => {
-        const items = document.querySelectorAll('.producto-item');
-        if (items.length > 0) {
+        const contexts = Array.from(document.querySelectorAll('.venta-context'));
+        const hasData = contexts.some((ctx) => hasVentaData(ctx));
+        if (hasData) {
             e.preventDefault();
             e.returnValue = ''; 
         }
@@ -371,15 +508,44 @@ include __DIR__ . '/includes/header.php';
 
         const selects = document.querySelectorAll('select');
         M.FormSelect.init(selects);
+        const closeModalNode = document.getElementById('modal-cerrar-venta');
+        closeVentaModalInstance = closeModalNode ? M.Modal.init(closeModalNode, { dismissible: true }) : null;
+
+        const btnConfirmCloseVenta = document.getElementById('btn-confirmar-cerrar-venta');
+        if (btnConfirmCloseVenta) {
+            btnConfirmCloseVenta.addEventListener('click', () => {
+                if (!pendingCloseVentaId) return;
+                const targetId = pendingCloseVentaId;
+                pendingCloseVentaId = null;
+                if (closeVentaModalInstance) closeVentaModalInstance.close();
+                ejecutarCierreVenta(targetId);
+            });
+        }
 
         window.addEventListener('beforeunload', prevenirCierre);
+
+        const ventaContainers = document.getElementById('ventas-containers');
+        ventaContainers.addEventListener('input', scheduleSalesDraftSave);
+        ventaContainers.addEventListener('change', scheduleSalesDraftSave);
         
-        nuevaVenta(); // Iniciar con la primera venta
+        const restored = restoreSalesDrafts();
+        if (!restored) {
+            nuevaVenta(); // Iniciar con la primera venta
+        }
     });
 
-    function nuevaVenta() {
-        tabCount++;
-        const id = 'v' + tabCount;
+    function nuevaVenta(draftTab = null) {
+        let id = '';
+        if (draftTab && typeof draftTab.id === 'string' && /^v\d+$/i.test(draftTab.id)) {
+            id = draftTab.id.toLowerCase();
+            const parsedNum = parseInt(id.substring(1), 10);
+            if (Number.isInteger(parsedNum) && parsedNum > tabCount) {
+                tabCount = parsedNum;
+            }
+        } else {
+            tabCount++;
+            id = 'v' + tabCount;
+        }
 
         // 1. Crear la pestaña física en la lista superior
         const colorIdx = (tabCount - 1) % 4;
@@ -494,11 +660,60 @@ include __DIR__ . '/includes/header.php';
         // Manejar envío del formulario
         context.querySelector('.formulario-venta').addEventListener('submit', (e) => procesarVenta(e, id));
 
+        if (draftTab && typeof draftTab === 'object') {
+            if (clienteNombreInput) clienteNombreInput.value = String(draftTab.cliente_nombre || '');
+            if (clienteTelefonoInput) clienteTelefonoInput.value = String(draftTab.cliente_telefono || '');
+            const descuentoInput = context.querySelector('.descuento');
+            if (descuentoInput) descuentoInput.value = String(draftTab.descuento ?? '0');
+            const observacionesInput = context.querySelector('.observaciones');
+            if (observacionesInput) observacionesInput.value = String(draftTab.observaciones || '');
+            const pagoConInput = context.querySelector('.pago-con');
+            if (pagoConInput) pagoConInput.value = String(draftTab.pago_con ?? '0');
+
+            const metodoPagoSelect = context.querySelector('select[name="id_metodo_pago"]');
+            if (metodoPagoSelect) {
+                metodoPagoSelect.value = String(draftTab.id_metodo_pago || '1');
+                M.FormSelect.init(metodoPagoSelect);
+            }
+
+            if (Array.isArray(draftTab.productos)) {
+                draftTab.productos.forEach((prodDraft) => {
+                    const product = productosDisponibles.find((p) => String(p.id_producto) === String(prodDraft.id_producto));
+                    if (!product) return;
+
+                    agregarProductoALista(id, product, { silent: true });
+
+                    const itemNode = context.querySelector(`.producto-item[data-id="${product.id_producto}"]`);
+                    if (!itemNode) return;
+
+                    const qtyInput = itemNode.querySelector('.cantidad');
+                    const priceInput = itemNode.querySelector('.precio-unitario');
+                    const stockDisponible = parseInt(product.cantidad_actual || 0, 10) || 0;
+
+                    if (qtyInput) {
+                        const draftQty = parseInt(prodDraft.cantidad || 1, 10) || 1;
+                        const finalQty = Math.max(1, Math.min(draftQty, stockDisponible > 0 ? stockDisponible : draftQty));
+                        qtyInput.value = String(finalQty);
+                    }
+
+                    if (priceInput) {
+                        const draftPrice = parseFloat(prodDraft.precio_unitario || product.precio_venta || 0) || 0;
+                        priceInput.value = String(draftPrice);
+                    }
+                });
+            }
+
+            M.updateTextFields();
+            actualizarTotal(id);
+            actualizarTituloTab(id, clienteNombreInput ? clienteNombreInput.value : '');
+        }
+
         // Seleccionar la nueva pestaña automáticamente
         if (tabsInstance) {
             tabsInstance.select(`venta-${id}`);
         }
         setTimeout(() => buscador.focus(), 200); // Dar foco al buscador automáticamente
+        scheduleSalesDraftSave();
     }
 
     function actualizarTituloTab(id, nombre = '') {
@@ -508,13 +723,38 @@ include __DIR__ . '/includes/header.php';
         }
     }
 
-    function cerrarVenta(id, event) {
-        event.stopPropagation();
-        const context = document.getElementById(`venta-${id}`);
-        if (context.querySelectorAll('.producto-item').length > 0) {
-            if (!confirm('Esta venta tiene productos. ¿Seguro que quieres cerrarla?')) return;
+    function abrirModalCerrarVenta(id) {
+        pendingCloseVentaId = id;
+        if (closeVentaModalInstance) {
+            closeVentaModalInstance.open();
+            return;
         }
-        
+
+        // Fallback seguro por si el modal no inicializa en algún navegador.
+        if (confirm('Esta pestaña tiene datos del ticket/cliente/venta. Si la cierras, perderás esa información. ¿Deseas continuar?')) {
+            const targetId = pendingCloseVentaId;
+            pendingCloseVentaId = null;
+            if (targetId) ejecutarCierreVenta(targetId);
+        } else {
+            pendingCloseVentaId = null;
+        }
+    }
+
+    function cerrarVenta(id, event) {
+        if (event) event.stopPropagation();
+        const context = document.getElementById(`venta-${id}`);
+        if (hasVentaData(context)) {
+            abrirModalCerrarVenta(id);
+            return;
+        }
+
+        ejecutarCierreVenta(id);
+    }
+
+    function ejecutarCierreVenta(id) {
+        const context = document.getElementById(`venta-${id}`);
+        if (!context) return;
+
         const tabLi = document.getElementById(`tab-li-${id}`);
         if (tabLi) tabLi.remove();
         if (context) {
@@ -538,9 +778,13 @@ include __DIR__ . '/includes/header.php';
         } else {
             M.Tabs.init(tabsUl);
         }
+
+        clearSalesDraftIfEmpty();
+        scheduleSalesDraftSave();
     }
 
-    function agregarProductoALista(tabId, product) {
+    function agregarProductoALista(tabId, product, options = {}) {
+        const silent = !!options.silent;
         const context = document.getElementById(`venta-${tabId}`);
         const sinProd = context.querySelector('.sin-productos');
         if (sinProd) sinProd.style.display = 'none';
@@ -554,18 +798,18 @@ include __DIR__ . '/includes/header.php';
             const nuevaCant = parseInt(cantInput.value) + 1;
             
             if (nuevaCant > stockDisponible) {
-                M.toast({html: `No hay más stock disponible de ${product.nombre} (${stockDisponible} max)`, classes: 'red'});
+                if (!silent) M.toast({html: `No hay más stock disponible de ${product.nombre} (${stockDisponible} max)`, classes: 'red'});
                 return;
             }
             
             cantInput.value = nuevaCant;
             actualizarTotal(tabId);
-            M.toast({html: `+1 ${product.nombre}`, classes: 'blue lighten-3'});
+            if (!silent) M.toast({html: `+1 ${product.nombre}`, classes: 'blue lighten-3'});
             return;
         }
 
         if (stockDisponible <= 0) {
-            M.toast({html: `${product.nombre} está AGOTADO en esta sucursal`, classes: 'red darken-2'});
+            if (!silent) M.toast({html: `${product.nombre} está AGOTADO en esta sucursal`, classes: 'red darken-2'});
             return;
         }
 
@@ -608,7 +852,7 @@ include __DIR__ . '/includes/header.php';
 
         productoIndex++;
         actualizarTotal(tabId);
-        M.toast({html: `Agregado: ${product.nombre}`, classes: 'green'});
+        if (!silent) M.toast({html: `Agregado: ${product.nombre}`, classes: 'green'});
     }
 
     function actualizarTotal(tabId) {
@@ -676,6 +920,7 @@ include __DIR__ . '/includes/header.php';
         container.style.color = (pagoCon > 0 && pagoCon < total) ? '#ef5350' : '#81c784';
         
         actualizarTituloTab(tabId, context.querySelector('.cliente_nombre').value);
+        scheduleSalesDraftSave();
     }
 
     function resolvePieceTierDiscountClient(pieces, settings) {
@@ -743,6 +988,7 @@ include __DIR__ . '/includes/header.php';
             context.querySelector('.sin-productos').style.display = 'block';
         }
         actualizarTotal(tabId);
+        scheduleSalesDraftSave();
     }
 
     function procesarVenta(e, tabId) {
@@ -774,10 +1020,10 @@ include __DIR__ . '/includes/header.php';
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                window.removeEventListener('beforeunload', prevenirCierre);
                 M.toast({html: 'Venta realizada con éxito', classes: 'green darken-2'});
                 document.getElementById(`tab-li-${tabId}`).remove();
                 context.remove();
+                scheduleSalesDraftSave();
                 if (document.querySelectorAll('.tab').length === 0) location.reload();
             } else {
                 M.toast({html: data.message || 'Error al procesar la venta', classes: 'red darken-2'});
