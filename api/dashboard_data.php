@@ -191,6 +191,34 @@ try {
         $stats['entregas_hoy'] = ['total' => $stmt->fetchColumn()];
 
     } elseif ($rol === 'vendedor') {
+        $fechaInicioVentas = trim((string)($_GET['ventas_fecha_inicio'] ?? ''));
+        $fechaFinVentas = trim((string)($_GET['ventas_fecha_fin'] ?? ''));
+        $estadoVentas = trim((string)($_GET['ventas_estado'] ?? ''));
+        $allowedEstados = ['pendiente_pago', 'pagado', 'en_reparto', 'entregado', 'apartado', 'cancelado'];
+
+        $fechaValida = static function (string $value): bool {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return false;
+            }
+            $dt = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+            return $dt !== false && $dt->format('Y-m-d') === $value;
+        };
+
+        if ($fechaInicioVentas !== '' && !$fechaValida($fechaInicioVentas)) {
+            $fechaInicioVentas = '';
+        }
+        if ($fechaFinVentas !== '' && !$fechaValida($fechaFinVentas)) {
+            $fechaFinVentas = '';
+        }
+
+        if ($fechaInicioVentas !== '' && $fechaFinVentas !== '' && $fechaInicioVentas > $fechaFinVentas) {
+            [$fechaInicioVentas, $fechaFinVentas] = [$fechaFinVentas, $fechaInicioVentas];
+        }
+
+        if ($estadoVentas !== '' && !in_array($estadoVentas, $allowedEstados, true)) {
+            $estadoVentas = '';
+        }
+
         $stmt = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto FROM pedidos WHERE id_usuario = ? AND DATE(fecha_creacion) = CURDATE() AND estado != 'cancelado'");
         $stmt->execute([$idUsuario]);
         $stats['ventas_hoy'] = $stmt->fetch();
@@ -236,6 +264,7 @@ try {
             'tarifa_por_pieza' => $comisionPorPieza,
             'piezas_hoy' => $piezasHoy,
             'piezas_mes' => $piezasMes,
+            'piezas_base_corte_dia' => $piezasAcumuladasDia,
             'comision_hoy' => $comisionHoy,
             'comision_mes' => $comisionMes,
             'ventas_base_corte_dia' => $ventasAcumuladasDia,
@@ -272,9 +301,41 @@ try {
         $stats['utilidad_mes'] = ['total' => 0];
         $stats['costo_mes'] = ['total' => 0];
 
-        $stmt = $pdo->prepare("SELECT numero_pedido, total, fecha_creacion, estado FROM pedidos WHERE id_usuario = ? ORDER BY fecha_creacion DESC LIMIT 10");
-        $stmt->execute([$idUsuario]);
-        $stats['ventas_recientes_vendedor'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $ventasWhere = "id_usuario = ?";
+        $ventasParams = [$idUsuario];
+        if ($fechaInicioVentas !== '') {
+            $ventasWhere .= " AND DATE(fecha_creacion) >= ?";
+            $ventasParams[] = $fechaInicioVentas;
+        }
+        if ($fechaFinVentas !== '') {
+            $ventasWhere .= " AND DATE(fecha_creacion) <= ?";
+            $ventasParams[] = $fechaFinVentas;
+        }
+        if ($estadoVentas !== '') {
+            $ventasWhere .= " AND estado = ?";
+            $ventasParams[] = $estadoVentas;
+        }
+
+        $stmt = $pdo->prepare("SELECT numero_pedido, total, fecha_creacion, estado, observaciones FROM pedidos WHERE {$ventasWhere} ORDER BY fecha_creacion DESC LIMIT 100");
+        $stmt->execute($ventasParams);
+        $ventasRecientes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($ventasRecientes as &$venta) {
+            $obs = (string)($venta['observaciones'] ?? '');
+            $clienteReferencia = 'Sin referencia';
+            if (preg_match('/Cliente:\s*(.+?)(?:\.\s|$)/u', $obs, $matches)) {
+                $clienteReferencia = trim((string)($matches[1] ?? ''));
+                if ($clienteReferencia === '') {
+                    $clienteReferencia = 'Sin referencia';
+                }
+            }
+
+            $venta['cliente_referencia'] = $clienteReferencia;
+            unset($venta['observaciones']);
+        }
+        unset($venta);
+
+        $stats['ventas_recientes_vendedor'] = $ventasRecientes;
     }
 
     if ($rol === 'admin') {
