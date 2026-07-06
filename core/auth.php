@@ -14,12 +14,59 @@ function isAuthenticated(): bool
 }
 
 /**
+ * Modo degradado para login cuando hay incidentes de latencia/timeout en el host.
+ */
+function isLoginDegradedModeEnabled(): bool
+{
+    $raw = getenv('LOGIN_DEGRADED_MODE');
+    if ($raw === false) {
+        $raw = $_SERVER['LOGIN_DEGRADED_MODE'] ?? $_ENV['LOGIN_DEGRADED_MODE'] ?? '';
+    }
+
+    $value = strtolower(trim((string)$raw));
+    return in_array($value, ['1', 'true', 'yes', 'on'], true);
+}
+
+/**
+ * Cola de auditoria de contingencia (JSONL) cuando la BD esta lenta/no disponible.
+ */
+function logAuditFallback(string $accion, string $tabla, ?int $id_registro, string $detalles): void
+{
+    try {
+        $path = __DIR__ . '/../audit_fallback.log';
+        $entry = [
+            'ts' => date('c'),
+            'accion' => $accion,
+            'tabla' => $tabla,
+            'id_registro' => $id_registro,
+            'detalles' => $detalles,
+            'id_usuario' => $_SESSION['usuario']['id_usuario'] ?? null,
+            'ip' => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
+            'ua' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+        ];
+        @file_put_contents($path, json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
+    } catch (Throwable $e) {
+        // Nunca romper flujo de negocio por auditoria.
+    }
+}
+
+/**
  * Registra una acción en el log de auditoría.
  */
 function logAudit(string $accion, string $tabla, ?int $id_registro, string $detalles): void
 {
+    if (isLoginDegradedModeEnabled()) {
+        logAuditFallback($accion, $tabla, $id_registro, $detalles);
+        return;
+    }
+
     try {
         $pdo = getPDO();
+        try {
+            $pdo->exec('SET SESSION innodb_lock_wait_timeout = 2');
+        } catch (Throwable $e) {
+            // Seguir aunque no se pueda ajustar timeout.
+        }
         $stmt = $pdo->prepare("INSERT INTO logs_auditoria (id_usuario, accion, tabla_afectada, id_registro, detalles, ip_address) VALUES (?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $_SESSION['usuario']['id_usuario'] ?? null,
@@ -217,6 +264,13 @@ function authenticate(string $email, string $password): bool
 {
     $pdo = getPDO();
 
+    // Evita esperas largas por bloqueos InnoDB durante login bajo carga.
+    try {
+        $pdo->exec('SET SESSION innodb_lock_wait_timeout = 3');
+    } catch (Throwable $e) {
+        // Continuar si el motor/usuario no permite cambiar esta variable.
+    }
+
     // Se añadió u.contrasena a la lista de columnas seleccionadas
     $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol, 
                    GROUP_CONCAT(p.clave) as permisos,
@@ -262,14 +316,18 @@ function authenticate(string $email, string $password): bool
             error_log("DEBUG LOGIN ADVERTENCIA: El usuario no tiene un rol asignado.");
         }
 
-        // ÉXITO: Limpiamos los intentos fallidos y el bloqueo
-        $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
-            ->execute([$user['id_usuario']]);
-
         $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
         $_SESSION['usuario'] = $user;
         session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
         $_SESSION['_session_id_rotated_at'] = time();
+
+        // ÉXITO: limpiar intentos es importante, pero no debe bloquear el login.
+        try {
+            $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
+                ->execute([$user['id_usuario']]);
+        } catch (Throwable $e) {
+            error_log("LOGIN_WARN: No se pudo limpiar intentos_fallidos: " . $e->getMessage());
+        }
         
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
@@ -287,28 +345,34 @@ function authenticate(string $email, string $password): bool
         logAudit('BLOQUEO_CUENTA', 'usuarios', (int)$user['id_usuario'], "Cuenta bloqueada por 5 intentos fallidos");
 
         // Enviar alerta al Centro de Mensajes (Soporte) para el Admin
-        try {
-            $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-            $msgAlerta = "⚠️ ALERTA DE SEGURIDAD: La cuenta vinculada a este chat ha sido bloqueada temporalmente tras 5 intentos fallidos de inicio de sesión. Origen IP: $ip";
-            
-            // Insertar mensaje de alerta
-            // Marcamos leido_cliente = 1 para que el usuario no vea esta alerta técnica en su chat
-            $stmtMsg = $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje, leido_staff, leido_cliente) 
-                                     VALUES (?, 'staff', 'seguridad', ?, 0, 1)");
-            $stmtMsg->execute([
-                $user['id_usuario'], 
-                $msgAlerta
-            ]);
-            
-            // Asegurar que el Admin vea la notificación en la lista de chats
-            $pdo->prepare("UPDATE usuarios SET soporte_activo = 1 WHERE id_usuario = ?")->execute([$user['id_usuario']]);
-        } catch (Throwable $e) {
-            error_log("Error al enviar alerta de bloqueo al chat: " . $e->getMessage());
+        if (!isLoginDegradedModeEnabled()) {
+            try {
+                $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+                $msgAlerta = "⚠️ ALERTA DE SEGURIDAD: La cuenta vinculada a este chat ha sido bloqueada temporalmente tras 5 intentos fallidos de inicio de sesión. Origen IP: $ip";
+                
+                // Insertar mensaje de alerta
+                // Marcamos leido_cliente = 1 para que el usuario no vea esta alerta técnica en su chat
+                $stmtMsg = $pdo->prepare("INSERT INTO mensajes_soporte (id_cliente, enviado_por, tipo_mensaje, mensaje, leido_staff, leido_cliente) 
+                                         VALUES (?, 'staff', 'seguridad', ?, 0, 1)");
+                $stmtMsg->execute([
+                    $user['id_usuario'], 
+                    $msgAlerta
+                ]);
+                
+                // Asegurar que el Admin vea la notificación en la lista de chats
+                $pdo->prepare("UPDATE usuarios SET soporte_activo = 1 WHERE id_usuario = ?")->execute([$user['id_usuario']]);
+            } catch (Throwable $e) {
+                error_log("Error al enviar alerta de bloqueo al chat: " . $e->getMessage());
+            }
         }
     }
 
-    $pdo->prepare("UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = ? WHERE id_usuario = ?")
-        ->execute([$nuevosIntentos, $nuevaFechaBloqueo, $user['id_usuario']]);
+    try {
+        $pdo->prepare("UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = ? WHERE id_usuario = ?")
+            ->execute([$nuevosIntentos, $nuevaFechaBloqueo, $user['id_usuario']]);
+    } catch (Throwable $e) {
+        error_log("LOGIN_WARN: No se pudo actualizar intentos_fallidos: " . $e->getMessage());
+    }
 
     return false;
 }

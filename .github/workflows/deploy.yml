@@ -102,7 +102,6 @@ jobs:
             **/IMPLEMENTATION_SUMMARY.md
             **/TESTING_GUIDE.md
             **/core/env.sample.php
-            **/core/config.php
             **/views/migracion_productos.md
             **/mail_log.txt
             .gitignore
