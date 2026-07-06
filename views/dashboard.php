@@ -629,8 +629,8 @@ include __DIR__ . '/includes/header.php';
                         <p class="grey-text" style="margin-top:0;">Tarifa fija para vendedor: <strong id="stat-tarifa-comision">$ 50.00</strong> por producto vendido.</p>
 
                         <div class="row" style="margin-bottom:0;">
-                            <div class="col s12 m6">
-                                <div class="card-panel orange lighten-5">
+                            <div class="col s12 l10 offset-l1">
+                                <div class="card-panel orange lighten-5 liquidacion-corte-panel">
                                     <h6 style="margin-top:0;">Corte del Dia</h6>
                                     <div class="liquidacion-summary-grid">
                                         <div class="liquidacion-summary-card liquidacion-summary-card--comision">
@@ -639,24 +639,24 @@ include __DIR__ . '/includes/header.php';
                                             <div class="liquidacion-summary-note"><span id="stat-comision-card-piezas">0</span> piezas x <span id="stat-tarifa-comision-card">$ 50.00</span></div>
                                         </div>
                                         <div class="liquidacion-summary-card liquidacion-summary-card--entrega">
-                                            <div class="liquidacion-summary-label">Dinero a Entregar al Dueno</div>
+                                            <div class="liquidacion-summary-label">Dinero a Entregar</div>
                                             <div class="liquidacion-summary-amount" id="stat-entrega-card-hoy">$ 0.00</div>
                                             <div class="liquidacion-summary-note">Monto neto de hoy</div>
                                         </div>
                                     </div>
 
-                                    <div class="grey-text text-small" style="margin: 0 0 10px 0; line-height: 1.5;">
+                                    <div class="grey-text text-small liquidacion-desglose" style="margin: 0 0 12px 0; line-height: 1.6;">
                                         <div>Total de Ventas Brutas: <strong id="stat-resumen-ventas-acum">$ 0.00</strong></div>
                                         <div>(-) Tu Comision Automatica: <strong id="stat-resumen-comision-acum">-$ 0.00</strong> (<span id="stat-corresponde-vendedor-acumulado-piezas">0</span> piezas)</div>
                                         <div>Total Neto a Entregar Hoy: <strong id="stat-resumen-pendiente">$ 0.00</strong></div>
                                         <div class="text-small" style="margin-top:4px;">Entregado anteriormente: <strong id="stat-resumen-entregado-previo">$ 0.00</strong></div>
                                     </div>
                                     <p style="margin: 6px 0;"><strong>Ultima declaracion:</strong> <span id="stat-declaracion-dia">Sin declarar</span></p>
-                                    <div class="input-field" style="margin-top: 12px;">
+                                    <div class="input-field" style="margin-top: 16px; margin-bottom: 18px;">
                                         <input type="number" id="input-entregado-dia" min="0" step="0.01" placeholder="Monto entregado hoy" readonly>
                                         <label for="input-entregado-dia" class="active">Monto entregado hoy (calculado automaticamente)</label>
                                     </div>
-                                    <div class="input-field" style="margin-top: 4px;">
+                                    <div class="input-field" style="margin-top: 10px; margin-bottom: 20px;">
                                         <input type="text" id="input-observaciones-dia" maxlength="255" placeholder="Notas del corte del dia">
                                         <label for="input-observaciones-dia" class="active">Observaciones (opcional)</label>
                                     </div>
@@ -819,14 +819,33 @@ include __DIR__ . '/includes/header.php';
     .liquidacion-summary-grid {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 10px;
-        margin: 8px 0 12px;
+        gap: 14px;
+        margin: 12px 0 16px;
     }
 
     .liquidacion-summary-card {
-        border-radius: 10px;
-        padding: 12px;
+        border-radius: 12px;
+        padding: 14px 16px;
         border: 1px solid transparent;
+    }
+
+    .liquidacion-corte-panel {
+        padding: 22px 24px 20px !important;
+    }
+
+    .liquidacion-corte-panel h6 {
+        font-size: 1.55rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }
+
+    .liquidacion-desglose > div {
+        margin-bottom: 6px;
+        color: #5f6368;
+    }
+
+    .liquidacion-desglose > div strong {
+        color: #2f343a;
     }
 
     .liquidacion-summary-card--comision {
@@ -849,14 +868,14 @@ include __DIR__ . '/includes/header.php';
     }
 
     .liquidacion-summary-amount {
-        font-size: 1.9rem;
+        font-size: 2.2rem;
         font-weight: 800;
         line-height: 1.1;
-        margin: 6px 0;
+        margin: 8px 0;
     }
 
     .liquidacion-summary-note {
-        font-size: 0.9rem;
+        font-size: 0.98rem;
         font-weight: 500;
     }
 
@@ -864,11 +883,23 @@ include __DIR__ . '/includes/header.php';
         width: 100%;
         font-weight: 800;
         letter-spacing: .02em;
+        height: 48px;
+        font-size: 1rem;
     }
 
     @media only screen and (min-width: 900px) {
         .liquidacion-summary-grid {
             grid-template-columns: 1fr 1fr;
+        }
+    }
+
+    @media only screen and (max-width: 600px) {
+        .liquidacion-corte-panel {
+            padding: 18px 14px 16px !important;
+        }
+
+        .liquidacion-summary-amount {
+            font-size: 2rem;
         }
     }
 </style>
