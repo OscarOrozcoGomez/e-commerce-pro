@@ -35,6 +35,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                if (session_status() === PHP_SESSION_ACTIVE) {
+                    // Libera lock de sesion antes de redireccionar para evitar contencion.
+                    session_write_close();
+                }
+
                 if (!empty($redirect)) {
                     header('Location: ' . BASE_URL . ltrim($redirect, '/'));
                 } elseif (isCliente()) {

@@ -70,11 +70,93 @@ function catalogBindNamedParams(PDOStatement $stmt, array $params): void
     }
 }
 
+function catalogGroupKey(string $name): string
+{
+    $trimmed = trim($name);
+    if ($trimmed === '') {
+        return '';
+    }
+
+    if (function_exists('mb_strtolower')) {
+        return mb_strtolower($trimmed, 'UTF-8');
+    }
+
+    return strtolower($trimmed);
+}
+
+function catalogHasUsableImage(?string $img): bool
+{
+    $value = trim((string)$img);
+    if ($value === '') {
+        return false;
+    }
+
+    return stripos($value, 'default-product.svg') === false;
+}
+
+function catalogCollapseProducts(array $products): array
+{
+    $grouped = [];
+
+    foreach ($products as $p) {
+        $name = (string)($p['nombre'] ?? '');
+        $key = catalogGroupKey($name);
+        if ($key === '') {
+            $key = 'id:' . (string)($p['id_producto'] ?? uniqid('', true));
+        }
+
+        $id = (int)($p['id_producto'] ?? 0);
+        $precioDesde = (float)($p['precio_desde'] ?? $p['precio_venta'] ?? 0);
+        $precioVenta = (float)($p['precio_venta'] ?? $precioDesde);
+
+        if (!isset($grouped[$key])) {
+            $p['precio_desde'] = $precioDesde;
+            $p['precio_venta'] = $precioVenta;
+            $p['_variant_ids'] = $id > 0 ? [$id => true] : [];
+            $p['total_variantes'] = max(1, (int)($p['total_variantes'] ?? 1));
+            $grouped[$key] = $p;
+            continue;
+        }
+
+        $grouped[$key]['_variant_ids'][$id] = true;
+        $variantCount = count($grouped[$key]['_variant_ids']);
+        $grouped[$key]['total_variantes'] = max((int)$grouped[$key]['total_variantes'], $variantCount);
+
+        $currentDesde = (float)($grouped[$key]['precio_desde'] ?? 0);
+        if ($currentDesde <= 0 || ($precioDesde > 0 && $precioDesde < $currentDesde)) {
+            $grouped[$key]['precio_desde'] = $precioDesde;
+        }
+
+        $currentVenta = (float)($grouped[$key]['precio_venta'] ?? 0);
+        if ($currentVenta <= 0 || ($precioVenta > 0 && $precioVenta < $currentVenta)) {
+            $grouped[$key]['precio_venta'] = $precioVenta;
+        }
+
+        if (!catalogHasUsableImage((string)($grouped[$key]['imagen'] ?? '')) && catalogHasUsableImage((string)($p['imagen'] ?? ''))) {
+            $grouped[$key]['imagen'] = $p['imagen'];
+        }
+
+        $existingDescription = trim((string)($grouped[$key]['descripcion'] ?? ''));
+        $incomingDescription = trim((string)($p['descripcion'] ?? ''));
+        if ($existingDescription === '' && $incomingDescription !== '') {
+            $grouped[$key]['descripcion'] = $p['descripcion'];
+        }
+    }
+
+    foreach ($grouped as &$item) {
+        unset($item['_variant_ids']);
+    }
+    unset($item);
+
+    return array_values($grouped);
+}
+
 function catalogRenderProductCard(array $p): string
 {
+    $groupKey = catalogGroupKey((string)($p['nombre'] ?? ''));
     ob_start();
     ?>
-    <div class="col s12 m6 l4 product-card-container" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
+    <div class="col s12 m6 l4 product-card-container" data-group-key="<?php echo esc($groupKey); ?>" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
         <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int)$p['id_producto']; ?>" class="card-link">
             <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
@@ -175,7 +257,7 @@ $sql .= " WHERE " . implode(" AND ", $whereClauses);
 // --- Conteo de total de productos para paginación ---
 $totalProductos = 0;
 if (!$isAjaxLoadMore) {
-    $sqlCount = "SELECT COUNT(DISTINCT p.id_producto) FROM productos p";
+    $sqlCount = "SELECT COUNT(DISTINCT TRIM(p.nombre)) FROM productos p";
     if (!empty($categoriaSeleccionada)) {
         $sqlCount .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
                        JOIN categorias c ON pc.id_categoria = c.id_categoria ";
@@ -250,6 +332,8 @@ try {
     error_log("Error al cargar catálogo paginado: " . $e->getMessage());
     $productos = [];
 }
+
+$productos = catalogCollapseProducts($productos);
 
 if ($isAjaxLoadMore) {
     header('Content-Type: text/html; charset=UTF-8');
@@ -555,6 +639,27 @@ function handleLoadMoreClick() {
             
             const productsRow = document.querySelector('.row-products');
             newProducts.forEach(product => {
+                const incomingGroupKey = (product.getAttribute('data-group-key') || '').trim();
+                if (incomingGroupKey !== '') {
+                    const duplicate = Array.from(productsRow.querySelectorAll('.product-card-container')).find(card => {
+                        return (card.getAttribute('data-group-key') || '').trim() === incomingGroupKey;
+                    });
+
+                    if (duplicate) {
+                        const currentImg = duplicate.querySelector('.card-image img');
+                        const incomingImg = product.querySelector('.card-image img');
+                        const currentSrc = currentImg ? String(currentImg.getAttribute('src') || '') : '';
+                        const incomingSrc = incomingImg ? String(incomingImg.getAttribute('src') || '') : '';
+                        const currentIsDefault = /default-product\.svg/i.test(currentSrc);
+                        const incomingIsDefault = /default-product\.svg/i.test(incomingSrc);
+
+                        if (currentImg && incomingImg && currentIsDefault && !incomingIsDefault) {
+                            currentImg.setAttribute('src', incomingSrc);
+                        }
+                        return;
+                    }
+                }
+
                 productsRow.appendChild(product);
             });
 

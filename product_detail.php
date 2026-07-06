@@ -348,28 +348,35 @@ include __DIR__ . '/views/includes/header.php';
     // Variables para Galería
     let galleryImages = [];
     let currentSlide = 0;
+    let mainImageFallbackApplied = false;
 
     // Variables para el Zoom
     const zoomContainer = document.getElementById('zoom-container');
     const mainImg = document.getElementById('main-image');
 
-    if (mainImg) {
-        mainImg.addEventListener('error', () => {
-            if (!Array.isArray(galleryImages) || galleryImages.length === 0) {
-                mainImg.onerror = null;
+    function handleMainImageError() {
+        if (!mainImg) return;
+
+        if (Array.isArray(galleryImages) && currentSlide < (galleryImages.length - 1)) {
+            currentSlide += 1;
+            updateGalleryUI();
+            return;
+        }
+
+        if (!mainImageFallbackApplied) {
+            mainImageFallbackApplied = true;
+            if (mainImg.src !== PDP_DEFAULT_PRODUCT_IMAGE) {
                 mainImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
-                return;
             }
+            return;
+        }
 
-            if (currentSlide < galleryImages.length - 1) {
-                currentSlide += 1;
-                updateGalleryUI();
-                return;
-            }
+        // Si hasta la imagen por defecto falla, evitamos ciclo de reintentos.
+        mainImg.removeEventListener('error', handleMainImageError);
+    }
 
-            mainImg.onerror = null;
-            mainImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
-        });
+    if (mainImg) {
+        mainImg.addEventListener('error', handleMainImageError);
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -547,6 +554,7 @@ include __DIR__ . '/views/includes/header.php';
             ? [...new Set(product.galeria.filter(Boolean))]
             : [PDP_DEFAULT_PRODUCT_IMAGE];
         currentSlide = 0;
+        mainImageFallbackApplied = false;
         mainImg.src = galleryImages[0];
 
         galleryImages.forEach((imgSrc, index) => {

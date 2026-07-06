@@ -14,8 +14,9 @@ Agrega estos secrets en Settings > Secrets and variables > Actions:
 Sugerencias para Produccion:
 
 - MIGRATIONS_URL = https://tu-dominio.com/api/run_migrations.php
-- PTF_PORT = 21 (SFTP en tu hosting Neubox)
-- El deploy SFTP ya apunta a /public_html/ en deploy.yml
+- PTF_PORT = 21 (FTP/FTPS segun hosting)
+- PTF_PROTOCOL = ftp o ftps (NO sftp para SamKirkland/FTP-Deploy-Action)
+- El deploy via FTP apunta a /public_html/ en deploy.yml
 
 ## 2) Hosting de Produccion
 
@@ -24,6 +25,7 @@ Define variables de entorno en el host remoto:
 - APP_ENV=production en Produccion
 - DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_CHARSET
 - MIGRATIONS_DEPLOY_TOKEN (igual al secret global de GitHub del repositorio)
+- LOGIN_DEGRADED_MODE=0 (poner en 1 solo durante incidentes de latencia/522)
 
 ## 3) Flujo diario
 
@@ -205,3 +207,24 @@ El error aparece cuando se modifica una migracion ya existente en el repositorio
 - El deploy a main tambien falla con la misma regla.
 
 Resultado: se reduce mucho el riesgo de romper despliegues por checksum invalido en remoto.
+
+## 10) Modo degradado de login y recuperacion de auditoria
+
+Durante incidentes de timeouts (ej. Cloudflare 522 en login), puedes activar degradacion temporal:
+
+1. En el host remoto, establecer `LOGIN_DEGRADED_MODE=1`.
+2. Esto evita que la auditoria de login bloquee la respuesta y guarda eventos en `audit_fallback.log`.
+3. Cuando el incidente pase, volver a `LOGIN_DEGRADED_MODE=0`.
+
+Para reprocesar eventos guardados en fallback:
+
+- Simulacion (sin insertar en BD):
+   - `C:\xampp\php\php.exe scripts/process_audit_fallback.php --dry-run`
+- Procesamiento real:
+   - `C:\xampp\php\php.exe scripts/process_audit_fallback.php`
+- Procesamiento por lotes:
+   - `C:\xampp\php\php.exe scripts/process_audit_fallback.php --limit=500`
+
+Sugerencia operativa:
+
+- Programar el reproceso real en ventanas de baja carga si hay muchos eventos pendientes.
