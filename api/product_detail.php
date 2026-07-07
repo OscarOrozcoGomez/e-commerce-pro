@@ -31,11 +31,8 @@ try {
     $stmtStock->execute([$id]);
     $product['stock'] = (float)$stmtStock->fetchColumn();
 
-    // 2. Resolver imagenes del producto (galeria + campos legacy) para variante,
-    // padre y variantes hermanas con el mismo nombre.
+    // 2. Resolver imagenes del producto para la variante actual exclusivamente.
     $currentId = (int)($product['id_producto'] ?? 0);
-    $parentId = (int)($product['id_padre'] ?? 0);
-    $rootId = $parentId > 0 ? $parentId : $currentId;
     $baseName = trim((string)($product['nombre'] ?? ''));
 
     $collectFolderImagesByProductId = static function (int $productId, string $preferredFolderName = ''): array {
@@ -201,16 +198,15 @@ try {
     $imageCandidates = [];
     $dbPreferredFolder = '';
 
-        $stmtGal = $pdo->prepare(
-            "SELECT pi.ruta_archivo
-             FROM producto_imagenes pi
-             INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto
-             WHERE p_img.id_producto IN (?, ?)
-             ORDER BY (p_img.id_producto = ?) DESC, (p_img.id_producto = ?) DESC, pi.orden ASC"
-        );
-        $stmtGal->execute([$currentId, $rootId, $currentId, $rootId]);
+    $stmtGal = $pdo->prepare(
+        "SELECT pi.ruta_archivo
+         FROM producto_imagenes pi
+         WHERE pi.id_producto = ?
+         ORDER BY pi.orden ASC"
+    );
+    $stmtGal->execute([$currentId]);
     $galeria = $stmtGal->fetchAll(PDO::FETCH_COLUMN);
-        $hasDbGallery = false;
+    $hasDbGallery = false;
     foreach ($galeria as $img) {
         $img = trim((string)$img);
         if ($img !== '') {
@@ -233,34 +229,12 @@ try {
     $currentPreferredFolder = $dbPreferredFolder !== ''
         ? $dbPreferredFolder
         : (slugify($baseName) . '-' . $currentId);
-    $currentFolderImages = [];
-    // Respetar cambios del admin (alta/baja/reorden) en producto_imagenes.
-    // Solo usar archivos de carpeta si no hay galeria definida en DB.
-    if (!$hasDbGallery) {
-        $currentFolderImages = $collectFolderImagesByProductId($currentId, $currentPreferredFolder);
-        foreach ($currentFolderImages as $folderImagePath) {
-            $imageCandidates[] = $folderImagePath;
-        }
-    }
 
-    // Fallback de ultimo recurso para catalogos con variantes no normalizadas:
-    // si no logramos ninguna imagen propia, intentamos tomar de productos hermanos por nombre.
-    if (empty($imageCandidates) && $baseName !== '') {
-        $stmtNameImgs = $pdo->prepare(
-            "SELECT imagen, imagen_url
-             FROM productos
-             WHERE estado = 'activo' AND TRIM(nombre) = ?"
-        );
-        $stmtNameImgs->execute([$baseName]);
-        $nameRows = $stmtNameImgs->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($nameRows as $row) {
-            foreach (['imagen', 'imagen_url'] as $field) {
-                $raw = trim((string)($row[$field] ?? ''));
-                if ($raw !== '') {
-                    $imageCandidates[] = $raw;
-                }
-            }
-        }
+    // Incluir siempre la carpeta fisica activa para reflejar descargas/importaciones
+    // aun cuando DB tenga un subconjunto de rutas.
+    $currentFolderImages = $collectFolderImagesByProductId($currentId, $currentPreferredFolder);
+    foreach ($currentFolderImages as $folderImagePath) {
+        $imageCandidates[] = $folderImagePath;
     }
 
     $imagenes = [];
@@ -272,11 +246,11 @@ try {
     }
     $imagenes = $filterValidProductUrls($imagenes);
 
-    // Si existen archivos fisicos para la variante actual, priorizamos solo esos
-    // para evitar mezclar galerias de presentaciones hermanas.
-    if (!empty($currentFolderImages)) {
+    // Si existen archivos fisicos para la variante actual, priorizamos solo esos.
+    $restrictFolderImages = array_values(array_unique($currentFolderImages));
+    if (!empty($restrictFolderImages)) {
         $currentFolderUrls = [];
-        foreach ($currentFolderImages as $folderImagePath) {
+        foreach ($restrictFolderImages as $folderImagePath) {
             $url = getProductImageUrl($folderImagePath, $currentId);
             if ($url !== '') {
                 $currentFolderUrls[] = $url;
@@ -297,7 +271,7 @@ try {
     }
 
     // Nota: no hacemos fallback cruzado entre productos hermanos/padre.
-    // Si el producto actual no tiene galeria valida, mostramos default.
+    // Si la variante actual no tiene galeria valida, mostramos default.
 
     // Definir la imagen principal como la primera imagen válida
     $principalImage = getProductImageUrl((string)($product['imagen'] ?? ''), $currentId);
