@@ -129,22 +129,21 @@ try {
             return false;
         }
 
-        if (strpos($url, 'data:image') === 0) {
-            return true;
-        }
-
         $path = parse_url($url, PHP_URL_PATH);
         if (!is_string($path) || $path === '') {
-            return true;
+            return false;
         }
 
         $marker = '/assets/img/products/';
         $pos = stripos($path, $marker);
         if ($pos === false) {
-            return true;
+            return false;
         }
 
         $rel = ltrim(substr($path, $pos + strlen($marker)), '/');
+        if ($rel === '') {
+            return false;
+        }
         $full = __DIR__ . '/../assets/img/products/' . str_replace('/', DIRECTORY_SEPARATOR, $rel);
         return is_file($full);
     };
@@ -292,11 +291,22 @@ try {
 
     // Definir la imagen principal como la primera imagen válida
     $principalImage = getProductImageUrl((string)($product['imagen'] ?? ''), $currentId);
+    if (!$localProductAssetExists($principalImage)) {
+        $principalImage = '';
+    }
     if ($principalImage !== '') {
         $imagenes = array_values(array_unique(array_merge([$principalImage], $imagenes)));
     }
 
-    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : $principalImage;
+    if (empty($imagenes)) {
+        $defaultImage = getDefaultProductImageUrl();
+        if ($localProductAssetExists($defaultImage)) {
+            $imagenes[] = $defaultImage;
+        }
+    }
+
+    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : '';
+    $product['image_source'] = !empty($imagenes) ? 'local' : 'fallback';
     $product['galeria'] = $imagenes;
     $product = normalizeProductDisplayRow($product);
 
@@ -335,6 +345,7 @@ try {
                 }
             }
             $v['imagen'] = $localProductAssetExists($resolvedVariantImage) ? $resolvedVariantImage : '';
+            $v['variant_image_source'] = $v['imagen'] !== '' ? 'local' : 'fallback';
             $variantes_unicas[] = normalizeProductDisplayRow($v);
         }
     }

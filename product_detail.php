@@ -69,12 +69,24 @@ include __DIR__ . '/views/includes/header.php';
         justify-content: center;
         margin-bottom: 15px;
     }
+    .main-img-viewer.is-loading::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, rgba(245, 245, 245, 0.5) 25%, rgba(230, 230, 230, 0.75) 50%, rgba(245, 245, 245, 0.5) 75%);
+        background-size: 200% 100%;
+        animation: pdpShimmer 1s linear infinite;
+        pointer-events: none;
+        z-index: 1;
+    }
     .main-img-viewer img {
         max-width: 100%;
         max-height: 100%;
         object-fit: contain;
         transition: transform 0.1s ease-out;
         transform-origin: center;
+        position: relative;
+        z-index: 2;
     }
     .main-img-viewer:hover img {
         transform: scale(2.5);
@@ -122,8 +134,29 @@ include __DIR__ . '/views/includes/header.php';
         cursor: pointer;
         transition: 0.3s;
         background: white;
+        position: relative;
     }
-    .thumb-item img { width: 100%; height: 100%; object-fit: contain; padding: 5px; }
+    .thumb-item.thumb-loading::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 6px;
+        background: linear-gradient(90deg, rgba(246, 246, 246, 0.8) 25%, rgba(232, 232, 232, 0.95) 50%, rgba(246, 246, 246, 0.8) 75%);
+        background-size: 180% 100%;
+        animation: pdpShimmer 1s linear infinite;
+        z-index: 1;
+    }
+    .thumb-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        padding: 5px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        position: relative;
+        z-index: 2;
+    }
+    .thumb-item img.thumb-ready { opacity: 1; }
     .thumb-item:hover, .thumb-item.active { border-color: #1a237e; opacity: 1; transform: translateY(-2px); }
     .thumb-item { opacity: 0.6; }
 
@@ -231,6 +264,11 @@ include __DIR__ . '/views/includes/header.php';
         0% { transform: scale(1); }
         45% { transform: scale(1.25); }
         100% { transform: scale(1); }
+    }
+
+    @keyframes pdpShimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
     }
 
     .terms-link { color: #888; text-decoration: underline; font-size: 0.85rem; }
@@ -349,6 +387,7 @@ include __DIR__ . '/views/includes/header.php';
     let galleryImages = [];
     let currentSlide = 0;
     let mainImageFallbackApplied = false;
+    let mainImageLoadToken = 0;
 
     // Variables para el Zoom
     const zoomContainer = document.getElementById('zoom-container');
@@ -370,6 +409,85 @@ include __DIR__ . '/views/includes/header.php';
         }
     }
 
+    function normalizeGalleryImages(images, principalImage) {
+        const rawList = Array.isArray(images) ? images : [];
+        const preList = [];
+
+        if (principalImage) {
+            preList.push(principalImage);
+        }
+
+        rawList.forEach((item) => {
+            const value = String(item || '').trim();
+            if (value !== '') {
+                preList.push(value);
+            }
+        });
+
+        const unique = [];
+        const seen = new Set();
+        preList.forEach((url) => {
+            if (!seen.has(url)) {
+                seen.add(url);
+                unique.push(url);
+            }
+        });
+
+        const principal = String(principalImage || '').trim();
+        return unique
+            .map((url, idx) => {
+                const low = url.toLowerCase();
+                let score = 3;
+                if (principal && url === principal) {
+                    score = 0;
+                } else if (/([\\/]|^)principal\.(webp|jpg|jpeg|png|gif|svg)(\?|$)/i.test(low)) {
+                    score = 1;
+                } else if (low.includes('/gal_') || low.includes('gal_')) {
+                    score = 2;
+                }
+                return { url, idx, score };
+            })
+            .sort((a, b) => (a.score - b.score) || (a.idx - b.idx))
+            .map(item => item.url);
+    }
+
+    function repairBrokenGalleryImage(index, fallbackUrl = PDP_DEFAULT_PRODUCT_IMAGE) {
+        if (!Array.isArray(galleryImages) || index < 0 || index >= galleryImages.length) return;
+        galleryImages[index] = fallbackUrl;
+    }
+
+    function setMainImageByIndex(index, force = false) {
+        if (!mainImg) return;
+
+        const normalizedIndex = Math.max(0, Math.min(index, Math.max(0, galleryImages.length - 1)));
+        const targetUrl = galleryImages[normalizedIndex] || PDP_DEFAULT_PRODUCT_IMAGE;
+        const currentUrl = String(mainImg.currentSrc || mainImg.src || '');
+
+        if (!force && currentUrl === targetUrl) {
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+            return;
+        }
+
+        const token = ++mainImageLoadToken;
+        if (zoomContainer) zoomContainer.classList.add('is-loading');
+
+        const probe = new Image();
+        probe.decoding = 'async';
+        probe.onload = () => {
+            if (token !== mainImageLoadToken) return;
+            delete mainImg.dataset.retryTried;
+            mainImg.src = targetUrl;
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+        };
+        probe.onerror = () => {
+            if (token !== mainImageLoadToken) return;
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+            delete mainImg.dataset.retryTried;
+            mainImg.src = targetUrl;
+        };
+        probe.src = targetUrl;
+    }
+
     function handleMainImageError() {
         if (!mainImg) return;
 
@@ -378,6 +496,16 @@ include __DIR__ . '/views/includes/header.php';
             mainImg.dataset.retryTried = '1';
             mainImg.src = addCacheBuster(mainImg.src);
             return;
+        }
+
+        repairBrokenGalleryImage(currentSlide, PDP_DEFAULT_PRODUCT_IMAGE);
+
+        const brokenThumb = document.querySelector(`.thumb-item[data-index="${currentSlide}"] img`);
+        if (brokenThumb) {
+            brokenThumb.src = PDP_DEFAULT_PRODUCT_IMAGE;
+            brokenThumb.classList.add('thumb-ready');
+            const thumbCard = brokenThumb.closest('.thumb-item');
+            if (thumbCard) thumbCard.classList.remove('thumb-loading');
         }
 
         if (Array.isArray(galleryImages) && currentSlide < (galleryImages.length - 1)) {
@@ -574,8 +702,12 @@ include __DIR__ . '/views/includes/header.php';
         thumbContainer.innerHTML = '';
         
         galleryImages = Array.isArray(product.galeria) && product.galeria.length > 0
-            ? [...new Set(product.galeria.filter(Boolean))]
-            : [PDP_DEFAULT_PRODUCT_IMAGE];
+            ? normalizeGalleryImages(product.galeria, product.imagen)
+            : [product.imagen || PDP_DEFAULT_PRODUCT_IMAGE];
+
+        if (!galleryImages.length) {
+            galleryImages = [PDP_DEFAULT_PRODUCT_IMAGE];
+        }
         currentSlide = 0;
         mainImageFallbackApplied = false;
         delete mainImg.dataset.retryTried;
@@ -584,15 +716,22 @@ include __DIR__ . '/views/includes/header.php';
             mainImg.fetchPriority = 'high';
             mainImg.decoding = 'async';
         }
-        mainImg.src = galleryImages[0];
+        setMainImageByIndex(0, true);
 
         galleryImages.forEach((imgSrc, index) => {
             const thumb = document.createElement('div');
             thumb.className = 'thumb-item' + (index === 0 ? ' active' : '');
+            thumb.classList.add('thumb-loading');
+            thumb.dataset.index = String(index);
             const thumbImg = document.createElement('img');
             thumbImg.src = imgSrc;
             thumbImg.loading = 'lazy';
             thumbImg.decoding = 'async';
+            thumbImg.addEventListener('load', function onThumbLoad() {
+                thumbImg.classList.add('thumb-ready');
+                thumb.classList.remove('thumb-loading');
+                thumbImg.removeEventListener('load', onThumbLoad);
+            });
             thumbImg.addEventListener('error', function onThumbError() {
                 if (!thumbImg.dataset.retryTried) {
                     thumbImg.dataset.retryTried = '1';
@@ -601,14 +740,15 @@ include __DIR__ . '/views/includes/header.php';
                 }
 
                 thumbImg.removeEventListener('error', onThumbError);
+                repairBrokenGalleryImage(index, PDP_DEFAULT_PRODUCT_IMAGE);
                 thumbImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
+                thumbImg.classList.add('thumb-ready');
+                thumb.classList.remove('thumb-loading');
             });
             thumb.appendChild(thumbImg);
             thumb.onclick = () => {
                 currentSlide = index;
                 updateGalleryUI();
-                document.querySelectorAll('.thumb-item').forEach(t => t.classList.remove('active'));
-                thumb.classList.add('active');
             };
             thumbContainer.appendChild(thumb);
         });
@@ -712,10 +852,8 @@ include __DIR__ . '/views/includes/header.php';
     }
 
     function updateGalleryUI() {
-        if (mainImg) {
-            delete mainImg.dataset.retryTried;
-        }
-        mainImg.src = galleryImages[currentSlide] || PDP_DEFAULT_PRODUCT_IMAGE;
+        if (mainImg) delete mainImg.dataset.retryTried;
+        setMainImageByIndex(currentSlide);
         
         // Actualizar miniaturas
         const thumbs = document.querySelectorAll('.thumb-item');
