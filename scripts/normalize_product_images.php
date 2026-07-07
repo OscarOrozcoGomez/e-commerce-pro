@@ -10,7 +10,7 @@ declare(strict_types=1);
  *
  * Notas:
  * - Trabaja en sitio (sobrescribe archivos) para no romper rutas en BD.
- * - Conserva extension original (jpg/jpeg/png/webp).
+ * - Conserva extension original (jpg/jpeg/png/webp/avif).
  * - Requiere extension GD habilitada.
  */
 
@@ -37,7 +37,11 @@ if (!is_dir($baseDir)) {
     exit(1);
 }
 
+$supportsAvif = function_exists('imagecreatefromavif') && function_exists('imageavif');
 $allowed = ['jpg', 'jpeg', 'png', 'webp'];
+if ($supportsAvif) {
+    $allowed[] = 'avif';
+}
 
 $files = [];
 $it = new RecursiveIteratorIterator(
@@ -66,25 +70,38 @@ $skipped = 0;
 $errors = 0;
 $reduced = 0;
 $increased = 0;
+$unsupported = 0;
 
 $startedAt = microtime(true);
 
 echo "Normalizando imagenes en: {$baseDir}\n";
 echo "Archivos detectados: " . count($files) . "\n";
+echo "Soporte AVIF GD: " . ($supportsAvif ? 'si' : 'no') . "\n";
 echo "Config: max={$maxDimension}px, quality={$quality}, dryRun=" . ($dryRun ? 'si' : 'no') . "\n\n";
 
 foreach ($files as $path) {
     $before = filesize($path) ?: 0;
     $totalBefore += $before;
 
-    $imageData = @file_get_contents($path);
-    if ($imageData === false || $imageData === '') {
-        $errors++;
-        echo "[ERROR] No se pudo leer: {$path}\n";
-        continue;
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+    $img = false;
+    if (in_array($ext, ['jpg', 'jpeg'], true)) {
+        $img = @imagecreatefromjpeg($path);
+    } elseif ($ext === 'png') {
+        $img = @imagecreatefrompng($path);
+    } elseif ($ext === 'webp') {
+        $img = @imagecreatefromwebp($path);
+    } elseif ($ext === 'avif') {
+        if ($supportsAvif) {
+            $img = @imagecreatefromavif($path);
+        } else {
+            $unsupported++;
+            echo "[SKIP] AVIF sin soporte GD: {$path}\n";
+            continue;
+        }
     }
 
-    $img = @imagecreatefromstring($imageData);
     if ($img === false) {
         $errors++;
         echo "[ERROR] No se pudo abrir imagen: {$path}\n";
@@ -100,8 +117,6 @@ foreach ($files as $path) {
         echo "[ERROR] Dimensiones invalidas: {$path}\n";
         continue;
     }
-
-    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
     // Corregir orientacion EXIF solo en JPEG.
     if (in_array($ext, ['jpg', 'jpeg'], true) && function_exists('exif_read_data')) {
@@ -167,6 +182,8 @@ foreach ($files as $path) {
 
         if ($ext === 'webp') {
             $saved = imagewebp($target, $path, $quality);
+        } elseif ($ext === 'avif') {
+            $saved = $supportsAvif ? imageavif($target, $path, $quality) : false;
         } elseif ($ext === 'png') {
             // PNG usa nivel de compresion 0-9 (mas alto, mas chico, mas lento)
             $saved = imagepng($target, $path, 8);
@@ -218,10 +235,11 @@ echo "Procesadas: {$processed}\n";
 echo "Reducidas: {$reduced}\n";
 echo "Aumentadas: {$increased}\n";
 echo "Sin cambio: {$skipped}\n";
+echo "No soportadas: {$unsupported}\n";
 echo "Errores: {$errors}\n";
 echo "Total antes: " . number_format($totalBefore / 1024 / 1024, 2) . " MB\n";
 echo "Total despues: " . number_format($totalAfter / 1024 / 1024, 2) . " MB\n";
 echo "Diferencia: {$diffLabel} MB\n";
 echo "Tiempo: " . number_format($elapsed, 2) . " s\n";
 
-exit($errors > 0 ? 2 : 0);
+exit(($errors > 0 || $unsupported > 0) ? 2 : 0);
