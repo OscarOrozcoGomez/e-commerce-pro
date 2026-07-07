@@ -108,10 +108,12 @@ function catalogCollapseProducts(array $products): array
         $id = (int)($p['id_producto'] ?? 0);
         $precioDesde = (float)($p['precio_desde'] ?? $p['precio_venta'] ?? 0);
         $precioVenta = (float)($p['precio_venta'] ?? $precioDesde);
+        $precioComparacionDesde = (float)($p['precio_comparacion_desde'] ?? $p['precio_comparacion'] ?? 0);
 
         if (!isset($grouped[$key])) {
             $p['precio_desde'] = $precioDesde;
             $p['precio_venta'] = $precioVenta;
+            $p['precio_comparacion_desde'] = $precioComparacionDesde;
             $p['_variant_ids'] = $id > 0 ? [$id => true] : [];
             $p['total_variantes'] = max(1, (int)($p['total_variantes'] ?? 1));
             $grouped[$key] = $p;
@@ -130,6 +132,11 @@ function catalogCollapseProducts(array $products): array
         $currentVenta = (float)($grouped[$key]['precio_venta'] ?? 0);
         if ($currentVenta <= 0 || ($precioVenta > 0 && $precioVenta < $currentVenta)) {
             $grouped[$key]['precio_venta'] = $precioVenta;
+        }
+
+        $currentComparacion = (float)($grouped[$key]['precio_comparacion_desde'] ?? 0);
+        if ($currentComparacion <= 0 || ($precioComparacionDesde > 0 && $precioComparacionDesde < $currentComparacion)) {
+            $grouped[$key]['precio_comparacion_desde'] = $precioComparacionDesde;
         }
 
         if (!catalogHasUsableImage((string)($grouped[$key]['imagen'] ?? '')) && catalogHasUsableImage((string)($p['imagen'] ?? ''))) {
@@ -154,30 +161,36 @@ function catalogCollapseProducts(array $products): array
 function catalogRenderProductCard(array $p): string
 {
     $groupKey = catalogGroupKey((string)($p['nombre'] ?? ''));
+    $precioActual = (float)($p['precio_desde'] ?? 0);
+    $precioComparacion = (float)($p['precio_comparacion_desde'] ?? $p['precio_comparacion'] ?? 0);
+    $showPrecioComparacion = $precioComparacion > $precioActual && $precioActual > 0;
     ob_start();
     ?>
     <div class="col s12 m6 l4 product-card-container" data-group-key="<?php echo esc($groupKey); ?>" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
         <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int)$p['id_producto']; ?>" class="card-link">
-            <div class="card hoverable border-radius-8" style="height: 420px; display: flex; flex-direction: column;">
+            <div class="card hoverable border-radius-8" style="height: 360px; display: flex; flex-direction: column;">
                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                    <?php $imgSrc = getProductImageUrl($p['imagen']); ?>
-                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo BASE_URL; ?>assets/img/products/default-product.svg';" style="max-height: 100%; width: auto; object-fit: contain;">
+                    <?php $imgSrc = getProductImageUrl($p['imagen'], (int)($p['id_producto'] ?? 0)); ?>
+                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" style="max-height: 100%; width: auto; object-fit: contain;">
                 </div>
                 <div class="card-content" style="flex-grow: 1;">
                     <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
                         <?php echo esc($p['nombre']); ?>
                     </span>
+                    <?php if ($showPrecioComparacion): ?>
+                        <p class="grey-text text-darken-1" style="font-size: 0.95rem; margin: 8px 0 0;">
+                            Precio de lista:
+                            <span style="text-decoration: line-through;">$<?php echo number_format($precioComparacion, 2); ?></span>
+                        </p>
+                    <?php endif; ?>
                     <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
                         <?php if ((int)($p['total_variantes'] ?? 0) > 1): ?>Desde <?php endif; ?>
-                        $<?php echo number_format((float)($p['precio_desde'] ?? 0), 2); ?>
+                        $<?php echo number_format($precioActual, 2); ?>
                         <?php if ((int)($p['total_variantes'] ?? 0) > 1): ?>
                             <span style="font-size: 0.8rem; display: block; color: #757575;">
                                 (<?php echo (int)$p['total_variantes']; ?> opciones)
                             </span>
                         <?php endif; ?>
-                    </p>
-                    <p class="grey-text truncate-3-lines" style="font-size: 0.9rem;">
-                        <?php echo esc($p['descripcion'] ?? 'Sin descripcion disponible.'); ?>
                     </p>
                 </div>
                 <div class="card-action center-align" style="border-top: 1px solid #eee;">
@@ -219,8 +232,9 @@ if (!empty($busqueda)) {
 
 // --- Lógica para obtener y filtrar productos ---
 $pdo = getPDO();
-$sql = "SELECT p.*,         COALESCE(NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto) ORDER BY (p_img.id_producto = p.id_producto) DESC, pi.orden ASC LIMIT 1), ''), NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
+$sql = "SELECT p.*,         COALESCE(NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto OR (TRIM(p_img.nombre) = TRIM(p.nombre) AND p_img.estado = 'activo')) ORDER BY (p_img.id_producto = p.id_producto) DESC, (p_img.id_padre = p.id_producto) DESC, pi.orden ASC LIMIT 1), ''), NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
+    (SELECT MIN(precio_comparacion) FROM productos p4 WHERE (p4.id_producto = p.id_producto OR p4.id_padre = p.id_producto) AND p4.estado = 'activo' AND p4.precio_comparacion > 0) as precio_comparacion_desde,
+    (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
         FROM productos p";
 $params = [];
 
@@ -449,7 +463,7 @@ include __DIR__ . '/includes/header.php';
             <?php if ($totalProductos > ($page * $itemsPerPage)): ?>
                 <div class="row" id="load-more-container" style="margin-top: 30px;">
                     <div class="col s12 center-align">
-                        <button id="load-more-btn" class="btn-large blue darken-4 waves-effect waves-light" style="width: 100%;">
+                        <button id="load-more-btn" type="button" data-no-track="1" class="btn-large blue darken-4 waves-effect waves-light" style="width: 100%;">
                             Cargar más productos
                         </button>
                         <div class="preloader-wrapper small" id="load-more-spinner" style="display: none; margin-top: 20px;">

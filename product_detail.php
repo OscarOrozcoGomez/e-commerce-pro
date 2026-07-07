@@ -245,7 +245,7 @@ include __DIR__ . '/views/includes/header.php';
         <!-- Columna Izquierda: Galería -->
         <div class="col s12 m7">
             <div class="main-img-viewer" id="zoom-container">
-                <img id="main-image" src="https://via.placeholder.com/600x600?text=Cargando" alt="Producto">
+                <img id="main-image" src="<?php echo getDefaultProductImageUrl(); ?>" alt="Producto" loading="eager" fetchpriority="high" decoding="async">
                 <div class="nav-arrow prev" onclick="moveSlide(-1, event)"><i class="material-icons">chevron_left</i></div>
                 <div class="nav-arrow next" onclick="moveSlide(1, event)"><i class="material-icons">chevron_right</i></div>
             </div>
@@ -337,7 +337,7 @@ include __DIR__ . '/views/includes/header.php';
 
 <script>
     const PDP_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
-    const PDP_DEFAULT_PRODUCT_IMAGE = '<?php echo BASE_URL; ?>assets/img/products/default-product.svg';
+    const PDP_DEFAULT_PRODUCT_IMAGE = '<?php echo getDefaultProductImageUrl(); ?>';
     const PDP_FAVORITES_API_URL = (typeof FAVORITES_API_URL !== 'undefined')
         ? FAVORITES_API_URL
         : '<?php echo BASE_URL; ?>api/favorites.php';
@@ -353,9 +353,32 @@ include __DIR__ . '/views/includes/header.php';
     // Variables para el Zoom
     const zoomContainer = document.getElementById('zoom-container');
     const mainImg = document.getElementById('main-image');
+    if (mainImg) {
+        mainImg.loading = 'eager';
+        mainImg.fetchPriority = 'high';
+        mainImg.decoding = 'async';
+    }
+
+    function addCacheBuster(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            parsed.searchParams.set('img_retry', String(Date.now()));
+            return parsed.toString();
+        } catch (e) {
+            const sep = String(url).includes('?') ? '&' : '?';
+            return `${url}${sep}img_retry=${Date.now()}`;
+        }
+    }
 
     function handleMainImageError() {
         if (!mainImg) return;
+
+        // Reintento unico para fallos intermitentes de red/cache.
+        if (!mainImg.dataset.retryTried) {
+            mainImg.dataset.retryTried = '1';
+            mainImg.src = addCacheBuster(mainImg.src);
+            return;
+        }
 
         if (Array.isArray(galleryImages) && currentSlide < (galleryImages.length - 1)) {
             currentSlide += 1;
@@ -555,12 +578,32 @@ include __DIR__ . '/views/includes/header.php';
             : [PDP_DEFAULT_PRODUCT_IMAGE];
         currentSlide = 0;
         mainImageFallbackApplied = false;
+        delete mainImg.dataset.retryTried;
+        if (mainImg) {
+            mainImg.loading = 'eager';
+            mainImg.fetchPriority = 'high';
+            mainImg.decoding = 'async';
+        }
         mainImg.src = galleryImages[0];
 
         galleryImages.forEach((imgSrc, index) => {
             const thumb = document.createElement('div');
             thumb.className = 'thumb-item' + (index === 0 ? ' active' : '');
-            thumb.innerHTML = `<img src="${imgSrc}" onerror="this.onerror=null;this.src='${PDP_DEFAULT_PRODUCT_IMAGE}';">`;
+            const thumbImg = document.createElement('img');
+            thumbImg.src = imgSrc;
+            thumbImg.loading = 'lazy';
+            thumbImg.decoding = 'async';
+            thumbImg.addEventListener('error', function onThumbError() {
+                if (!thumbImg.dataset.retryTried) {
+                    thumbImg.dataset.retryTried = '1';
+                    thumbImg.src = addCacheBuster(imgSrc);
+                    return;
+                }
+
+                thumbImg.removeEventListener('error', onThumbError);
+                thumbImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
+            });
+            thumb.appendChild(thumbImg);
             thumb.onclick = () => {
                 currentSlide = index;
                 updateGalleryUI();
@@ -669,6 +712,9 @@ include __DIR__ . '/views/includes/header.php';
     }
 
     function updateGalleryUI() {
+        if (mainImg) {
+            delete mainImg.dataset.retryTried;
+        }
         mainImg.src = galleryImages[currentSlide] || PDP_DEFAULT_PRODUCT_IMAGE;
         
         // Actualizar miniaturas

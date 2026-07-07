@@ -19,7 +19,6 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($action === 'list') {
             $id_alm = (int)($_GET['almacen_id'] ?? 1);
-            // Obtenemos la primera imagen de la galería como 'imagen' para el frontend
             $sql = "SELECT p.*, 
                     (SELECT pi2.ruta_archivo FROM producto_imagenes pi2 WHERE pi2.id_producto = p.id_producto ORDER BY pi2.orden ASC LIMIT 1) as imagen,
                     GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids, 

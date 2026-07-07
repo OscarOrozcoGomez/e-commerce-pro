@@ -68,7 +68,7 @@ async function renderFavorites() {
 
     favorites.forEach((item) => {
         const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${item.id_producto}`;
-        const imgSrc = item.imagen || '<?php echo BASE_URL; ?>assets/img/products/default-product.svg';
+        const imgSrc = item.imagen || '<?php echo getDefaultProductImageUrl(); ?>';
         const safeName = String(item.nombre || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safePrice = parseFloat(item.precio || 0);
 

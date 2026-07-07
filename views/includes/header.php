@@ -559,30 +559,47 @@
     <script>
         (function() {
             const apiEndpoint = '<?php echo BASE_URL; ?>api/log_activity.php';
+
+            function sendActivity(payload) {
+                const body = JSON.stringify(payload);
+
+                if (navigator.sendBeacon) {
+                    try {
+                        navigator.sendBeacon(apiEndpoint, new Blob([body], { type: 'application/json' }));
+                        return;
+                    } catch (e) {
+                        // Fallback below.
+                    }
+                }
+
+                fetch(apiEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body,
+                    keepalive: true,
+                    credentials: 'same-origin'
+                }).catch(() => {});
+            }
             
             // 1. Registrar Visita a la página
-            fetch(apiEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tipo: 'visit',
-                    url: window.location.href
-                })
+            sendActivity({
+                tipo: 'visit',
+                url: window.location.href
             });
 
             // 2. Registrar Clics en elementos interactivos
             document.addEventListener('click', function(e) {
                 const target = e.target.closest('a, button, .btn, .btn-floating');
                 if (target) {
-                    fetch(apiEndpoint, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            tipo: 'click',
-                            url: window.location.href,
-                            id: target.id || target.name || null,
-                            texto: target.innerText.trim().substring(0, 50) || target.title || 'Icon/Image'
-                        })
+                    if (target.id === 'load-more-btn' || target.closest('[data-no-track="1"]')) {
+                        return;
+                    }
+
+                    sendActivity({
+                        tipo: 'click',
+                        url: window.location.href,
+                        id: target.id || target.name || null,
+                        texto: target.innerText.trim().substring(0, 50) || target.title || 'Icon/Image'
                     });
                 }
             }, true);

@@ -1059,13 +1059,197 @@ function slugify(string $text): string {
     return empty($slug) ? 'producto' : $slug;
 }
 
+function getDefaultProductImageUrl(): string {
+    static $dataUri = null;
+
+    if ($dataUri === null) {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" role="img" aria-labelledby="title desc"><title>Producto sin imagen</title><desc>Placeholder para productos sin imagen disponible</desc><rect width="600" height="600" rx="32" fill="#f4f4f4"/><rect x="90" y="120" width="420" height="300" rx="24" fill="#e0e0e0"/><circle cx="205" cy="225" r="42" fill="#c7c7c7"/><path d="M140 380 240 280l70 70 60-55 90 85H140z" fill="#b5b5b5"/><path d="M210 470h180" stroke="#b0b0b0" stroke-width="18" stroke-linecap="round"/><text x="300" y="525" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#8a8a8a">Sin imagen</text></svg>';
+        $dataUri = 'data:image/svg+xml;utf8,' . rawurlencode($svg);
+    }
+
+    return $dataUri;
+}
+
 /**
  * Resuelve la URL de la imagen de un producto de forma robusta.
  */
-function getProductImageUrl(?string $imgData): string {
+function findProductImageById(int $productId, string $preferredFileName = ''): ?string {
+    if ($productId <= 0) {
+        return null;
+    }
+
+    $baseDir = __DIR__ . '/../assets/img/products';
+    if (!is_dir($baseDir)) {
+        return null;
+    }
+
+    static $foldersById = null;
+    if ($foldersById === null) {
+        $foldersById = [];
+        $entries = @scandir($baseDir);
+        if (is_array($entries)) {
+            foreach ($entries as $entry) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
+                }
+                $fullPath = $baseDir . DIRECTORY_SEPARATOR . $entry;
+                if (!is_dir($fullPath)) {
+                    continue;
+                }
+                if (preg_match('/-(\d+)$/', $entry, $m)) {
+                    $id = (int)$m[1];
+                    if (!isset($foldersById[$id])) {
+                        $foldersById[$id] = [];
+                    }
+                    $foldersById[$id][] = $entry;
+                }
+            }
+        }
+    }
+
+    $candidateFolders = $foldersById[$productId] ?? [];
+    if (empty($candidateFolders)) {
+        return null;
+    }
+
+    $preferredFileName = trim($preferredFileName);
+    $preferredStem = pathinfo($preferredFileName, PATHINFO_FILENAME);
+
+    foreach ($candidateFolders as $folder) {
+        $folderPath = $baseDir . DIRECTORY_SEPARATOR . $folder;
+        if ($preferredFileName !== '') {
+            $exactPath = $folderPath . DIRECTORY_SEPARATOR . $preferredFileName;
+            if (is_file($exactPath)) {
+                return $folder . '/' . $preferredFileName;
+            }
+        }
+
+        if ($preferredStem !== '') {
+            $stemMatches = glob($folderPath . DIRECTORY_SEPARATOR . $preferredStem . '.*');
+            if (is_array($stemMatches)) {
+                foreach ($stemMatches as $match) {
+                    if (is_file($match)) {
+                        return $folder . '/' . basename($match);
+                    }
+                }
+            }
+        }
+
+        $principalMatches = glob($folderPath . DIRECTORY_SEPARATOR . 'principal.*');
+        if (is_array($principalMatches)) {
+            foreach ($principalMatches as $match) {
+                if (is_file($match)) {
+                    return $folder . '/' . basename($match);
+                }
+            }
+        }
+
+        $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{jpg,jpeg,png,webp,gif,svg}', GLOB_BRACE);
+        if (is_array($files)) {
+            foreach ($files as $match) {
+                if (is_file($match)) {
+                    return $folder . '/' . basename($match);
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+function resolveLocalProductImagePath(string $imgData): ?string {
+    $baseDir = __DIR__ . '/../assets/img/products';
+    if (!is_dir($baseDir)) {
+        return null;
+    }
+
+    $normalized = str_replace('\\', '/', trim($imgData));
+    if ($normalized === '') {
+        return null;
+    }
+
+    $normalized = strtok($normalized, '?#') ?: '';
+    $normalized = ltrim($normalized, '/');
+
+    $prefix = 'assets/img/products/';
+    if (stripos($normalized, $prefix) === 0) {
+        $normalized = substr($normalized, strlen($prefix));
+    }
+
+    if ($normalized === '') {
+        return null;
+    }
+
+    $fullPath = $baseDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $normalized);
+    if (is_file($fullPath)) {
+        return $normalized;
+    }
+
+    $fileName = basename($normalized);
+    $dirPart = trim(dirname($normalized), '.\/');
+    $fileStem = pathinfo($fileName, PATHINFO_FILENAME);
+
+    if ($dirPart !== '') {
+        $dirPath = $baseDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $dirPart);
+        if (is_dir($dirPath) && $fileStem !== '') {
+            $stemMatches = glob($dirPath . DIRECTORY_SEPARATOR . $fileStem . '.*');
+            if (is_array($stemMatches)) {
+                foreach ($stemMatches as $match) {
+                    if (is_file($match)) {
+                        return $dirPart . '/' . basename($match);
+                    }
+                }
+            }
+        }
+    }
+
+    if (preg_match('/-(\d+)(?:\/|$)/', $normalized, $m)) {
+        $fallback = findProductImageById((int)$m[1], $fileName);
+        if ($fallback !== null) {
+            return $fallback;
+        }
+    }
+
+    if ($fileName !== '') {
+        $rootPath = $baseDir . DIRECTORY_SEPARATOR . $fileName;
+        if (is_file($rootPath)) {
+            return $fileName;
+        }
+    }
+
+    return null;
+}
+
+function getProductImageUrl(?string $imgData, ?int $productId = null): string {
     $imgData = trim((string)$imgData);
+    $normalizedProductId = $productId !== null ? (int)$productId : 0;
+
+    $resolveByProductId = static function (int $id): ?string {
+        if ($id <= 0) {
+            return null;
+        }
+        $fallbackPath = findProductImageById($id, 'principal.webp');
+        if ($fallbackPath === null) {
+            return null;
+        }
+        return rtrim(BASE_URL, '/') . '/assets/img/products/' . ltrim(str_replace('\\', '/', $fallbackPath), '/');
+    };
+
     if (empty($imgData) || in_array($imgData, ['NULL', 'undefined', '[object Object]', 'null', ''])) {
-        return BASE_URL . 'assets/img/products/default-product.svg';
+        $byIdUrl = $resolveByProductId($normalizedProductId);
+        if ($byIdUrl !== null) {
+            return $byIdUrl;
+        }
+        return getDefaultProductImageUrl();
+    }
+
+    // Normaliza referencias antiguas al placeholder en PNG/JPG.
+    if (preg_match('#(^|[\\/])default-product\.(png|jpe?g)$#i', $imgData)) {
+        $byIdUrl = $resolveByProductId($normalizedProductId);
+        if ($byIdUrl !== null) {
+            return $byIdUrl;
+        }
+        return getDefaultProductImageUrl();
     }
 
     // Si ya es una URL completa (http o https), devolverla tal cual
@@ -1081,10 +1265,23 @@ function getProductImageUrl(?string $imgData): string {
         return "data:$mime;base64," . $imgData;
     }
 
-    // Si no es ninguna de las anteriores, verificar si parece una ruta de archivo local (tiene / o extensión)
-    if (strpos($imgData, '/') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
+    // Si no es ninguna de las anteriores, intentar resolver una ruta local robusta
+    if (strpos($imgData, '/') !== false || strpos($imgData, '\\') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
         $base = rtrim(BASE_URL, '/') . '/';
-        return $base . 'assets/img/products/' . ltrim($imgData, '/');
+        $resolvedLocalPath = resolveLocalProductImagePath($imgData);
+        if ($resolvedLocalPath !== null) {
+            return $base . 'assets/img/products/' . ltrim(str_replace('\\', '/', $resolvedLocalPath), '/');
+        }
+        $byIdUrl = $resolveByProductId($normalizedProductId);
+        if ($byIdUrl !== null) {
+            return $byIdUrl;
+        }
+        return $base . 'assets/img/products/' . ltrim(str_replace('\\', '/', $imgData), '/');
+    }
+
+    $byIdUrl = $resolveByProductId($normalizedProductId);
+    if ($byIdUrl !== null) {
+        return $byIdUrl;
     }
 
     return '';
