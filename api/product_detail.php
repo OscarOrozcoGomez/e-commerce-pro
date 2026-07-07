@@ -162,7 +162,44 @@ try {
         return array_values(array_unique($filtered));
     };
 
+    $extractFolderNameFromImagePath = static function (string $rawPath): string {
+        $candidate = trim($rawPath);
+        if ($candidate === '') {
+            return '';
+        }
+
+        $parsedPath = parse_url($candidate, PHP_URL_PATH);
+        if (is_string($parsedPath) && $parsedPath !== '') {
+            $candidate = $parsedPath;
+        }
+
+        $candidate = str_replace('\\', '/', $candidate);
+        $marker = '/assets/img/products/';
+        $markerPos = stripos($candidate, $marker);
+        if ($markerPos !== false) {
+            $candidate = substr($candidate, $markerPos + strlen($marker));
+        }
+
+        $candidate = ltrim($candidate, '/');
+        if ($candidate === '') {
+            return '';
+        }
+
+        $parts = explode('/', $candidate, 2);
+        if (count($parts) < 2) {
+            return '';
+        }
+
+        $folder = trim($parts[0]);
+        if ($folder === '' || $folder === '.' || $folder === '..') {
+            return '';
+        }
+
+        return $folder;
+    };
+
     $imageCandidates = [];
+    $dbPreferredFolder = '';
 
         $stmtGal = $pdo->prepare(
             "SELECT pi.ruta_archivo
@@ -177,6 +214,9 @@ try {
         $img = trim((string)$img);
         if ($img !== '') {
             $imageCandidates[] = $img;
+            if ($dbPreferredFolder === '') {
+                $dbPreferredFolder = $extractFolderNameFromImagePath($img);
+            }
         }
     }
 
@@ -199,7 +239,9 @@ try {
         }
     }
 
-    $currentPreferredFolder = slugify($baseName) . '-' . $currentId;
+    $currentPreferredFolder = $dbPreferredFolder !== ''
+        ? $dbPreferredFolder
+        : (slugify($baseName) . '-' . $currentId);
     $currentFolderImages = $collectFolderImagesByProductId($currentId, $currentPreferredFolder);
     foreach ($currentFolderImages as $folderImagePath) {
         $imageCandidates[] = $folderImagePath;

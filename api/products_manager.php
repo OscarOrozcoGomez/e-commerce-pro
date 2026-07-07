@@ -140,12 +140,66 @@ try {
             $hasOrden = !empty($data['imagenes_orden_json']);
 
             if ($hasLocal || $hasRemote || $hasOrden) {
-                // Generar nombre de carpeta único para el producto
-                $folderName = slugify($data['nombre'] ?? 'producto') . '-' . $id;
+                // Reusar carpeta existente para evitar duplicados cuando cambia el nombre/slug.
+                $existingFolderName = '';
+                $baseDir = rtrim(dirname(__DIR__), '/\\') . '/assets/img/products/';
+                if ($id > 0) {
+                    $stmtFolder = $pdo->prepare(
+                        "SELECT ruta_archivo
+                         FROM producto_imagenes
+                         WHERE id_producto = ? AND ruta_archivo IS NOT NULL AND ruta_archivo <> ''
+                         ORDER BY orden ASC
+                         LIMIT 1"
+                    );
+                    $stmtFolder->execute([$id]);
+                    $firstPath = trim((string)$stmtFolder->fetchColumn());
+                    if ($firstPath !== '') {
+                        $normalizedPath = str_replace('\\\\', '/', $firstPath);
+                        $firstFolder = explode('/', ltrim($normalizedPath, '/'), 2)[0] ?? '';
+                        $firstFolder = trim($firstFolder);
+                        if ($firstFolder !== '' && $firstFolder !== '.' && $firstFolder !== '..') {
+                            $existingFolderName = $firstFolder;
+                        }
+                    }
+
+                    // Fallback: si DB no trae ruta, intentar detectar carpeta existente en disco por sufijo -ID.
+                    if ($existingFolderName === '') {
+                        $diskMatches = glob($baseDir . '*-' . $id, GLOB_ONLYDIR);
+                        if (is_array($diskMatches) && !empty($diskMatches)) {
+                            usort($diskMatches, static function (string $a, string $b): int {
+                                $countImages = static function (string $dir): int {
+                                    $files = glob(rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . '*.{webp,jpg,jpeg,png,gif,svg,avif}', GLOB_BRACE);
+                                    return is_array($files) ? count($files) : 0;
+                                };
+
+                                $aCount = $countImages($a);
+                                $bCount = $countImages($b);
+                                if ($aCount !== $bCount) {
+                                    return $bCount <=> $aCount;
+                                }
+
+                                $aBase = (string)basename($a);
+                                $bBase = (string)basename($b);
+                                $lenCmp = strlen($aBase) <=> strlen($bBase);
+                                if ($lenCmp !== 0) {
+                                    return $lenCmp;
+                                }
+
+                                return strcasecmp($aBase, $bBase);
+                            });
+
+                            $existingFolderName = (string)basename($diskMatches[0]);
+                        }
+                    }
+                }
+
+                // Solo si no hay historial, usar slug-id como carpeta nueva.
+                $folderName = $existingFolderName !== ''
+                    ? $existingFolderName
+                    : (slugify($data['nombre'] ?? 'producto') . '-' . $id);
                 
                 // FORZAR RUTA ABSOLUTA: Independiente de si PRODUCTS_IMG_DIR es relativo o absoluto
                 // Buscamos la carpeta assets desde la raíz del proyecto (un nivel arriba de api/)
-                $baseDir = rtrim(dirname(__DIR__), '/\\') . '/assets/img/products/';
                 $targetDir = $baseDir . $folderName . '/';
                 
                 if (!is_dir($targetDir)) {
