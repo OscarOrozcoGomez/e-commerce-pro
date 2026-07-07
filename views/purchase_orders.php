@@ -57,6 +57,7 @@ include __DIR__ . '/includes/header.php';
                                         <th class="center-align" style="width: 180px;">Ajustar Mín/Máx</th>
                                         <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad Recibida</th>
                                         <th class="right-align">Subtotal Est.</th>
+                                        <th class="center-align" style="width: 120px;">Acción</th>
                                     </tr>
                                 </thead>
                                 <tbody id="table-po-body"></tbody>
@@ -137,14 +138,14 @@ include __DIR__ . '/includes/header.php';
 
     function renderTable(items) {
         const tbody = document.getElementById('table-po-body');
-        let totalInversion = 0;
+        tbody.innerHTML = '';
+
         items.forEach((item, index) => {
             const aComprar = Math.max(0, parseInt(item.stock_maximo) - parseInt(item.cantidad_actual));
             const costoFila = aComprar * parseFloat(item.precio_costo);
-            totalInversion += costoFila;
 
             tbody.innerHTML += `
-                <tr>
+                <tr id="po-row-${index}">
                     <td><strong>${item.nombre}</strong><br><small class="grey-text">SKU: ${item.sku}</small></td>
                     <td>${item.sucursal}</td>
                     <td>$${parseFloat(item.precio_venta).toFixed(2)}</td>
@@ -158,12 +159,102 @@ include __DIR__ . '/includes/header.php';
                     <td class="blue lighten-5">
                         <input type="hidden" name="items[${index}][id_producto]" value="${item.id_producto}">
                         <input type="hidden" name="items[${index}][id_almacen]" value="${item.id_almacen}">
+                        <input type="hidden" name="items[${index}][precio_costo]" value="${parseFloat(item.precio_costo)}">
                         <input type="number" name="items[${index}][cantidad]" value="${aComprar}" min="0" class="browser-default qty-input" style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
                     </td>
-                    <td class="right-align">$${costoFila.toFixed(2)}</td>
+                    <td class="right-align po-subtotal">$${costoFila.toFixed(2)}</td>
+                    <td class="center-align">
+                        <button type="button" class="btn-flat red-text" onclick="posponerItem(${index}, ${item.id_producto}, ${item.id_almacen})">
+                            <i class="material-icons">schedule</i>
+                        </button>
+                    </td>
                 </tr>`;
         });
-        document.getElementById('total-inversion-val').textContent = totalInversion.toFixed(2);
+
+        bindQtyRecalculation();
+        recalculateTotalInversion();
+    }
+
+    function bindQtyRecalculation() {
+        document.querySelectorAll('input[name$="[cantidad]"]').forEach((input) => {
+            input.addEventListener('input', recalculateTotalInversion);
+        });
+    }
+
+    function recalculateTotalInversion() {
+        let total = 0;
+
+        document.querySelectorAll('#table-po-body tr').forEach((row) => {
+            const qtyInput = row.querySelector('input[name$="[cantidad]"]');
+            const costInput = row.querySelector('input[name$="[precio_costo]"]');
+            const subtotalCell = row.querySelector('.po-subtotal');
+
+            const qty = Math.max(0, parseInt(qtyInput?.value || '0', 10));
+            const unitCost = parseFloat(costInput?.value || '0');
+            const subtotal = qty * unitCost;
+
+            if (subtotalCell) {
+                subtotalCell.textContent = '$' + subtotal.toFixed(2);
+            }
+
+            total += subtotal;
+        });
+
+        document.getElementById('total-inversion-val').textContent = total.toFixed(2);
+    }
+
+    function posponerItem(index, idProducto, idAlmacen) {
+        const form = document.getElementById('form-entrada-masiva');
+        const formData = new FormData(form);
+        const csrfToken = formData.get('csrf_token');
+
+        Swal.fire({
+            title: '¿Posponer producto?',
+            text: 'Este producto se quitará de la compra actual y quedará pendiente para el siguiente pedido.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#1565c0',
+            confirmButtonText: 'Sí, posponer'
+        }).then((result) => {
+            if (!result.isConfirmed) {
+                return;
+            }
+
+            fetch('<?php echo BASE_URL; ?>api/postpone_purchase_items.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    csrf_token: csrfToken,
+                    items: [{ id_producto: idProducto, id_almacen: idAlmacen }]
+                })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) {
+                    M.toast({html: 'Error: ' + res.message, classes: 'red'});
+                    return;
+                }
+
+                const row = document.getElementById('po-row-' + index);
+                if (row) {
+                    row.remove();
+                    recalculateTotalInversion();
+                }
+
+                if (document.querySelectorAll('#table-po-body tr').length === 0) {
+                    document.getElementById('po-form-wrapper').style.display = 'none';
+                    document.getElementById('po-list-container').style.display = 'block';
+                    document.getElementById('po-list-container').innerHTML = `
+                        <div class="center-align" style="padding: 40px;">
+                            <i class="material-icons large blue-text">schedule</i>
+                            <h5>No hay productos activos en esta ronda</h5>
+                            <p>Todos los productos fueron pospuestos o ya están cubiertos.</p>
+                        </div>`;
+                }
+
+                M.toast({html: res.message, classes: 'blue'});
+            });
+        });
     }
 
     function renderChart(data) {
@@ -281,27 +372,6 @@ include __DIR__ . '/includes/header.php';
         });
     }
 
-    // Inicializar Gráfico de Faltantes
-    <?php if (!empty($chartData)): ?>
-    const ctx = document.getElementById('chartFaltantes').getContext('2d');
-    new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: <?php echo json_encode(array_column($chartData, 'categoria')); ?>,
-            datasets: [{
-                data: <?php echo json_encode(array_column($chartData, 'total')); ?>,
-                backgroundColor: [
-                    '#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5',
-                    '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6'
-                ]
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { position: 'bottom' } }
-        }
-    });
-    <?php endif; ?>
 </script>
 
 <style>

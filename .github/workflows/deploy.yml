@@ -1,0 +1,74 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy + Run Migrations
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate required secrets
+        env:
+          PTF_HOST: ${{ secrets.PTF_HOST }}
+          PTF_USERNAME: ${{ secrets.PTF_USERNAME }}
+          PTF_PASSWORD: ${{ secrets.PTF_PASSWORD }}
+          MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
+          MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
+        run: |
+          missing=0
+          for key in PTF_HOST PTF_USERNAME PTF_PASSWORD MIGRATIONS_URL MIGRATIONS_DEPLOY_TOKEN; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing required secret: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Deploy files via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
+        with:
+          server: ${{ secrets.PTF_HOST }}
+          username: ${{ secrets.PTF_USERNAME }}
+          password: ${{ secrets.PTF_PASSWORD }}
+          port: ${{ secrets.PTF_PORT || 21 }}
+          protocol: ${{ secrets.PTF_PROTOCOL || 'ftp' }}
+          server-dir: /public_html/
+          timeout: 120000
+          exclude: |
+            **/.git*/**
+            **/.github/**
+            .ftp-deploy-sync-state.json
+
+      - name: Trigger remote migrations
+        env:
+          MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
+          MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
+        run: |
+          response=$(curl -sS -X POST "$MIGRATIONS_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Migrations-Token: $MIGRATIONS_DEPLOY_TOKEN" \
+            -d '{}')
+
+          echo "Migration response:"
+          echo "$response"
+
+          if ! echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+            echo "::error::Remote migrations failed"
+            exit 1
+          fi
