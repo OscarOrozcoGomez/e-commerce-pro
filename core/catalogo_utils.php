@@ -51,8 +51,56 @@ function catalogPerfLogPath(): string
     return rtrim(sys_get_temp_dir(), '/\\') . '/ecommerce_catalog_performance.log';
 }
 
+function catalogPerfLogMaxBytes(): int
+{
+    $raw = trim((string) (getenv('CATALOG_PERF_LOG_MAX_BYTES') ?: ''));
+    $value = is_numeric($raw) ? (int) $raw : 2097152;
+    return max(10240, $value);
+}
+
 /**
- * @return array{path:string, exists:bool, is_writable:bool, dir:string, dir_exists:bool, dir_writable:bool, size_bytes:int}
+ * @param mixed $value
+ * @return mixed
+ */
+function catalogPerfNormalizeValueForLog($value)
+{
+    if (is_float($value)) {
+        return round($value, 2);
+    }
+
+    if (is_array($value)) {
+        $normalized = [];
+        foreach ($value as $key => $item) {
+            $normalized[$key] = catalogPerfNormalizeValueForLog($item);
+        }
+        return $normalized;
+    }
+
+    return $value;
+}
+
+function catalogPerfRotateLogIfNeeded(string $path): void
+{
+    if (!is_file($path)) {
+        return;
+    }
+
+    $size = (int) (@filesize($path) ?: 0);
+    if ($size < catalogPerfLogMaxBytes()) {
+        return;
+    }
+
+    $rotatedPath = $path . '.1';
+    if (is_file($rotatedPath)) {
+        @unlink($rotatedPath);
+    }
+
+    @rename($path, $rotatedPath);
+    @touch($path);
+}
+
+/**
+ * @return array{path:string, exists:bool, is_writable:bool, dir:string, dir_exists:bool, dir_writable:bool, size_bytes:int, max_bytes:int, rotated_path:string, rotated_exists:bool, rotated_size_bytes:int}
  */
 function catalogPerfLogStatus(): array
 {
@@ -69,6 +117,10 @@ function catalogPerfLogStatus(): array
         'dir_exists' => is_dir($dir),
         'dir_writable' => is_dir($dir) ? is_writable($dir) : false,
         'size_bytes' => $size,
+        'max_bytes' => catalogPerfLogMaxBytes(),
+        'rotated_path' => $path . '.1',
+        'rotated_exists' => is_file($path . '.1'),
+        'rotated_size_bytes' => is_file($path . '.1') ? (int) (@filesize($path . '.1') ?: 0) : 0,
     ];
 }
 
@@ -98,7 +150,7 @@ function catalogPerfLogEntry(array $entry): bool
     $normalized = [
         'ts' => gmdate('c'),
         'env' => catalogPerfAppEnv(),
-        'entry' => $entry,
+        'entry' => catalogPerfNormalizeValueForLog($entry),
     ];
 
     $line = json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -109,6 +161,8 @@ function catalogPerfLogEntry(array $entry): bool
     if (!catalogPerfEnsureLogFileExists()) {
         return false;
     }
+
+    catalogPerfRotateLogIfNeeded($path);
 
     return @file_put_contents($path, $line . PHP_EOL, FILE_APPEND | LOCK_EX) !== false;
 }

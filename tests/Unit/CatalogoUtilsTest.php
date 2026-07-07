@@ -14,6 +14,7 @@ final class CatalogoUtilsTest extends TestCase
         $this->envBackup = [
             'CATALOG_PERF_LOG' => getenv('CATALOG_PERF_LOG') === false ? null : (string) getenv('CATALOG_PERF_LOG'),
             'CATALOG_PERF_LOG_PATH' => getenv('CATALOG_PERF_LOG_PATH') === false ? null : (string) getenv('CATALOG_PERF_LOG_PATH'),
+            'CATALOG_PERF_LOG_MAX_BYTES' => getenv('CATALOG_PERF_LOG_MAX_BYTES') === false ? null : (string) getenv('CATALOG_PERF_LOG_MAX_BYTES'),
             'APP_ENV' => getenv('APP_ENV') === false ? null : (string) getenv('APP_ENV'),
         ];
     }
@@ -22,6 +23,7 @@ final class CatalogoUtilsTest extends TestCase
     {
         $this->restoreEnv('CATALOG_PERF_LOG');
         $this->restoreEnv('CATALOG_PERF_LOG_PATH');
+        $this->restoreEnv('CATALOG_PERF_LOG_MAX_BYTES');
         $this->restoreEnv('APP_ENV');
 
         parent::tearDown();
@@ -117,6 +119,52 @@ final class CatalogoUtilsTest extends TestCase
 
         putenv('CATALOG_PERF_LOG=1');
         $this->assertTrue(catalogPerfEnabledForRequest([]));
+    }
+
+    public function testCatalogPerfLogEntryRoundsFloatValuesToTwoDecimals(): void
+    {
+        $path = sys_get_temp_dir() . '/catalog_perf_round_test_' . uniqid('', true) . '.log';
+        putenv('CATALOG_PERF_LOG_PATH=' . $path);
+
+        catalogPerfLogEntry([
+            'timings' => [
+                'request_total_ms' => 14.6299999999,
+                'query_ms' => 12.1600000001,
+            ],
+        ]);
+
+        $lines = catalogPerfReadLastLines(1);
+        $decoded = json_decode((string) ($lines[0] ?? ''), true);
+
+        $this->assertIsArray($decoded);
+        $this->assertSame(14.63, (float) ($decoded['entry']['timings']['request_total_ms'] ?? 0));
+        $this->assertSame(12.16, (float) ($decoded['entry']['timings']['query_ms'] ?? 0));
+
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+
+    public function testCatalogPerfLogRotatesWhenMaxBytesExceeded(): void
+    {
+        $path = sys_get_temp_dir() . '/catalog_perf_rotate_test_' . uniqid('', true) . '.log';
+        putenv('CATALOG_PERF_LOG_PATH=' . $path);
+        putenv('CATALOG_PERF_LOG_MAX_BYTES=10240');
+
+        $payload = str_repeat('X', 12000);
+
+        file_put_contents($path, $payload);
+        catalogPerfRotateLogIfNeeded($path);
+
+        $this->assertTrue(is_file($path));
+        $this->assertTrue(is_file($path . '.1'));
+
+        if (is_file($path)) {
+            @unlink($path);
+        }
+        if (is_file($path . '.1')) {
+            @unlink($path . '.1');
+        }
     }
 
     private function restoreEnv(string $key): void
