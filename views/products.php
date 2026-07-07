@@ -168,7 +168,7 @@ include __DIR__ . '/includes/header.php';
                                 <input type="file" name="imagenes[]" id="input-imagenes" accept="image/*" multiple>
                             </div>
                             <div class="file-path-wrapper">
-                                <input class="file-path validate" type="text" placeholder="Máx 6. La primera será la principal">
+                                <input class="file-path validate" type="text" placeholder="La primera será la principal">
                             </div>
                         </div>
                         <div id="preview-container" class="row sortable-preview" style="margin-top: -10px; margin-bottom: 20px;"></div>
@@ -738,6 +738,41 @@ include __DIR__ . '/includes/header.php';
         return '';
     }
 
+    function getImageFolderFromPath(rawPath) {
+        if (!rawPath || typeof rawPath !== 'string') return '';
+        let value = rawPath.trim();
+        if (!value) return '';
+
+        try {
+            const parsed = new URL(value, window.location.origin);
+            value = parsed.pathname || value;
+        } catch (_) {}
+
+        value = value.replace(/\\/g, '/');
+        const marker = '/assets/img/products/';
+        const idx = value.toLowerCase().indexOf(marker);
+        if (idx >= 0) {
+            value = value.slice(idx + marker.length);
+        }
+
+        value = value.replace(/^\/+/, '');
+        if (!value.includes('/')) return '';
+        const folder = value.split('/')[0].trim();
+        if (!folder || folder === '.' || folder === '..') return '';
+        return folder;
+    }
+
+    function isImagePathFromProduct(rawPath, productId, preferredFolder = '') {
+        const folder = getImageFolderFromPath(rawPath);
+        if (!folder) return false;
+
+        const pref = String(preferredFolder || '').trim().toLowerCase();
+        if (pref && folder.toLowerCase() === pref) return true;
+
+        const expectedSuffix = '-' + String(productId || '').trim();
+        return expectedSuffix !== '-' && folder.toLowerCase().endsWith(expectedSuffix.toLowerCase());
+    }
+
     function getNormalizedProductStock(p) {
         return Math.max(0, parseInt(p?.chat_stock ?? p?.total_stock ?? p?.cantidad_actual) || 0);
     }
@@ -895,17 +930,28 @@ include __DIR__ . '/includes/header.php';
         // Cargar imágenes actuales a la cola
         colaImagenes = [];
         const rutasVistas = new Set();
+        let preferredFolder = getImageFolderFromPath(prod.imagen || '');
 
-        if (prod.imagen && prod.imagen !== 'NULL' && prod.imagen !== '') {
-            colaImagenes.push({ type: 'server', path: prod.imagen, preview: getProductImgUrl(prod.imagen) });
-            rutasVistas.add(prod.imagen);
+        if (!preferredFolder && prod.galeria_paths) {
+            const rawPaths = String(prod.galeria_paths).split(',');
+            const guessed = rawPaths.find(path => isImagePathFromProduct(path, prod.id_producto));
+            preferredFolder = guessed ? getImageFolderFromPath(guessed) : '';
+        }
+
+        if (prod.imagen && prod.imagen !== 'NULL' && prod.imagen !== '' && isImagePathFromProduct(prod.imagen, prod.id_producto, preferredFolder)) {
+            const normalizedMain = String(prod.imagen).trim();
+            colaImagenes.push({ type: 'server', path: normalizedMain, preview: getProductImgUrl(normalizedMain) });
+            rutasVistas.add(normalizedMain);
         }
 
         if (prod.galeria_paths) {
             prod.galeria_paths.split(',').forEach(p => {
-                if (p && p !== 'NULL' && !rutasVistas.has(p)) {
-                    colaImagenes.push({ type: 'server', path: p, preview: getProductImgUrl(p) });
-                    rutasVistas.add(p);
+                const normalized = String(p || '').trim();
+                if (!normalized || normalized === 'NULL') return;
+                if (!isImagePathFromProduct(normalized, prod.id_producto, preferredFolder)) return;
+                if (!rutasVistas.has(normalized)) {
+                    colaImagenes.push({ type: 'server', path: normalized, preview: getProductImgUrl(normalized) });
+                    rutasVistas.add(normalized);
                 }
             });
         }

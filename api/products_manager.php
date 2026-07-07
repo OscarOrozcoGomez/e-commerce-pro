@@ -267,7 +267,38 @@ try {
                     $orden = json_decode($data['imagenes_orden_json'], true);
                     foreach ($orden as $ref) {
                         if (strpos($ref, 'server:') === 0) {
-                            $finalPaths[] = substr($ref, 7);
+                            $rawServerPath = trim((string)substr($ref, 7));
+                            $rawServerPath = ltrim(str_replace('\\\\', '/', $rawServerPath), '/');
+                            if ($rawServerPath === '') {
+                                continue;
+                            }
+
+                            $segments = explode('/', $rawServerPath);
+                            if (count($segments) < 2) {
+                                continue;
+                            }
+
+                            $folderPart = trim((string)($segments[0] ?? ''));
+                            $filePart = trim((string)basename($rawServerPath));
+                            if ($folderPart === '' || $filePart === '') {
+                                continue;
+                            }
+
+                            // Solo aceptar rutas de la carpeta activa del producto.
+                            if ($folderPart !== $folderName) {
+                                // Compatibilidad: si coincide por nombre de archivo en la carpeta activa,
+                                // canonicalizamos a folderName/archivo y descartamos referencias cruzadas.
+                                $candidateInTarget = $targetDir . $filePart;
+                                if (is_file($candidateInTarget)) {
+                                    $finalPaths[] = $folderName . '/' . $filePart;
+                                }
+                                continue;
+                            }
+
+                            $canonicalServerPath = $folderName . '/' . $filePart;
+                            if (is_file($targetDir . $filePart)) {
+                                $finalPaths[] = $canonicalServerPath;
+                            }
                         } elseif (strpos($ref, 'local:') === 0) {
                             $idx = (int)substr($ref, 6);
                             if (isset($uploadedPaths[$idx])) $finalPaths[] = $uploadedPaths[$idx];
@@ -280,13 +311,18 @@ try {
                     $finalPaths = $uploadedPaths;
                 }
 
+                $finalPaths = array_values(array_unique(array_filter(array_map(static function ($path): string {
+                    return trim((string)$path);
+                }, $finalPaths), static function (string $path): bool {
+                    return $path !== '';
+                })));
+
                 // Limpiar galería actual
                 $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
                 
                 if (!empty($finalPaths)) {
                     // Insertar todas en la galería (la primera será la principal por orden 0)
                     for ($i = 0; $i < count($finalPaths); $i++) {
-                        if ($i >= 6) break; // Límite de 6 imágenes
                         $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
                             ->execute([$id, $finalPaths[$i], $i]);
                     }

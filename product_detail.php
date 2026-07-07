@@ -470,7 +470,7 @@ include __DIR__ . '/views/includes/header.php';
 
     function isPackshotLikeImage(url) {
         const value = String(url || '').toLowerCase();
-        return /(^|[\/._-])(upd|principal|main|front|packshot)([\/._-]|\d|$)/i.test(value);
+        return /(^|[\/._-])(principal|main|front|packshot)([\/._-]|\d|$)/i.test(value);
     }
 
     function normalizeGalleryImages(images, principalImage) {
@@ -795,6 +795,7 @@ include __DIR__ . '/views/includes/header.php';
             thumb.classList.add('thumb-loading');
             thumb.dataset.index = String(index);
             const thumbImg = document.createElement('img');
+            thumbImg.dataset.originalSrc = String(imgSrc || '');
             // En tiras horizontales, lazy puede dejar slots sin cargar en algunos navegadores.
             thumbImg.loading = 'eager';
             thumbImg.fetchPriority = 'low';
@@ -808,8 +809,24 @@ include __DIR__ . '/views/includes/header.php';
                 thumb.classList.remove('thumb-loading');
             };
 
-            const applyThumbSrc = (url) => {
+            const applyThumbSrc = (url, reason = '') => {
                 thumbImg.src = url;
+                thumbImg.dataset.currentSrc = String(url || '');
+                if (reason) {
+                    thumbImg.dataset.fallbackReason = reason;
+                } else {
+                    delete thumbImg.dataset.fallbackReason;
+                }
+
+                // Evita apariencia confusa de "contain" cuando estamos en placeholder.
+                const isFallbackPlaceholder = String(url || '') === String(PDP_DEFAULT_PRODUCT_IMAGE || '');
+                if (isFallbackPlaceholder) {
+                    thumbImg.classList.remove('thumb-fit-contain');
+                    thumb.classList.add('thumb-fallback');
+                } else {
+                    thumb.classList.remove('thumb-fallback');
+                }
+
                 if (thumbImg.complete) {
                     if (thumbImg.naturalWidth > 0) {
                         markThumbReady();
@@ -833,7 +850,7 @@ include __DIR__ . '/views/includes/header.php';
                 } else {
                     pushThumbDebug(index, 'ok', imgSrc, finalUrl, 'probe success');
                 }
-                applyThumbSrc(ok ? finalUrl : PDP_DEFAULT_PRODUCT_IMAGE);
+                applyThumbSrc(ok ? finalUrl : PDP_DEFAULT_PRODUCT_IMAGE, ok ? '' : 'probe failed');
             };
 
             const thumbTimeout = window.setTimeout(() => {
