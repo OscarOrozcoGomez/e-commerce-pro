@@ -210,9 +210,11 @@ try {
         );
         $stmtGal->execute([$currentId, $rootId, $currentId, $rootId]);
     $galeria = $stmtGal->fetchAll(PDO::FETCH_COLUMN);
+        $hasDbGallery = false;
     foreach ($galeria as $img) {
         $img = trim((string)$img);
         if ($img !== '') {
+                $hasDbGallery = true;
             $imageCandidates[] = $img;
             if ($dbPreferredFolder === '') {
                 $dbPreferredFolder = $extractFolderNameFromImagePath($img);
@@ -227,24 +229,18 @@ try {
         }
     }
 
-    if ($rootId > 0 && $rootId !== $currentId) {
-        $stmtRoot = $pdo->prepare("SELECT imagen, imagen_url FROM productos WHERE id_producto = ? LIMIT 1");
-        $stmtRoot->execute([$rootId]);
-        $rootRow = $stmtRoot->fetch(PDO::FETCH_ASSOC) ?: [];
-        foreach (['imagen', 'imagen_url'] as $field) {
-            $raw = trim((string)($rootRow[$field] ?? ''));
-            if ($raw !== '') {
-                $imageCandidates[] = $raw;
-            }
-        }
-    }
 
     $currentPreferredFolder = $dbPreferredFolder !== ''
         ? $dbPreferredFolder
         : (slugify($baseName) . '-' . $currentId);
-    $currentFolderImages = $collectFolderImagesByProductId($currentId, $currentPreferredFolder);
-    foreach ($currentFolderImages as $folderImagePath) {
-        $imageCandidates[] = $folderImagePath;
+    $currentFolderImages = [];
+    // Respetar cambios del admin (alta/baja/reorden) en producto_imagenes.
+    // Solo usar archivos de carpeta si no hay galeria definida en DB.
+    if (!$hasDbGallery) {
+        $currentFolderImages = $collectFolderImagesByProductId($currentId, $currentPreferredFolder);
+        foreach ($currentFolderImages as $folderImagePath) {
+            $imageCandidates[] = $folderImagePath;
+        }
     }
 
     // Fallback de ultimo recurso para catalogos con variantes no normalizadas:
@@ -300,36 +296,8 @@ try {
         }
     }
 
-    // Si una variante no tiene archivos propios, usar carpeta de una hermana valida
-    // para evitar imagenes en blanco por rutas stale en BD.
-    if (empty($imagenes) && $baseName !== '') {
-        $stmtSiblingIds = $pdo->prepare(
-            "SELECT id_producto, nombre
-             FROM productos
-             WHERE estado = 'activo' AND TRIM(nombre) = ? AND id_producto <> ?
-             ORDER BY id_producto ASC"
-        );
-        $stmtSiblingIds->execute([$baseName, $currentId]);
-        $siblingRows = $stmtSiblingIds->fetchAll(PDO::FETCH_ASSOC);
-
-        $siblingCandidates = [];
-        foreach ($siblingRows as $siblingRow) {
-            $sid = (int)($siblingRow['id_producto'] ?? 0);
-            $siblingName = trim((string)($siblingRow['nombre'] ?? ''));
-            $siblingPreferredFolder = slugify($siblingName) . '-' . $sid;
-            foreach ($collectFolderImagesByProductId($sid, $siblingPreferredFolder) as $relPath) {
-                $resolved = getProductImageUrl($relPath, $sid);
-                if ($resolved !== '') {
-                    $siblingCandidates[] = $resolved;
-                }
-            }
-            if (!empty($siblingCandidates)) {
-                break;
-            }
-        }
-
-        $imagenes = $filterValidProductUrls($siblingCandidates);
-    }
+    // Nota: no hacemos fallback cruzado entre productos hermanos/padre.
+    // Si el producto actual no tiene galeria valida, mostramos default.
 
     // Definir la imagen principal como la primera imagen válida
     $principalImage = getProductImageUrl((string)($product['imagen'] ?? ''), $currentId);

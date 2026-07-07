@@ -291,6 +291,43 @@ try {
                             ->execute([$id, $finalPaths[$i], $i]);
                     }
                 }
+
+                // Sincronizar campo legacy productos.imagen con la primera imagen vigente.
+                $legacyMainImage = !empty($finalPaths) ? $finalPaths[0] : null;
+                $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")
+                    ->execute([$legacyMainImage, $id]);
+
+                // Limpieza fisica: eliminar archivos no referenciados por la galeria final.
+                // Esto evita que el fallback por carpeta vuelva a mostrar imagenes ya eliminadas desde admin.
+                $keepFiles = [];
+                foreach ($finalPaths as $path) {
+                    $path = trim((string)$path);
+                    if ($path === '') {
+                        continue;
+                    }
+
+                    $normalized = str_replace('\\\\', '/', $path);
+                    $parts = explode('/', ltrim($normalized, '/'));
+                    if (count($parts) < 2) {
+                        continue;
+                    }
+
+                    $folderPart = trim((string)$parts[0]);
+                    $filePart = trim((string)($parts[count($parts) - 1] ?? ''));
+                    if ($folderPart === $folderName && $filePart !== '') {
+                        $keepFiles[$filePart] = true;
+                    }
+                }
+
+                $diskImages = glob($targetDir . '*.{webp,jpg,jpeg,png,gif,svg,avif}', GLOB_BRACE);
+                if (is_array($diskImages)) {
+                    foreach ($diskImages as $absPath) {
+                        $base = (string)basename($absPath);
+                        if (!isset($keepFiles[$base]) && is_file($absPath)) {
+                            @unlink($absPath);
+                        }
+                    }
+                }
             }
 
             dbSetProductCategories($id, $data['categorias'] ?? []);
