@@ -300,6 +300,13 @@ function authenticate(string $email, string $password): bool
         return false;
     }
 
+    if (isset($user['telefono_cliente']) && is_string($user['telefono_cliente'])
+        && function_exists('piiIsEncryptedValue')
+        && function_exists('piiDecryptValue')
+        && piiIsEncryptedValue($user['telefono_cliente'])) {
+        $user['telefono_cliente'] = (string)piiDecryptValue($user['telefono_cliente']);
+    }
+
     error_log("DEBUG LOGIN: Usuario encontrado. ID: " . $user['id_usuario'] . " | Rol: " . $user['rol']);
 
     // Verificar si la cuenta está bloqueada temporalmente

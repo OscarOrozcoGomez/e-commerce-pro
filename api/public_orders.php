@@ -27,7 +27,11 @@ function guardarDireccionCheckoutSiAplica(array $data): void {
         $direcciones = $stmt->fetchAll();
 
         foreach ($direcciones as $dir) {
-            if (trim((string)$dir['direccion']) === $direccion) {
+            $dirActual = trim((string)($dir['direccion'] ?? ''));
+            if (function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($dirActual)) {
+                $dirActual = trim((string)piiDecryptValue($dirActual));
+            }
+            if ($dirActual === $direccion) {
                 return; // Ya existe exactamente esa direccion, no duplicar.
             }
         }
@@ -39,6 +43,9 @@ function guardarDireccionCheckoutSiAplica(array $data): void {
         $maxAlias = 0;
         foreach ($direcciones as $dir) {
             $alias = trim((string)($dir['alias'] ?? ''));
+            if (function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($alias)) {
+                $alias = trim((string)piiDecryptValue($alias));
+            }
             if (preg_match('/^(?:Direccion|Direcci[oó]n)\s+(\d+)$/iu', $alias, $m)) {
                 $maxAlias = max($maxAlias, (int)$m[1]);
             }
@@ -47,8 +54,12 @@ function guardarDireccionCheckoutSiAplica(array $data): void {
         $nuevoAlias = 'Direccion ' . ($maxAlias + 1);
         $esDefault = empty($direcciones) ? 1 : 0;
 
+        $aliasStore = function_exists('piiEncryptValue') ? piiEncryptValue($nuevoAlias) : $nuevoAlias;
+        $direccionStore = function_exists('piiEncryptValue') ? piiEncryptValue($direccion) : $direccion;
+        $mapsStore = ($mapsLink !== '' && function_exists('piiEncryptValue')) ? piiEncryptValue($mapsLink) : $mapsLink;
+
         $pdo->prepare("INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default) VALUES (?, ?, ?, ?, ?)")
-            ->execute([$idCliente, $nuevoAlias, $direccion, $mapsLink, $esDefault]);
+            ->execute([$idCliente, $aliasStore, $direccionStore, $mapsStore, $esDefault]);
     } catch (Throwable $e) {
         error_log('No se pudo guardar direccion de checkout: ' . $e->getMessage());
     }
@@ -87,10 +98,12 @@ if ($result['success'] && isAuthenticated() && !empty($data['cliente']['telefono
     if ($idCliente && empty($telActual)) {
         try {
             $pdo = getPDO();
+            $telefono = trim((string)$data['cliente']['telefono']);
+            $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefono) : $telefono;
             $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ? AND (telefono IS NULL OR telefono = '')")
-                ->execute([trim($data['cliente']['telefono']), $idCliente]);
+                ->execute([$telefonoStore, $idCliente]);
             // Actualizar la sesión para que los futuros formularios lo lean
-            $_SESSION['usuario']['telefono_cliente'] = trim($data['cliente']['telefono']);
+            $_SESSION['usuario']['telefono_cliente'] = $telefono;
         } catch (PDOException $e) {
             error_log('No se pudo guardar teléfono del cliente: ' . $e->getMessage());
         }

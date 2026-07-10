@@ -69,12 +69,24 @@ include __DIR__ . '/views/includes/header.php';
         justify-content: center;
         margin-bottom: 15px;
     }
+    .main-img-viewer.is-loading::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, rgba(245, 245, 245, 0.5) 25%, rgba(230, 230, 230, 0.75) 50%, rgba(245, 245, 245, 0.5) 75%);
+        background-size: 200% 100%;
+        animation: pdpShimmer 1s linear infinite;
+        pointer-events: none;
+        z-index: 1;
+    }
     .main-img-viewer img {
         max-width: 100%;
         max-height: 100%;
         object-fit: contain;
         transition: transform 0.1s ease-out;
         transform-origin: center;
+        position: relative;
+        z-index: 2;
     }
     .main-img-viewer:hover img {
         transform: scale(2.5);
@@ -122,8 +134,35 @@ include __DIR__ . '/views/includes/header.php';
         cursor: pointer;
         transition: 0.3s;
         background: white;
+        position: relative;
     }
-    .thumb-item img { width: 100%; height: 100%; object-fit: contain; padding: 5px; }
+    .thumb-item.thumb-loading::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 6px;
+        background: linear-gradient(90deg, rgba(246, 246, 246, 0.8) 25%, rgba(232, 232, 232, 0.95) 50%, rgba(246, 246, 246, 0.8) 75%);
+        background-size: 180% 100%;
+        animation: pdpShimmer 1s linear infinite;
+        z-index: 1;
+    }
+    .thumb-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
+        padding: 0;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        position: relative;
+        z-index: 2;
+    }
+    .thumb-item img.thumb-fit-contain {
+        object-fit: contain;
+        padding: 5px;
+        background: #fff;
+    }
+    .thumb-item img.thumb-ready { opacity: 1; }
     .thumb-item:hover, .thumb-item.active { border-color: #1a237e; opacity: 1; transform: translateY(-2px); }
     .thumb-item { opacity: 0.6; }
 
@@ -233,6 +272,39 @@ include __DIR__ . '/views/includes/header.php';
         100% { transform: scale(1); }
     }
 
+    @keyframes pdpShimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    .thumb-debug-panel {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px dashed #ef9a9a;
+        background: #fff8f8;
+        color: #5d4037;
+        font-size: 0.85rem;
+    }
+    .thumb-debug-panel h6 {
+        margin: 0 0 6px;
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: #b71c1c;
+    }
+    .thumb-debug-panel .thumb-debug-meta {
+        margin-bottom: 6px;
+        color: #6d4c41;
+    }
+    .thumb-debug-list {
+        margin: 0;
+        padding-left: 18px;
+        max-height: 180px;
+        overflow: auto;
+        word-break: break-all;
+    }
+    .thumb-debug-list li { margin-bottom: 4px; }
+
     .terms-link { color: #888; text-decoration: underline; font-size: 0.85rem; }
 </style>
 
@@ -252,6 +324,11 @@ include __DIR__ . '/views/includes/header.php';
             
             <div id="thumb-container" class="gallery-strip">
                 <!-- Miniaturas dinámicas -->
+            </div>
+            <div id="thumb-debug-panel" class="thumb-debug-panel" style="display:none;">
+                <h6>Diagnóstico de miniaturas</h6>
+                <div id="thumb-debug-meta" class="thumb-debug-meta"></div>
+                <ol id="thumb-debug-list" class="thumb-debug-list"></ol>
             </div>
         </div>
 
@@ -341,6 +418,7 @@ include __DIR__ . '/views/includes/header.php';
     const PDP_FAVORITES_API_URL = (typeof FAVORITES_API_URL !== 'undefined')
         ? FAVORITES_API_URL
         : '<?php echo BASE_URL; ?>api/favorites.php';
+    const PDP_THUMB_DEBUG = (new URLSearchParams(window.location.search).get('img_debug') === '1');
 
     let currentProduct = null;
     let qty = 1;
@@ -349,6 +427,10 @@ include __DIR__ . '/views/includes/header.php';
     let galleryImages = [];
     let currentSlide = 0;
     let mainImageFallbackApplied = false;
+    let mainImageLoadToken = 0;
+    const thumbDebugPanel = document.getElementById('thumb-debug-panel');
+    const thumbDebugMeta = document.getElementById('thumb-debug-meta');
+    const thumbDebugList = document.getElementById('thumb-debug-list');
 
     // Variables para el Zoom
     const zoomContainer = document.getElementById('zoom-container');
@@ -370,6 +452,106 @@ include __DIR__ . '/views/includes/header.php';
         }
     }
 
+    function resetThumbDebug(product) {
+        if (!PDP_THUMB_DEBUG || !thumbDebugPanel || !thumbDebugList || !thumbDebugMeta) return;
+        thumbDebugPanel.style.display = 'block';
+        thumbDebugList.innerHTML = '';
+        const source = product && product.image_source ? String(product.image_source) : 'n/a';
+        const galCount = Array.isArray(product && product.galeria) ? product.galeria.length : 0;
+        thumbDebugMeta.textContent = `id=${product && product.id_producto ? product.id_producto : 'n/a'} | image_source=${source} | galeria_raw=${galCount}`;
+    }
+
+    function pushThumbDebug(index, stage, originalUrl, finalUrl, detail = '') {
+        if (!PDP_THUMB_DEBUG || !thumbDebugList) return;
+        const li = document.createElement('li');
+        li.textContent = `#${index} [${stage}] original=${originalUrl || 'n/a'} | final=${finalUrl || 'n/a'}${detail ? ' | ' + detail : ''}`;
+        thumbDebugList.appendChild(li);
+    }
+
+    function isPackshotLikeImage(url) {
+        const value = String(url || '').toLowerCase();
+        return /(^|[\/._-])(principal|main|front|packshot)([\/._-]|\d|$)/i.test(value);
+    }
+
+    function normalizeGalleryImages(images, principalImage) {
+        const rawList = Array.isArray(images) ? images : [];
+        const preList = [];
+
+        if (principalImage) {
+            preList.push(principalImage);
+        }
+
+        rawList.forEach((item) => {
+            const value = String(item || '').trim();
+            if (value !== '') {
+                preList.push(value);
+            }
+        });
+
+        const unique = [];
+        const seen = new Set();
+        preList.forEach((url) => {
+            if (!seen.has(url)) {
+                seen.add(url);
+                unique.push(url);
+            }
+        });
+
+        const principal = String(principalImage || '').trim();
+        return unique
+            .map((url, idx) => {
+                const low = url.toLowerCase();
+                let score = 3;
+                if (principal && url === principal) {
+                    score = 0;
+                } else if (/([\\/]|^)principal\.(webp|jpg|jpeg|png|gif|svg)(\?|$)/i.test(low)) {
+                    score = 1;
+                } else if (low.includes('/gal_') || low.includes('gal_')) {
+                    score = 2;
+                }
+                return { url, idx, score };
+            })
+            .sort((a, b) => (a.score - b.score) || (a.idx - b.idx))
+            .map(item => item.url);
+    }
+
+    function repairBrokenGalleryImage(index, fallbackUrl = PDP_DEFAULT_PRODUCT_IMAGE) {
+        if (!Array.isArray(galleryImages) || index < 0 || index >= galleryImages.length) return;
+        galleryImages[index] = fallbackUrl;
+    }
+
+    function setMainImageByIndex(index, force = false) {
+        if (!mainImg) return;
+
+        const normalizedIndex = Math.max(0, Math.min(index, Math.max(0, galleryImages.length - 1)));
+        const targetUrl = galleryImages[normalizedIndex] || PDP_DEFAULT_PRODUCT_IMAGE;
+        const currentUrl = String(mainImg.currentSrc || mainImg.src || '');
+
+        if (!force && currentUrl === targetUrl) {
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+            return;
+        }
+
+        const token = ++mainImageLoadToken;
+        if (zoomContainer) zoomContainer.classList.add('is-loading');
+
+        const probe = new Image();
+        probe.decoding = 'async';
+        probe.onload = () => {
+            if (token !== mainImageLoadToken) return;
+            delete mainImg.dataset.retryTried;
+            mainImg.src = targetUrl;
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+        };
+        probe.onerror = () => {
+            if (token !== mainImageLoadToken) return;
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+            delete mainImg.dataset.retryTried;
+            mainImg.src = targetUrl;
+        };
+        probe.src = targetUrl;
+    }
+
     function handleMainImageError() {
         if (!mainImg) return;
 
@@ -378,6 +560,16 @@ include __DIR__ . '/views/includes/header.php';
             mainImg.dataset.retryTried = '1';
             mainImg.src = addCacheBuster(mainImg.src);
             return;
+        }
+
+        repairBrokenGalleryImage(currentSlide, PDP_DEFAULT_PRODUCT_IMAGE);
+
+        const brokenThumb = document.querySelector(`.thumb-item[data-index="${currentSlide}"] img`);
+        if (brokenThumb) {
+            brokenThumb.src = PDP_DEFAULT_PRODUCT_IMAGE;
+            brokenThumb.classList.add('thumb-ready');
+            const thumbCard = brokenThumb.closest('.thumb-item');
+            if (thumbCard) thumbCard.classList.remove('thumb-loading');
         }
 
         if (Array.isArray(galleryImages) && currentSlide < (galleryImages.length - 1)) {
@@ -572,10 +764,21 @@ include __DIR__ . '/views/includes/header.php';
         // Galería
         const thumbContainer = document.getElementById('thumb-container');
         thumbContainer.innerHTML = '';
+        resetThumbDebug(product);
         
         galleryImages = Array.isArray(product.galeria) && product.galeria.length > 0
-            ? [...new Set(product.galeria.filter(Boolean))]
-            : [PDP_DEFAULT_PRODUCT_IMAGE];
+            ? normalizeGalleryImages(product.galeria, product.imagen)
+            : [product.imagen || PDP_DEFAULT_PRODUCT_IMAGE];
+
+        if (PDP_THUMB_DEBUG) {
+            galleryImages.forEach((url, i) => {
+                pushThumbDebug(i, 'source', url, url, 'normalized');
+            });
+        }
+
+        if (!galleryImages.length) {
+            galleryImages = [PDP_DEFAULT_PRODUCT_IMAGE];
+        }
         currentSlide = 0;
         mainImageFallbackApplied = false;
         delete mainImg.dataset.retryTried;
@@ -584,31 +787,100 @@ include __DIR__ . '/views/includes/header.php';
             mainImg.fetchPriority = 'high';
             mainImg.decoding = 'async';
         }
-        mainImg.src = galleryImages[0];
+        setMainImageByIndex(0, true);
 
         galleryImages.forEach((imgSrc, index) => {
             const thumb = document.createElement('div');
             thumb.className = 'thumb-item' + (index === 0 ? ' active' : '');
+            thumb.classList.add('thumb-loading');
+            thumb.dataset.index = String(index);
             const thumbImg = document.createElement('img');
-            thumbImg.src = imgSrc;
-            thumbImg.loading = 'lazy';
+            thumbImg.dataset.originalSrc = String(imgSrc || '');
+            // En tiras horizontales, lazy puede dejar slots sin cargar en algunos navegadores.
+            thumbImg.loading = 'eager';
+            thumbImg.fetchPriority = 'low';
             thumbImg.decoding = 'async';
-            thumbImg.addEventListener('error', function onThumbError() {
-                if (!thumbImg.dataset.retryTried) {
-                    thumbImg.dataset.retryTried = '1';
-                    thumbImg.src = addCacheBuster(imgSrc);
-                    return;
+            if (isPackshotLikeImage(imgSrc)) {
+                thumbImg.classList.add('thumb-fit-contain');
+            }
+
+            const markThumbReady = () => {
+                thumbImg.classList.add('thumb-ready');
+                thumb.classList.remove('thumb-loading');
+            };
+
+            const applyThumbSrc = (url, reason = '') => {
+                thumbImg.src = url;
+                thumbImg.dataset.currentSrc = String(url || '');
+                if (reason) {
+                    thumbImg.dataset.fallbackReason = reason;
+                } else {
+                    delete thumbImg.dataset.fallbackReason;
                 }
 
-                thumbImg.removeEventListener('error', onThumbError);
-                thumbImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
-            });
+                // Evita apariencia confusa de "contain" cuando estamos en placeholder.
+                const isFallbackPlaceholder = String(url || '') === String(PDP_DEFAULT_PRODUCT_IMAGE || '');
+                if (isFallbackPlaceholder) {
+                    thumbImg.classList.remove('thumb-fit-contain');
+                    thumb.classList.add('thumb-fallback');
+                } else {
+                    thumb.classList.remove('thumb-fallback');
+                }
+
+                if (thumbImg.complete) {
+                    if (thumbImg.naturalWidth > 0) {
+                        markThumbReady();
+                        pushThumbDebug(index, 'painted', imgSrc, url, 'complete=1');
+                    } else {
+                        repairBrokenGalleryImage(index, PDP_DEFAULT_PRODUCT_IMAGE);
+                        thumbImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
+                        markThumbReady();
+                        pushThumbDebug(index, 'fallback', imgSrc, PDP_DEFAULT_PRODUCT_IMAGE, 'complete=1 naturalWidth=0');
+                    }
+                }
+            };
+
+            let thumbSettled = false;
+            const settleThumb = (ok, finalUrl) => {
+                if (thumbSettled) return;
+                thumbSettled = true;
+                if (!ok) {
+                    repairBrokenGalleryImage(index, PDP_DEFAULT_PRODUCT_IMAGE);
+                    pushThumbDebug(index, 'fallback', imgSrc, PDP_DEFAULT_PRODUCT_IMAGE, 'probe failed');
+                } else {
+                    pushThumbDebug(index, 'ok', imgSrc, finalUrl, 'probe success');
+                }
+                applyThumbSrc(ok ? finalUrl : PDP_DEFAULT_PRODUCT_IMAGE, ok ? '' : 'probe failed');
+            };
+
+            const thumbTimeout = window.setTimeout(() => {
+                pushThumbDebug(index, 'timeout', imgSrc, PDP_DEFAULT_PRODUCT_IMAGE, '5s');
+                settleThumb(false, PDP_DEFAULT_PRODUCT_IMAGE);
+            }, 5000);
+
+            const probeThumb = new Image();
+            probeThumb.decoding = 'async';
+            probeThumb.onload = () => {
+                window.clearTimeout(thumbTimeout);
+                settleThumb(true, imgSrc);
+            };
+            probeThumb.onerror = () => {
+                if (!thumbImg.dataset.retryTried) {
+                    thumbImg.dataset.retryTried = '1';
+                    const retried = addCacheBuster(imgSrc);
+                    pushThumbDebug(index, 'retry', imgSrc, retried, 'probe error first attempt');
+                    probeThumb.src = retried;
+                    return;
+                }
+                window.clearTimeout(thumbTimeout);
+                settleThumb(false, PDP_DEFAULT_PRODUCT_IMAGE);
+            };
+            probeThumb.src = imgSrc;
+
             thumb.appendChild(thumbImg);
             thumb.onclick = () => {
                 currentSlide = index;
                 updateGalleryUI();
-                document.querySelectorAll('.thumb-item').forEach(t => t.classList.remove('active'));
-                thumb.classList.add('active');
             };
             thumbContainer.appendChild(thumb);
         });
@@ -712,10 +984,8 @@ include __DIR__ . '/views/includes/header.php';
     }
 
     function updateGalleryUI() {
-        if (mainImg) {
-            delete mainImg.dataset.retryTried;
-        }
-        mainImg.src = galleryImages[currentSlide] || PDP_DEFAULT_PRODUCT_IMAGE;
+        if (mainImg) delete mainImg.dataset.retryTried;
+        setMainImageByIndex(currentSlide);
         
         // Actualizar miniaturas
         const thumbs = document.querySelectorAll('.thumb-item');

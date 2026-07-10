@@ -24,8 +24,19 @@ Define variables de entorno en el host remoto:
 
 - APP_ENV=production en Produccion
 - DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_CHARSET
+- PII_ENCRYPTION_KEY (si no usas GSM) o CUSTOMER_PII_KEY/PII_ENCRYPTION_KEY en Google Secret Manager
 - MIGRATIONS_DEPLOY_TOKEN (igual al secret global de GitHub del repositorio)
 - LOGIN_DEGRADED_MODE=0 (poner en 1 solo durante incidentes de latencia/522)
+- GCP_PROJECT_ID=vendimia-497305
+- GCP_SA_KEY_FILE=/home/<usuario>/.gcp/sa.json (fuera de public_html)
+- DISABLE_GSM=0 en produccion
+- GSM_CACHE_TTL_SECONDS=2592000 (30 dias, reduce llamadas/costo a Google Secret Manager)
+
+Notas de seguridad para secretos en produccion:
+
+- No guardar secretos en cookies. El sistema cachea secretos en sesion/APCu/archivo temporal del servidor.
+- No guardar secretos reales dentro del repositorio.
+- El archivo de service account solo autentica contra GCP; los valores sensibles (PII_ENCRYPTION_KEY, DB_PASSWORD, etc.) deben vivir en Secret Manager.
 
 ## 3) Flujo diario
 

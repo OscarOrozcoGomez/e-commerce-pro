@@ -31,11 +31,8 @@ try {
     $stmtStock->execute([$id]);
     $product['stock'] = (float)$stmtStock->fetchColumn();
 
-    // 2. Resolver imagenes del producto (galeria + campos legacy) para variante,
-    // padre y variantes hermanas con el mismo nombre.
+    // 2. Resolver imagenes del producto para la variante actual exclusivamente.
     $currentId = (int)($product['id_producto'] ?? 0);
-    $parentId = (int)($product['id_padre'] ?? 0);
-    $rootId = $parentId > 0 ? $parentId : $currentId;
     $baseName = trim((string)($product['nombre'] ?? ''));
 
     $collectFolderImagesByProductId = static function (int $productId, string $preferredFolderName = ''): array {
@@ -129,22 +126,21 @@ try {
             return false;
         }
 
-        if (strpos($url, 'data:image') === 0) {
-            return true;
-        }
-
         $path = parse_url($url, PHP_URL_PATH);
         if (!is_string($path) || $path === '') {
-            return true;
+            return false;
         }
 
         $marker = '/assets/img/products/';
         $pos = stripos($path, $marker);
         if ($pos === false) {
-            return true;
+            return false;
         }
 
         $rel = ltrim(substr($path, $pos + strlen($marker)), '/');
+        if ($rel === '') {
+            return false;
+        }
         $full = __DIR__ . '/../assets/img/products/' . str_replace('/', DIRECTORY_SEPARATOR, $rel);
         return is_file($full);
     };
@@ -163,21 +159,62 @@ try {
         return array_values(array_unique($filtered));
     };
 
-    $imageCandidates = [];
+    $extractFolderNameFromImagePath = static function (string $rawPath): string {
+        $candidate = trim($rawPath);
+        if ($candidate === '') {
+            return '';
+        }
 
-        $stmtGal = $pdo->prepare(
-            "SELECT pi.ruta_archivo
-             FROM producto_imagenes pi
-             INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto
-             WHERE p_img.id_producto IN (?, ?)
-             ORDER BY (p_img.id_producto = ?) DESC, (p_img.id_producto = ?) DESC, pi.orden ASC"
-        );
-        $stmtGal->execute([$currentId, $rootId, $currentId, $rootId]);
+        $parsedPath = parse_url($candidate, PHP_URL_PATH);
+        if (is_string($parsedPath) && $parsedPath !== '') {
+            $candidate = $parsedPath;
+        }
+
+        $candidate = str_replace('\\', '/', $candidate);
+        $marker = '/assets/img/products/';
+        $markerPos = stripos($candidate, $marker);
+        if ($markerPos !== false) {
+            $candidate = substr($candidate, $markerPos + strlen($marker));
+        }
+
+        $candidate = ltrim($candidate, '/');
+        if ($candidate === '') {
+            return '';
+        }
+
+        $parts = explode('/', $candidate, 2);
+        if (count($parts) < 2) {
+            return '';
+        }
+
+        $folder = trim($parts[0]);
+        if ($folder === '' || $folder === '.' || $folder === '..') {
+            return '';
+        }
+
+        return $folder;
+    };
+
+    $imageCandidates = [];
+    $dbPreferredFolder = '';
+
+    $stmtGal = $pdo->prepare(
+        "SELECT pi.ruta_archivo
+         FROM producto_imagenes pi
+         WHERE pi.id_producto = ?
+         ORDER BY pi.orden ASC"
+    );
+    $stmtGal->execute([$currentId]);
     $galeria = $stmtGal->fetchAll(PDO::FETCH_COLUMN);
+    $hasDbGallery = false;
     foreach ($galeria as $img) {
         $img = trim((string)$img);
         if ($img !== '') {
+                $hasDbGallery = true;
             $imageCandidates[] = $img;
+            if ($dbPreferredFolder === '') {
+                $dbPreferredFolder = $extractFolderNameFromImagePath($img);
+            }
         }
     }
 
@@ -188,42 +225,16 @@ try {
         }
     }
 
-    if ($rootId > 0 && $rootId !== $currentId) {
-        $stmtRoot = $pdo->prepare("SELECT imagen, imagen_url FROM productos WHERE id_producto = ? LIMIT 1");
-        $stmtRoot->execute([$rootId]);
-        $rootRow = $stmtRoot->fetch(PDO::FETCH_ASSOC) ?: [];
-        foreach (['imagen', 'imagen_url'] as $field) {
-            $raw = trim((string)($rootRow[$field] ?? ''));
-            if ($raw !== '') {
-                $imageCandidates[] = $raw;
-            }
-        }
-    }
 
-    $currentPreferredFolder = slugify($baseName) . '-' . $currentId;
+    $currentPreferredFolder = $dbPreferredFolder !== ''
+        ? $dbPreferredFolder
+        : (slugify($baseName) . '-' . $currentId);
+
+    // Incluir siempre la carpeta fisica activa para reflejar descargas/importaciones
+    // aun cuando DB tenga un subconjunto de rutas.
     $currentFolderImages = $collectFolderImagesByProductId($currentId, $currentPreferredFolder);
     foreach ($currentFolderImages as $folderImagePath) {
         $imageCandidates[] = $folderImagePath;
-    }
-
-    // Fallback de ultimo recurso para catalogos con variantes no normalizadas:
-    // si no logramos ninguna imagen propia, intentamos tomar de productos hermanos por nombre.
-    if (empty($imageCandidates) && $baseName !== '') {
-        $stmtNameImgs = $pdo->prepare(
-            "SELECT imagen, imagen_url
-             FROM productos
-             WHERE estado = 'activo' AND TRIM(nombre) = ?"
-        );
-        $stmtNameImgs->execute([$baseName]);
-        $nameRows = $stmtNameImgs->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($nameRows as $row) {
-            foreach (['imagen', 'imagen_url'] as $field) {
-                $raw = trim((string)($row[$field] ?? ''));
-                if ($raw !== '') {
-                    $imageCandidates[] = $raw;
-                }
-            }
-        }
     }
 
     $imagenes = [];
@@ -235,11 +246,11 @@ try {
     }
     $imagenes = $filterValidProductUrls($imagenes);
 
-    // Si existen archivos fisicos para la variante actual, priorizamos solo esos
-    // para evitar mezclar galerias de presentaciones hermanas.
-    if (!empty($currentFolderImages)) {
+    // Si existen archivos fisicos para la variante actual, priorizamos solo esos.
+    $restrictFolderImages = array_values(array_unique($currentFolderImages));
+    if (!empty($restrictFolderImages)) {
         $currentFolderUrls = [];
-        foreach ($currentFolderImages as $folderImagePath) {
+        foreach ($restrictFolderImages as $folderImagePath) {
             $url = getProductImageUrl($folderImagePath, $currentId);
             if ($url !== '') {
                 $currentFolderUrls[] = $url;
@@ -259,44 +270,27 @@ try {
         }
     }
 
-    // Si una variante no tiene archivos propios, usar carpeta de una hermana valida
-    // para evitar imagenes en blanco por rutas stale en BD.
-    if (empty($imagenes) && $baseName !== '') {
-        $stmtSiblingIds = $pdo->prepare(
-            "SELECT id_producto, nombre
-             FROM productos
-             WHERE estado = 'activo' AND TRIM(nombre) = ? AND id_producto <> ?
-             ORDER BY id_producto ASC"
-        );
-        $stmtSiblingIds->execute([$baseName, $currentId]);
-        $siblingRows = $stmtSiblingIds->fetchAll(PDO::FETCH_ASSOC);
-
-        $siblingCandidates = [];
-        foreach ($siblingRows as $siblingRow) {
-            $sid = (int)($siblingRow['id_producto'] ?? 0);
-            $siblingName = trim((string)($siblingRow['nombre'] ?? ''));
-            $siblingPreferredFolder = slugify($siblingName) . '-' . $sid;
-            foreach ($collectFolderImagesByProductId($sid, $siblingPreferredFolder) as $relPath) {
-                $resolved = getProductImageUrl($relPath, $sid);
-                if ($resolved !== '') {
-                    $siblingCandidates[] = $resolved;
-                }
-            }
-            if (!empty($siblingCandidates)) {
-                break;
-            }
-        }
-
-        $imagenes = $filterValidProductUrls($siblingCandidates);
-    }
+    // Nota: no hacemos fallback cruzado entre productos hermanos/padre.
+    // Si la variante actual no tiene galeria valida, mostramos default.
 
     // Definir la imagen principal como la primera imagen válida
     $principalImage = getProductImageUrl((string)($product['imagen'] ?? ''), $currentId);
+    if (!$localProductAssetExists($principalImage)) {
+        $principalImage = '';
+    }
     if ($principalImage !== '') {
         $imagenes = array_values(array_unique(array_merge([$principalImage], $imagenes)));
     }
 
-    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : $principalImage;
+    if (empty($imagenes)) {
+        $defaultImage = getDefaultProductImageUrl();
+        if ($localProductAssetExists($defaultImage)) {
+            $imagenes[] = $defaultImage;
+        }
+    }
+
+    $product['imagen'] = !empty($imagenes) ? $imagenes[0] : '';
+    $product['image_source'] = !empty($imagenes) ? 'local' : 'fallback';
     $product['galeria'] = $imagenes;
     $product = normalizeProductDisplayRow($product);
 
@@ -335,6 +329,7 @@ try {
                 }
             }
             $v['imagen'] = $localProductAssetExists($resolvedVariantImage) ? $resolvedVariantImage : '';
+            $v['variant_image_source'] = $v['imagen'] !== '' ? 'local' : 'fallback';
             $variantes_unicas[] = normalizeProductDisplayRow($v);
         }
     }

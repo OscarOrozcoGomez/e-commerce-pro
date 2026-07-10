@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/catalogo_utils.php';
 
 function catalogDebugEnvEnabled(): bool
 {
@@ -61,149 +62,6 @@ function catalogDebugLog(string $event, array $data = []): void
     $data['ip'] = (string)($_SERVER['REMOTE_ADDR'] ?? '');
     $data['client'] = catalogClientContext();
     error_log('CATALOGO_DEBUG ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-}
-
-function catalogBindNamedParams(PDOStatement $stmt, array $params): void
-{
-    foreach ($params as $key => $value) {
-        $stmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
-    }
-}
-
-function catalogGroupKey(string $name): string
-{
-    $trimmed = trim($name);
-    if ($trimmed === '') {
-        return '';
-    }
-
-    if (function_exists('mb_strtolower')) {
-        return mb_strtolower($trimmed, 'UTF-8');
-    }
-
-    return strtolower($trimmed);
-}
-
-function catalogHasUsableImage(?string $img): bool
-{
-    $value = trim((string)$img);
-    if ($value === '') {
-        return false;
-    }
-
-    return stripos($value, 'default-product.svg') === false;
-}
-
-function catalogCollapseProducts(array $products): array
-{
-    $grouped = [];
-
-    foreach ($products as $p) {
-        $name = (string)($p['nombre'] ?? '');
-        $key = catalogGroupKey($name);
-        if ($key === '') {
-            $key = 'id:' . (string)($p['id_producto'] ?? uniqid('', true));
-        }
-
-        $id = (int)($p['id_producto'] ?? 0);
-        $precioDesde = (float)($p['precio_desde'] ?? $p['precio_venta'] ?? 0);
-        $precioVenta = (float)($p['precio_venta'] ?? $precioDesde);
-        $precioComparacionDesde = (float)($p['precio_comparacion_desde'] ?? $p['precio_comparacion'] ?? 0);
-
-        if (!isset($grouped[$key])) {
-            $p['precio_desde'] = $precioDesde;
-            $p['precio_venta'] = $precioVenta;
-            $p['precio_comparacion_desde'] = $precioComparacionDesde;
-            $p['_variant_ids'] = $id > 0 ? [$id => true] : [];
-            $p['total_variantes'] = max(1, (int)($p['total_variantes'] ?? 1));
-            $grouped[$key] = $p;
-            continue;
-        }
-
-        $grouped[$key]['_variant_ids'][$id] = true;
-        $variantCount = count($grouped[$key]['_variant_ids']);
-        $grouped[$key]['total_variantes'] = max((int)$grouped[$key]['total_variantes'], $variantCount);
-
-        $currentDesde = (float)($grouped[$key]['precio_desde'] ?? 0);
-        if ($currentDesde <= 0 || ($precioDesde > 0 && $precioDesde < $currentDesde)) {
-            $grouped[$key]['precio_desde'] = $precioDesde;
-        }
-
-        $currentVenta = (float)($grouped[$key]['precio_venta'] ?? 0);
-        if ($currentVenta <= 0 || ($precioVenta > 0 && $precioVenta < $currentVenta)) {
-            $grouped[$key]['precio_venta'] = $precioVenta;
-        }
-
-        $currentComparacion = (float)($grouped[$key]['precio_comparacion_desde'] ?? 0);
-        if ($currentComparacion <= 0 || ($precioComparacionDesde > 0 && $precioComparacionDesde < $currentComparacion)) {
-            $grouped[$key]['precio_comparacion_desde'] = $precioComparacionDesde;
-        }
-
-        if (!catalogHasUsableImage((string)($grouped[$key]['imagen'] ?? '')) && catalogHasUsableImage((string)($p['imagen'] ?? ''))) {
-            $grouped[$key]['imagen'] = $p['imagen'];
-        }
-
-        $existingDescription = trim((string)($grouped[$key]['descripcion'] ?? ''));
-        $incomingDescription = trim((string)($p['descripcion'] ?? ''));
-        if ($existingDescription === '' && $incomingDescription !== '') {
-            $grouped[$key]['descripcion'] = $p['descripcion'];
-        }
-    }
-
-    foreach ($grouped as &$item) {
-        unset($item['_variant_ids']);
-    }
-    unset($item);
-
-    return array_values($grouped);
-}
-
-function catalogRenderProductCard(array $p): string
-{
-    $groupKey = catalogGroupKey((string)($p['nombre'] ?? ''));
-    $precioActual = (float)($p['precio_desde'] ?? 0);
-    $precioComparacion = (float)($p['precio_comparacion_desde'] ?? $p['precio_comparacion'] ?? 0);
-    $showPrecioComparacion = $precioComparacion > $precioActual && $precioActual > 0;
-    ob_start();
-    ?>
-    <div class="col s12 m6 l4 product-card-container" data-group-key="<?php echo esc($groupKey); ?>" data-name="<?php echo esc(strtolower($p['nombre'])); ?>" data-sku="<?php echo esc(strtolower($p['sku'] ?? '')); ?>">
-        <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int)$p['id_producto']; ?>" class="card-link">
-            <div class="card hoverable border-radius-8" style="height: 360px; display: flex; flex-direction: column;">
-                <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                    <?php $imgSrc = getProductImageUrl($p['imagen'], (int)($p['id_producto'] ?? 0)); ?>
-                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" style="max-height: 100%; width: auto; object-fit: contain;">
-                </div>
-                <div class="card-content" style="flex-grow: 1;">
-                    <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc($p['nombre']); ?>">
-                        <?php echo esc($p['nombre']); ?>
-                    </span>
-                    <?php if ($showPrecioComparacion): ?>
-                        <p class="grey-text text-darken-1" style="font-size: 0.95rem; margin: 8px 0 0;">
-                            Precio de lista:
-                            <span style="text-decoration: line-through;">$<?php echo number_format($precioComparacion, 2); ?></span>
-                        </p>
-                    <?php endif; ?>
-                    <p class="blue-text text-darken-4" style="font-size: 1.3rem; margin: 10px 0;">
-                        <?php if ((int)($p['total_variantes'] ?? 0) > 1): ?>Desde <?php endif; ?>
-                        $<?php echo number_format($precioActual, 2); ?>
-                        <?php if ((int)($p['total_variantes'] ?? 0) > 1): ?>
-                            <span style="font-size: 0.8rem; display: block; color: #757575;">
-                                (<?php echo (int)$p['total_variantes']; ?> opciones)
-                            </span>
-                        <?php endif; ?>
-                    </p>
-                </div>
-                <div class="card-action center-align" style="border-top: 1px solid #eee;">
-                    <button class="btn blue darken-4 waves-effect waves-light"
-                            onclick="handleAddToCart(event, <?php echo (int)$p['id_producto']; ?>, '<?php echo addslashes(esc($p['nombre'])); ?>', <?php echo (float)($p['precio_venta'] ?? 0); ?>)">
-                        <i class="material-icons">add_shopping_cart</i>
-                    </button>
-                </div>
-            </div>
-        </a>
-    </div>
-    <?php
-    return (string)ob_get_clean();
 }
 
 $categoriaSeleccionada = $_GET['categoria'] ?? '';
@@ -480,6 +338,7 @@ include __DIR__ . '/includes/header.php';
 const searchInput = document.getElementById('search-input');
 const clearSearchBtn = document.getElementById('clear-search-btn');
 const searchForm = searchInput ? searchInput.closest('form') : null;
+const catalogApiUrl = '<?php echo BASE_URL; ?>api/catalog_products.php';
 const initialSearchQuery = normalizeFilterText(searchInput ? searchInput.value : '');
 let lastRequestedQuery = initialSearchQuery;
 let searchDebounceTimer = null;
@@ -513,8 +372,7 @@ function triggerServerSearch() {
 
     lastRequestedQuery = query;
 
-    const action = searchForm.getAttribute('action') || window.location.pathname;
-    const url = new URL(action, window.location.href);
+    const url = new URL(catalogApiUrl, window.location.href);
     const formData = new FormData(searchForm);
 
     formData.forEach((value, key) => {
@@ -526,7 +384,8 @@ function triggerServerSearch() {
 
     // Siempre reiniciamos al inicio en una nueva búsqueda.
     url.searchParams.set('page', '1');
-    url.searchParams.delete('ajax');
+    url.searchParams.set('items_per_page', String(getCatalogMeta().itemsPerPage || 9));
+    url.searchParams.set('source', 'search');
 
     if (activeSearchController) {
         activeSearchController.abort();
@@ -539,34 +398,24 @@ function triggerServerSearch() {
     const currentValue = searchInput.value;
 
     fetch(url.toString(), { signal: activeSearchController.signal })
-        .then(response => response.text())
-        .then(html => {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
+        .then(response => response.json())
+        .then(payload => {
+            if (!payload || !payload.success) {
+                throw new Error((payload && payload.message) ? payload.message : 'No se pudo cargar el catálogo');
+            }
 
             const currentProductsRow = document.querySelector('.row-products');
-            const newProductsRow = doc.querySelector('.row-products');
-            if (currentProductsRow && newProductsRow) {
-                currentProductsRow.innerHTML = newProductsRow.innerHTML;
+            if (currentProductsRow) {
+                currentProductsRow.innerHTML = payload.items_html || '';
             }
 
             const currentMeta = document.getElementById('catalog-meta');
-            const newMeta = doc.getElementById('catalog-meta');
-            if (currentMeta && newMeta) {
-                currentMeta.dataset.totalProducts = newMeta.dataset.totalProducts || '0';
-                currentMeta.dataset.itemsPerPage = newMeta.dataset.itemsPerPage || currentMeta.dataset.itemsPerPage || '9';
+            if (currentMeta && payload.meta) {
+                currentMeta.dataset.totalProducts = String(payload.meta.total_products || 0);
+                currentMeta.dataset.itemsPerPage = String(payload.meta.items_per_page || currentMeta.dataset.itemsPerPage || 9);
             }
 
-            const existingLoadMore = document.getElementById('load-more-container');
-            if (existingLoadMore) {
-                existingLoadMore.remove();
-            }
-
-            const newLoadMore = doc.getElementById('load-more-container');
-            const productsRow = document.querySelector('.row-products');
-            if (newLoadMore && productsRow && productsRow.parentNode) {
-                productsRow.parentNode.insertBefore(newLoadMore, productsRow.nextSibling);
-            }
+            updateLoadMoreVisibility(Boolean(payload.meta && payload.meta.has_more));
 
             currentPage = 1;
             bindLoadMoreHandler();
@@ -640,15 +489,32 @@ function handleLoadMoreClick() {
 
     currentPage++;
 
-    const url = new URL(window.location.href);
-    url.searchParams.set('page', currentPage);
-    url.searchParams.set('ajax', '1'); // Indicador para el servidor
+    const url = new URL(catalogApiUrl, window.location.href);
+    const pageToLoad = currentPage;
+    url.searchParams.set('page', String(pageToLoad));
+    url.searchParams.set('items_per_page', String(meta.itemsPerPage || 9));
+    url.searchParams.set('source', 'load_more');
+
+    const currentSearch = normalizeFilterText(searchInput ? searchInput.value : '');
+    if (currentSearch !== '') {
+        url.searchParams.set('search', currentSearch);
+    }
+
+    const categoriaInput = searchForm ? searchForm.querySelector('input[name="categoria"]') : null;
+    const currentCategoria = categoriaInput ? String(categoriaInput.value || '').trim() : '';
+    if (currentCategoria !== '') {
+        url.searchParams.set('categoria', currentCategoria);
+    }
 
     fetch(url)
-        .then(response => response.text())
-        .then(html => {
+        .then(response => response.json())
+        .then(payload => {
+            if (!payload || !payload.success) {
+                throw new Error((payload && payload.message) ? payload.message : 'No se pudieron cargar más productos');
+            }
+
             const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
+            const doc = parser.parseFromString(payload.items_html || '', 'text/html');
             const newProducts = doc.querySelectorAll('.product-card-container');
             
             const productsRow = document.querySelector('.row-products');
@@ -677,12 +543,11 @@ function handleLoadMoreClick() {
                 productsRow.appendChild(product);
             });
 
-            // Actualizar estado del botón
-            if ((currentPage * meta.itemsPerPage) >= meta.totalProducts) {
-                container.remove(); // Ocultar el contenedor del botón si no hay más
-            } else {
+            if (payload.meta && payload.meta.has_more) {
                 btn.style.display = 'block';
                 spinner.style.display = 'none';
+            } else {
+                container.remove();
             }
 
             // Actualizar URL en el navegador sin recargar
@@ -706,6 +571,41 @@ function bindLoadMoreHandler() {
     }
     btn.removeEventListener('click', handleLoadMoreClick);
     btn.addEventListener('click', handleLoadMoreClick);
+}
+
+function updateLoadMoreVisibility(hasMore) {
+    const existingLoadMore = document.getElementById('load-more-container');
+    const productsRow = document.querySelector('.row-products');
+
+    if (!hasMore) {
+        if (existingLoadMore) {
+            existingLoadMore.remove();
+        }
+        return;
+    }
+
+    if (existingLoadMore) {
+        return;
+    }
+
+    if (!productsRow || !productsRow.parentNode) {
+        return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'row';
+    wrapper.id = 'load-more-container';
+    wrapper.style.marginTop = '30px';
+    wrapper.innerHTML = `
+        <div class="col s12 center-align">
+            <button id="load-more-btn" type="button" data-no-track="1" class="btn-large blue darken-4 waves-effect waves-light" style="width: 100%;">
+                Cargar más productos
+            </button>
+            <div class="preloader-wrapper small" id="load-more-spinner" style="display: none; margin-top: 20px;">
+                <div class="spinner-layer spinner-blue-only"><div class="circle-clipper left"><div class="circle"></div></div><div class="gap-patch"><div class="circle"></div></div><div class="circle-clipper right"><div class="circle"></div></div></div>
+            </div>
+        </div>`;
+    productsRow.parentNode.insertBefore(wrapper, productsRow.nextSibling);
 }
 
 // Si el usuario usa los botones de atrás/adelante del navegador

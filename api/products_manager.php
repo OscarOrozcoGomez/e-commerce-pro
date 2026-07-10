@@ -140,12 +140,66 @@ try {
             $hasOrden = !empty($data['imagenes_orden_json']);
 
             if ($hasLocal || $hasRemote || $hasOrden) {
-                // Generar nombre de carpeta único para el producto
-                $folderName = slugify($data['nombre'] ?? 'producto') . '-' . $id;
+                // Reusar carpeta existente para evitar duplicados cuando cambia el nombre/slug.
+                $existingFolderName = '';
+                $baseDir = rtrim(dirname(__DIR__), '/\\') . '/assets/img/products/';
+                if ($id > 0) {
+                    $stmtFolder = $pdo->prepare(
+                        "SELECT ruta_archivo
+                         FROM producto_imagenes
+                         WHERE id_producto = ? AND ruta_archivo IS NOT NULL AND ruta_archivo <> ''
+                         ORDER BY orden ASC
+                         LIMIT 1"
+                    );
+                    $stmtFolder->execute([$id]);
+                    $firstPath = trim((string)$stmtFolder->fetchColumn());
+                    if ($firstPath !== '') {
+                        $normalizedPath = str_replace('\\\\', '/', $firstPath);
+                        $firstFolder = explode('/', ltrim($normalizedPath, '/'), 2)[0] ?? '';
+                        $firstFolder = trim($firstFolder);
+                        if ($firstFolder !== '' && $firstFolder !== '.' && $firstFolder !== '..') {
+                            $existingFolderName = $firstFolder;
+                        }
+                    }
+
+                    // Fallback: si DB no trae ruta, intentar detectar carpeta existente en disco por sufijo -ID.
+                    if ($existingFolderName === '') {
+                        $diskMatches = glob($baseDir . '*-' . $id, GLOB_ONLYDIR);
+                        if (is_array($diskMatches) && !empty($diskMatches)) {
+                            usort($diskMatches, static function (string $a, string $b): int {
+                                $countImages = static function (string $dir): int {
+                                    $files = glob(rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . '*.{webp,jpg,jpeg,png,gif,svg,avif}', GLOB_BRACE);
+                                    return is_array($files) ? count($files) : 0;
+                                };
+
+                                $aCount = $countImages($a);
+                                $bCount = $countImages($b);
+                                if ($aCount !== $bCount) {
+                                    return $bCount <=> $aCount;
+                                }
+
+                                $aBase = (string)basename($a);
+                                $bBase = (string)basename($b);
+                                $lenCmp = strlen($aBase) <=> strlen($bBase);
+                                if ($lenCmp !== 0) {
+                                    return $lenCmp;
+                                }
+
+                                return strcasecmp($aBase, $bBase);
+                            });
+
+                            $existingFolderName = (string)basename($diskMatches[0]);
+                        }
+                    }
+                }
+
+                // Solo si no hay historial, usar slug-id como carpeta nueva.
+                $folderName = $existingFolderName !== ''
+                    ? $existingFolderName
+                    : (slugify($data['nombre'] ?? 'producto') . '-' . $id);
                 
                 // FORZAR RUTA ABSOLUTA: Independiente de si PRODUCTS_IMG_DIR es relativo o absoluto
                 // Buscamos la carpeta assets desde la raíz del proyecto (un nivel arriba de api/)
-                $baseDir = rtrim(dirname(__DIR__), '/\\') . '/assets/img/products/';
                 $targetDir = $baseDir . $folderName . '/';
                 
                 if (!is_dir($targetDir)) {
@@ -213,7 +267,38 @@ try {
                     $orden = json_decode($data['imagenes_orden_json'], true);
                     foreach ($orden as $ref) {
                         if (strpos($ref, 'server:') === 0) {
-                            $finalPaths[] = substr($ref, 7);
+                            $rawServerPath = trim((string)substr($ref, 7));
+                            $rawServerPath = ltrim(str_replace('\\\\', '/', $rawServerPath), '/');
+                            if ($rawServerPath === '') {
+                                continue;
+                            }
+
+                            $segments = explode('/', $rawServerPath);
+                            if (count($segments) < 2) {
+                                continue;
+                            }
+
+                            $folderPart = trim((string)($segments[0] ?? ''));
+                            $filePart = trim((string)basename($rawServerPath));
+                            if ($folderPart === '' || $filePart === '') {
+                                continue;
+                            }
+
+                            // Solo aceptar rutas de la carpeta activa del producto.
+                            if ($folderPart !== $folderName) {
+                                // Compatibilidad: si coincide por nombre de archivo en la carpeta activa,
+                                // canonicalizamos a folderName/archivo y descartamos referencias cruzadas.
+                                $candidateInTarget = $targetDir . $filePart;
+                                if (is_file($candidateInTarget)) {
+                                    $finalPaths[] = $folderName . '/' . $filePart;
+                                }
+                                continue;
+                            }
+
+                            $canonicalServerPath = $folderName . '/' . $filePart;
+                            if (is_file($targetDir . $filePart)) {
+                                $finalPaths[] = $canonicalServerPath;
+                            }
                         } elseif (strpos($ref, 'local:') === 0) {
                             $idx = (int)substr($ref, 6);
                             if (isset($uploadedPaths[$idx])) $finalPaths[] = $uploadedPaths[$idx];
@@ -226,15 +311,57 @@ try {
                     $finalPaths = $uploadedPaths;
                 }
 
+                $finalPaths = array_values(array_unique(array_filter(array_map(static function ($path): string {
+                    return trim((string)$path);
+                }, $finalPaths), static function (string $path): bool {
+                    return $path !== '';
+                })));
+
                 // Limpiar galería actual
                 $pdo->prepare("DELETE FROM producto_imagenes WHERE id_producto = ?")->execute([$id]);
                 
                 if (!empty($finalPaths)) {
                     // Insertar todas en la galería (la primera será la principal por orden 0)
                     for ($i = 0; $i < count($finalPaths); $i++) {
-                        if ($i >= 6) break; // Límite de 6 imágenes
                         $pdo->prepare("INSERT INTO producto_imagenes (id_producto, ruta_archivo, orden) VALUES (?, ?, ?)")
                             ->execute([$id, $finalPaths[$i], $i]);
+                    }
+                }
+
+                // Sincronizar campo legacy productos.imagen con la primera imagen vigente.
+                $legacyMainImage = !empty($finalPaths) ? $finalPaths[0] : null;
+                $pdo->prepare("UPDATE productos SET imagen = ? WHERE id_producto = ?")
+                    ->execute([$legacyMainImage, $id]);
+
+                // Limpieza fisica: eliminar archivos no referenciados por la galeria final.
+                // Esto evita que el fallback por carpeta vuelva a mostrar imagenes ya eliminadas desde admin.
+                $keepFiles = [];
+                foreach ($finalPaths as $path) {
+                    $path = trim((string)$path);
+                    if ($path === '') {
+                        continue;
+                    }
+
+                    $normalized = str_replace('\\\\', '/', $path);
+                    $parts = explode('/', ltrim($normalized, '/'));
+                    if (count($parts) < 2) {
+                        continue;
+                    }
+
+                    $folderPart = trim((string)$parts[0]);
+                    $filePart = trim((string)($parts[count($parts) - 1] ?? ''));
+                    if ($folderPart === $folderName && $filePart !== '') {
+                        $keepFiles[$filePart] = true;
+                    }
+                }
+
+                $diskImages = glob($targetDir . '*.{webp,jpg,jpeg,png,gif,svg,avif}', GLOB_BRACE);
+                if (is_array($diskImages)) {
+                    foreach ($diskImages as $absPath) {
+                        $base = (string)basename($absPath);
+                        if (!isset($keepFiles[$base]) && is_file($absPath)) {
+                            @unlink($absPath);
+                        }
                     }
                 }
             }

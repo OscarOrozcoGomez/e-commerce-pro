@@ -113,22 +113,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmtCliente->execute([':id' => $userId]);
                 $clienteRow = $stmtCliente->fetch(PDO::FETCH_ASSOC);
 
+                $nombreCliente = function_exists('piiEncryptValue') ? piiEncryptValue($nombre) : $nombre;
+
                 if ($clienteRow) {
                     if ($hasAliasPerfil) {
                         $stmtUpd = $pdo->prepare('UPDATE clientes SET nombre = :nombre, email = :email, telefono = :telefono, alias_perfil = :alias WHERE id_usuario = :id');
                         $stmtUpd->execute([
-                            ':nombre' => $nombre,
+                            ':nombre' => $nombreCliente,
                             ':email' => $email,
-                            ':telefono' => $telefono === '' ? null : $telefono,
-                            ':alias' => $aliasPerfil === '' ? null : $aliasPerfil,
+                            ':telefono' => $telefono === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($telefono) : $telefono),
+                            ':alias' => $aliasPerfil === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($aliasPerfil) : $aliasPerfil),
                             ':id' => $userId,
                         ]);
                     } else {
                         $stmtUpd = $pdo->prepare('UPDATE clientes SET nombre = :nombre, email = :email, telefono = :telefono WHERE id_usuario = :id');
                         $stmtUpd->execute([
-                            ':nombre' => $nombre,
+                            ':nombre' => $nombreCliente,
                             ':email' => $email,
-                            ':telefono' => $telefono === '' ? null : $telefono,
+                            ':telefono' => $telefono === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($telefono) : $telefono),
                             ':id' => $userId,
                         ]);
                     }
@@ -136,18 +138,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($hasAliasPerfil) {
                         $stmtIns = $pdo->prepare('INSERT INTO clientes (nombre, email, telefono, id_usuario, alias_perfil) VALUES (:nombre, :email, :telefono, :id, :alias)');
                         $stmtIns->execute([
-                            ':nombre' => $nombre,
+                            ':nombre' => $nombreCliente,
                             ':email' => $email,
-                            ':telefono' => $telefono === '' ? null : $telefono,
+                            ':telefono' => $telefono === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($telefono) : $telefono),
                             ':id' => $userId,
-                            ':alias' => $aliasPerfil === '' ? null : $aliasPerfil,
+                            ':alias' => $aliasPerfil === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($aliasPerfil) : $aliasPerfil),
                         ]);
                     } else {
                         $stmtIns = $pdo->prepare('INSERT INTO clientes (nombre, email, telefono, id_usuario) VALUES (:nombre, :email, :telefono, :id)');
                         $stmtIns->execute([
-                            ':nombre' => $nombre,
+                            ':nombre' => $nombreCliente,
                             ':email' => $email,
-                            ':telefono' => $telefono === '' ? null : $telefono,
+                            ':telefono' => $telefono === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($telefono) : $telefono),
                             ':id' => $userId,
                         ]);
                     }
@@ -179,6 +181,13 @@ $perfil = $stmt->fetch(PDO::FETCH_ASSOC) ?: [
     'telefono' => '',
     'alias_perfil' => '',
 ];
+
+if (isset($perfil['telefono']) && is_string($perfil['telefono']) && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($perfil['telefono'])) {
+    $perfil['telefono'] = (string)piiDecryptValue($perfil['telefono']);
+}
+if (isset($perfil['alias_perfil']) && is_string($perfil['alias_perfil']) && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($perfil['alias_perfil'])) {
+    $perfil['alias_perfil'] = (string)piiDecryptValue($perfil['alias_perfil']);
+}
 
 $displayName = trim((string)($perfil['alias_perfil'] ?? '')) !== ''
     ? trim((string)$perfil['alias_perfil'])
