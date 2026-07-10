@@ -139,21 +139,53 @@ try {
                 $stmtCliente->execute([$clienteTelefono]);
                 $existingCliente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
 
+                if (!$existingCliente && function_exists('piiDecryptValue') && function_exists('piiIsEncryptedValue')) {
+                    $stmtAllClientes = $pdo->query("SELECT id_cliente, nombre, telefono FROM clientes ORDER BY id_cliente DESC");
+                    if ($stmtAllClientes !== false) {
+                        while (($rowCliente = $stmtAllClientes->fetch(PDO::FETCH_ASSOC)) !== false) {
+                            $telRow = preg_replace('/\D+/', '', (string)($rowCliente['telefono'] ?? '')) ?: '';
+                            if (piiIsEncryptedValue((string)($rowCliente['telefono'] ?? ''))) {
+                                $telDec = (string)piiDecryptValue((string)$rowCliente['telefono']);
+                                $telRow = preg_replace('/\D+/', '', $telDec) ?: '';
+                            }
+
+                            $telIn = preg_replace('/\D+/', '', $clienteTelefono) ?: '';
+                            if ($telRow !== '' && $telIn !== '' && substr($telRow, -10) === substr($telIn, -10)) {
+                                $existingCliente = [
+                                    'id_cliente' => $rowCliente['id_cliente'],
+                                    'nombre' => $rowCliente['nombre'],
+                                ];
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if ($existingCliente) {
                     $idCliente = (int)($existingCliente['id_cliente'] ?? 0);
 
+                    $existingNombre = trim((string)($existingCliente['nombre'] ?? ''));
+                    if (function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($existingNombre)) {
+                        $existingNombre = trim((string)piiDecryptValue($existingNombre));
+                    }
+
                     // Solo actualizar si llega nombre y el guardado esta vacio.
-                    if ($idCliente > 0 && $clienteNombre !== '' && trim((string)($existingCliente['nombre'] ?? '')) === '') {
+                    if ($idCliente > 0 && $clienteNombre !== '' && $existingNombre === '') {
+                        $nombreStore = function_exists('piiEncryptValue') ? piiEncryptValue($clienteNombre) : $clienteNombre;
                         $pdo->prepare("UPDATE clientes SET nombre = ? WHERE id_cliente = ?")
-                            ->execute([$clienteNombre, $idCliente]);
+                            ->execute([$nombreStore, $idCliente]);
                     }
                 }
             }
 
             if ($idCliente === null) {
                 $nombreFinal = $clienteNombre !== '' ? $clienteNombre : 'Cliente Mostrador';
+                $nombreStore = function_exists('piiEncryptValue') ? piiEncryptValue($nombreFinal) : $nombreFinal;
+                $telefonoStore = $clienteTelefono !== ''
+                    ? (function_exists('piiEncryptValue') ? piiEncryptValue($clienteTelefono) : $clienteTelefono)
+                    : null;
                 $stmtInsCliente = $pdo->prepare("INSERT INTO clientes (nombre, telefono, estado) VALUES (?, ?, 'activo')");
-                $stmtInsCliente->execute([$nombreFinal, $clienteTelefono !== '' ? $clienteTelefono : null]);
+                $stmtInsCliente->execute([$nombreStore, $telefonoStore]);
                 $idCliente = (int)$pdo->lastInsertId();
             }
         }

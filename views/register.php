@@ -104,11 +104,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([$nombre, $email, $hash]);
                     
                     $newUserId = $pdo->lastInsertId();
+
+                    $nombreCliente = function_exists('piiEncryptValue') ? piiEncryptValue($nombre) : $nombre;
+                    $telefonoCliente = $telefonoNormalizado === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($telefonoNormalizado) : $telefonoNormalizado);
                     
                     // Crear entrada en tabla clientes para este usuario
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, id_usuario) VALUES (?, ?, ?)");
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_usuario) VALUES (?, ?, ?, ?)");
-                    $stmtCli->execute([$nombre, $email, ($telefonoNormalizado === '' ? null : $telefonoNormalizado), $newUserId]);
+                    $stmtCli->execute([$nombreCliente, $email, $telefonoCliente, $newUserId]);
                     
                     $success = 'Cuenta creada con éxito. Ya puedes iniciar sesión.';
                 }

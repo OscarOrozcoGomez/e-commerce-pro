@@ -111,6 +111,11 @@ if (is_readable($gsmHelperPath)) {
     require_once $gsmHelperPath;
 }
 
+$piiCryptoPath = __DIR__ . '/pii_crypto.php';
+if (is_readable($piiCryptoPath)) {
+    require_once $piiCryptoPath;
+}
+
 function applySecretValue(string $key, string $value): void
 {
     $trimmedKey = trim($key);
@@ -218,6 +223,8 @@ function preloadSecretSources(): void
             'DB_USER' => ['DB_USER'],
             'DB_PASSWORD' => ['DB_PASSWORD'],
             'DB_CHARSET' => ['DB_CHARSET'],
+            'MIGRATIONS_DEPLOY_TOKEN' => ['MIGRATIONS_DEPLOY_TOKEN'],
+            'PII_ENCRYPTION_KEY' => ['PII_ENCRYPTION_KEY', 'CUSTOMER_PII_KEY'],
             'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
             'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
             'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
@@ -464,6 +471,9 @@ function getMySqli(): mysqli
  */
 function esc(string $value): string
 {
+    if (function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($value)) {
+        $value = (string)piiDecryptValue($value);
+    }
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 

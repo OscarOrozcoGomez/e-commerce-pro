@@ -25,8 +25,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $maps_link = trim($_POST['maps_link'] ?? '');
                 if (empty($alias) || empty($direccion)) throw new Exception("Campos obligatorios.");
 
+                $aliasStore = function_exists('piiEncryptValue') ? piiEncryptValue($alias) : $alias;
+                $direccionStore = function_exists('piiEncryptValue') ? piiEncryptValue($direccion) : $direccion;
+                $mapsStore = ($maps_link !== '' && function_exists('piiEncryptValue')) ? piiEncryptValue($maps_link) : $maps_link;
+
                 $pdo->prepare("INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link) VALUES (?, ?, ?, ?)")
-                    ->execute([$idCliente, $alias, $direccion, $maps_link]);
+                    ->execute([$idCliente, $aliasStore, $direccionStore, $mapsStore]);
                 $success = 'Dirección guardada.';
             } elseif ($accion === 'editar') {
                 $id_dir = (int)$_POST['id_direccion'];
@@ -35,8 +39,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $maps_link = trim($_POST['maps_link'] ?? '');
                 if (empty($alias) || empty($direccion)) throw new Exception("Campos obligatorios.");
 
+                $aliasStore = function_exists('piiEncryptValue') ? piiEncryptValue($alias) : $alias;
+                $direccionStore = function_exists('piiEncryptValue') ? piiEncryptValue($direccion) : $direccion;
+                $mapsStore = ($maps_link !== '' && function_exists('piiEncryptValue')) ? piiEncryptValue($maps_link) : $maps_link;
+
                 $pdo->prepare("UPDATE cliente_direcciones SET alias = ?, direccion = ?, maps_link = ? WHERE id_direccion = ? AND id_cliente = ?")
-                    ->execute([$alias, $direccion, $maps_link, $id_dir, $idCliente]);
+                    ->execute([$aliasStore, $direccionStore, $mapsStore, $id_dir, $idCliente]);
                 $success = 'Dirección actualizada correctamente.';
             } elseif ($accion === 'eliminar') {
                 $id_dir = (int)$_POST['id_direccion'];
@@ -58,6 +66,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 $stmt = $pdo->prepare("SELECT * FROM cliente_direcciones WHERE id_cliente = ? ORDER BY es_default DESC, fecha_creacion DESC");
 $stmt->execute([$idCliente]);
 $direcciones = $stmt->fetchAll();
+
+if (function_exists('piiDecryptValue') && function_exists('piiIsEncryptedValue')) {
+    foreach ($direcciones as &$d) {
+        foreach (['alias', 'direccion', 'maps_link'] as $k) {
+            if (isset($d[$k]) && is_string($d[$k]) && piiIsEncryptedValue($d[$k])) {
+                $raw = trim((string)$d[$k]);
+                $dec = trim((string)piiDecryptValue($raw));
+
+                // Si falla descifrado (por llave distinta), evitar mostrar ENCv1 en UI.
+                if ($dec === $raw) {
+                    if ($k === 'alias') {
+                        $dec = 'Direccion ' . (string)($d['id_direccion'] ?? '');
+                    } elseif ($k === 'maps_link') {
+                        $dec = '';
+                    } else {
+                        $dec = 'Direccion protegida';
+                    }
+                }
+
+                $d[$k] = $dec;
+            }
+        }
+    }
+    unset($d);
+}
 
 $prefillMode = isset($_GET['prefill']) && $_GET['prefill'] === '1';
 $prefillAlias = trim((string)($_GET['alias'] ?? ''));
@@ -100,7 +133,7 @@ include __DIR__ . '/includes/header.php';
                                     <span class="title"><strong><?php echo esc($d['alias']); ?></strong></span>
                                     <p><?php echo esc($d['direccion']); ?></p>
                                     <?php if($d['maps_link']): ?>
-                                        <a href="<?php echo $d['maps_link']; ?>" target="_blank" class="blue-text" style="font-size: 0.8rem;">
+                                        <a href="<?php echo esc($d['maps_link']); ?>" target="_blank" rel="noopener noreferrer" class="blue-text" style="font-size: 0.8rem;">
                                             <i class="material-icons tiny">map</i> Ver en Google Maps
                                         </a>
                                     <?php endif; ?>
