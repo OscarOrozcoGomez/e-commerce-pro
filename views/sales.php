@@ -62,8 +62,9 @@ try {
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
 
     $direccionExpr = $hasClienteDireccionesTable
-        ? ", COALESCE((SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1), '') AS direccion"
-        : ", '' AS direccion";
+        ? ", COALESCE((SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1), '') AS direccion,
+           COALESCE((SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1), '') AS maps_link"
+        : ", '' AS direccion, '' AS maps_link";
 
     $sql = "SELECT c.id_cliente, c.nombre, COALESCE(c.telefono, '') AS telefono {$direccionExpr}
             FROM clientes c
@@ -75,7 +76,7 @@ try {
     $clientesActivos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($clientesActivos as &$cliente) {
-        foreach (['nombre', 'telefono', 'direccion'] as $campo) {
+        foreach (['nombre', 'telefono', 'direccion', 'maps_link'] as $campo) {
             $valor = (string)($cliente[$campo] ?? '');
             if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
                 $cliente[$campo] = (string)piiDecryptValue($valor);
@@ -154,11 +155,22 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="row">
-                            <div class="input-field col s12">
+                            <div class="input-field col s12 m8">
                                 <i class="material-icons prefix">place</i>
                                 <textarea class="materialize-textarea direccion_entrega" name="direccion_entrega" required placeholder="Calle, número, colonia, referencias y cualquier dato útil para repartir"></textarea>
                                 <label class="active">Direccion exacta de entrega</label>
                                 <span class="helper-text">Se guardará en el pedido aunque el cliente ya exista.</span>
+                                <div class="delivery-map-link" style="display:none; margin-top:8px;">
+                                    <a href="#" target="_blank" rel="noopener noreferrer" class="btn-small blue darken-2 waves-effect waves-light delivery-map-link-anchor">
+                                        <i class="material-icons left">map</i><span class="delivery-map-link-text">Abrir ubicación</span>
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="input-field col s12 m4">
+                                <i class="material-icons prefix">map</i>
+                                <input type="url" class="maps_link_entrega" name="maps_link_entrega" placeholder="https://maps.google.com/..." autocomplete="off">
+                                <label class="active">Link de Google Maps</label>
+                                <span class="helper-text">Opcional. Si el cliente ya lo tiene guardado, aparecerá aquí.</span>
                             </div>
                         </div>
 
@@ -323,6 +335,7 @@ include __DIR__ . '/includes/header.php';
                 cliente_nombre: (context.querySelector('.cliente_nombre')?.value || '').trim(),
                 cliente_telefono: (context.querySelector('.cliente_telefono')?.value || '').trim(),
                 direccion_entrega: (context.querySelector('.direccion_entrega')?.value || '').trim(),
+                maps_link_entrega: (context.querySelector('.maps_link_entrega')?.value || '').trim(),
                 id_metodo_pago: String(context.querySelector('select[name="id_metodo_pago"]')?.value || ''),
                 observaciones: (context.querySelector('.observaciones')?.value || '').trim(),
                 productos,
@@ -404,6 +417,7 @@ include __DIR__ . '/includes/header.php';
         const clienteNombreInput = context.querySelector('.cliente_nombre');
         const clienteTelefonoInput = context.querySelector('.cliente_telefono');
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
+        const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
         const statusNode = context.querySelector('.selected-client-status');
 
         if (clienteIdInput) clienteIdInput.value = String(cliente.id_cliente || '');
@@ -415,7 +429,13 @@ include __DIR__ . '/includes/header.php';
         if (direccionEntregaInput && overrideFields && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
             direccionEntregaInput.value = String(cliente.direccion || '');
         }
+        if (mapsLinkEntregaInput && overrideFields && (!mapsLinkEntregaInput.value || mapsLinkEntregaInput.value.trim() === '')) {
+            mapsLinkEntregaInput.value = String(cliente.maps_link || '');
+        }
+        context.dataset.customerMapsLink = String(cliente.maps_link || '');
+        context.dataset.customerAddress = String(cliente.direccion || '');
         if (statusNode) statusNode.textContent = cliente.id_cliente ? `Cliente existente seleccionado: #${cliente.id_cliente}` : '';
+        updateDeliveryMapLink(context);
     }
 
     function clearSelectedCustomer(context, wipeFields = false) {
@@ -424,6 +444,7 @@ include __DIR__ . '/includes/header.php';
         const clienteNombreInput = context.querySelector('.cliente_nombre');
         const clienteTelefonoInput = context.querySelector('.cliente_telefono');
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
+        const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
         const statusNode = context.querySelector('.selected-client-status');
 
         if (clienteIdInput) clienteIdInput.value = '';
@@ -433,7 +454,50 @@ include __DIR__ . '/includes/header.php';
         }
         if (clienteTelefonoInput && wipeFields) clienteTelefonoInput.value = '';
         if (direccionEntregaInput && wipeFields) direccionEntregaInput.value = '';
+        if (mapsLinkEntregaInput && wipeFields) mapsLinkEntregaInput.value = '';
+        context.dataset.customerMapsLink = '';
+        context.dataset.customerAddress = '';
         if (statusNode) statusNode.textContent = 'Nuevo cliente: captura sus datos para darlo de alta.';
+        updateDeliveryMapLink(context);
+    }
+
+    function updateDeliveryMapLink(context) {
+        if (!context) return;
+
+        const wrapper = context.querySelector('.delivery-map-link');
+        const anchor = context.querySelector('.delivery-map-link-anchor');
+        const text = context.querySelector('.delivery-map-link-text');
+        const direccionActual = String(context.querySelector('.direccion_entrega')?.value || '').trim();
+        const manualMapsLink = String(context.querySelector('.maps_link_entrega')?.value || '').trim();
+        const savedMapsLink = String(context.dataset.customerMapsLink || '').trim();
+        const savedAddress = String(context.dataset.customerAddress || '').trim();
+
+        if (!wrapper || !anchor || !text) return;
+
+        let href = '';
+        let label = 'Abrir ubicación';
+
+        if (manualMapsLink !== '') {
+            href = manualMapsLink;
+            label = 'Abrir link capturado';
+        } else if (savedMapsLink !== '' && (direccionActual === '' || savedAddress === '' || direccionActual === savedAddress)) {
+            href = savedMapsLink;
+            label = 'Abrir ubicación guardada';
+        } else if (direccionActual !== '') {
+            href = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(direccionActual);
+            label = savedMapsLink !== '' ? 'Abrir ruta con dirección actual' : 'Abrir dirección en Google Maps';
+        }
+
+        if (href === '') {
+            wrapper.style.display = 'none';
+            anchor.setAttribute('href', '#');
+            text.textContent = 'Abrir ubicación';
+            return;
+        }
+
+        anchor.setAttribute('href', href);
+        text.textContent = label;
+        wrapper.style.display = 'block';
     }
 
     const prevenirCierre = (e) => {
@@ -463,10 +527,11 @@ include __DIR__ . '/includes/header.php';
             const nombre = String(c.nombre || '').trim();
             const telefono = String(c.telefono || '').trim();
             const direccion = String(c.direccion || '').trim();
+            const mapsLink = String(c.maps_link || '').trim();
             if (nombre === '') return;
             const label = telefono !== '' ? `${nombre} (${telefono})` : nombre;
             customerAutocompleteData[label] = null;
-            customerMap[label.toLowerCase()] = { id_cliente: idCliente, nombre, telefono, direccion, label };
+            customerMap[label.toLowerCase()] = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, label };
         });
 
         M.FormSelect.init(document.querySelectorAll('select'));
@@ -530,6 +595,10 @@ include __DIR__ . '/includes/header.php';
         const clienteIdInput = context.querySelector('.cliente_id');
         const clienteTelefonoInput = context.querySelector('.cliente_telefono');
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
+        const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
+
+        direccionEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
+        mapsLinkEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
 
         if (clienteNombreInput) {
             M.Autocomplete.init(clienteNombreInput, {
@@ -601,6 +670,7 @@ include __DIR__ . '/includes/header.php';
             if (clienteNombreInput) clienteNombreInput.value = String(draftTab.cliente_nombre || '');
             if (clienteTelefonoInput) clienteTelefonoInput.value = String(draftTab.cliente_telefono || '');
             if (direccionEntregaInput) direccionEntregaInput.value = String(draftTab.direccion_entrega || '');
+            if (mapsLinkEntregaInput) mapsLinkEntregaInput.value = String(draftTab.maps_link_entrega || '');
 
             const observacionesInput = context.querySelector('.observaciones');
             if (observacionesInput) observacionesInput.value = String(draftTab.observaciones || '');
@@ -639,6 +709,7 @@ include __DIR__ . '/includes/header.php';
                         nombre: String(selected.nombre || ''),
                         telefono: String(selected.telefono || ''),
                         direccion: String(selected.direccion || ''),
+                        maps_link: String(selected.maps_link || ''),
                     }, false);
                 }
             }
@@ -647,6 +718,8 @@ include __DIR__ . '/includes/header.php';
             actualizarTotal(id);
             actualizarTituloTab(id, clienteNombreInput ? clienteNombreInput.value : '');
         }
+
+        updateDeliveryMapLink(context);
 
         if (tabsInstance) tabsInstance.select(`venta-${id}`);
         setTimeout(() => buscador.focus(), 200);

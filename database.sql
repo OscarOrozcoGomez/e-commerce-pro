@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS `pedidos` (
   `total` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `direccion_entrega` TEXT DEFAULT NULL,
   `telefono_entrega` VARCHAR(30) DEFAULT NULL,
+  `maps_link_entrega` TEXT DEFAULT NULL,
   `observaciones` TEXT DEFAULT NULL,
   `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `fecha_pago` DATETIME DEFAULT NULL,

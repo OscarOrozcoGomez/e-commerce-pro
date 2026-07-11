@@ -55,6 +55,7 @@ try {
     $hasClienteDireccionesTable = false;
     $hasPedidosDireccionEntrega = false;
     $hasPedidosTelefonoEntrega = false;
+    $hasPedidosMapsLinkEntrega = false;
 
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'direccion'");
     $stmtMeta->execute();
@@ -76,6 +77,10 @@ try {
     $stmtMeta->execute();
     $hasPedidosTelefonoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
 
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'maps_link_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosMapsLinkEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
     if ($hasPedidosDireccionEntrega) {
         $fallbackDireccion = $hasClientesDireccion && $hasClienteDireccionesTable
             ? "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1))"
@@ -95,7 +100,16 @@ try {
         $direccionExpr = "NULL AS direccion";
     }
 
-    if ($hasClientesUbicacionMapa && $hasClienteDireccionesTable) {
+    if ($hasPedidosMapsLinkEntrega) {
+        $fallbackMap = $hasClientesUbicacionMapa && $hasClienteDireccionesTable
+            ? "COALESCE(c.ubicacion_mapa, (SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1))"
+            : ($hasClientesUbicacionMapa
+                ? 'c.ubicacion_mapa'
+                : ($hasClienteDireccionesTable
+                    ? "(SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)"
+                    : 'NULL'));
+        $mapExpr = "COALESCE(NULLIF(TRIM(p.maps_link_entrega), ''), {$fallbackMap}) AS ubicacion_mapa";
+    } elseif ($hasClientesUbicacionMapa && $hasClienteDireccionesTable) {
         $mapExpr = "COALESCE(c.ubicacion_mapa, (SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS ubicacion_mapa";
     } elseif ($hasClientesUbicacionMapa) {
         $mapExpr = "c.ubicacion_mapa AS ubicacion_mapa";

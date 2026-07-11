@@ -79,6 +79,7 @@ try {
     $clienteTelefonoRaw = trim((string)($_POST['cliente_telefono'] ?? ''));
     $clienteTelefono = $normalizeCounterPhone($clienteTelefonoRaw);
     $direccionEntrega = trim((string)($_POST['direccion_entrega'] ?? ''));
+    $mapsLinkEntrega = trim((string)($_POST['maps_link_entrega'] ?? ''));
     $observaciones = trim((string)($_POST['observaciones'] ?? ''));
 
     if ($clienteTelefono === null) {
@@ -100,6 +101,7 @@ try {
     $hasPedidosTipoEntrega = $columnExists($pdo, 'pedidos', 'tipo_entrega');
     $hasPedidosDireccionEntrega = $columnExists($pdo, 'pedidos', 'direccion_entrega');
     $hasPedidosTelefonoEntrega = $columnExists($pdo, 'pedidos', 'telefono_entrega');
+    $hasPedidosMapsLinkEntrega = $columnExists($pdo, 'pedidos', 'maps_link_entrega');
     $hasClienteDireccionesTable = $tableExists($pdo, 'cliente_direcciones');
 
     $productos = [];
@@ -201,8 +203,8 @@ try {
             $idCliente = (int)$pdo->lastInsertId();
 
             if ($hasClienteDireccionesTable) {
-                $stmtDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, es_default) VALUES (?, ?, ?, 1)');
-                $stmtDir->execute([$idCliente, $storeValue('Direccion 1'), $storeValue($direccionEntrega)]);
+                $stmtDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default) VALUES (?, ?, ?, ?, 1)');
+                $stmtDir->execute([$idCliente, $storeValue('Direccion 1'), $storeValue($direccionEntrega), $storeValue($mapsLinkEntrega)]);
             }
         }
 
@@ -215,6 +217,9 @@ try {
         ];
         if ($observaciones !== '') {
             $observacionesChunks[] = 'Notas: ' . $observaciones;
+        }
+        if ($mapsLinkEntrega !== '') {
+            $observacionesChunks[] = 'Maps: ' . $mapsLinkEntrega;
         }
 
         $pedidoColumns = [
@@ -268,6 +273,11 @@ try {
             $pedidoColumns[] = 'telefono_entrega';
             $pedidoPlaceholders[] = ':telefono_entrega';
             $pedidoParams[':telefono_entrega'] = $clienteTelefonoFinal;
+        }
+        if ($hasPedidosMapsLinkEntrega) {
+            $pedidoColumns[] = 'maps_link_entrega';
+            $pedidoPlaceholders[] = ':maps_link_entrega';
+            $pedidoParams[':maps_link_entrega'] = $mapsLinkEntrega !== '' ? $mapsLinkEntrega : null;
         }
 
         $sqlPedido = sprintf(
