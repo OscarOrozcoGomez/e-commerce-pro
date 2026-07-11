@@ -75,6 +75,7 @@ try {
     $idMetodoPago = intval($_POST['id_metodo_pago'] ?? 0);
     $idMetodoPago = $idMetodoPago > 0 ? $idMetodoPago : null;
     $idClienteSeleccionado = intval($_POST['id_cliente'] ?? 0);
+    $customerAddressSelection = trim((string)($_POST['customer_address_id'] ?? ''));
     $clienteNombre = trim((string)($_POST['cliente_nombre'] ?? ''));
     $clienteTelefonoRaw = trim((string)($_POST['cliente_telefono'] ?? ''));
     $clienteTelefono = $normalizeCounterPhone($clienteTelefonoRaw);
@@ -86,16 +87,12 @@ try {
         throw new Exception('Si capturas teléfono, debe tener 10 dígitos.');
     }
 
-    if ($idClienteSeleccionado <= 0 && $clienteNombre === '') {
-        throw new Exception('Debes seleccionar un cliente existente o capturar uno nuevo.');
+    if ($idClienteSeleccionado <= 0) {
+        throw new Exception('Debes seleccionar un cliente existente.');
     }
 
     if ($clienteTelefono === '') {
         throw new Exception('Debes capturar el teléfono de entrega.');
-    }
-
-    if ($direccionEntrega === '') {
-        throw new Exception('Debes capturar la dirección exacta de entrega.');
     }
 
     $hasPedidosTipoEntrega = $columnExists($pdo, 'pedidos', 'tipo_entrega');
@@ -103,6 +100,10 @@ try {
     $hasPedidosTelefonoEntrega = $columnExists($pdo, 'pedidos', 'telefono_entrega');
     $hasPedidosMapsLinkEntrega = $columnExists($pdo, 'pedidos', 'maps_link_entrega');
     $hasClienteDireccionesTable = $tableExists($pdo, 'cliente_direcciones');
+
+    if ($hasClienteDireccionesTable && !ctype_digit($customerAddressSelection)) {
+        throw new Exception('Debes seleccionar una direccion guardada del cliente.');
+    }
 
     $productos = [];
     $subtotal = 0.0;
@@ -162,50 +163,46 @@ try {
         $idCliente = null;
         $clienteNombreFinal = $clienteNombre;
         $clienteTelefonoFinal = $clienteTelefono;
+        $selectedAddressId = ctype_digit($customerAddressSelection) ? (int)$customerAddressSelection : 0;
 
-        if ($idClienteSeleccionado > 0) {
-            $stmtCliente = $pdo->prepare('SELECT id_cliente, nombre, telefono FROM clientes WHERE id_cliente = ? LIMIT 1');
-            $stmtCliente->execute([$idClienteSeleccionado]);
-            $clienteExistente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
-            if (!$clienteExistente) {
-                throw new Exception('El cliente seleccionado no existe.');
+        $stmtCliente = $pdo->prepare('SELECT id_cliente, nombre, telefono FROM clientes WHERE id_cliente = ? LIMIT 1');
+        $stmtCliente->execute([$idClienteSeleccionado]);
+        $clienteExistente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
+        if (!$clienteExistente) {
+            throw new Exception('El cliente seleccionado no existe.');
+        }
+
+        $idCliente = (int)$clienteExistente['id_cliente'];
+        $nombreActual = $decryptValue((string)($clienteExistente['nombre'] ?? ''));
+        $telefonoActual = $decryptValue((string)($clienteExistente['telefono'] ?? ''));
+        $clienteNombreFinal = $nombreActual;
+        $clienteTelefonoFinal = $telefonoActual;
+
+        if ($clienteNombreFinal === '') {
+            throw new Exception('El cliente seleccionado no tiene nombre valido.');
+        }
+        if ($clienteTelefonoFinal === '') {
+            throw new Exception('El cliente seleccionado no tiene telefono. Actualizalo desde Administrar Clientes.');
+        }
+
+        if ($hasClienteDireccionesTable) {
+            if ($selectedAddressId <= 0) {
+                throw new Exception('Debes seleccionar una direccion guardada del cliente.');
             }
 
-            $idCliente = (int)$clienteExistente['id_cliente'];
-            $nombreActual = $decryptValue((string)($clienteExistente['nombre'] ?? ''));
-            $telefonoActual = $decryptValue((string)($clienteExistente['telefono'] ?? ''));
-            $clienteNombreFinal = $clienteNombre !== '' ? $clienteNombre : $nombreActual;
-            $clienteTelefonoFinal = $clienteTelefono !== '' ? $clienteTelefono : $telefonoActual;
-
-            if ($clienteNombreFinal === '') {
-                throw new Exception('El cliente seleccionado no tiene nombre válido.');
-            }
-            if ($clienteTelefonoFinal === '') {
-                throw new Exception('El cliente seleccionado no tiene teléfono; captúralo para continuar.');
+            $stmtDirValidacion = $pdo->prepare('SELECT direccion, maps_link FROM cliente_direcciones WHERE id_direccion = ? AND id_cliente = ? LIMIT 1');
+            $stmtDirValidacion->execute([$selectedAddressId, $idCliente]);
+            $direccionSeleccionada = $stmtDirValidacion->fetch(PDO::FETCH_ASSOC) ?: null;
+            if (!$direccionSeleccionada) {
+                throw new Exception('La direccion seleccionada no pertenece al cliente.');
             }
 
-            if ($nombreActual === '' && $clienteNombre !== '') {
-                $pdo->prepare('UPDATE clientes SET nombre = ? WHERE id_cliente = ?')
-                    ->execute([$storeValue($clienteNombre), $idCliente]);
-            }
+            $direccionEntrega = $decryptValue((string)($direccionSeleccionada['direccion'] ?? ''));
+            $mapsLinkEntrega = $decryptValue((string)($direccionSeleccionada['maps_link'] ?? ''));
+        }
 
-            if ($telefonoActual === '' && $clienteTelefono !== '') {
-                $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?')
-                    ->execute([$storeValue($clienteTelefono), $idCliente]);
-            }
-        } else {
-            if ($clienteNombre === '' || $clienteTelefono === '') {
-                throw new Exception('Para dar de alta un cliente nuevo debes capturar nombre y teléfono.');
-            }
-
-            $stmtInsCliente = $pdo->prepare("INSERT INTO clientes (nombre, telefono, estado) VALUES (?, ?, 'activo')");
-            $stmtInsCliente->execute([$storeValue($clienteNombre), $storeValue($clienteTelefono)]);
-            $idCliente = (int)$pdo->lastInsertId();
-
-            if ($hasClienteDireccionesTable) {
-                $stmtDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default) VALUES (?, ?, ?, ?, 1)');
-                $stmtDir->execute([$idCliente, $storeValue('Direccion 1'), $storeValue($direccionEntrega), $storeValue($mapsLinkEntrega)]);
-            }
+        if ($direccionEntrega === '') {
+            throw new Exception('La direccion guardada del cliente no es valida.');
         }
 
         $numeroPedido = 'DOM-' . date('YmdHis') . '-' . substr(uniqid(), -4);

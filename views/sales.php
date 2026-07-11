@@ -61,12 +61,7 @@ try {
     $stmtMeta->execute();
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
 
-    $direccionExpr = $hasClienteDireccionesTable
-        ? ", COALESCE((SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1), '') AS direccion,
-           COALESCE((SELECT cd.maps_link FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1), '') AS maps_link"
-        : ", '' AS direccion, '' AS maps_link";
-
-    $sql = "SELECT c.id_cliente, c.nombre, COALESCE(c.telefono, '') AS telefono {$direccionExpr}
+    $sql = "SELECT c.id_cliente, c.nombre, COALESCE(c.telefono, '') AS telefono
             FROM clientes c
             WHERE c.estado = 'activo'
             ORDER BY c.nombre ASC
@@ -76,7 +71,10 @@ try {
     $clientesActivos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($clientesActivos as &$cliente) {
-        foreach (['nombre', 'telefono', 'direccion', 'maps_link'] as $campo) {
+        $cliente['direccion'] = '';
+        $cliente['maps_link'] = '';
+        $cliente['direcciones'] = [];
+        foreach (['nombre', 'telefono'] as $campo) {
             $valor = (string)($cliente[$campo] ?? '');
             if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
                 $cliente[$campo] = (string)piiDecryptValue($valor);
@@ -84,6 +82,55 @@ try {
         }
     }
     unset($cliente);
+
+    if ($hasClienteDireccionesTable && !empty($clientesActivos)) {
+        $idsCliente = array_values(array_filter(array_map(static function (array $cliente): int {
+            return (int)($cliente['id_cliente'] ?? 0);
+        }, $clientesActivos), static function (int $idCliente): bool {
+            return $idCliente > 0;
+        }));
+
+        if (!empty($idsCliente)) {
+            $placeholders = implode(', ', array_fill(0, count($idsCliente), '?'));
+            $stmtDir = $pdo->prepare("SELECT id_direccion, id_cliente, alias, direccion, maps_link, es_default FROM cliente_direcciones WHERE id_cliente IN ({$placeholders}) ORDER BY id_cliente ASC, es_default DESC, id_direccion ASC");
+            $stmtDir->execute($idsCliente);
+            $direccionesRaw = $stmtDir->fetchAll(PDO::FETCH_ASSOC);
+
+            $direccionesPorCliente = [];
+            foreach ($direccionesRaw as $direccion) {
+                foreach (['alias', 'direccion', 'maps_link'] as $campo) {
+                    $valor = (string)($direccion[$campo] ?? '');
+                    if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
+                        $direccion[$campo] = (string)piiDecryptValue($valor);
+                    }
+                }
+
+                $idClienteDireccion = (int)($direccion['id_cliente'] ?? 0);
+                if ($idClienteDireccion <= 0) {
+                    continue;
+                }
+
+                $direccionesPorCliente[$idClienteDireccion][] = [
+                    'id_direccion' => (int)($direccion['id_direccion'] ?? 0),
+                    'alias' => (string)($direccion['alias'] ?? ''),
+                    'direccion' => (string)($direccion['direccion'] ?? ''),
+                    'maps_link' => (string)($direccion['maps_link'] ?? ''),
+                    'es_default' => ((int)($direccion['es_default'] ?? 0)) === 1,
+                ];
+            }
+
+            foreach ($clientesActivos as &$cliente) {
+                $idCliente = (int)($cliente['id_cliente'] ?? 0);
+                $direccionesCliente = $direccionesPorCliente[$idCliente] ?? [];
+                $cliente['direcciones'] = $direccionesCliente;
+                if (!empty($direccionesCliente)) {
+                    $cliente['direccion'] = (string)($direccionesCliente[0]['direccion'] ?? '');
+                    $cliente['maps_link'] = (string)($direccionesCliente[0]['maps_link'] ?? '');
+                }
+            }
+            unset($cliente);
+        }
+    }
 } catch (PDOException $e) {
     $clientesActivos = [];
 }
@@ -141,25 +188,35 @@ include __DIR__ . '/includes/header.php';
                             <div class="input-field col s12 m7">
                                 <i class="material-icons prefix">person_outline</i>
                                 <input type="hidden" class="cliente_id" name="id_cliente" value="">
-                                <input type="text" class="cliente_nombre" name="cliente_nombre" placeholder="Busca un cliente existente o escribe uno nuevo" oninput="actualizarTituloTab('{{id}}', this.value)" autocomplete="off">
+                                <input type="text" class="cliente_nombre" name="cliente_nombre" placeholder="Busca un cliente existente" oninput="actualizarTituloTab('{{id}}', this.value)" autocomplete="off">
                                 <label class="active">Cliente</label>
-                                <span class="helper-text">Selecciona un cliente existente o captura uno nuevo para darlo de alta.</span>
+                                <span class="helper-text">Selecciona un cliente existente. Si no existe, registralo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.</span>
                                 <div class="selected-client-status grey-text text-darken-1" style="font-size:0.85rem; margin-top:4px;"></div>
                             </div>
                             <div class="input-field col s12 m5">
                                 <i class="material-icons prefix">phone</i>
-                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national" required>
+                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Telefono del cliente seleccionado" maxlength="19" inputmode="numeric" autocomplete="tel-national" required readonly>
                                 <label class="active">Telefono</label>
                                 <span class="helper-text">Obligatorio para la entrega a domicilio.</span>
                             </div>
                         </div>
 
                         <div class="row">
+                            <div class="col s12 customer-address-block" style="display:none; margin-bottom: 10px;">
+                                <label style="display:block; margin-bottom:8px; font-weight:600; color:#37474f;">Domicilios guardados del cliente</label>
+                                <select class="browser-default customer-address-select" name="customer_address_id" style="border: 1px solid #cfd8dc; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
+                                    <option value="">-- Selecciona un domicilio --</option>
+                                </select>
+                                <span class="helper-text">Usa el alias para identificar Casa, Trabajo, Mama u otras direcciones guardadas.</span>
+                            </div>
+                        </div>
+
+                        <div class="row">
                             <div class="input-field col s12 m8">
                                 <i class="material-icons prefix">place</i>
-                                <textarea class="materialize-textarea direccion_entrega" name="direccion_entrega" required placeholder="Calle, número, colonia, referencias y cualquier dato útil para repartir"></textarea>
+                                <textarea class="materialize-textarea direccion_entrega" name="direccion_entrega" required placeholder="Se llena al elegir un domicilio guardado" readonly></textarea>
                                 <label class="active">Direccion exacta de entrega</label>
-                                <span class="helper-text">Se guardará en el pedido aunque el cliente ya exista.</span>
+                                <span class="helper-text">Se toma de la direccion guardada del cliente y queda reflejada para el repartidor.</span>
                                 <div class="delivery-map-link" style="display:none; margin-top:8px;">
                                     <a href="#" target="_blank" rel="noopener noreferrer" class="btn-small blue darken-2 waves-effect waves-light delivery-map-link-anchor">
                                         <i class="material-icons left">map</i><span class="delivery-map-link-text">Abrir ubicación</span>
@@ -168,7 +225,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             <div class="input-field col s12 m4">
                                 <i class="material-icons prefix">map</i>
-                                <input type="url" class="maps_link_entrega" name="maps_link_entrega" placeholder="https://maps.google.com/..." autocomplete="off">
+                                <input type="url" class="maps_link_entrega" name="maps_link_entrega" placeholder="Link guardado del domicilio" autocomplete="off" readonly>
                                 <label class="active">Link de Google Maps</label>
                                 <span class="helper-text">Opcional. Si el cliente ya lo tiene guardado, aparecerá aquí.</span>
                             </div>
@@ -283,7 +340,7 @@ include __DIR__ . '/includes/header.php';
 <script>
     const productosDisponibles = <?php echo json_encode($productos, JSON_UNESCAPED_UNICODE); ?>;
     const clientesActivos = <?php echo json_encode($clientesActivos, JSON_UNESCAPED_UNICODE); ?>;
-    const SALES_TABS_STORAGE_KEY = 'sales_tabs_draft_v3';
+    const SALES_TABS_STORAGE_KEY = 'sales_tabs_draft_v4';
     let tabCount = 0;
     let productoIndex = 0;
     const productMap = {};
@@ -334,6 +391,7 @@ include __DIR__ . '/includes/header.php';
                 id_cliente: String(context.querySelector('.cliente_id')?.value || ''),
                 cliente_nombre: (context.querySelector('.cliente_nombre')?.value || '').trim(),
                 cliente_telefono: (context.querySelector('.cliente_telefono')?.value || '').trim(),
+                customer_address_id: String(context.querySelector('.customer-address-select')?.value || ''),
                 direccion_entrega: (context.querySelector('.direccion_entrega')?.value || '').trim(),
                 maps_link_entrega: (context.querySelector('.maps_link_entrega')?.value || '').trim(),
                 id_metodo_pago: String(context.querySelector('select[name="id_metodo_pago"]')?.value || ''),
@@ -346,7 +404,7 @@ include __DIR__ . '/includes/header.php';
         const activeHref = activeTab?.getAttribute('href') || '';
         const activeTabId = activeHref.startsWith('#venta-') ? activeHref.replace('#venta-', '') : null;
 
-        return { version: 3, saved_at: Date.now(), active_tab_id: activeTabId, tabs };
+        return { version: 4, saved_at: Date.now(), active_tab_id: activeTabId, tabs };
     }
 
     function saveSalesDraftNow() {
@@ -434,7 +492,9 @@ include __DIR__ . '/includes/header.php';
         }
         context.dataset.customerMapsLink = String(cliente.maps_link || '');
         context.dataset.customerAddress = String(cliente.direccion || '');
+        context.dataset.selectedCustomerId = String(cliente.id_cliente || '');
         if (statusNode) statusNode.textContent = cliente.id_cliente ? `Cliente existente seleccionado: #${cliente.id_cliente}` : '';
+        renderCustomerAddressOptions(context, cliente);
         updateDeliveryMapLink(context);
     }
 
@@ -457,8 +517,90 @@ include __DIR__ . '/includes/header.php';
         if (mapsLinkEntregaInput && wipeFields) mapsLinkEntregaInput.value = '';
         context.dataset.customerMapsLink = '';
         context.dataset.customerAddress = '';
-        if (statusNode) statusNode.textContent = 'Nuevo cliente: captura sus datos para darlo de alta.';
+        context.dataset.selectedCustomerId = '';
+        if (statusNode) statusNode.innerHTML = 'Busca un cliente existente. Si necesitas darlo de alta, hazlo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.';
+        renderCustomerAddressOptions(context, null);
         updateDeliveryMapLink(context);
+    }
+
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getCustomerSavedAddresses(cliente) {
+        if (!cliente || !Array.isArray(cliente.direcciones)) return [];
+        return cliente.direcciones.map((direccion) => ({
+            id_direccion: parseInt(direccion.id_direccion || 0, 10) || 0,
+            alias: String(direccion.alias || '').trim(),
+            direccion: String(direccion.direccion || '').trim(),
+            maps_link: String(direccion.maps_link || '').trim(),
+            es_default: !!direccion.es_default,
+        })).filter((direccion) => direccion.id_direccion > 0 && direccion.direccion !== '');
+    }
+
+    function renderCustomerAddressOptions(context, cliente, preferredValue = '') {
+        if (!context) return;
+        const block = context.querySelector('.customer-address-block');
+        const select = context.querySelector('.customer-address-select');
+        if (!block || !select) return;
+
+        const addresses = getCustomerSavedAddresses(cliente);
+        context.__customerAddresses = addresses;
+
+        if (!cliente || !cliente.id_cliente || addresses.length === 0) {
+            block.style.display = cliente && cliente.id_cliente ? 'block' : 'none';
+            select.innerHTML = '<option value="">-- Sin direcciones guardadas --</option>';
+            const direccionInput = context.querySelector('.direccion_entrega');
+            const mapsInput = context.querySelector('.maps_link_entrega');
+            if (direccionInput) direccionInput.value = '';
+            if (mapsInput) mapsInput.value = '';
+            context.dataset.addressMode = 'none';
+            const statusNode = context.querySelector('.selected-client-status');
+            if (statusNode && cliente && cliente.id_cliente) {
+                statusNode.innerHTML = `Cliente existente seleccionado: #${cliente.id_cliente}. Este cliente no tiene direcciones guardadas. Agregalas en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`;
+            }
+            updateDeliveryMapLink(context);
+            return;
+        }
+
+        const options = ['<option value="">-- Selecciona un domicilio --</option>'];
+        addresses.forEach((direccion) => {
+            const suffix = direccion.es_default ? ' (Predeterminada)' : '';
+            options.push(
+                `<option value="${direccion.id_direccion}">${escapeHtml(direccion.alias || `Direccion ${direccion.id_direccion}`)}${suffix}: ${escapeHtml(direccion.direccion)}</option>`
+            );
+        });
+        select.innerHTML = options.join('');
+        block.style.display = 'block';
+
+        if (preferredValue !== '') {
+            select.value = preferredValue;
+        }
+        if (!select.value) {
+            const selectedDefault = addresses.find((direccion) => direccion.es_default);
+            select.value = selectedDefault ? String(selectedDefault.id_direccion) : String(addresses[0].id_direccion || '');
+        }
+
+        const selectedAddress = addresses.find((direccion) => String(direccion.id_direccion) === String(select.value));
+        context.dataset.addressMode = selectedAddress ? 'saved' : 'none';
+        if (selectedAddress) {
+            const direccionInput = context.querySelector('.direccion_entrega');
+            const mapsInput = context.querySelector('.maps_link_entrega');
+            if (direccionInput) {
+                direccionInput.value = selectedAddress.direccion || '';
+                M.textareaAutoResize(direccionInput);
+            }
+            if (mapsInput) mapsInput.value = selectedAddress.maps_link || '';
+            context.dataset.customerMapsLink = String(selectedAddress.maps_link || '');
+            context.dataset.customerAddress = String(selectedAddress.direccion || '');
+        }
+        updateDeliveryMapLink(context);
+        M.updateTextFields();
     }
 
     function updateDeliveryMapLink(context) {
@@ -528,10 +670,11 @@ include __DIR__ . '/includes/header.php';
             const telefono = String(c.telefono || '').trim();
             const direccion = String(c.direccion || '').trim();
             const mapsLink = String(c.maps_link || '').trim();
+            const direcciones = Array.isArray(c.direcciones) ? c.direcciones : [];
             if (nombre === '') return;
             const label = telefono !== '' ? `${nombre} (${telefono})` : nombre;
             customerAutocompleteData[label] = null;
-            customerMap[label.toLowerCase()] = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, label };
+            customerMap[label.toLowerCase()] = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, direcciones, label };
         });
 
         M.FormSelect.init(document.querySelectorAll('select'));
@@ -594,11 +737,20 @@ include __DIR__ . '/includes/header.php';
         const clienteNombreInput = context.querySelector('.cliente_nombre');
         const clienteIdInput = context.querySelector('.cliente_id');
         const clienteTelefonoInput = context.querySelector('.cliente_telefono');
+        const customerAddressSelect = context.querySelector('.customer-address-select');
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
         const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
 
         direccionEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
         mapsLinkEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
+        customerAddressSelect?.addEventListener('change', () => {
+            const addresses = Array.isArray(context.__customerAddresses) ? context.__customerAddresses : [];
+            const selectedAddress = addresses.find((direccion) => String(direccion.id_direccion) === String(customerAddressSelect.value));
+            renderCustomerAddressOptions(context, customerMap[String(clienteNombreInput?.value || '').toLowerCase()] || null, String(customerAddressSelect.value || ''));
+            if (!selectedAddress) {
+                M.toast({ html: 'Selecciona una direccion valida del cliente.', classes: 'orange' });
+            }
+        });
 
         if (clienteNombreInput) {
             M.Autocomplete.init(clienteNombreInput, {
@@ -613,6 +765,7 @@ include __DIR__ . '/includes/header.php';
                     if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
                         direccionEntregaInput.value = cliente.direccion || '';
                     }
+                    renderCustomerAddressOptions(context, cliente);
                     actualizarTituloTab(id, cliente.nombre);
                     M.updateTextFields();
                 }
@@ -669,6 +822,7 @@ include __DIR__ . '/includes/header.php';
             if (clienteIdInput) clienteIdInput.value = String(draftTab.id_cliente || '');
             if (clienteNombreInput) clienteNombreInput.value = String(draftTab.cliente_nombre || '');
             if (clienteTelefonoInput) clienteTelefonoInput.value = String(draftTab.cliente_telefono || '');
+            if (customerAddressSelect) customerAddressSelect.value = String(draftTab.customer_address_id || '');
             if (direccionEntregaInput) direccionEntregaInput.value = String(draftTab.direccion_entrega || '');
             if (mapsLinkEntregaInput) mapsLinkEntregaInput.value = String(draftTab.maps_link_entrega || '');
 
@@ -710,7 +864,9 @@ include __DIR__ . '/includes/header.php';
                         telefono: String(selected.telefono || ''),
                         direccion: String(selected.direccion || ''),
                         maps_link: String(selected.maps_link || ''),
+                        direcciones: Array.isArray(selected.direcciones) ? selected.direcciones : [],
                     }, false);
+                    renderCustomerAddressOptions(context, selected, String(draftTab.customer_address_id || ''));
                 }
             }
 
@@ -944,20 +1100,24 @@ include __DIR__ . '/includes/header.php';
         }
 
         const clienteId = String(context.querySelector('.cliente_id')?.value || '').trim();
-        const nombreCliente = (context.querySelector('.cliente_nombre')?.value || '').trim();
         const telefonoCliente = (context.querySelector('.cliente_telefono')?.value || '').trim();
+        const customerAddressId = String(context.querySelector('.customer-address-select')?.value || '').trim();
         const direccionEntrega = (context.querySelector('.direccion_entrega')?.value || '').trim();
 
-        if (clienteId === '' && nombreCliente === '') {
-            M.toast({ html: 'Selecciona un cliente existente o captura un cliente nuevo.', classes: 'red darken-2' });
+        if (clienteId === '') {
+            M.toast({ html: 'Selecciona un cliente existente.', classes: 'red darken-2' });
             return;
         }
         if (telefonoCliente === '') {
-            M.toast({ html: 'Debes capturar el teléfono de entrega.', classes: 'red darken-2' });
+            M.toast({ html: 'El cliente seleccionado no tiene telefono. Actualizalo en Administrar Clientes.', classes: 'red darken-2' });
+            return;
+        }
+        if (!/^\d+$/.test(customerAddressId)) {
+            M.toast({ html: 'Selecciona una direccion guardada del cliente.', classes: 'red darken-2' });
             return;
         }
         if (direccionEntrega === '') {
-            M.toast({ html: 'Debes capturar la dirección exacta de entrega.', classes: 'red darken-2' });
+            M.toast({ html: 'La direccion seleccionada no es valida. Revisa el cliente en Administrar Clientes.', classes: 'red darken-2' });
             return;
         }
 
