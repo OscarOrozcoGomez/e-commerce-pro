@@ -343,6 +343,12 @@ include __DIR__ . '/includes/header.php';
         white-space: nowrap;
     }
 
+    .manage-customers-phone {
+        display: inline-block;
+        white-space: nowrap;
+        min-width: 132px;
+    }
+
     .manage-customers-badge-cell .badge,
     .manage-customers-badge-cell .new.badge {
         float: none !important;
@@ -352,6 +358,34 @@ include __DIR__ . '/includes/header.php';
     .manage-customers-name {
         display: inline-block;
         max-width: 220px;
+    }
+
+    .manage-customers-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-end;
+        margin-bottom: 18px;
+    }
+
+    .manage-customers-toolbar-item {
+        min-width: 180px;
+        flex: 1 1 180px;
+    }
+
+    .manage-customers-toolbar-item label {
+        display: block;
+        font-size: 0.9rem;
+        color: #546e7a;
+        margin-bottom: 6px;
+    }
+
+    .manage-customers-toolbar-item select {
+        width: 100%;
+    }
+
+    .manage-customers-col-hidden {
+        display: none;
     }
 </style>
 <div class="container">
@@ -380,21 +414,41 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="card">
-        <div class="card-content" style="padding-bottom: 10px;">
-            <span class="card-title" style="font-size: 1.2rem; margin-bottom: 10px;">Filtros rapidos</span>
-            <div class="row" style="margin-bottom: 0;">
-                <div class="col s12 m8 l9" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-                    <button type="button" class="btn-small blue waves-effect waves-light js-filter-btn" data-filter="todos">Todos</button>
-                    <button type="button" class="btn-small teal waves-effect waves-light js-filter-btn" data-filter="sitio_web">Sitio Web</button>
-                    <button type="button" class="btn-small indigo waves-effect waves-light js-filter-btn" data-filter="sucursal">Sucursal</button>
-                    <button type="button" class="btn-small green waves-effect waves-light js-filter-btn" data-filter="acceso_si">Con acceso</button>
-                    <button type="button" class="btn-small grey darken-1 waves-effect waves-light js-filter-btn" data-filter="acceso_no">Sin acceso</button>
-                    <button type="button" class="btn-small light-green darken-2 waves-effect waves-light js-filter-btn" data-filter="activo">Activos</button>
-                    <button type="button" class="btn-small orange darken-2 waves-effect waves-light js-filter-btn" data-filter="inactivo">Inactivos</button>
+        <div class="card-content">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+                <div>
+                    <span class="card-title" style="font-size: 1.2rem; margin-bottom: 4px;">Clientes registrados</span>
+                    <span class="grey-text text-darken-1">Mostrando <strong id="clientes-visibles"><?php echo count($clientes); ?></strong> de <strong id="clientes-total"><?php echo count($clientes); ?></strong> clientes.</span>
                 </div>
-                <div class="col s12 m4 l3">
-                    <label for="filtro-sucursal" class="active">Sucursal origen</label>
-                    <select id="filtro-sucursal" class="browser-default" style="margin-top: 4px;">
+            </div>
+            <div class="manage-customers-toolbar">
+                <div class="manage-customers-toolbar-item">
+                    <label for="filtro-origen">Origen</label>
+                    <select id="filtro-origen" class="browser-default">
+                        <option value="todos">Todos</option>
+                        <option value="sitio_web">Sitio Web</option>
+                        <option value="sucursal">Sucursal</option>
+                    </select>
+                </div>
+                <div class="manage-customers-toolbar-item">
+                    <label for="filtro-acceso">Acceso web</label>
+                    <select id="filtro-acceso" class="browser-default">
+                        <option value="todos">Todos</option>
+                        <option value="acceso_si">Con acceso</option>
+                        <option value="acceso_no">Sin acceso</option>
+                    </select>
+                </div>
+                <div class="manage-customers-toolbar-item">
+                    <label for="filtro-estado">Estado</label>
+                    <select id="filtro-estado" class="browser-default">
+                        <option value="todos">Todos</option>
+                        <option value="activo">Activos</option>
+                        <option value="inactivo">Inactivos</option>
+                    </select>
+                </div>
+                <div class="manage-customers-toolbar-item">
+                    <label for="filtro-sucursal">Sucursal origen</label>
+                    <select id="filtro-sucursal" class="browser-default">
                         <option value="__todas__">Todas</option>
                         <option value="__sin_sucursal__">Sin sucursal detectada</option>
                         <?php foreach ($sucursalesOrigen as $suc): ?>
@@ -402,27 +456,25 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
-            </div>
-            <div class="row" style="margin-top: 10px; margin-bottom: 0;">
-                <div class="col s12">
-                    <span class="grey-text text-darken-1">Mostrando <strong id="clientes-visibles"><?php echo count($clientes); ?></strong> de <strong id="clientes-total"><?php echo count($clientes); ?></strong> clientes.</span>
+                <div class="manage-customers-toolbar-item">
+                    <label for="filtro-columnas">Vista de columnas</label>
+                    <select id="filtro-columnas" class="browser-default">
+                        <option value="operativa">Operativa</option>
+                        <option value="compacta">Compacta</option>
+                        <option value="completa">Completa</option>
+                    </select>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-content">
             <table class="striped responsive-table manage-customers-table">
                 <thead>
                     <tr>
                         <th>Nombre</th>
                         <th>Telefono</th>
                         <th>Email</th>
-                        <th>Direcciones</th>
-                        <th>Origen</th>
-                        <th>Sucursal Origen</th>
-                        <th>Acceso Web</th>
+                        <th class="js-col-direcciones">Direcciones</th>
+                        <th class="js-col-origen">Origen</th>
+                        <th class="js-col-sucursal manage-customers-col-hidden">Sucursal Origen</th>
+                        <th class="js-col-acceso">Acceso Web</th>
                         <th>Estado</th>
                         <th class="center-align">Acciones</th>
                     </tr>
@@ -432,7 +484,9 @@ include __DIR__ . '/includes/header.php';
                     <?php
                         $origenRegistro = (string)($c['origen_registro'] ?? 'sucursal');
                         $sucursalOrigen = trim((string)($c['sucursal_origen'] ?? ''));
-                        $sucursalFiltro = $sucursalOrigen !== '' ? strtolower($sucursalOrigen) : '__sin_sucursal__';
+                        $sucursalFiltro = ($origenRegistro === 'sucursal' && $sucursalOrigen !== '')
+                            ? strtolower($sucursalOrigen)
+                            : '__sin_sucursal__';
                         $accesoWebFiltro = ((int)($c['tiene_acceso_web'] ?? 0) === 1) ? 'si' : 'no';
                         $estadoVisible = (string)($c['estado_visible'] ?? 'activo');
                         $direccionesCliente = $c['direcciones'] ?? [];
@@ -440,23 +494,23 @@ include __DIR__ . '/includes/header.php';
                     ?>
                     <tr data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                         <td><strong class="manage-customers-name"><?php echo esc((string)$c['nombre']); ?></strong></td>
-                        <td><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></td>
+                        <td><span class="manage-customers-phone"><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></span></td>
                         <td><?php echo esc((string)($c['email'] ?: 'N/A')); ?></td>
-                        <td class="manage-customers-badge-cell">
+                        <td class="manage-customers-badge-cell js-col-direcciones">
                             <?php if ($resumenDirecciones > 0): ?>
                                 <span class="badge blue white-text" style="float:none;"><?php echo $resumenDirecciones; ?></span>
                             <?php else: ?>
                                 <span class="grey-text text-darken-1">Sin direcciones</span>
                             <?php endif; ?>
                         </td>
-                        <td class="manage-customers-badge-cell">
+                        <td class="manage-customers-badge-cell js-col-origen">
                             <?php if ($origenRegistro === 'sitio_web'): ?>
                                 <span class="new badge teal" data-badge-caption="Sitio Web"></span>
                             <?php else: ?>
                                 <span class="new badge indigo" data-badge-caption="Sucursal"></span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td class="js-col-sucursal manage-customers-col-hidden">
                             <?php if ($origenRegistro === 'sitio_web'): ?>
                                 <span class="grey-text text-darken-1">N/A</span>
                             <?php elseif ($sucursalOrigen !== ''): ?>
@@ -465,7 +519,7 @@ include __DIR__ . '/includes/header.php';
                                 <span class="grey-text text-darken-1">Sin sucursal detectada</span>
                             <?php endif; ?>
                         </td>
-                        <td class="manage-customers-badge-cell">
+                        <td class="manage-customers-badge-cell js-col-acceso">
                             <?php if ((int)$c['tiene_acceso_web'] === 1): ?>
                                 <span class="new badge green" data-badge-caption="Si"></span>
                             <?php else: ?>
@@ -693,25 +747,98 @@ document.addEventListener('DOMContentLoaded', () => {
     M.updateTextFields();
 
     const tableRows = Array.from(document.querySelectorAll('table tbody tr[data-origen]'));
-    const btns = Array.from(document.querySelectorAll('.js-filter-btn'));
+    const origenSelect = document.getElementById('filtro-origen');
+    const accesoSelect = document.getElementById('filtro-acceso');
+    const estadoSelect = document.getElementById('filtro-estado');
     const sucursalSelect = document.getElementById('filtro-sucursal');
+    const columnasSelect = document.getElementById('filtro-columnas');
     const visibleEl = document.getElementById('clientes-visibles');
     const totalEl = document.getElementById('clientes-total');
     const total = tableRows.length;
-    let activeFilter = 'todos';
+    const columnStorageKey = 'manageCustomersColumnPreset';
+
+    function readColumnPreset() {
+        try {
+            const raw = window.localStorage.getItem(columnStorageKey);
+            return raw || 'operativa';
+        } catch (error) {
+            return 'operativa';
+        }
+    }
+
+    function writeColumnPreset(value) {
+        try {
+            window.localStorage.setItem(columnStorageKey, value);
+        } catch (error) {
+            // Ignora bloqueos de storage sin romper la vista.
+        }
+    }
+
+    function applyColumnVisibility(columnName, visible) {
+        document.querySelectorAll(`.js-col-${columnName}`).forEach((cell) => {
+            cell.classList.toggle('manage-customers-col-hidden', !visible);
+        });
+    }
 
     if (totalEl) totalEl.textContent = String(total);
 
-    function matchesQuickFilter(row, filter) {
+    function applyColumnPreset(preset) {
+        const visibilityByPreset = {
+            compacta: {
+                direcciones: false,
+                origen: false,
+                sucursal: false,
+                acceso: false,
+            },
+            operativa: {
+                direcciones: true,
+                origen: true,
+                sucursal: false,
+                acceso: true,
+            },
+            completa: {
+                direcciones: true,
+                origen: true,
+                sucursal: true,
+                acceso: true,
+            },
+        };
+
+        const selectedPreset = visibilityByPreset[preset] ? preset : 'operativa';
+        const columns = visibilityByPreset[selectedPreset];
+        Object.keys(columns).forEach((columnName) => {
+            applyColumnVisibility(columnName, !!columns[columnName]);
+        });
+        if (columnasSelect) {
+            columnasSelect.value = selectedPreset;
+        }
+        writeColumnPreset(selectedPreset);
+    }
+
+    applyColumnPreset(readColumnPreset());
+
+    function matchesOrigen(row, filter) {
         const origen = row.getAttribute('data-origen') || '';
-        const acceso = row.getAttribute('data-acceso-web') || '';
-        const estado = row.getAttribute('data-estado') || '';
 
         if (filter === 'todos') return true;
         if (filter === 'sitio_web') return origen === 'sitio_web';
         if (filter === 'sucursal') return origen === 'sucursal';
+        return true;
+    }
+
+    function matchesAcceso(row, filter) {
+        const acceso = row.getAttribute('data-acceso-web') || '';
+
+        if (filter === 'todos') return true;
         if (filter === 'acceso_si') return acceso === 'si';
         if (filter === 'acceso_no') return acceso === 'no';
+        return true;
+    }
+
+    function matchesEstado(row, filter) {
+        const estado = row.getAttribute('data-estado') || '';
+
+        if (filter === 'todos') return true;
         if (filter === 'activo') return estado === 'activo';
         if (filter === 'inactivo') return estado === 'inactivo';
         return true;
@@ -725,10 +852,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyFilters() {
         const sucursalValue = (sucursalSelect?.value || '__todas__').toLowerCase();
+        const origenValue = origenSelect?.value || 'todos';
+        const accesoValue = accesoSelect?.value || 'todos';
+        const estadoValue = estadoSelect?.value || 'todos';
         let visibles = 0;
 
         tableRows.forEach((row) => {
-            const ok = matchesQuickFilter(row, activeFilter) && matchesSucursal(row, sucursalValue);
+            const ok = matchesOrigen(row, origenValue)
+                && matchesAcceso(row, accesoValue)
+                && matchesEstado(row, estadoValue)
+                && matchesSucursal(row, sucursalValue);
             row.style.display = ok ? '' : 'none';
             if (ok) visibles++;
         });
@@ -736,27 +869,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (visibleEl) visibleEl.textContent = String(visibles);
     }
 
-    btns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-            activeFilter = btn.getAttribute('data-filter') || 'todos';
-            btns.forEach((b) => {
-                b.classList.remove('darken-4');
-                b.classList.add('lighten-1');
-            });
-            btn.classList.remove('lighten-1');
-            btn.classList.add('darken-4');
-            applyFilters();
-        });
+    [origenSelect, accesoSelect, estadoSelect, sucursalSelect].forEach((select) => {
+        if (select) {
+            select.addEventListener('change', applyFilters);
+        }
     });
 
-    if (sucursalSelect) {
-        sucursalSelect.addEventListener('change', applyFilters);
+    if (columnasSelect) {
+        columnasSelect.addEventListener('change', () => {
+            applyColumnPreset(columnasSelect.value || 'operativa');
+        });
     }
 
-    const defaultBtn = document.querySelector('.js-filter-btn[data-filter="todos"]');
-    if (defaultBtn) {
-        defaultBtn.classList.add('darken-4');
-    }
     applyFilters();
 });
 

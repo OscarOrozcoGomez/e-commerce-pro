@@ -145,9 +145,13 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Desglose Diario del Mes</span>
-                        <div style="overflow-x:auto;">
-                            <table class="striped highlight">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <span class="card-title" style="margin:0;">Desglose Diario del Mes</span>
+                            <button type="button" id="btn-finance-toggle" class="btn-small blue-grey lighten-1 waves-effect waves-light">Ver todo</button>
+                        </div>
+                        <p class="grey-text text-small" style="margin-top:6px; margin-bottom:12px;">Se muestran los 10 dias mas recientes para mantener la vista compacta.</p>
+                        <div class="finance-daily-table-wrap">
+                            <table class="striped highlight finance-daily-table">
                                 <thead>
                                     <tr>
                                         <th>Fecha</th>
@@ -837,6 +841,20 @@ include __DIR__ . '/includes/header.php';
         width: 100%;
     }
 
+    .finance-daily-table-wrap {
+        overflow-x: auto;
+        max-height: 320px;
+        border: 1px solid #eceff1;
+        border-radius: 8px;
+    }
+
+    .finance-daily-table thead th {
+        position: sticky;
+        top: 0;
+        background: #f8fbfc;
+        z-index: 1;
+    }
+
     .dashboard-metrics-row {
         display: grid !important;
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -961,6 +979,7 @@ include __DIR__ . '/includes/header.php';
         const csrfToken = '<?php echo esc(getCsrfToken()); ?>';
         const settlementSuggested = { dia: 0 };
         const sellerSalesFilters = { fechaInicio: '', fechaFin: '', estado: '' };
+        const financeDailyState = { expanded: false, rows: [] };
 
         const currency = (value) => '$ ' + parseFloat(value || 0).toFixed(2);
         const fmtDateTime = (value) => {
@@ -973,6 +992,48 @@ include __DIR__ . '/includes/header.php';
         const updateEl = (id, value) => {
             const el = document.getElementById(id);
             if (el) el.textContent = value;
+        };
+
+        const renderFinanceDaily = () => {
+            const tbody = document.getElementById('finance-daily-body');
+            const toggleBtn = document.getElementById('btn-finance-toggle');
+            const wrap = document.querySelector('.finance-daily-table-wrap');
+            if (!tbody) return;
+
+            const rows = Array.isArray(financeDailyState.rows) ? financeDailyState.rows : [];
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="center grey-text">Sin datos para el periodo seleccionado.</td></tr>';
+                if (toggleBtn) toggleBtn.style.display = 'none';
+                return;
+            }
+
+            const maxCompactRows = 10;
+            const visibleRows = financeDailyState.expanded ? rows : rows.slice(-maxCompactRows);
+            tbody.innerHTML = '';
+            visibleRows.forEach(row => {
+                const date = new Date(row.fecha + 'T00:00:00');
+                const fechaTxt = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${fechaTxt}</td>
+                        <td class="right-align">${currency(row.ingresos)}</td>
+                        <td class="right-align">${currency(row.costos)}</td>
+                        <td class="right-align">${currency(row.utilidad)}</td>
+                    </tr>`;
+            });
+
+            if (toggleBtn) {
+                if (rows.length > maxCompactRows) {
+                    toggleBtn.style.display = '';
+                    toggleBtn.textContent = financeDailyState.expanded ? 'Ver menos' : 'Ver todo';
+                } else {
+                    toggleBtn.style.display = 'none';
+                }
+            }
+
+            if (wrap) {
+                wrap.style.maxHeight = financeDailyState.expanded ? '520px' : '320px';
+            }
         };
 
         const syncFiltersFromUrl = () => {
@@ -1177,29 +1238,22 @@ include __DIR__ . '/includes/header.php';
                 renderSellerSettlement(d);
                 renderSellerRecentSales(d);
 
-                if (d.finanzas_mes?.diario) {
-                    const tbody = document.getElementById('finance-daily-body');
-                    if (tbody) {
-                        tbody.innerHTML = '';
-                        d.finanzas_mes.diario.forEach(row => {
-                            const date = new Date(row.fecha + 'T00:00:00');
-                            const fechaTxt = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-                            tbody.innerHTML += `
-                                <tr>
-                                    <td>${fechaTxt}</td>
-                                    <td class="right-align">${currency(row.ingresos)}</td>
-                                    <td class="right-align">${currency(row.costos)}</td>
-                                    <td class="right-align">${currency(row.utilidad)}</td>
-                                </tr>`;
-                        });
-                    }
-                }
+                financeDailyState.rows = Array.isArray(d.finanzas_mes?.diario) ? d.finanzas_mes.diario : [];
+                renderFinanceDaily();
             })
             .catch(err => {
                 M.toast({html: 'Error cargando estadísticas', classes: 'red'});
                 console.error(err);
             });
         };
+
+        const financeToggleBtn = document.getElementById('btn-finance-toggle');
+        if (financeToggleBtn) {
+            financeToggleBtn.addEventListener('click', () => {
+                financeDailyState.expanded = !financeDailyState.expanded;
+                renderFinanceDaily();
+            });
+        }
 
         const btnFilter = document.getElementById('btn-seller-sales-filter');
         if (btnFilter) {
