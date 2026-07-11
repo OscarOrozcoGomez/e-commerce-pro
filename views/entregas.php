@@ -38,8 +38,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_
                 $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                 if ($stmt->rowCount() > 0) {
-                    logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado por repartidor');
-                    $success = 'Pedido entregado correctamente.';
+                    logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
+                    $success = 'Pedido entregado y cobrado correctamente.';
                 }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
@@ -53,6 +53,8 @@ try {
     $hasClientesDireccion = false;
     $hasClientesUbicacionMapa = false;
     $hasClienteDireccionesTable = false;
+    $hasPedidosDireccionEntrega = false;
+    $hasPedidosTelefonoEntrega = false;
 
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'direccion'");
     $stmtMeta->execute();
@@ -66,7 +68,24 @@ try {
     $stmtMeta->execute();
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
 
-    if ($hasClientesDireccion && $hasClienteDireccionesTable) {
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'direccion_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosDireccionEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'telefono_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosTelefonoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    if ($hasPedidosDireccionEntrega) {
+        $fallbackDireccion = $hasClientesDireccion && $hasClienteDireccionesTable
+            ? "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1))"
+            : ($hasClientesDireccion
+                ? 'c.direccion'
+                : ($hasClienteDireccionesTable
+                    ? "(SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)"
+                    : 'NULL'));
+        $direccionExpr = "COALESCE(NULLIF(TRIM(p.direccion_entrega), ''), {$fallbackDireccion}) AS direccion";
+    } elseif ($hasClientesDireccion && $hasClienteDireccionesTable) {
         $direccionExpr = "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS direccion";
     } elseif ($hasClientesDireccion) {
         $direccionExpr = "c.direccion AS direccion";
@@ -86,8 +105,12 @@ try {
         $mapExpr = "NULL AS ubicacion_mapa";
     }
 
+    $telefonoExpr = $hasPedidosTelefonoEntrega
+        ? "COALESCE(NULLIF(TRIM(p.telefono_entrega), ''), c.telefono) AS telefono"
+        : 'c.telefono AS telefono';
+
     $sql = "SELECT p.*, p.observaciones,
-                   c.nombre as cliente, {$direccionExpr}, c.telefono, {$mapExpr}
+                   c.nombre as cliente, {$direccionExpr}, {$telefonoExpr}, {$mapExpr}
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             WHERE p.id_repartidor = :repartidor AND p.estado IN ('pendiente_pago','pagado','en_reparto')

@@ -3,13 +3,16 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
-require_once __DIR__ . '/../core/pickup_offer_utils.php';
 
-// Validar autenticación y permisos
 requireAuth();
-requirePermission('realizar_ventas', BASE_URL . 'views/dashboard.php');
 
 header('Content-Type: application/json');
+
+if (!canManageDeliveryOrders()) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'No autorizado para agendar pedidos a domicilio.']);
+    exit;
+}
 
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
@@ -31,8 +34,36 @@ $normalizeCounterPhone = static function (string $phone): ?string {
     return sprintf('(%s) - %s - %s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
 };
 
+$columnExists = static function (PDO $pdo, string $table, string $column): bool {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute([$table, $column]);
+    return ((int)$stmt->fetchColumn()) > 0;
+};
+
+$tableExists = static function (PDO $pdo, string $table): bool {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $stmt->execute([$table]);
+    return ((int)$stmt->fetchColumn()) > 0;
+};
+
+$decryptValue = static function (?string $value): string {
+    $value = trim((string)$value);
+    if ($value !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($value)) {
+        return trim((string)piiDecryptValue($value));
+    }
+    return $value;
+};
+
+$storeValue = static function (?string $value): ?string {
+    $value = $value !== null ? trim($value) : null;
+    if ($value === null || $value === '') {
+        return $value;
+    }
+
+    return function_exists('piiEncryptValue') ? piiEncryptValue($value) : $value;
+};
+
 try {
-    // Validar método POST
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         throw new Exception('Método no permitido');
     }
@@ -41,265 +72,309 @@ try {
         throw new Exception('Token CSRF inválido o expirado.');
     }
 
-    // Obtener y validar datos
-    $id_metodo_pago = intval($_POST['id_metodo_pago'] ?? 0);
-    $descuentoManualInput = floatval($_POST['descuento'] ?? 0);
-    $descuentoManual = isAdmin() ? $descuentoManualInput : 0.0;
+    $idMetodoPago = intval($_POST['id_metodo_pago'] ?? 0);
+    $idMetodoPago = $idMetodoPago > 0 ? $idMetodoPago : null;
+    $idClienteSeleccionado = intval($_POST['id_cliente'] ?? 0);
     $clienteNombre = trim((string)($_POST['cliente_nombre'] ?? ''));
     $clienteTelefonoRaw = trim((string)($_POST['cliente_telefono'] ?? ''));
     $clienteTelefono = $normalizeCounterPhone($clienteTelefonoRaw);
-    $observaciones = htmlspecialchars($_POST['observaciones'] ?? '');
-    
-    if ($id_metodo_pago <= 0) {
-        throw new Exception('Debe seleccionar un método de pago');
-    }
-
-    if ($descuentoManualInput < 0) {
-        throw new Exception('El descuento no puede ser negativo');
-    }
+    $direccionEntrega = trim((string)($_POST['direccion_entrega'] ?? ''));
+    $observaciones = trim((string)($_POST['observaciones'] ?? ''));
 
     if ($clienteTelefono === null) {
-        throw new Exception('Si capturas telefono, debe tener 10 digitos.');
+        throw new Exception('Si capturas teléfono, debe tener 10 dígitos.');
     }
 
-    // Validar que exista al menos un producto
+    if ($idClienteSeleccionado <= 0 && $clienteNombre === '') {
+        throw new Exception('Debes seleccionar un cliente existente o capturar uno nuevo.');
+    }
+
+    if ($clienteTelefono === '') {
+        throw new Exception('Debes capturar el teléfono de entrega.');
+    }
+
+    if ($direccionEntrega === '') {
+        throw new Exception('Debes capturar la dirección exacta de entrega.');
+    }
+
+    $hasPedidosTipoEntrega = $columnExists($pdo, 'pedidos', 'tipo_entrega');
+    $hasPedidosDireccionEntrega = $columnExists($pdo, 'pedidos', 'direccion_entrega');
+    $hasPedidosTelefonoEntrega = $columnExists($pdo, 'pedidos', 'telefono_entrega');
+    $hasClienteDireccionesTable = $tableExists($pdo, 'cliente_direcciones');
+
     $productos = [];
-    $subtotal = 0;
+    $subtotal = 0.0;
+    $descuentoTotal = 0.0;
 
     foreach ($_POST as $key => $value) {
-        if (strpos($key, 'producto_') === 0) {
-            $index = str_replace('producto_', '', $key);
-            $id_producto = intval($value);
-            $cantidad = intval($_POST["cantidad_$index"] ?? 0);
-            $precio = floatval($_POST["precio_$index"] ?? 0);
-
-            if ($id_producto > 0 && $cantidad > 0 && $precio > 0) {
-                $productos[] = [
-                    'id_producto' => $id_producto,
-                    'cantidad' => $cantidad,
-                    'precio_unitario' => $precio,
-                    'subtotal' => $cantidad * $precio,
-                ];
-                $subtotal += $cantidad * $precio;
-            }
+        if (strpos($key, 'producto_') !== 0) {
+            continue;
         }
+
+        $index = str_replace('producto_', '', $key);
+        $idProducto = intval($value);
+        $cantidad = intval($_POST["cantidad_$index"] ?? 0);
+        $precio = round((float)($_POST["precio_$index"] ?? 0), 2);
+        $descuentoLinea = round(max(0.0, (float)($_POST["descuento_linea_$index"] ?? 0)), 2);
+
+        if ($idProducto <= 0 || $cantidad <= 0 || $precio <= 0) {
+            continue;
+        }
+
+        $subtotalLineaBase = round($cantidad * $precio, 2);
+        if ($descuentoLinea > $subtotalLineaBase) {
+            throw new Exception('El descuento manual no puede ser mayor al subtotal del producto.');
+        }
+
+        $productos[] = [
+            'id_producto' => $idProducto,
+            'cantidad' => $cantidad,
+            'precio_unitario' => $precio,
+            'descuento_linea' => $descuentoLinea,
+            'subtotal_base' => $subtotalLineaBase,
+            'subtotal' => round($subtotalLineaBase - $descuentoLinea, 2),
+        ];
+        $subtotal += $subtotalLineaBase;
+        $descuentoTotal += $descuentoLinea;
     }
 
     if (empty($productos)) {
-        throw new Exception('Debe agregar al menos un producto a la venta');
+        throw new Exception('Debe agregar al menos un producto al pedido.');
     }
 
-    $totalPiezas = (int)array_reduce($productos, static fn($acc, $item) => $acc + max(0, (int)$item['cantidad']), 0);
-    $pickupSettings = getPickupOfferSettings($pdo);
-    $pieceMap = parsePickupPieceDiscountMap($pickupSettings['descuentos_por_pieza'] ?? ($pickupSettings['descuento_por_piezas_json'] ?? []));
-
-    $resolveTierDiscountPerPiece = static function (int $pieces, array $map): float {
-        if ($pieces <= 0 || empty($map)) {
-            return 0.0;
-        }
-
-        if (isset($map[$pieces])) {
-            return (float)$map[$pieces];
-        }
-
-        $eligible = 0.0;
-        foreach ($map as $minPieces => $discountPerPiece) {
-            if ($pieces >= (int)$minPieces) {
-                $eligible = (float)$discountPerPiece;
-                continue;
-            }
-            break;
-        }
-
-        return round(max(0.0, $eligible), 2);
-    };
-
-    $descuentoPorPieza = (!empty($pickupSettings['activo']) && $totalPiezas > 0)
-        ? $resolveTierDiscountPerPiece($totalPiezas, $pieceMap)
-        : 0.0;
-    $descuentoIncentivoBruto = round($descuentoPorPieza * $totalPiezas, 2);
-    $descuentoIncentivo = round(min($descuentoIncentivoBruto, (float)$subtotal), 2);
-
-    $descuento = round($descuentoManual + $descuentoIncentivo, 2);
-    $total = $subtotal - $descuento;
+    $subtotal = round($subtotal, 2);
+    $descuentoTotal = round($descuentoTotal, 2);
+    $total = round($subtotal - $descuentoTotal, 2);
 
     if ($total < 0) {
-        throw new Exception('El descuento no puede ser mayor al subtotal');
+        throw new Exception('El descuento no puede ser mayor al subtotal.');
     }
 
-    // Iniciar transacción
+    if ($almacenVentaId <= 0) {
+        throw new Exception('No tienes una sucursal asignada para registrar el pedido.');
+    }
+
     $pdo->beginTransaction();
 
     try {
         $idCliente = null;
+        $clienteNombreFinal = $clienteNombre;
+        $clienteTelefonoFinal = $clienteTelefono;
 
-        if ($clienteNombre !== '' || $clienteTelefono !== '') {
-            if ($clienteTelefono !== '') {
-                $stmtCliente = $pdo->prepare("SELECT id_cliente, nombre FROM clientes WHERE telefono = ? ORDER BY id_cliente DESC LIMIT 1");
-                $stmtCliente->execute([$clienteTelefono]);
-                $existingCliente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
-
-                if (!$existingCliente && function_exists('piiDecryptValue') && function_exists('piiIsEncryptedValue')) {
-                    $stmtAllClientes = $pdo->query("SELECT id_cliente, nombre, telefono FROM clientes ORDER BY id_cliente DESC");
-                    if ($stmtAllClientes !== false) {
-                        while (($rowCliente = $stmtAllClientes->fetch(PDO::FETCH_ASSOC)) !== false) {
-                            $telRow = preg_replace('/\D+/', '', (string)($rowCliente['telefono'] ?? '')) ?: '';
-                            if (piiIsEncryptedValue((string)($rowCliente['telefono'] ?? ''))) {
-                                $telDec = (string)piiDecryptValue((string)$rowCliente['telefono']);
-                                $telRow = preg_replace('/\D+/', '', $telDec) ?: '';
-                            }
-
-                            $telIn = preg_replace('/\D+/', '', $clienteTelefono) ?: '';
-                            if ($telRow !== '' && $telIn !== '' && substr($telRow, -10) === substr($telIn, -10)) {
-                                $existingCliente = [
-                                    'id_cliente' => $rowCliente['id_cliente'],
-                                    'nombre' => $rowCliente['nombre'],
-                                ];
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if ($existingCliente) {
-                    $idCliente = (int)($existingCliente['id_cliente'] ?? 0);
-
-                    $existingNombre = trim((string)($existingCliente['nombre'] ?? ''));
-                    if (function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($existingNombre)) {
-                        $existingNombre = trim((string)piiDecryptValue($existingNombre));
-                    }
-
-                    // Solo actualizar si llega nombre y el guardado esta vacio.
-                    if ($idCliente > 0 && $clienteNombre !== '' && $existingNombre === '') {
-                        $nombreStore = function_exists('piiEncryptValue') ? piiEncryptValue($clienteNombre) : $clienteNombre;
-                        $pdo->prepare("UPDATE clientes SET nombre = ? WHERE id_cliente = ?")
-                            ->execute([$nombreStore, $idCliente]);
-                    }
-                }
+        if ($idClienteSeleccionado > 0) {
+            $stmtCliente = $pdo->prepare('SELECT id_cliente, nombre, telefono FROM clientes WHERE id_cliente = ? LIMIT 1');
+            $stmtCliente->execute([$idClienteSeleccionado]);
+            $clienteExistente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
+            if (!$clienteExistente) {
+                throw new Exception('El cliente seleccionado no existe.');
             }
 
-            if ($idCliente === null) {
-                $nombreFinal = $clienteNombre !== '' ? $clienteNombre : 'Cliente Mostrador';
-                $nombreStore = function_exists('piiEncryptValue') ? piiEncryptValue($nombreFinal) : $nombreFinal;
-                $telefonoStore = $clienteTelefono !== ''
-                    ? (function_exists('piiEncryptValue') ? piiEncryptValue($clienteTelefono) : $clienteTelefono)
-                    : null;
-                $stmtInsCliente = $pdo->prepare("INSERT INTO clientes (nombre, telefono, estado) VALUES (?, ?, 'activo')");
-                $stmtInsCliente->execute([$nombreStore, $telefonoStore]);
-                $idCliente = (int)$pdo->lastInsertId();
+            $idCliente = (int)$clienteExistente['id_cliente'];
+            $nombreActual = $decryptValue((string)($clienteExistente['nombre'] ?? ''));
+            $telefonoActual = $decryptValue((string)($clienteExistente['telefono'] ?? ''));
+            $clienteNombreFinal = $clienteNombre !== '' ? $clienteNombre : $nombreActual;
+            $clienteTelefonoFinal = $clienteTelefono !== '' ? $clienteTelefono : $telefonoActual;
+
+            if ($clienteNombreFinal === '') {
+                throw new Exception('El cliente seleccionado no tiene nombre válido.');
+            }
+            if ($clienteTelefonoFinal === '') {
+                throw new Exception('El cliente seleccionado no tiene teléfono; captúralo para continuar.');
+            }
+
+            if ($nombreActual === '' && $clienteNombre !== '') {
+                $pdo->prepare('UPDATE clientes SET nombre = ? WHERE id_cliente = ?')
+                    ->execute([$storeValue($clienteNombre), $idCliente]);
+            }
+
+            if ($telefonoActual === '' && $clienteTelefono !== '') {
+                $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?')
+                    ->execute([$storeValue($clienteTelefono), $idCliente]);
+            }
+        } else {
+            if ($clienteNombre === '' || $clienteTelefono === '') {
+                throw new Exception('Para dar de alta un cliente nuevo debes capturar nombre y teléfono.');
+            }
+
+            $stmtInsCliente = $pdo->prepare("INSERT INTO clientes (nombre, telefono, estado) VALUES (?, ?, 'activo')");
+            $stmtInsCliente->execute([$storeValue($clienteNombre), $storeValue($clienteTelefono)]);
+            $idCliente = (int)$pdo->lastInsertId();
+
+            if ($hasClienteDireccionesTable) {
+                $stmtDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, es_default) VALUES (?, ?, ?, 1)');
+                $stmtDir->execute([$idCliente, $storeValue('Direccion 1'), $storeValue($direccionEntrega)]);
             }
         }
 
-        // Generar número de pedido único
-        $numero_pedido = 'PED-' . date('YmdHis') . '-' . substr(uniqid(), -4);
-
-        // Insertar pedido
-        $sql = "INSERT INTO pedidos 
-                (numero_pedido, id_cliente, id_usuario, id_almacen, id_metodo_pago, estado, subtotal, descuento_total, total, observaciones) 
-                VALUES (:numero_pedido, :id_cliente, :usuario, :almacen, :metodo_pago, 'pagado', :subtotal, :descuento, :total, :observaciones)";
-        
-        $stmt = $pdo->prepare($sql);
-        $observacionesFinales = $observaciones;
-        if ($descuentoIncentivo > 0) {
-            $tagIncentivo = sprintf('Incentivo sucursal aplicado: -$%.2f ($%.2f por pieza x %d pieza(s))', $descuentoIncentivo, $descuentoPorPieza, $totalPiezas);
-            $observacionesFinales = $observacionesFinales !== '' ? ($tagIncentivo . '. ' . $observacionesFinales) : $tagIncentivo;
+        $numeroPedido = 'DOM-' . date('YmdHis') . '-' . substr(uniqid(), -4);
+        $observacionesChunks = [
+            'ENTREGA: Domicilio',
+            'Cliente: ' . $clienteNombreFinal,
+            'Tel: ' . $clienteTelefonoFinal,
+            'Dir: ' . $direccionEntrega,
+        ];
+        if ($observaciones !== '') {
+            $observacionesChunks[] = 'Notas: ' . $observaciones;
         }
 
-        if ($almacenVentaId <= 0) {
-            throw new Exception('No tienes una sucursal asignada para registrar la venta.');
-        }
-
-        $stmt->execute([
-            ':numero_pedido' => $numero_pedido,
+        $pedidoColumns = [
+            'numero_pedido',
+            'id_cliente',
+            'id_usuario',
+            'id_almacen',
+            'id_metodo_pago',
+            'estado',
+            'subtotal',
+            'descuento_total',
+            'total',
+            'observaciones',
+        ];
+        $pedidoPlaceholders = [
+            ':numero_pedido',
+            ':id_cliente',
+            ':usuario',
+            ':almacen',
+            ':metodo_pago',
+            ':estado',
+            ':subtotal',
+            ':descuento_total',
+            ':total',
+            ':observaciones',
+        ];
+        $pedidoParams = [
+            ':numero_pedido' => $numeroPedido,
             ':id_cliente' => $idCliente,
             ':usuario' => $usuario['id_usuario'],
             ':almacen' => $almacenVentaId,
-            ':metodo_pago' => $id_metodo_pago,
+            ':metodo_pago' => $idMetodoPago,
+            ':estado' => 'pendiente_pago',
             ':subtotal' => $subtotal,
-            ':descuento' => $descuento,
+            ':descuento_total' => $descuentoTotal,
             ':total' => $total,
-            ':observaciones' => $observacionesFinales,
-        ]);
+            ':observaciones' => implode(' | ', $observacionesChunks),
+        ];
 
-        $id_pedido = $pdo->lastInsertId();
+        if ($hasPedidosTipoEntrega) {
+            $pedidoColumns[] = 'tipo_entrega';
+            $pedidoPlaceholders[] = ':tipo_entrega';
+            $pedidoParams[':tipo_entrega'] = 'Domicilio';
+        }
+        if ($hasPedidosDireccionEntrega) {
+            $pedidoColumns[] = 'direccion_entrega';
+            $pedidoPlaceholders[] = ':direccion_entrega';
+            $pedidoParams[':direccion_entrega'] = $direccionEntrega;
+        }
+        if ($hasPedidosTelefonoEntrega) {
+            $pedidoColumns[] = 'telefono_entrega';
+            $pedidoPlaceholders[] = ':telefono_entrega';
+            $pedidoParams[':telefono_entrega'] = $clienteTelefonoFinal;
+        }
 
-        // Insertar detalles de pedido y actualizar inventario
-        foreach ($productos as $prod) {
-            $stmtCosto = $pdo->prepare("SELECT COALESCE(precio_costo, 0) FROM productos WHERE id_producto = ?");
-            $stmtCosto->execute([$prod['id_producto']]);
-            $costoUnitario = (float)($stmtCosto->fetchColumn() ?: 0);
+        $sqlPedido = sprintf(
+            'INSERT INTO pedidos (%s) VALUES (%s)',
+            implode(', ', $pedidoColumns),
+            implode(', ', $pedidoPlaceholders)
+        );
+        $stmtPedido = $pdo->prepare($sqlPedido);
+        $stmtPedido->execute($pedidoParams);
 
-            // Insertar detalle
-            $sql = "INSERT INTO detalle_pedidos 
-                    (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, subtotal) 
-                    VALUES (:pedido, :producto, :cantidad, :precio_original, :precio_unitario, :costo_unitario, :subtotal)";
-            
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':pedido' => $id_pedido,
-                ':producto' => $prod['id_producto'],
-                ':cantidad' => $prod['cantidad'],
-                ':precio_original' => $prod['precio_unitario'],
-                ':precio_unitario' => $prod['precio_unitario'],
-                ':costo_unitario' => $costoUnitario,
-                ':subtotal' => $prod['subtotal'],
-            ]);
+        $idPedido = (int)$pdo->lastInsertId();
+        $auditNotes = [];
 
-            // Actualizar inventario
-            $sql = "UPDATE inventario_almacen 
-                    SET cantidad_actual = cantidad_actual - :cantidad1
-                    WHERE id_producto = :producto AND id_almacen = :almacen
-                    AND cantidad_actual >= :cantidad2";
-            
-            $stmt = $pdo->prepare($sql);
-            $result = $stmt->execute([
-                ':cantidad1' => $prod['cantidad'],
-                ':cantidad2' => $prod['cantidad'],
-                ':producto' => $prod['id_producto'],
-                ':almacen' => $almacenVentaId,
-            ]);
-
-            if ($stmt->rowCount() === 0) {
-                throw new Exception('Stock insuficiente para el producto ID: ' . $prod['id_producto']);
+        foreach ($productos as $producto) {
+            $stmtProducto = $pdo->prepare('SELECT nombre, COALESCE(precio_venta, 0) AS precio_venta, COALESCE(precio_costo, 0) AS precio_costo FROM productos WHERE id_producto = ? LIMIT 1');
+            $stmtProducto->execute([$producto['id_producto']]);
+            $productoDb = $stmtProducto->fetch(PDO::FETCH_ASSOC) ?: null;
+            if (!$productoDb) {
+                throw new Exception('Producto no encontrado para el pedido.');
             }
 
-            // Registrar movimiento de inventario
-            $sql = "INSERT INTO movimientos_inventario 
-                    (id_producto, tipo_movimiento, id_almacen_origen, cantidad, id_usuario, observacion) 
-                    VALUES (:producto, 'salida', :almacen, :cantidad, :usuario, :observacion)";
-            
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':producto' => $prod['id_producto'],
+            $precioCatalogo = round((float)($productoDb['precio_venta'] ?? 0), 2);
+            $costoUnitario = round((float)($productoDb['precio_costo'] ?? 0), 2);
+            $descuentoLinea = round((float)$producto['descuento_linea'], 2);
+            $porcentajeDescuento = $producto['subtotal_base'] > 0
+                ? round(($descuentoLinea / (float)$producto['subtotal_base']) * 100, 2)
+                : null;
+            $nombreProducto = trim((string)($productoDb['nombre'] ?? ('Producto #' . $producto['id_producto'])));
+
+            if (abs($precioCatalogo - (float)$producto['precio_unitario']) > 0.009) {
+                $auditNotes[] = sprintf(
+                    '%s x%d: precio catálogo $%.2f, precio capturado $%.2f',
+                    $nombreProducto,
+                    (int)$producto['cantidad'],
+                    $precioCatalogo,
+                    (float)$producto['precio_unitario']
+                );
+            }
+            if ($descuentoLinea > 0) {
+                $auditNotes[] = sprintf(
+                    '%s x%d: descuento manual $%.2f',
+                    $nombreProducto,
+                    (int)$producto['cantidad'],
+                    $descuentoLinea
+                );
+            }
+
+            $stmtDetalle = $pdo->prepare(
+                'INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, porcentaje_descuento, monto_descuento, subtotal) VALUES (:pedido, :producto, :cantidad, :precio_original, :precio_unitario, :costo_unitario, :porcentaje_descuento, :monto_descuento, :subtotal)'
+            );
+            $stmtDetalle->execute([
+                ':pedido' => $idPedido,
+                ':producto' => $producto['id_producto'],
+                ':cantidad' => $producto['cantidad'],
+                ':precio_original' => $precioCatalogo,
+                ':precio_unitario' => $producto['precio_unitario'],
+                ':costo_unitario' => $costoUnitario,
+                ':porcentaje_descuento' => $porcentajeDescuento,
+                ':monto_descuento' => $descuentoLinea,
+                ':subtotal' => $producto['subtotal'],
+            ]);
+
+            $stmtStock = $pdo->prepare(
+                'UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - :cantidad1 WHERE id_producto = :producto AND id_almacen = :almacen AND cantidad_actual >= :cantidad2'
+            );
+            $stmtStock->execute([
+                ':cantidad1' => $producto['cantidad'],
+                ':cantidad2' => $producto['cantidad'],
+                ':producto' => $producto['id_producto'],
                 ':almacen' => $almacenVentaId,
-                ':cantidad' => $prod['cantidad'],
+            ]);
+            if ($stmtStock->rowCount() === 0) {
+                throw new Exception('Stock insuficiente para el producto ID: ' . $producto['id_producto']);
+            }
+
+            $stmtMov = $pdo->prepare(
+                "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_origen, cantidad, id_usuario, observacion) VALUES (:producto, 'salida', :almacen, :cantidad, :usuario, :observacion)"
+            );
+            $stmtMov->execute([
+                ':producto' => $producto['id_producto'],
+                ':almacen' => $almacenVentaId,
+                ':cantidad' => $producto['cantidad'],
                 ':usuario' => $usuario['id_usuario'],
-                ':observacion' => 'Venta ' . $numero_pedido,
+                ':observacion' => 'Pedido a domicilio ' . $numeroPedido,
             ]);
         }
 
-        // Confirmar transacción
+        if (!empty($auditNotes)) {
+            $stmtAuditObs = $pdo->prepare("UPDATE pedidos SET observaciones = CONCAT(COALESCE(observaciones, ''), ?) WHERE id_pedido = ?");
+            $stmtAuditObs->execute([' | AJUSTES: ' . implode(' ; ', $auditNotes), $idPedido]);
+        }
+
         $pdo->commit();
 
-        // Registrar en auditoría
-        logAudit('VENTA_REALIZADA', 'pedidos', (int)$id_pedido, "Venta registrada: $numero_pedido. Total: $total");
+        logAudit('PEDIDO_DOMICILIO_AGENDADO', 'pedidos', $idPedido, "Pedido agendado: $numeroPedido. Total: $total");
 
         $response['success'] = true;
-        $response['message'] = 'Venta registrada correctamente: ' . $numero_pedido;
-        $response['id_pedido'] = $id_pedido;
+        $response['message'] = 'Pedido agendado correctamente: ' . $numeroPedido;
+        $response['id_pedido'] = $idPedido;
         $response['id_cliente'] = $idCliente;
-        $response['numero_pedido'] = $numero_pedido;
-        $response['descuento_manual'] = round($descuentoManual, 2);
-        $response['descuento_por_pieza'] = round($descuentoPorPieza, 2);
-        $response['descuento_incentivo'] = round($descuentoIncentivo, 2);
-        $response['descuento_total'] = round($descuento, 2);
-        $response['total'] = round($total, 2);
-
+        $response['numero_pedido'] = $numeroPedido;
+        $response['descuento_total'] = $descuentoTotal;
+        $response['total'] = $total;
     } catch (Exception $e) {
         $pdo->rollBack();
         throw $e;
     }
-
 } catch (Exception $e) {
     $response['success'] = false;
     $response['message'] = $e->getMessage();

@@ -179,6 +179,14 @@ function isCliente(): bool
 }
 
 /**
+ * Verifica si el usuario puede agendar pedidos a domicilio y asignar repartidores.
+ */
+function canManageDeliveryOrders(): bool
+{
+    return isAuthenticated() && (isAdmin() || isEncargado());
+}
+
+/**
  * Obtiene el ID del almacén del usuario actual.
  *
  * @return int|null

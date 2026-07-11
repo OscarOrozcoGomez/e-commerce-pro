@@ -253,6 +253,54 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Atención</h5></div></div>
+        <div class="row dashboard-actions">
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Agendar Pedido</span>
+                        <p>Capturar pedidos a domicilio, cliente y productos para reparto</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green">Ir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Asignar Entregas</span>
+                        <p>Asignar pedidos a domicilio a repartidores disponibles</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/asignar_entregas.php" class="btn waves-effect waves-light indigo">Ir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Reportes de Ventas</span>
+                        <p>Generar archivos de ventas y análisis del período</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones Pickup</span>
+                        <p>Seguimiento de pedidos por recoger y reabasto de sucursal</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Atender</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- SECCIÓN 2: LOGÍSTICA E INVENTARIO -->
         <div class="row"><div class="col s12"><h5><i class="material-icons left">inventory</i> Operaciones y Stock</h5></div></div>
         <div class="row dashboard-actions">
@@ -425,8 +473,8 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Realizar Venta</span>
-                        <p>Procesar nuevas ventas y consultar historial</p>
+                        <span class="card-title">Agendar Pedido</span>
+                        <p>Capturar pedidos a domicilio, cliente y productos para reparto</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green">Ir</a>
@@ -732,10 +780,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Realizar Venta</span>
-                        <p>Procesar nuevas ventas, registrar métodos de pago y generar recibos</p>
+                        <p>Acceso restringido a admin y encargado</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green btn-large">Ir</a>
+                        <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn waves-effect waves-light grey btn-large">Solo autorizados</a>
                     </div>
                 </div>
             </div>
