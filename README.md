@@ -164,11 +164,13 @@ Nota: En localhost/CLI ahora el valor por defecto de `APP_ENV` es `qa`.
 
 Agrega estos secrets a nivel repositorio (sin GitHub Environments):
 
-- `PTF_HOST`
-- `PTF_USERNAME`
-- `PTF_PASSWORD`
+- `FTP_HOST`
+- `FTP_USERNAME`
+- `FTP_PASSWORD`
 - `MIGRATIONS_URL`
 - `MIGRATIONS_DEPLOY_TOKEN`
+
+Nota: el workflow mantiene compatibilidad con `PTF_*` como alias legacy, pero se recomienda usar `FTP_*`.
 
 ### Seguridad
 

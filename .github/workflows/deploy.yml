@@ -23,16 +23,50 @@ jobs:
 
       - name: Validate required secrets
         env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_PORT: ${{ secrets.FTP_PORT }}
+          FTP_PROTOCOL: ${{ secrets.FTP_PROTOCOL }}
           PTF_HOST: ${{ secrets.PTF_HOST }}
           PTF_USERNAME: ${{ secrets.PTF_USERNAME }}
           PTF_PASSWORD: ${{ secrets.PTF_PASSWORD }}
+          PTF_PORT: ${{ secrets.PTF_PORT }}
+          PTF_PROTOCOL: ${{ secrets.PTF_PROTOCOL }}
           MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
           MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
         run: |
+          # Prefer FTP_* names; keep PTF_* as legacy fallback.
+          RESOLVED_FTP_HOST="${FTP_HOST:-$PTF_HOST}"
+          RESOLVED_FTP_USERNAME="${FTP_USERNAME:-$PTF_USERNAME}"
+          RESOLVED_FTP_PASSWORD="${FTP_PASSWORD:-$PTF_PASSWORD}"
+          RESOLVED_FTP_PORT="${FTP_PORT:-${PTF_PORT:-21}}"
+          RESOLVED_FTP_PROTOCOL="${FTP_PROTOCOL:-${PTF_PROTOCOL:-ftp}}"
+
+          if [ -n "$PTF_HOST" ] || [ -n "$PTF_USERNAME" ] || [ -n "$PTF_PASSWORD" ]; then
+            echo "::warning::Using legacy PTF_* secrets. Prefer FTP_* secrets going forward."
+          fi
+
+          export RESOLVED_FTP_HOST RESOLVED_FTP_USERNAME RESOLVED_FTP_PASSWORD
+          export RESOLVED_FTP_PORT RESOLVED_FTP_PROTOCOL
+
           missing=0
-          for key in PTF_HOST PTF_USERNAME PTF_PASSWORD MIGRATIONS_URL MIGRATIONS_DEPLOY_TOKEN; do
+          for key in RESOLVED_FTP_HOST RESOLVED_FTP_USERNAME RESOLVED_FTP_PASSWORD MIGRATIONS_URL MIGRATIONS_DEPLOY_TOKEN; do
             if [ -z "${!key}" ]; then
-              echo "::error::Missing required secret: $key"
+              case "$key" in
+                RESOLVED_FTP_HOST)
+                  echo "::error::Missing required secret: FTP_HOST (or legacy PTF_HOST)"
+                  ;;
+                RESOLVED_FTP_USERNAME)
+                  echo "::error::Missing required secret: FTP_USERNAME (or legacy PTF_USERNAME)"
+                  ;;
+                RESOLVED_FTP_PASSWORD)
+                  echo "::error::Missing required secret: FTP_PASSWORD (or legacy PTF_PASSWORD)"
+                  ;;
+                *)
+                  echo "::error::Missing required secret: $key"
+                  ;;
+              esac
               missing=1
             fi
           done
@@ -40,14 +74,22 @@ jobs:
             exit 1
           fi
 
+          {
+            echo "FTP_HOST_RESOLVED=$RESOLVED_FTP_HOST"
+            echo "FTP_USERNAME_RESOLVED=$RESOLVED_FTP_USERNAME"
+            echo "FTP_PASSWORD_RESOLVED=$RESOLVED_FTP_PASSWORD"
+            echo "FTP_PORT_RESOLVED=$RESOLVED_FTP_PORT"
+            echo "FTP_PROTOCOL_RESOLVED=$RESOLVED_FTP_PROTOCOL"
+          } >> "$GITHUB_ENV"
+
       - name: Deploy files via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
-          server: ${{ secrets.PTF_HOST }}
-          username: ${{ secrets.PTF_USERNAME }}
-          password: ${{ secrets.PTF_PASSWORD }}
-          port: ${{ secrets.PTF_PORT || 21 }}
-          protocol: ${{ secrets.PTF_PROTOCOL || 'ftp' }}
+          server: ${{ env.FTP_HOST_RESOLVED }}
+          username: ${{ env.FTP_USERNAME_RESOLVED }}
+          password: ${{ env.FTP_PASSWORD_RESOLVED }}
+          port: ${{ env.FTP_PORT_RESOLVED }}
+          protocol: ${{ env.FTP_PROTOCOL_RESOLVED }}
           server-dir: /public_html/
           timeout: 120000
           exclude: |
