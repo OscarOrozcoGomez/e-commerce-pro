@@ -44,6 +44,7 @@ final class UserRolesPermissionsTest extends TestCase
         $this->assertFalse(isVendedor());
         $this->assertFalse(isRepartidor());
         $this->assertFalse(isCliente());
+        $this->assertFalse(canManageDeliveryOrders());
     }
 
     #[DataProvider('roleMatrixProvider')]
@@ -75,19 +76,24 @@ final class UserRolesPermissionsTest extends TestCase
         $_SESSION['usuario'] = ['rol' => 'admin'];
         $this->assertTrue(isAdmin());
         $this->assertFalse(isEncargado());
+        $this->assertTrue(canManageDeliveryOrders());
 
         $_SESSION['usuario'] = ['rol' => 'encargado'];
         $this->assertTrue(isEncargado());
         $this->assertFalse(isAdmin());
+        $this->assertTrue(canManageDeliveryOrders());
 
         $_SESSION['usuario'] = ['rol' => 'vendedor'];
         $this->assertTrue(isVendedor());
+        $this->assertFalse(canManageDeliveryOrders());
 
         $_SESSION['usuario'] = ['rol' => 'repartidor'];
         $this->assertTrue(isRepartidor());
+        $this->assertFalse(canManageDeliveryOrders());
 
         $_SESSION['usuario'] = ['rol' => 'cliente'];
         $this->assertTrue(isCliente());
+        $this->assertFalse(canManageDeliveryOrders());
     }
 
     public function testRoleCheckersAreCaseSensitiveEdgeCase(): void

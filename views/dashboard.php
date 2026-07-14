@@ -67,7 +67,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Retiros Sucursal</span>
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
-                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
                     </div>
                 </div>
             </div>
@@ -145,9 +145,13 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Desglose Diario del Mes</span>
-                        <div style="overflow-x:auto;">
-                            <table class="striped highlight">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <span class="card-title" style="margin:0;">Desglose Diario del Mes</span>
+                            <button type="button" id="btn-finance-toggle" class="btn-small blue-grey lighten-1 waves-effect waves-light">Ver todo</button>
+                        </div>
+                        <p class="grey-text text-small" style="margin-top:6px; margin-bottom:12px;">Se muestran los 10 dias mas recientes para mantener la vista compacta.</p>
+                        <div class="finance-daily-table-wrap">
+                            <table class="striped highlight finance-daily-table">
                                 <thead>
                                     <tr>
                                         <th>Fecha</th>
@@ -248,6 +252,54 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/manage_blogs.php" class="btn waves-effect waves-light blue darken-4">Blogs</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Atención</h5></div></div>
+        <div class="row dashboard-actions">
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Agendar Pedido</span>
+                        <p>Capturar pedidos a domicilio, cliente y productos para reparto</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green">Ir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Asignar Entregas</span>
+                        <p>Asignar pedidos a domicilio a repartidores disponibles</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/asignar_entregas.php" class="btn waves-effect waves-light indigo">Ir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Reportes de Ventas</span>
+                        <p>Generar archivos de ventas y análisis del período</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones Pickup</span>
+                        <p>Seguimiento de pedidos por recoger y reabasto de sucursal</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Atender</a>
                     </div>
                 </div>
             </div>
@@ -414,7 +466,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Retiros Sucursal</span>
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
-                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
                     </div>
                 </div>
             </div>
@@ -425,8 +477,8 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Realizar Venta</span>
-                        <p>Procesar nuevas ventas y consultar historial</p>
+                        <span class="card-title">Agendar Pedido</span>
+                        <p>Capturar pedidos a domicilio, cliente y productos para reparto</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green">Ir</a>
@@ -732,10 +784,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Realizar Venta</span>
-                        <p>Procesar nuevas ventas, registrar métodos de pago y generar recibos</p>
+                        <p>Acceso restringido a admin y encargado</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green btn-large">Ir</a>
+                        <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn waves-effect waves-light grey btn-large">Solo autorizados</a>
                     </div>
                 </div>
             </div>
@@ -787,6 +839,20 @@ include __DIR__ . '/includes/header.php';
 
     .dashboard-actions .card-action .btn {
         width: 100%;
+    }
+
+    .finance-daily-table-wrap {
+        overflow-x: auto;
+        max-height: 320px;
+        border: 1px solid #eceff1;
+        border-radius: 8px;
+    }
+
+    .finance-daily-table thead th {
+        position: sticky;
+        top: 0;
+        background: #f8fbfc;
+        z-index: 1;
     }
 
     .dashboard-metrics-row {
@@ -913,6 +979,7 @@ include __DIR__ . '/includes/header.php';
         const csrfToken = '<?php echo esc(getCsrfToken()); ?>';
         const settlementSuggested = { dia: 0 };
         const sellerSalesFilters = { fechaInicio: '', fechaFin: '', estado: '' };
+        const financeDailyState = { expanded: false, rows: [] };
 
         const currency = (value) => '$ ' + parseFloat(value || 0).toFixed(2);
         const fmtDateTime = (value) => {
@@ -925,6 +992,48 @@ include __DIR__ . '/includes/header.php';
         const updateEl = (id, value) => {
             const el = document.getElementById(id);
             if (el) el.textContent = value;
+        };
+
+        const renderFinanceDaily = () => {
+            const tbody = document.getElementById('finance-daily-body');
+            const toggleBtn = document.getElementById('btn-finance-toggle');
+            const wrap = document.querySelector('.finance-daily-table-wrap');
+            if (!tbody) return;
+
+            const rows = Array.isArray(financeDailyState.rows) ? financeDailyState.rows : [];
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="center grey-text">Sin datos para el periodo seleccionado.</td></tr>';
+                if (toggleBtn) toggleBtn.style.display = 'none';
+                return;
+            }
+
+            const maxCompactRows = 10;
+            const visibleRows = financeDailyState.expanded ? rows : rows.slice(-maxCompactRows);
+            tbody.innerHTML = '';
+            visibleRows.forEach(row => {
+                const date = new Date(row.fecha + 'T00:00:00');
+                const fechaTxt = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${fechaTxt}</td>
+                        <td class="right-align">${currency(row.ingresos)}</td>
+                        <td class="right-align">${currency(row.costos)}</td>
+                        <td class="right-align">${currency(row.utilidad)}</td>
+                    </tr>`;
+            });
+
+            if (toggleBtn) {
+                if (rows.length > maxCompactRows) {
+                    toggleBtn.style.display = '';
+                    toggleBtn.textContent = financeDailyState.expanded ? 'Ver menos' : 'Ver todo';
+                } else {
+                    toggleBtn.style.display = 'none';
+                }
+            }
+
+            if (wrap) {
+                wrap.style.maxHeight = financeDailyState.expanded ? '520px' : '320px';
+            }
         };
 
         const syncFiltersFromUrl = () => {
@@ -1119,6 +1228,7 @@ include __DIR__ . '/includes/header.php';
                         'stat-pickup-breakdown',
                         'Nuevas: ' + (d.pickup_metrics.nuevas || 0)
                         + ' | Vistas: ' + (d.pickup_metrics.vistas || 0)
+                        + ' | Apartadas: ' + (d.pickup_metrics.apartadas || 0)
                         + ' | Atendidas hoy: ' + (d.pickup_metrics.atendidas_hoy || 0)
                     );
                 }
@@ -1129,29 +1239,22 @@ include __DIR__ . '/includes/header.php';
                 renderSellerSettlement(d);
                 renderSellerRecentSales(d);
 
-                if (d.finanzas_mes?.diario) {
-                    const tbody = document.getElementById('finance-daily-body');
-                    if (tbody) {
-                        tbody.innerHTML = '';
-                        d.finanzas_mes.diario.forEach(row => {
-                            const date = new Date(row.fecha + 'T00:00:00');
-                            const fechaTxt = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-                            tbody.innerHTML += `
-                                <tr>
-                                    <td>${fechaTxt}</td>
-                                    <td class="right-align">${currency(row.ingresos)}</td>
-                                    <td class="right-align">${currency(row.costos)}</td>
-                                    <td class="right-align">${currency(row.utilidad)}</td>
-                                </tr>`;
-                        });
-                    }
-                }
+                financeDailyState.rows = Array.isArray(d.finanzas_mes?.diario) ? d.finanzas_mes.diario : [];
+                renderFinanceDaily();
             })
             .catch(err => {
                 M.toast({html: 'Error cargando estadísticas', classes: 'red'});
                 console.error(err);
             });
         };
+
+        const financeToggleBtn = document.getElementById('btn-finance-toggle');
+        if (financeToggleBtn) {
+            financeToggleBtn.addEventListener('click', () => {
+                financeDailyState.expanded = !financeDailyState.expanded;
+                renderFinanceDaily();
+            });
+        }
 
         const btnFilter = document.getElementById('btn-seller-sales-filter');
         if (btnFilter) {

@@ -179,6 +179,14 @@ function isCliente(): bool
 }
 
 /**
+ * Verifica si el usuario puede agendar pedidos a domicilio y asignar repartidores.
+ */
+function canManageDeliveryOrders(): bool
+{
+    return isAuthenticated() && (isAdmin() || isEncargado());
+}
+
+/**
  * Obtiene el ID del almacén del usuario actual.
  *
  * @return int|null
@@ -554,14 +562,25 @@ function dbCreatePublicOrder(array $data): array {
     $pdo = getPDO();
     try {
         $pdo->beginTransaction();
+
+        $entrega = $data['tipo_entrega'] ?? 'No especificado';
+        $esPickupSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0;
+        $pickupWarehouseId = $esPickupSucursal ? resolvePickupWarehouseId($pdo) : null;
+        if ($esPickupSucursal && (int)$pickupWarehouseId <= 0) {
+            throw new Exception('No hay una sucursal pickup publica configurada para pedidos web.');
+        }
+        $pickupStockHint = is_array($data['pickup_stock_hint'] ?? null) ? $data['pickup_stock_hint'] : null;
         
         // Definir el almacén de despacho: si no llega explícito, resolver automáticamente
         // un almacén que pueda surtir todos los productos del carrito.
-        $id_almacen_despacho = resolveCheckoutWarehouse($pdo, $data['items'] ?? [], $data['id_almacen'] ?? null);
+        $id_almacen_despacho = resolveCheckoutWarehouse(
+            $pdo,
+            $data['items'] ?? [],
+            $pickupWarehouseId ?? ($data['id_almacen'] ?? null)
+        );
         $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
-        $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | Dir: {$data['cliente']['direccion']}";
         $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ((float)($i['precio'] ?? 0) * (int)($i['quantity'] ?? 0)), 0.0);
         $subtotal = round(max(0.0, (float)$subtotal), 2);
@@ -577,6 +596,21 @@ function dbCreatePublicOrder(array $data): array {
 
         if ($aplicarIncentivoSucursal) {
             $infoCliente .= " | INCENTIVO_SUCURSAL: -$" . number_format($descuentoTotal, 2, '.', '');
+        }
+
+        if ($esPickupSucursal && is_array($pickupStockHint) && (($pickupStockHint['status'] ?? '') === 'transferible')) {
+            $supportWarehouse = trim((string)($pickupStockHint['almacen_apoyo_nombre'] ?? 'almacen de apoyo'));
+            $faltantesRaw = is_array($pickupStockHint['faltantes'] ?? null) ? $pickupStockHint['faltantes'] : [];
+            $faltantesTxt = [];
+            foreach ($faltantesRaw as $row) {
+                $nombre = trim((string)($row['nombre'] ?? ''));
+                $faltan = max(0, (int)($row['faltan'] ?? 0));
+                if ($nombre !== '' && $faltan > 0) {
+                    $faltantesTxt[] = $nombre . ' (faltan ' . $faltan . ')';
+                }
+            }
+            $detalleFaltantes = empty($faltantesTxt) ? 'productos pendientes por surtir' : implode(', ', $faltantesTxt);
+            $infoCliente .= ' | TRASLADO_INTERNO_2_3H: Requiere traslado desde ' . $supportWarehouse . ' para pickup. ' . $detalleFaltantes;
         }
 
         $numero_pedido = 'WEB-' . strtoupper(uniqid());
@@ -667,6 +701,61 @@ function dbCreatePublicOrder(array $data): array {
         }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
     }
+}
+
+/**
+ * Resuelve la sucursal de pickup web.
+ *
+ * Prioridad:
+ * 1) Env var CHECKOUT_PICKUP_WAREHOUSE_ID o PICKUP_WAREHOUSE_ID si es valida y activa.
+ * 2) Primera sucursal activa por id_almacen.
+ */
+function resolvePickupWarehouseId(PDO $pdo): int
+{
+    $fromEnv = (int)(getEnvVar('CHECKOUT_PUBLIC_PICKUP_WAREHOUSE_ID', getEnvVar('CHECKOUT_PICKUP_WAREHOUSE_ID', getEnvVar('PICKUP_WAREHOUSE_ID', '0'))) ?: 0);
+    if ($fromEnv > 0) {
+        $stmt = $pdo->prepare("SELECT id_almacen, nombre FROM almacenes WHERE id_almacen = ? AND estado = 'activo' LIMIT 1");
+        $stmt->execute([$fromEnv]);
+        $validatedRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $validated = (int)($validatedRow['id_almacen'] ?? 0);
+        $validatedName = (string)($validatedRow['nombre'] ?? '');
+        if ($validated > 0 && isPublicPickupWarehouseName($validatedName)) {
+            return $validated;
+        }
+    }
+
+    $stmt = $pdo->query("SELECT id_almacen, nombre FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC");
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $row) {
+        $idAlmacen = (int)($row['id_almacen'] ?? 0);
+        $nombre = (string)($row['nombre'] ?? '');
+        if ($idAlmacen > 0 && isPublicPickupWarehouseName($nombre)) {
+            return $idAlmacen;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Determina si una sucursal es apta para pickup de cliente web (punto de venta publico).
+ */
+function isPublicPickupWarehouseName(string $warehouseName): bool
+{
+    $name = strtolower(trim($warehouseName));
+    if ($name === '') {
+        return false;
+    }
+
+    if (strpos($name, 'papeler') !== false || strpos($name, 'liz') !== false) {
+        return true;
+    }
+
+    if (strpos($name, 'central') !== false || strpos($name, 'almacen') !== false || strpos($name, 'luisa') !== false) {
+        return false;
+    }
+
+    return false;
 }
 
 /**

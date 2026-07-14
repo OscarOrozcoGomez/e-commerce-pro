@@ -5,7 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-if (!isAdmin() && !isEncargado()) {
+if (!canManageDeliveryOrders()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -72,6 +72,7 @@ try {
     $hasClientesDireccion = false;
     $hasClienteDireccionesTable = false;
     $hasPedidosTipoEntrega = false;
+    $hasPedidosDireccionEntrega = false;
 
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'direccion'");
     $stmtMeta->execute();
@@ -85,7 +86,20 @@ try {
     $stmtMeta->execute();
     $hasPedidosTipoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
 
-    if ($hasClientesDireccion && $hasClienteDireccionesTable) {
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'direccion_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosDireccionEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    if ($hasPedidosDireccionEntrega) {
+        $fallbackDireccion = $hasClientesDireccion && $hasClienteDireccionesTable
+            ? "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1))"
+            : ($hasClientesDireccion
+                ? 'c.direccion'
+                : ($hasClienteDireccionesTable
+                    ? "(SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)"
+                    : 'NULL'));
+        $direccionExpr = "COALESCE(NULLIF(TRIM(p.direccion_entrega), ''), {$fallbackDireccion}) AS direccion";
+    } elseif ($hasClientesDireccion && $hasClienteDireccionesTable) {
         $direccionExpr = "COALESCE(c.direccion, (SELECT cd.direccion FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS direccion";
     } elseif ($hasClientesDireccion) {
         $direccionExpr = "c.direccion AS direccion";
@@ -127,7 +141,7 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <div class="col s12">
             <h4>Asignar Entregas a Domicilio</h4>
-            <p class="grey-text">Selecciona un pedido pagado y asígnalo a un repartidor disponible.</p>
+            <p class="grey-text">Selecciona un pedido agendado a domicilio y asígnalo a un repartidor disponible.</p>
         </div>
     </div>
 

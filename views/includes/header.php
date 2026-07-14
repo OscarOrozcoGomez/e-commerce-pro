@@ -73,12 +73,27 @@
             border-radius: 12px !important;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
         }
+        @keyframes pickupBuzz {
+            0% { transform: translateX(0) rotate(0deg); }
+            15% { transform: translateX(-2px) rotate(-10deg); }
+            30% { transform: translateX(2px) rotate(10deg); }
+            45% { transform: translateX(-2px) rotate(-8deg); }
+            60% { transform: translateX(2px) rotate(8deg); }
+            75% { transform: translateX(-1px) rotate(-4deg); }
+            100% { transform: translateX(0) rotate(0deg); }
+        }
+        .pickup-buzz-active {
+            animation: pickupBuzz 0.75s ease-in-out 3;
+            transform-origin: center;
+        }
     </style>
 </head>
 <body class="grey lighten-4">
     <?php
         $headerDisplayName = '';
         $headerAvatarInitials = 'U';
+        $pickupAlertCount = 0;
+        $showPickupAlertInHeader = false;
         if (isAuthenticated()) {
             $headerDisplayName = trim((string)($_SESSION['usuario']['nombre'] ?? ''));
             if ($headerDisplayName !== '') {
@@ -87,6 +102,31 @@
                     $firstInitial = mb_substr($nameParts[0], 0, 1, 'UTF-8');
                     $lastInitial = count($nameParts) > 1 ? mb_substr($nameParts[count($nameParts) - 1], 0, 1, 'UTF-8') : '';
                     $headerAvatarInitials = mb_strtoupper($firstInitial . $lastInitial, 'UTF-8');
+                }
+            }
+
+            if (!isCliente() && !isRepartidor()) {
+                try {
+                    $pdoPickupHeader = getPDO();
+                    $stmtPickupTable = $pdoPickupHeader->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+                    $stmtPickupTable->execute();
+                    $hasPickupTableHeader = ((int)$stmtPickupTable->fetchColumn()) > 0;
+
+                    if ($hasPickupTableHeader) {
+                        $pickupSql = "SELECT COUNT(*) FROM pickup_notificaciones WHERE estado IN ('nueva', 'vista', 'apartada')";
+                        $pickupParams = [];
+                        if ((isEncargado() || isVendedor()) && !empty($_SESSION['usuario']['id_almacen'])) {
+                            $pickupSql .= " AND id_almacen = :id_almacen";
+                            $pickupParams[':id_almacen'] = (int)$_SESSION['usuario']['id_almacen'];
+                        }
+                        $stmtPickupCount = $pdoPickupHeader->prepare($pickupSql);
+                        $stmtPickupCount->execute($pickupParams);
+                        $pickupAlertCount = (int)$stmtPickupCount->fetchColumn();
+                        $showPickupAlertInHeader = $pickupAlertCount > 0;
+                    }
+                } catch (Throwable $e) {
+                    $pickupAlertCount = 0;
+                    $showPickupAlertInHeader = false;
                 }
             }
         }
@@ -119,6 +159,13 @@
                 </li>
                 
                 <?php if (isAuthenticated() && !isCliente() && !isRepartidor()): ?>
+                    <li style="position: relative;">
+                        <a id="pickup-alert-link" href="<?php echo BASE_URL; ?>views/pickup_notifications.php" title="Compras Pickup Agendadas" style="position: relative;" data-pickup-count="<?php echo (int)$pickupAlertCount; ?>">
+                            <i id="pickup-alert-icon" class="material-icons <?php echo $showPickupAlertInHeader ? 'deep-orange-text text-lighten-2 animated pulse infinite' : ''; ?>">store_mall_directory</i>
+                            <span id="pickup-alert-badge" class="new badge deep-orange" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px; <?php echo $pickupAlertCount > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$pickupAlertCount; ?></span>
+                        </a>
+                    </li>
+
                     <?php
                         $pdoHead = getPDO();
                         $sqlAlert = "SELECT COUNT(*) FROM inventario_almacen ia 
@@ -229,6 +276,20 @@
         </div>
     </nav>
 
+    <?php if ($showPickupAlertInHeader): ?>
+        <div style="background:#fff3e0; border-top:1px solid #ffe0b2; border-bottom:1px solid #ffe0b2;">
+            <div class="container" style="padding:8px 0; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px; color:#bf360c;">
+                    <i class="material-icons tiny">notifications_active</i>
+                    <strong>Tienes <?php echo $pickupAlertCount; ?> compra(s) pickup por atender.</strong>
+                </div>
+                <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn-small deep-orange darken-2 waves-effect waves-light">
+                    Ver Notificaciones Pickup
+                </a>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <!-- Estructura del Menú Lateral (Móvil) -->
     <ul class="sidenav" id="mobile-nav">
         <li class="blue darken-4 white-text center-align" style="padding: 20px 0; position: relative;">
@@ -266,6 +327,12 @@
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php else: ?>
                 <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
+                <li>
+                    <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php">
+                        <i class="material-icons">store_mall_directory</i> Notificaciones Pickup
+                        <span id="pickup-alert-badge-mobile" class="new badge deep-orange" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $pickupAlertCount > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$pickupAlertCount; ?></span>
+                    </a>
+                </li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes</a></li>
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php endif; ?>
@@ -283,7 +350,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
         const USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+        const USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
         const CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
+        const CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
+        const BASE_URL_HEADER = '<?php echo BASE_URL; ?>';
         const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
 
         // Persistir parametros de marketing para atribucion de conversiones.
@@ -437,6 +507,116 @@
             }
         }
 
+        function getPickupStorageKey() {
+            return `bb_pickup_pending_last_u${CURRENT_USER_ID}_a${CURRENT_USER_WAREHOUSE_ID}`;
+        }
+
+        function updatePickupBadges(count) {
+            const total = Math.max(0, parseInt(count, 10) || 0);
+            const badgeDesktop = document.getElementById('pickup-alert-badge');
+            const badgeMobile = document.getElementById('pickup-alert-badge-mobile');
+
+            [badgeDesktop, badgeMobile].forEach((badge) => {
+                if (!badge) return;
+                badge.textContent = String(total);
+                badge.style.display = total > 0 ? 'inline-block' : 'none';
+            });
+        }
+
+        function triggerPickupBuzz() {
+            const icon = document.getElementById('pickup-alert-icon');
+            if (!icon) return;
+            icon.classList.remove('pickup-buzz-active');
+            void icon.offsetWidth;
+            icon.classList.add('pickup-buzz-active');
+            setTimeout(() => {
+                icon.classList.remove('pickup-buzz-active');
+            }, 2400);
+        }
+
+        function playPickupAlertSound() {
+            try {
+                const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextCtor) return;
+
+                if (!window.__pickupAudioCtx) {
+                    window.__pickupAudioCtx = new AudioContextCtor();
+                }
+
+                const ctx = window.__pickupAudioCtx;
+                if (ctx.state === 'suspended') {
+                    ctx.resume();
+                }
+                const now = ctx.currentTime;
+                const notes = [
+                    { freq: 1180, start: 0.00, duration: 0.12 },
+                    { freq: 740,  start: 0.14, duration: 0.12 },
+                    { freq: 1240, start: 0.30, duration: 0.14 },
+                    { freq: 820,  start: 0.48, duration: 0.14 }
+                ];
+
+                notes.forEach((note) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.value = note.freq;
+                    gain.gain.setValueAtTime(0.0001, now + note.start);
+                    gain.gain.exponentialRampToValueAtTime(0.25, now + note.start + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + note.start + note.duration);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now + note.start);
+                    osc.stop(now + note.start + note.duration + 0.02);
+                });
+            } catch (e) {
+                console.error('No se pudo reproducir alerta pickup:', e);
+            }
+        }
+
+        function processPickupCount(newCount) {
+            const normalized = Math.max(0, parseInt(newCount, 10) || 0);
+            const storageKey = getPickupStorageKey();
+            const prevRaw = localStorage.getItem(storageKey);
+            const prev = prevRaw === null ? null : Math.max(0, parseInt(prevRaw, 10) || 0);
+
+            updatePickupBadges(normalized);
+
+            if (prev !== null && normalized > prev) {
+                triggerPickupBuzz();
+                if (window.__pickupAudioUnlocked === true) {
+                    playPickupAlertSound();
+                }
+                if (typeof M !== 'undefined' && M.toast) {
+                    const msg = window.__pickupAudioUnlocked === true
+                        ? `Nueva reserva pickup: +${normalized - prev}`
+                        : `Nueva reserva pickup: +${normalized - prev} (haz click para habilitar sonido)`;
+                    M.toast({ html: msg, classes: 'deep-orange darken-2' });
+                }
+            }
+
+            localStorage.setItem(storageKey, String(normalized));
+        }
+
+        async function pollPickupAlerts() {
+            if (!USER_IS_INTERNAL_STAFF) {
+                return;
+            }
+            try {
+                const response = await fetch(`${BASE_URL_HEADER}api/dashboard_data.php`, {
+                    credentials: 'same-origin',
+                    cache: 'no-store'
+                });
+                const data = await response.json();
+                if (!response.ok || !data || !data.success) {
+                    return;
+                }
+                const count = parseInt(data?.data?.pickup_pendientes?.total ?? 0, 10) || 0;
+                processPickupCount(count);
+            } catch (e) {
+                console.error('Error consultando alertas pickup:', e);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Inicializar Menú Lateral
             var sidenavElems = document.querySelectorAll('.sidenav');
@@ -471,6 +651,42 @@
             syncLegacyFavoritesToServer().finally(() => {
                 updateFavoritesBadge();
             });
+
+            if (USER_IS_INTERNAL_STAFF) {
+                const pickupLink = document.getElementById('pickup-alert-link');
+                const initialCount = pickupLink ? (parseInt(pickupLink.getAttribute('data-pickup-count') || '0', 10) || 0) : 0;
+                processPickupCount(initialCount);
+
+                const unlockAudioContext = () => {
+                    try {
+                        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+                        if (!AudioContextCtor) return;
+                        if (!window.__pickupAudioCtx) {
+                            window.__pickupAudioCtx = new AudioContextCtor();
+                        }
+                        if (window.__pickupAudioCtx && window.__pickupAudioCtx.state === 'suspended') {
+                            window.__pickupAudioCtx.resume();
+                        }
+                        window.__pickupAudioUnlocked = true;
+                    } catch (e) {
+                        console.error('No se pudo habilitar audio pickup:', e);
+                    }
+                };
+
+                window.__pickupAudioUnlocked = false;
+
+                ['click', 'keydown', 'touchstart', 'mousemove'].forEach((evt) => {
+                    window.addEventListener(evt, unlockAudioContext, { once: true, passive: true });
+                });
+
+                pollPickupAlerts();
+                setInterval(pollPickupAlerts, 10000);
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible') {
+                        pollPickupAlerts();
+                    }
+                });
+            }
 
             window.addEventListener('storage', function(event) {
                 if (event.key === 'cart') {

@@ -651,6 +651,11 @@ include __DIR__ . '/includes/header.php';
 
     function cargarProductos(almacenId) {
         const tbody = document.getElementById('tabla-productos-body');
+        const stockWarehouseSelector = document.getElementById('id_almacen_stock');
+        if (stockWarehouseSelector && String(stockWarehouseSelector.value) !== String(almacenId)) {
+            stockWarehouseSelector.value = String(almacenId);
+        }
+
         fetch(`${BASE_API}?action=list&almacen_id=${almacenId}`)
             .then(r => r.json())
             .then(res => {
@@ -774,7 +779,7 @@ include __DIR__ . '/includes/header.php';
     }
 
     function getNormalizedProductStock(p) {
-        return Math.max(0, parseInt(p?.chat_stock ?? p?.total_stock ?? p?.cantidad_actual) || 0);
+        return Math.max(0, parseInt(p?.cantidad_actual ?? p?.chat_stock ?? p?.total_stock) || 0);
     }
 
     function renderRow(p) {
@@ -898,6 +903,12 @@ include __DIR__ . '/includes/header.php';
     // Mantener las funciones de UI existentes pero adaptadas
 
     function abrirEditar(prod) {
+        const currentViewWarehouse = document.getElementById('almacen_view_selector')?.value || '';
+        const stockWarehouseSelector = document.getElementById('id_almacen_stock');
+        if (stockWarehouseSelector && currentViewWarehouse) {
+            stockWarehouseSelector.value = String(currentViewWarehouse);
+        }
+
         document.getElementById('accion').value = 'editar';
         document.getElementById('id_producto').value = prod.id_producto;
         

@@ -79,9 +79,10 @@ try {
             }
 
             $sql = "SELECT
-                        COALESCE(SUM(CASE WHEN estado IN ('nueva','vista') THEN 1 ELSE 0 END), 0) AS pendientes,
+                        COALESCE(SUM(CASE WHEN estado IN ('nueva','vista','apartada') THEN 1 ELSE 0 END), 0) AS pendientes,
                         COALESCE(SUM(CASE WHEN estado = 'nueva' THEN 1 ELSE 0 END), 0) AS nuevas,
                         COALESCE(SUM(CASE WHEN estado = 'vista' THEN 1 ELSE 0 END), 0) AS vistas,
+                        COALESCE(SUM(CASE WHEN estado = 'apartada' THEN 1 ELSE 0 END), 0) AS apartadas,
                         COALESCE(SUM(CASE WHEN estado = 'atendida' THEN 1 ELSE 0 END), 0) AS atendidas,
                         COALESCE(SUM(CASE WHEN estado = 'atendida' AND DATE(fecha_atendida) = CURDATE() THEN 1 ELSE 0 END), 0) AS atendidas_hoy
                     FROM pickup_notificaciones
@@ -94,6 +95,7 @@ try {
                 'pendientes' => (int)($row['pendientes'] ?? 0),
                 'nuevas' => (int)($row['nuevas'] ?? 0),
                 'vistas' => (int)($row['vistas'] ?? 0),
+                'apartadas' => (int)($row['apartadas'] ?? 0),
                 'atendidas' => (int)($row['atendidas'] ?? 0),
                 'atendidas_hoy' => (int)($row['atendidas_hoy'] ?? 0),
             ];
@@ -114,6 +116,7 @@ try {
             'pendientes' => $total,
             'nuevas' => $total,
             'vistas' => 0,
+            'apartadas' => 0,
             'atendidas' => 0,
             'atendidas_hoy' => 0,
         ];
