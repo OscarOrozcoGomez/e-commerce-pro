@@ -4,18 +4,23 @@
 
 Agrega estos secrets en Settings > Secrets and variables > Actions:
 
-- PTF_HOST
-- PTF_USERNAME
-- PTF_PASSWORD
-- PTF_PORT (opcional, por default 21)
+- FTP_HOST
+- FTP_USERNAME
+- FTP_PASSWORD
+- FTP_PORT (opcional, por default 21)
 - MIGRATIONS_URL
 - MIGRATIONS_DEPLOY_TOKEN
+
+Compatibilidad legacy:
+
+- El workflow tambien acepta `PTF_HOST`, `PTF_USERNAME`, `PTF_PASSWORD`, `PTF_PORT`, `PTF_PROTOCOL`.
+- Recomendado estandarizar a `FTP_*` para evitar confusiones.
 
 Sugerencias para Produccion:
 
 - MIGRATIONS_URL = https://tu-dominio.com/api/run_migrations.php
-- PTF_PORT = 21 (FTP/FTPS segun hosting)
-- PTF_PROTOCOL = ftp o ftps (NO sftp para SamKirkland/FTP-Deploy-Action)
+- FTP_PORT = 21 (FTP/FTPS segun hosting)
+- FTP_PROTOCOL = ftp o ftps (NO sftp para SamKirkland/FTP-Deploy-Action)
 - El deploy via FTP apunta a /public_html/ en deploy.yml
 
 ## 2) Hosting de Produccion
