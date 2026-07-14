@@ -187,6 +187,14 @@ function canManageDeliveryOrders(): bool
 }
 
 /**
+ * Verifica si el usuario puede agendar pedidos a domicilio.
+ */
+function canScheduleSalesOrders(): bool
+{
+    return isAuthenticated() && (isAdmin() || isEncargado() || isVendedor());
+}
+
+/**
  * Obtiene el ID del almacén del usuario actual.
  *
  * @return int|null

@@ -8,7 +8,7 @@ requireAuth();
 
 header('Content-Type: application/json');
 
-if (!canManageDeliveryOrders()) {
+if (!canScheduleSalesOrders()) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado para agendar pedidos a domicilio.']);
     exit;

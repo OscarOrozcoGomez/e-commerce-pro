@@ -784,10 +784,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Realizar Venta</span>
-                        <p>Acceso restringido a admin y encargado</p>
+                        <p>Capturar pedidos a domicilio para tus clientes</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn waves-effect waves-light grey btn-large">Solo autorizados</a>
+                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="btn waves-effect waves-light green btn-large">Ir a Ventas</a>
                     </div>
                 </div>
             </div>
