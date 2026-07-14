@@ -566,6 +566,10 @@ function dbCreatePublicOrder(array $data): array {
         $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $esPickupSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0;
         $pickupWarehouseId = $esPickupSucursal ? resolvePickupWarehouseId($pdo) : null;
+        if ($esPickupSucursal && (int)$pickupWarehouseId <= 0) {
+            throw new Exception('No hay una sucursal pickup publica configurada para pedidos web.');
+        }
+        $pickupStockHint = is_array($data['pickup_stock_hint'] ?? null) ? $data['pickup_stock_hint'] : null;
         
         // Definir el almacén de despacho: si no llega explícito, resolver automáticamente
         // un almacén que pueda surtir todos los productos del carrito.
@@ -592,6 +596,21 @@ function dbCreatePublicOrder(array $data): array {
 
         if ($aplicarIncentivoSucursal) {
             $infoCliente .= " | INCENTIVO_SUCURSAL: -$" . number_format($descuentoTotal, 2, '.', '');
+        }
+
+        if ($esPickupSucursal && is_array($pickupStockHint) && (($pickupStockHint['status'] ?? '') === 'transferible')) {
+            $supportWarehouse = trim((string)($pickupStockHint['almacen_apoyo_nombre'] ?? 'almacen de apoyo'));
+            $faltantesRaw = is_array($pickupStockHint['faltantes'] ?? null) ? $pickupStockHint['faltantes'] : [];
+            $faltantesTxt = [];
+            foreach ($faltantesRaw as $row) {
+                $nombre = trim((string)($row['nombre'] ?? ''));
+                $faltan = max(0, (int)($row['faltan'] ?? 0));
+                if ($nombre !== '' && $faltan > 0) {
+                    $faltantesTxt[] = $nombre . ' (faltan ' . $faltan . ')';
+                }
+            }
+            $detalleFaltantes = empty($faltantesTxt) ? 'productos pendientes por surtir' : implode(', ', $faltantesTxt);
+            $infoCliente .= ' | TRASLADO_INTERNO_2_3H: Requiere traslado desde ' . $supportWarehouse . ' para pickup. ' . $detalleFaltantes;
         }
 
         $numero_pedido = 'WEB-' . strtoupper(uniqid());
@@ -693,18 +712,50 @@ function dbCreatePublicOrder(array $data): array {
  */
 function resolvePickupWarehouseId(PDO $pdo): int
 {
-    $fromEnv = (int)(getEnvVar('CHECKOUT_PICKUP_WAREHOUSE_ID', getEnvVar('PICKUP_WAREHOUSE_ID', '0')) ?: 0);
+    $fromEnv = (int)(getEnvVar('CHECKOUT_PUBLIC_PICKUP_WAREHOUSE_ID', getEnvVar('CHECKOUT_PICKUP_WAREHOUSE_ID', getEnvVar('PICKUP_WAREHOUSE_ID', '0'))) ?: 0);
     if ($fromEnv > 0) {
-        $stmt = $pdo->prepare("SELECT id_almacen FROM almacenes WHERE id_almacen = ? AND estado = 'activo' LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id_almacen, nombre FROM almacenes WHERE id_almacen = ? AND estado = 'activo' LIMIT 1");
         $stmt->execute([$fromEnv]);
-        $validated = (int)($stmt->fetchColumn() ?: 0);
-        if ($validated > 0) {
+        $validatedRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $validated = (int)($validatedRow['id_almacen'] ?? 0);
+        $validatedName = (string)($validatedRow['nombre'] ?? '');
+        if ($validated > 0 && isPublicPickupWarehouseName($validatedName)) {
             return $validated;
         }
     }
 
-    $stmt = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1");
-    return (int)($stmt->fetchColumn() ?: 0);
+    $stmt = $pdo->query("SELECT id_almacen, nombre FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC");
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $row) {
+        $idAlmacen = (int)($row['id_almacen'] ?? 0);
+        $nombre = (string)($row['nombre'] ?? '');
+        if ($idAlmacen > 0 && isPublicPickupWarehouseName($nombre)) {
+            return $idAlmacen;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Determina si una sucursal es apta para pickup de cliente web (punto de venta publico).
+ */
+function isPublicPickupWarehouseName(string $warehouseName): bool
+{
+    $name = strtolower(trim($warehouseName));
+    if ($name === '') {
+        return false;
+    }
+
+    if (strpos($name, 'papeler') !== false || strpos($name, 'liz') !== false) {
+        return true;
+    }
+
+    if (strpos($name, 'central') !== false || strpos($name, 'almacen') !== false || strpos($name, 'luisa') !== false) {
+        return false;
+    }
+
+    return false;
 }
 
 /**

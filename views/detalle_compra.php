@@ -11,12 +11,31 @@ $usuario = $_SESSION['usuario'];
 $pdo = getPDO();
 
 try {
+    $stmtMetaPickup = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+    $stmtMetaPickup->execute();
+    $hasPickupTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
+
+    $hasPickupFechaApartada = false;
+    if ($hasPickupTable) {
+        $stmtMetaPickupApartada = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones' AND COLUMN_NAME = 'fecha_apartada'");
+        $stmtMetaPickupApartada->execute();
+        $hasPickupFechaApartada = ((int)$stmtMetaPickupApartada->fetchColumn()) > 0;
+    }
+
+    $pickupSelect = $hasPickupTable
+        ? ", pn.estado AS pickup_estado, pn.fecha_vista AS pickup_fecha_vista, "
+            . ($hasPickupFechaApartada ? "pn.fecha_apartada" : "NULL") . " AS pickup_fecha_apartada, pn.fecha_atendida AS pickup_fecha_atendida"
+        : ", NULL AS pickup_estado, NULL AS pickup_fecha_vista, NULL AS pickup_fecha_apartada, NULL AS pickup_fecha_atendida";
+    $pickupJoin = $hasPickupTable ? " LEFT JOIN pickup_notificaciones pn ON pn.id_pedido = p.id_pedido " : "";
+
     // Validar que el pedido exista y pertenezca al usuario logueado
     $sql = "SELECT p.*, mp.nombre as metodo_nombre,
                    c.nombre as cliente_nombre, c.email as cliente_email
+                   {$pickupSelect}
             FROM pedidos p
             JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
+            {$pickupJoin}
             WHERE p.id_pedido = :id_pedido AND c.id_usuario = :id_usuario";
     
     $stmt = $pdo->prepare($sql);
@@ -81,6 +100,22 @@ function getStatusLabel(string $status): string {
     }
 }
 
+function getPickupStatusLabel(?string $status): string {
+    $normalized = trim((string)$status);
+    switch ($normalized) {
+        case 'nueva': return '<span class="badge deep-orange white-text">Pickup: Reserva recibida</span>';
+        case 'vista': return '<span class="badge amber darken-2 white-text">Pickup: Vista por sucursal</span>';
+        case 'apartada': return '<span class="badge blue darken-2 white-text">Pickup: Apartada en sucursal</span>';
+        case 'atendida': return '<span class="badge green darken-2 white-text">Pickup: Atendida</span>';
+        default: return '';
+    }
+}
+
+function fmtPickupDateTime(?string $value): string {
+    $txt = trim((string)$value);
+    return $txt !== '' ? $txt : '---';
+}
+
 $pageTitle = 'Detalle de Pedido ' . $pedido['numero_pedido'];
 include __DIR__ . '/includes/header.php';
 
@@ -95,6 +130,13 @@ $ordenEstados = array_keys($estadosTimeline);
 $estadoTimelineActual = ($pedido['estado'] === 'apartado') ? 'pendiente_pago' : $pedido['estado'];
 $indiceActual = array_search($estadoTimelineActual, $ordenEstados);
 if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado'
+
+$tipoEntrega = strtolower(trim((string)($pedido['tipo_entrega'] ?? '')));
+$obsEntrega = strtolower((string)($pedido['observaciones'] ?? ''));
+$isPickupOrder = in_array($tipoEntrega, ['pickup', 'sucursal', 'recoger_sucursal'], true) || strpos($obsEntrega, 'entrega: sucursal') !== false;
+$pickupEstado = trim((string)($pedido['pickup_estado'] ?? ''));
+$pickupBadge = getPickupStatusLabel($pickupEstado);
+$showPickupTracking = $isPickupOrder && $pickupBadge !== '';
 ?>
 
 <div class="container" style="margin-top: 30px; margin-bottom: 50px;">
@@ -111,6 +153,9 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                     </div>
                     <div class="col s12 m4 right-align">
                         <?php echo getStatusLabel($pedido['estado']); ?>
+                        <?php if ($showPickupTracking): ?>
+                            <div style="margin-top:8px;"><?php echo $pickupBadge; ?></div>
+                        <?php endif; ?>
                         <div style="margin-top: 10px;">
                             <!-- Habilidad: Repetir Pedido -->
                             <button onclick="repetirPedido()" class="btn-small indigo darken-4 waves-effect waves-light">
@@ -139,8 +184,13 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                 <div class="row" style="margin-bottom: 0;">
                     <div class="col s12">
                         <div class="status-rules-box">
-                            <strong>Flujo de estados:</strong>
-                            <span>Pendiente/Apartado -> Confirmado (vendedor o encargado valida pago) -> En camino (repartidor) -> Entregado (repartidor).</span>
+                            <?php if ($isPickupOrder): ?>
+                                <strong>Flujo pickup:</strong>
+                                <span>Reserva recibida -> Vista por sucursal -> Apartada en sucursal -> Atendida (se acredita pago).</span>
+                            <?php else: ?>
+                                <strong>Flujo de estados:</strong>
+                                <span>Pendiente/Apartado -> Confirmado (vendedor o encargado valida pago) -> En camino (repartidor) -> Entregado (repartidor).</span>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -161,6 +211,16 @@ if ($indiceActual === false) $indiceActual = -1; // Para estados como 'cancelado
                     <p class="grey-text text-darken-2" style="font-size: 0.9rem; white-space: pre-line;">
                         <?php echo esc($pedido['observaciones'] ?? 'Sin datos adicionales.'); ?>
                     </p>
+                    <?php if ($showPickupTracking): ?>
+                        <div class="divider" style="margin: 15px 0;"></div>
+                        <p><strong>Estatus pickup en sucursal:</strong></p>
+                        <div style="margin:8px 0;"><?php echo $pickupBadge; ?></div>
+                        <p class="grey-text text-darken-2" style="font-size: 0.88rem; line-height: 1.55; margin: 0;">
+                            Vista: <?php echo esc(fmtPickupDateTime((string)($pedido['pickup_fecha_vista'] ?? ''))); ?><br>
+                            Apartada: <?php echo esc(fmtPickupDateTime((string)($pedido['pickup_fecha_apartada'] ?? ''))); ?><br>
+                            Atendida: <?php echo esc(fmtPickupDateTime((string)($pedido['pickup_fecha_atendida'] ?? ''))); ?>
+                        </p>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
