@@ -562,14 +562,21 @@ function dbCreatePublicOrder(array $data): array {
     $pdo = getPDO();
     try {
         $pdo->beginTransaction();
+
+        $entrega = $data['tipo_entrega'] ?? 'No especificado';
+        $esPickupSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0;
+        $pickupWarehouseId = $esPickupSucursal ? resolvePickupWarehouseId($pdo) : null;
         
         // Definir el almacén de despacho: si no llega explícito, resolver automáticamente
         // un almacén que pueda surtir todos los productos del carrito.
-        $id_almacen_despacho = resolveCheckoutWarehouse($pdo, $data['items'] ?? [], $data['id_almacen'] ?? null);
+        $id_almacen_despacho = resolveCheckoutWarehouse(
+            $pdo,
+            $data['items'] ?? [],
+            $pickupWarehouseId ?? ($data['id_almacen'] ?? null)
+        );
         $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
-        $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | Dir: {$data['cliente']['direccion']}";
         $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ((float)($i['precio'] ?? 0) * (int)($i['quantity'] ?? 0)), 0.0);
         $subtotal = round(max(0.0, (float)$subtotal), 2);
@@ -675,6 +682,29 @@ function dbCreatePublicOrder(array $data): array {
         }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
     }
+}
+
+/**
+ * Resuelve la sucursal de pickup web.
+ *
+ * Prioridad:
+ * 1) Env var CHECKOUT_PICKUP_WAREHOUSE_ID o PICKUP_WAREHOUSE_ID si es valida y activa.
+ * 2) Primera sucursal activa por id_almacen.
+ */
+function resolvePickupWarehouseId(PDO $pdo): int
+{
+    $fromEnv = (int)(getEnvVar('CHECKOUT_PICKUP_WAREHOUSE_ID', getEnvVar('PICKUP_WAREHOUSE_ID', '0')) ?: 0);
+    if ($fromEnv > 0) {
+        $stmt = $pdo->prepare("SELECT id_almacen FROM almacenes WHERE id_almacen = ? AND estado = 'activo' LIMIT 1");
+        $stmt->execute([$fromEnv]);
+        $validated = (int)($stmt->fetchColumn() ?: 0);
+        if ($validated > 0) {
+            return $validated;
+        }
+    }
+
+    $stmt = $pdo->query("SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1");
+    return (int)($stmt->fetchColumn() ?: 0);
 }
 
 /**

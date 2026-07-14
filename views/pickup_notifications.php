@@ -5,7 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-if (!isEncargado() && !isAdmin()) {
+if (!isEncargado() && !isAdmin() && !isVendedor()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -33,59 +33,87 @@ try {
             $accion = trim((string)($_POST['accion'] ?? ''));
             $idNotificacion = (int)($_POST['id_notificacion'] ?? 0);
             $estado = trim((string)($_POST['estado'] ?? 'nueva'));
-            $fechaEstimacionRaw = trim((string)($_POST['fecha_estimacion_reabasto'] ?? ''));
-            $notas = trim((string)($_POST['notas_seguimiento'] ?? ''));
 
             if ($idNotificacion <= 0) {
                 $error = 'Notificacion invalida.';
-            } elseif ($accion !== 'actualizar') {
+            } elseif ($accion !== 'marcar_estado') {
                 $error = 'Accion no permitida.';
-            } elseif (!in_array($estado, ['nueva', 'vista', 'atendida'], true)) {
+            } elseif (!in_array($estado, ['vista', 'apartada', 'atendida'], true)) {
                 $error = 'Estado invalido.';
             } else {
-                $fechaEstimacion = null;
-                if ($fechaEstimacionRaw !== '') {
-                    $dt = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $fechaEstimacionRaw);
-                    if ($dt === false) {
-                        $error = 'Formato invalido para fecha estimada de reabasto.';
-                    } else {
-                        $fechaEstimacion = $dt->format('Y-m-d H:i:s');
-                    }
-                }
-
                 if ($error === '') {
                     $scopeWhere = '';
                     $scopeParams = [];
-                    if (isEncargado()) {
+                    if (isEncargado() || isVendedor()) {
                         $scopeWhere = ' AND id_almacen = :scope_almacen';
                         $scopeParams[':scope_almacen'] = $idAlmacenUsuario;
                     }
 
-                    $sql = "UPDATE pickup_notificaciones
-                            SET estado = :estado,
-                                fecha_estimacion_reabasto = :fecha_estimacion,
-                                notas_seguimiento = :notas,
-                                id_usuario_seguimiento = :id_usuario,
-                                fecha_vista = CASE WHEN :estado = 'vista' AND fecha_vista IS NULL THEN NOW() WHEN :estado = 'nueva' THEN NULL ELSE fecha_vista END,
-                                fecha_atendida = CASE WHEN :estado = 'atendida' THEN NOW() WHEN :estado != 'atendida' THEN NULL ELSE fecha_atendida END,
-                                actualizado_en = NOW()
-                            WHERE id_notificacion = :id_notificacion{$scopeWhere}";
-
-                    $stmt = $pdo->prepare($sql);
-                    $params = [
-                        ':estado' => $estado,
-                        ':fecha_estimacion' => $fechaEstimacion,
-                        ':notas' => $notas !== '' ? $notas : null,
-                        ':id_usuario' => $idUsuario,
+                    $stmtCurrent = $pdo->prepare("SELECT id_pedido, estado FROM pickup_notificaciones WHERE id_notificacion = :id_notificacion{$scopeWhere} LIMIT 1");
+                    $stmtCurrent->execute([
                         ':id_notificacion' => $idNotificacion,
-                    ] + $scopeParams;
+                    ] + $scopeParams);
+                    $current = $stmtCurrent->fetch(PDO::FETCH_ASSOC) ?: null;
 
-                    $stmt->execute($params);
-                    if ($stmt->rowCount() > 0) {
-                        $success = 'Seguimiento de pickup actualizado.';
-                        logAudit('PICKUP_NOTIFICACION_ACTUALIZADA', 'pickup_notificaciones', $idNotificacion, "Estado actualizado a {$estado}");
+                    if (!$current) {
+                        $error = 'No se encontro la notificacion o no tienes permisos para modificarla.';
                     } else {
-                        $error = 'No se pudo actualizar la notificacion. Verifica permisos o si hubo cambios.';
+                        $estadoActual = (string)($current['estado'] ?? 'nueva');
+                        $transicionesPermitidas = [
+                            'nueva' => ['vista'],
+                            'vista' => ['apartada'],
+                            'apartada' => ['atendida'],
+                            'atendida' => [],
+                        ];
+
+                        if (!in_array($estado, $transicionesPermitidas[$estadoActual] ?? [], true)) {
+                            $error = 'Transicion de estado no permitida.';
+                        } else {
+                            $pdo->beginTransaction();
+                            try {
+                                $sql = "UPDATE pickup_notificaciones
+                                        SET estado = :estado,
+                                            id_usuario_seguimiento = :id_usuario,
+                                            fecha_vista = CASE WHEN :estado_vista IN ('vista','apartada','atendida') AND fecha_vista IS NULL THEN NOW() ELSE fecha_vista END,
+                                            fecha_apartada = CASE WHEN :estado_apartada = 'apartada' AND fecha_apartada IS NULL THEN NOW() ELSE fecha_apartada END,
+                                            fecha_atendida = CASE WHEN :estado_atendida = 'atendida' THEN NOW() ELSE fecha_atendida END,
+                                            actualizado_en = NOW()
+                                        WHERE id_notificacion = :id_notificacion{$scopeWhere}";
+
+                                $stmt = $pdo->prepare($sql);
+                                $params = [
+                                    ':estado' => $estado,
+                                    ':estado_vista' => $estado,
+                                    ':estado_apartada' => $estado,
+                                    ':estado_atendida' => $estado,
+                                    ':id_usuario' => $idUsuario,
+                                    ':id_notificacion' => $idNotificacion,
+                                ] + $scopeParams;
+
+                                $stmt->execute($params);
+
+                                if ($estado === 'atendida') {
+                                    $idPedido = (int)($current['id_pedido'] ?? 0);
+                                    if ($idPedido > 0) {
+                                        $stmtPedido = $pdo->prepare("UPDATE pedidos
+                                                                   SET estado = 'pagado',
+                                                                       fecha_pago = IFNULL(fecha_pago, NOW())
+                                                                 WHERE id_pedido = :id_pedido
+                                                                   AND estado IN ('pendiente_pago', 'apartado', 'pagado')");
+                                        $stmtPedido->execute([':id_pedido' => $idPedido]);
+                                    }
+                                }
+
+                                $pdo->commit();
+                                $success = 'Seguimiento de pickup actualizado.';
+                                logAudit('PICKUP_NOTIFICACION_ACTUALIZADA', 'pickup_notificaciones', $idNotificacion, "Estado actualizado de {$estadoActual} a {$estado}");
+                            } catch (Throwable $txe) {
+                                if ($pdo->inTransaction()) {
+                                    $pdo->rollBack();
+                                }
+                                throw $txe;
+                            }
+                        }
                     }
                 }
             }
@@ -96,12 +124,12 @@ try {
     $where = '1=1';
     $params = [];
 
-    if (isEncargado()) {
+    if (isEncargado() || isVendedor()) {
         $where .= ' AND pn.id_almacen = :almacen';
         $params[':almacen'] = $idAlmacenUsuario;
     }
 
-    if (in_array($estadoFiltro, ['nueva', 'vista', 'atendida'], true)) {
+    if (in_array($estadoFiltro, ['nueva', 'vista', 'apartada', 'atendida'], true)) {
         $where .= ' AND pn.estado = :estado';
         $params[':estado'] = $estadoFiltro;
     }
@@ -119,7 +147,7 @@ try {
         LEFT JOIN clientes c ON c.id_cliente = pn.id_cliente
         INNER JOIN almacenes a ON a.id_almacen = pn.id_almacen
         WHERE {$where}
-        ORDER BY FIELD(pn.estado, 'nueva', 'vista', 'atendida'), pn.creado_en DESC
+        ORDER BY FIELD(pn.estado, 'nueva', 'vista', 'apartada', 'atendida'), pn.creado_en DESC
         LIMIT 300";
 
     $stmtList = $pdo->prepare($sqlList);
@@ -128,7 +156,7 @@ try {
 
     $whereCounts = '1=1';
     $paramsCounts = [];
-    if (isEncargado()) {
+    if (isEncargado() || isVendedor()) {
         $whereCounts .= ' AND id_almacen = :almacen';
         $paramsCounts[':almacen'] = $idAlmacenUsuario;
     }
@@ -136,7 +164,7 @@ try {
     $stmtCounts = $pdo->prepare("SELECT estado, COUNT(*) AS total FROM pickup_notificaciones WHERE {$whereCounts} GROUP BY estado");
     $stmtCounts->execute($paramsCounts);
     $rowsCounts = $stmtCounts->fetchAll(PDO::FETCH_ASSOC);
-    $counts = ['nueva' => 0, 'vista' => 0, 'atendida' => 0];
+    $counts = ['nueva' => 0, 'vista' => 0, 'apartada' => 0, 'atendida' => 0];
     foreach ($rowsCounts as $row) {
         $key = (string)($row['estado'] ?? '');
         if (isset($counts[$key])) {
@@ -146,7 +174,7 @@ try {
 } catch (Throwable $e) {
     $error = $e->getMessage();
     $notificaciones = [];
-    $counts = ['nueva' => 0, 'vista' => 0, 'atendida' => 0];
+    $counts = ['nueva' => 0, 'vista' => 0, 'apartada' => 0, 'atendida' => 0];
     $estadoFiltro = '';
 }
 
@@ -174,7 +202,7 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <div class="row">
-        <div class="col s12 m4">
+        <div class="col s12 m3">
             <div class="card deep-orange lighten-1 white-text">
                 <div class="card-content">
                     <span class="card-title">Nuevas</span>
@@ -182,7 +210,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col s12 m4">
+        <div class="col s12 m3">
             <div class="card amber darken-2 white-text">
                 <div class="card-content">
                     <span class="card-title">Vistas</span>
@@ -190,7 +218,15 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col s12 m4">
+        <div class="col s12 m3">
+            <div class="card blue darken-2 white-text">
+                <div class="card-content">
+                    <span class="card-title">Apartadas</span>
+                    <p style="font-size:2.4rem; margin:0;"><?php echo (int)$counts['apartada']; ?></p>
+                </div>
+            </div>
+        </div>
+        <div class="col s12 m3">
             <div class="card green darken-2 white-text">
                 <div class="card-content">
                     <span class="card-title">Atendidas</span>
@@ -210,6 +246,7 @@ include __DIR__ . '/includes/header.php';
                                 <option value="">Todos los estados</option>
                                 <option value="nueva" <?php echo $estadoFiltro === 'nueva' ? 'selected' : ''; ?>>Nueva</option>
                                 <option value="vista" <?php echo $estadoFiltro === 'vista' ? 'selected' : ''; ?>>Vista</option>
+                                <option value="apartada" <?php echo $estadoFiltro === 'apartada' ? 'selected' : ''; ?>>Apartada</option>
                                 <option value="atendida" <?php echo $estadoFiltro === 'atendida' ? 'selected' : ''; ?>>Atendida</option>
                             </select>
                         </div>
@@ -249,37 +286,62 @@ include __DIR__ . '/includes/header.php';
                                             <strong><?php echo esc((string)$n['numero_pedido']); ?></strong><br>
                                             <small class="grey-text">$<?php echo number_format((float)$n['total'], 2); ?> | <?php echo esc((string)$n['fecha_pedido']); ?></small>
                                         </td>
-                                        <td><?php echo esc((string)$n['sucursal']); ?></td>
+                                        <td>
+                                            <?php echo esc((string)$n['sucursal']); ?><br>
+                                            <small class="grey-text">ID almacén: <?php echo (int)($n['id_almacen'] ?? 0); ?></small>
+                                        </td>
                                         <td><?php echo esc((string)($n['cliente'] ?? 'N/A')); ?></td>
                                         <td>
-                                            <span class="badge <?php echo $n['estado'] === 'nueva' ? 'deep-orange' : ($n['estado'] === 'vista' ? 'amber darken-2' : 'green'); ?> white-text" style="float:none;">
+                                            <span class="badge <?php echo $n['estado'] === 'nueva' ? 'deep-orange' : ($n['estado'] === 'vista' ? 'amber darken-2' : ($n['estado'] === 'apartada' ? 'blue darken-2' : 'green')); ?> white-text" style="float:none;">
                                                 <?php echo strtoupper((string)$n['estado']); ?>
                                             </span>
+                                            <div style="margin-top:6px; font-size:.82rem;" class="grey-text">
+                                                Vista: <?php echo !empty($n['fecha_vista']) ? esc((string)$n['fecha_vista']) : '---'; ?>
+                                                <br>
+                                                Apartada: <?php echo !empty($n['fecha_apartada']) ? esc((string)$n['fecha_apartada']) : '---'; ?>
+                                                <br>
+                                                Atendida: <?php echo !empty($n['fecha_atendida']) ? esc((string)$n['fecha_atendida']) : '---'; ?>
+                                            </div>
                                         </td>
                                         <td>
-                                            <?php if (!empty($n['fecha_estimacion_reabasto'])): ?>
-                                                <?php echo esc((string)$n['fecha_estimacion_reabasto']); ?>
-                                            <?php else: ?>
-                                                <span class="grey-text">Sin definir</span>
-                                            <?php endif; ?>
+                                            <span class="grey-text">Hora automatica por estatus</span>
                                         </td>
                                         <td>
-                                            <form method="POST" style="min-width:260px;">
-                                                <?php echo csrfInput(); ?>
-                                                <input type="hidden" name="accion" value="actualizar">
-                                                <input type="hidden" name="id_notificacion" value="<?php echo (int)$n['id_notificacion']; ?>">
+                                            <div style="display:flex; gap:6px; flex-wrap:wrap; min-width:260px;">
+                                                <?php if ((string)$n['estado'] === 'nueva'): ?>
+                                                    <form method="POST" style="margin:0;">
+                                                        <?php echo csrfInput(); ?>
+                                                        <input type="hidden" name="accion" value="marcar_estado">
+                                                        <input type="hidden" name="id_notificacion" value="<?php echo (int)$n['id_notificacion']; ?>">
+                                                        <input type="hidden" name="estado" value="vista">
+                                                        <button type="submit" class="btn-small amber darken-2 waves-effect waves-light">Marcar vista</button>
+                                                    </form>
+                                                <?php endif; ?>
 
-                                                <select name="estado" class="browser-default" style="margin-bottom:6px; border:1px solid #9e9e9e;">
-                                                    <option value="nueva" <?php echo $n['estado'] === 'nueva' ? 'selected' : ''; ?>>Nueva</option>
-                                                    <option value="vista" <?php echo $n['estado'] === 'vista' ? 'selected' : ''; ?>>Vista</option>
-                                                    <option value="atendida" <?php echo $n['estado'] === 'atendida' ? 'selected' : ''; ?>>Atendida</option>
-                                                </select>
+                                                <?php if ((string)$n['estado'] === 'vista'): ?>
+                                                    <form method="POST" style="margin:0;">
+                                                        <?php echo csrfInput(); ?>
+                                                        <input type="hidden" name="accion" value="marcar_estado">
+                                                        <input type="hidden" name="id_notificacion" value="<?php echo (int)$n['id_notificacion']; ?>">
+                                                        <input type="hidden" name="estado" value="apartada">
+                                                        <button type="submit" class="btn-small blue darken-2 waves-effect waves-light">Marcar apartada</button>
+                                                    </form>
+                                                <?php endif; ?>
 
-                                                <input type="datetime-local" name="fecha_estimacion_reabasto" value="<?php echo !empty($n['fecha_estimacion_reabasto']) ? date('Y-m-d\TH:i', strtotime((string)$n['fecha_estimacion_reabasto'])) : ''; ?>" style="margin-bottom:6px;">
-                                                <input type="text" name="notas_seguimiento" maxlength="255" placeholder="Nota de seguimiento" value="<?php echo esc((string)($n['notas_seguimiento'] ?? '')); ?>" style="margin-bottom:6px;">
+                                                <?php if ((string)$n['estado'] === 'apartada'): ?>
+                                                    <form method="POST" style="margin:0;">
+                                                        <?php echo csrfInput(); ?>
+                                                        <input type="hidden" name="accion" value="marcar_estado">
+                                                        <input type="hidden" name="id_notificacion" value="<?php echo (int)$n['id_notificacion']; ?>">
+                                                        <input type="hidden" name="estado" value="atendida">
+                                                        <button type="submit" class="btn-small green darken-2 waves-effect waves-light">Marcar atendida y pagada</button>
+                                                    </form>
+                                                <?php endif; ?>
 
-                                                <button type="submit" class="btn-small indigo waves-effect waves-light">Guardar</button>
-                                            </form>
+                                                <?php if ((string)$n['estado'] === 'atendida'): ?>
+                                                    <span class="grey-text text-darken-1">Flujo completado.</span>
+                                                <?php endif; ?>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>

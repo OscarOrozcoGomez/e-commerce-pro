@@ -67,7 +67,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Retiros Sucursal</span>
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
-                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
                     </div>
                 </div>
             </div>
@@ -466,7 +466,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Retiros Sucursal</span>
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
-                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Atendidas hoy: 0</p>
+                        <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
                     </div>
                 </div>
             </div>
@@ -1228,6 +1228,7 @@ include __DIR__ . '/includes/header.php';
                         'stat-pickup-breakdown',
                         'Nuevas: ' + (d.pickup_metrics.nuevas || 0)
                         + ' | Vistas: ' + (d.pickup_metrics.vistas || 0)
+                        + ' | Apartadas: ' + (d.pickup_metrics.apartadas || 0)
                         + ' | Atendidas hoy: ' + (d.pickup_metrics.atendidas_hoy || 0)
                     );
                 }

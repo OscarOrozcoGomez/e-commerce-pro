@@ -16,11 +16,16 @@ $compras = [];
 if ($canViewPurchases) {
     try {
         $sql = "SELECT p.*, a.nombre as almacen_nombre,
+                   pn.estado AS pickup_estado,
+                   pn.fecha_vista AS pickup_fecha_vista,
+                   pn.fecha_apartada AS pickup_fecha_apartada,
+                   pn.fecha_atendida AS pickup_fecha_atendida,
                        (SELECT COUNT(*) FROM detalle_pedidos dp0 WHERE dp0.id_pedido = p.id_pedido AND dp0.cantidad <= 0) AS items_liberados,
                        (SELECT COUNT(*) FROM detalle_pedidos dp1 WHERE dp1.id_pedido = p.id_pedido AND dp1.cantidad > 0) AS items_activos
                 FROM pedidos p 
                 JOIN clientes c ON p.id_cliente = c.id_cliente 
                 LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
+            LEFT JOIN pickup_notificaciones pn ON pn.id_pedido = p.id_pedido
                 WHERE c.id_usuario = :id_usuario 
                 ORDER BY p.fecha_creacion DESC";
         $stmt = $pdo->prepare($sql);
@@ -40,6 +45,22 @@ function getStatusBadge(string $status): string {
         case 'apartado': return '<span class="badge purple white-text">Apartado</span>';
         case 'cancelado': return '<span class="badge red white-text">Cancelado</span>';
         default: return '<span class="badge grey">'.$status.'</span>';
+    }
+}
+
+function getPickupStatusBadge(?string $status): string {
+    $normalized = trim((string)$status);
+    switch ($normalized) {
+        case 'nueva':
+            return '<span class="badge deep-orange white-text">Pickup: Nueva</span>';
+        case 'vista':
+            return '<span class="badge amber darken-2 white-text">Pickup: Vista por sucursal</span>';
+        case 'apartada':
+            return '<span class="badge blue darken-2 white-text">Pickup: Apartada en sucursal</span>';
+        case 'atendida':
+            return '<span class="badge green darken-2 white-text">Pickup: Atendida</span>';
+        default:
+            return '';
     }
 }
 
@@ -87,6 +108,9 @@ include __DIR__ . '/includes/header.php';
                                     <div class="col s12 m6 right-align">
                                         <div style="margin-bottom: 10px;">
                                             <?php echo getStatusBadge($c['estado']); ?>
+                                            <?php if (!empty($c['pickup_estado'])): ?>
+                                                <?php echo getPickupStatusBadge((string)$c['pickup_estado']); ?>
+                                            <?php endif; ?>
                                             <?php if ($isLiberadoParcial): ?>
                                                 <span class="badge amber darken-2 white-text" style="margin-left: 6px;">Liberado parcial</span>
                                             <?php endif; ?>
