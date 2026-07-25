@@ -2,6 +2,10 @@
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
+function normalizePhoneDigitsCheckout(string $value): string {
+    return preg_replace('/\D+/', '', $value) ?? '';
+}
+
 function guardarDireccionCheckoutSiAplica(array $data): void {
     if (!isAuthenticated() || !isCliente()) {
         return;
@@ -91,19 +95,29 @@ if (isAuthenticated()) {
 
 $result = dbCreatePublicOrder($data);
 
-// Guardar teléfono en clientes si el cliente está logueado y aún no tiene teléfono registrado
+// Guardar o actualizar teléfono del cliente desde checkout cuando cambie.
 if ($result['success'] && isAuthenticated() && !empty($data['cliente']['telefono'])) {
     $idCliente = $_SESSION['usuario']['id_cliente'] ?? null;
     $telActual  = $_SESSION['usuario']['telefono_cliente'] ?? null;
-    if ($idCliente && empty($telActual)) {
+    if ($idCliente) {
         try {
             $pdo = getPDO();
-            $telefono = trim((string)$data['cliente']['telefono']);
-            $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefono) : $telefono;
-            $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ? AND (telefono IS NULL OR telefono = '')")
-                ->execute([$telefonoStore, $idCliente]);
-            // Actualizar la sesión para que los futuros formularios lo lean
-            $_SESSION['usuario']['telefono_cliente'] = $telefono;
+            $telefonoNuevo = trim((string)$data['cliente']['telefono']);
+            $digitsNuevo = normalizePhoneDigitsCheckout($telefonoNuevo);
+
+            $telActualPlain = trim((string)$telActual);
+            if ($telActualPlain !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($telActualPlain)) {
+                $telActualPlain = trim((string)piiDecryptValue($telActualPlain));
+            }
+            $digitsActual = normalizePhoneDigitsCheckout($telActualPlain);
+
+            if ($digitsNuevo !== '' && $digitsNuevo !== $digitsActual) {
+                $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefonoNuevo) : $telefonoNuevo;
+                $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ?")
+                    ->execute([$telefonoStore, $idCliente]);
+                // Actualizar la sesión para futuros formularios.
+                $_SESSION['usuario']['telefono_cliente'] = $telefonoNuevo;
+            }
         } catch (PDOException $e) {
             error_log('No se pudo guardar teléfono del cliente: ' . $e->getMessage());
         }
