@@ -14,6 +14,31 @@ if ($isUserAuthenticated && isCliente()) {
     $stmtDir = $pdo->prepare("SELECT * FROM cliente_direcciones WHERE id_cliente = ? ORDER BY es_default DESC");
     $stmtDir->execute([$usuarioLogueado['id_cliente']]);
     $direcciones = $stmtDir->fetchAll();
+
+    if (function_exists('piiDecryptValue') && function_exists('piiIsEncryptedValue')) {
+        foreach ($direcciones as &$d) {
+            foreach (['alias', 'direccion', 'maps_link'] as $k) {
+                if (isset($d[$k]) && is_string($d[$k]) && piiIsEncryptedValue($d[$k])) {
+                    $raw = trim((string)$d[$k]);
+                    $dec = trim((string)piiDecryptValue($raw));
+
+                    // Si no se pudo descifrar (ej. llave distinta), evitar mostrar ENCv1 en UI.
+                    if ($dec === $raw) {
+                        if ($k === 'alias') {
+                            $dec = 'Direccion ' . (string)($d['id_direccion'] ?? '');
+                        } elseif ($k === 'maps_link') {
+                            $dec = '';
+                        } else {
+                            $dec = 'Direccion protegida';
+                        }
+                    }
+
+                    $d[$k] = $dec;
+                }
+            }
+        }
+        unset($d);
+    }
 }
 
 $telefonoGuardado = $usuarioLogueado['telefono_cliente'] ?? '';
