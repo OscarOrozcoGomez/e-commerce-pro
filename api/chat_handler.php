@@ -187,6 +187,25 @@ try {
         $stmtList->execute($params);
         echo json_encode(['success' => true, 'clientes' => $stmtList->fetchAll()]);
 
+    } elseif ($action === 'staff_alerts_summary') {
+        if ($soyCliente) throw new Exception("No autorizado");
+
+        $unreadTotal = (int)$pdo->query("SELECT COUNT(*) FROM mensajes_soporte WHERE leido_staff = 0")->fetchColumn();
+
+        $sqlUnassigned = "SELECT COUNT(DISTINCT u.id_usuario)
+                          FROM usuarios u
+                          JOIN mensajes_soporte m ON m.id_cliente = u.id_usuario
+                          WHERE u.soporte_activo = 1
+                            AND u.asignado_a IS NULL
+                            AND m.leido_staff = 0";
+        $unassignedUnread = (int)$pdo->query($sqlUnassigned)->fetchColumn();
+
+        echo json_encode([
+            'success' => true,
+            'unread_total' => $unreadTotal,
+            'unassigned_unread' => $unassignedUnread
+        ]);
+
     } elseif ($action === 'start' || $action === 'close') {
         $id_cliente = $soyStaff ? (int)($_GET['id_cliente'] ?? 0) : $id_actual;
         
@@ -211,10 +230,27 @@ try {
         
         if ($id_cliente <= 0 || $id_destino <= 0) throw new Exception("Datos de transferencia incompletos.");
 
+        // Solo el agente actualmente asignado (o un admin) puede transferir un chat.
+        $stmtOwner = $pdo->prepare("SELECT asignado_a FROM usuarios WHERE id_usuario = ?");
+        $stmtOwner->execute([$id_cliente]);
+        $ownerData = $stmtOwner->fetch();
+        if (!$ownerData) {
+            throw new Exception("Cliente no encontrado.");
+        }
+
+        $asignadoActual = $ownerData['asignado_a'] !== null ? (int)$ownerData['asignado_a'] : null;
+        if (!isAdmin() && $asignadoActual !== $id_actual) {
+            throw new Exception("Solo el agente asignado puede transferir esta conversación.");
+        }
+
+        if ($asignadoActual !== null && $asignadoActual === $id_destino) {
+            throw new Exception("La conversación ya está asignada a ese agente.");
+        }
+
         $pdo->beginTransaction();
 
-        // Obtener nombre del nuevo agente para el mensaje de sistema
-        $stmtN = $pdo->prepare("SELECT nombre FROM usuarios WHERE id_usuario = ?");
+        // Validar que el destino exista y sea staff activo.
+        $stmtN = $pdo->prepare("SELECT nombre FROM usuarios WHERE id_usuario = ? AND id_rol IN (1,2,3) AND estado = 'activo'");
         $stmtN->execute([$id_destino]);
         $nombreDestino = $stmtN->fetchColumn();
         if (!$nombreDestino) throw new Exception("El agente de destino no existe.");
@@ -470,5 +506,8 @@ try {
         echo json_encode(['success' => true]);
     }
 } catch (Exception $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }
