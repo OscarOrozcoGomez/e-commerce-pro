@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+// Allow up to 5 minutes for migrations; prevents PHP from dying mid-execution
+// and causing Cloudflare 522 (origin closed connection without responding).
+set_time_limit(300);
+
 require_once __DIR__ . '/../core/migrations.php';
 
 header('Content-Type: application/json');
