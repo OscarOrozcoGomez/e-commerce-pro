@@ -212,6 +212,65 @@ include __DIR__ . '/includes/header.php';
     let pickupStockCheckTimer = null;
     let latestPickupStockCheck = null;
 
+    function getCheckoutSubmitButton() {
+        return document.querySelector('#form-checkout button[type="submit"]');
+    }
+
+    function setPickupSubmitBlocked(blocked, helperText = '') {
+        const btn = getCheckoutSubmitButton();
+        if (!btn) return;
+
+        btn.disabled = !!blocked;
+        if (blocked) {
+            btn.dataset.originalText = btn.dataset.originalText || btn.innerHTML;
+            btn.innerHTML = 'Sin stock disponible <i class="material-icons right">block</i>';
+            btn.classList.remove('green');
+            btn.classList.add('red', 'darken-2');
+            if (helperText) {
+                btn.title = helperText;
+            }
+        } else {
+            btn.innerHTML = btn.dataset.originalText || 'Confirmar Pedido <i class="material-icons right">check</i>';
+            btn.classList.remove('red', 'darken-2');
+            btn.classList.add('green');
+            btn.title = '';
+        }
+    }
+
+    function getSinStockProductsText() {
+        const faltantes = Array.isArray(latestPickupStockCheck?.faltantes) ? latestPickupStockCheck.faltantes : [];
+        const noTransferibles = faltantes.filter((row) => row && row.transferible === false);
+        const source = noTransferibles.length > 0 ? noTransferibles : faltantes;
+
+        return source
+            .map((row) => {
+                const nombre = String(row?.nombre || 'Producto');
+                const faltan = Math.max(0, parseInt(row?.faltan, 10) || 0);
+                return faltan > 0 ? `${nombre} (faltan ${faltan})` : nombre;
+            })
+            .join(', ');
+    }
+
+    function getSinStockProductIdSet() {
+        const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaActual !== 'Sucursal') {
+            return new Set();
+        }
+
+        if (!latestPickupStockCheck || latestPickupStockCheck.status !== 'sin_stock') {
+            return new Set();
+        }
+
+        const faltantes = Array.isArray(latestPickupStockCheck.faltantes) ? latestPickupStockCheck.faltantes : [];
+        const noTransferibles = faltantes.filter((row) => row && row.transferible === false);
+        const source = noTransferibles.length > 0 ? noTransferibles : faltantes;
+
+        return new Set(source
+            .map((row) => parseInt(row?.id_producto, 10) || 0)
+            .filter((id) => id > 0)
+        );
+    }
+
     function initAutocompleteCart() {
         if (typeof google === 'undefined') {
             console.error('Google Maps no pudo cargarse. Revisa tu API Key y Facturacion.');
@@ -297,6 +356,7 @@ include __DIR__ . '/includes/header.php';
         const tbody = document.getElementById('cart-table-body');
         let total = 0;
         let totalPieces = 0;
+        const sinStockProductIds = getSinStockProductIdSet();
         
         tbody.innerHTML = cart.length === 0 ? '<tr><td colspan="5" class="center">El carrito está vacío</td></tr>' : '';
 
@@ -314,11 +374,18 @@ include __DIR__ . '/includes/header.php';
                 .replace(/\s*[\-||]\s*Unidades\s*$/i, '')
                 .trim();
 
+            const itemProductId = parseInt(item.id_producto || item.id, 10) || 0;
+            const isSinStockItem = sinStockProductIds.has(itemProductId);
+            const rowClass = isSinStockItem ? 'cart-row-sin-stock' : '';
+            const warningBadge = isSinStockItem
+                ? '<div class="cart-sin-stock-chip">Sin existencia. Elimina este producto para continuar.</div>'
+                : '';
+
             total += subtotal;
             totalPieces += (parseInt(item.quantity, 10) || 0);
             tbody.innerHTML += `
-                <tr>
-                    <td>${cleanName}</td>
+                <tr class="${rowClass}">
+                    <td>${cleanName}${warningBadge}</td>
                     <td>$${price.toFixed(2)}</td>
                     <td>${item.quantity}</td>
                     <td>$${subtotal.toFixed(2)}</td>
@@ -332,6 +399,10 @@ include __DIR__ . '/includes/header.php';
         // Mostrar u ocultar el botón de vaciar según si hay items
         const btnEmpty = document.getElementById('btn-empty-cart');
         if (btnEmpty) btnEmpty.style.display = cart.length > 0 ? 'inline-block' : 'none';
+
+        if (cart.length === 0) {
+            hidePickupStockBanner();
+        }
     }
 
     function resolvePieceTierDiscountClient(pieces, settings) {
@@ -441,12 +512,14 @@ include __DIR__ . '/includes/header.php';
         localStorage.setItem('cart', JSON.stringify(cart));
         renderCart();
         updateCartBadge();
+        schedulePickupStockCheck();
     }
 
     function hidePickupStockBanner() {
         const banner = document.getElementById('pickup-stock-banner');
         if (banner) banner.style.display = 'none';
         latestPickupStockCheck = null;
+        setPickupSubmitBlocked(false);
     }
 
     function renderPickupStockBanner(payload) {
@@ -465,9 +538,12 @@ include __DIR__ . '/includes/header.php';
             faltantes: faltantes.map((row) => ({
                 id_producto: parseInt(row.id_producto, 10) || 0,
                 nombre: String(row.nombre || ''),
-                faltan: Math.max(0, parseInt(row.faltan, 10) || 0)
+                faltan: Math.max(0, parseInt(row.faltan, 10) || 0),
+                transferible: row.transferible === true
             }))
         };
+
+        renderCart();
 
         banner.className = 'card-panel';
 
@@ -477,6 +553,7 @@ include __DIR__ . '/includes/header.php';
             message.style.color = '#1b5e20';
             message.innerHTML = `<strong>Listo para recoger en sucursal.</strong> Todo tu pedido tiene existencia disponible en punto de entrega.`;
             banner.style.display = 'block';
+            setPickupSubmitBlocked(false);
             return;
         }
 
@@ -495,6 +572,7 @@ include __DIR__ . '/includes/header.php';
                 Hay existencia en inventario de respaldo; en aprox. <strong>2 a 3 horas</strong> podriamos moverlo y dejarlo listo para recoger.<br>
                 <small>Productos a surtir: ${detalles}</small>`;
             banner.style.display = 'block';
+            setPickupSubmitBlocked(false);
             return;
         }
 
@@ -502,8 +580,12 @@ include __DIR__ . '/includes/header.php';
             banner.classList.add('red', 'lighten-5');
             banner.style.borderLeft = '5px solid #c62828';
             message.style.color = '#b71c1c';
-            message.innerHTML = `<strong>Sin stock suficiente para pickup.</strong> Algunos productos no tienen existencia en sucursal ni en almacen de apoyo por ahora.`;
+            message.innerHTML = `<strong>Sin stock suficiente para pickup.</strong><br>
+                No tenemos existencia en sucursal ni en almacen de apoyo para uno o mas productos.<br>
+                <strong>Debes eliminar esos productos del carrito para continuar.</strong>`;
             banner.style.display = 'block';
+            const sinStockDetalle = getSinStockProductsText();
+            setPickupSubmitBlocked(true, sinStockDetalle !== '' ? `Sin stock: ${sinStockDetalle}` : 'Sin stock disponible para pickup');
             return;
         }
 
@@ -514,13 +596,13 @@ include __DIR__ . '/includes/header.php';
         const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
         if (tipoEntregaActual !== 'Sucursal') {
             hidePickupStockBanner();
-            return;
+            return null;
         }
 
         const cart = getCart();
         if (!Array.isArray(cart) || cart.length === 0) {
             hidePickupStockBanner();
-            return;
+            return null;
         }
 
         const items = cart
@@ -532,7 +614,7 @@ include __DIR__ . '/includes/header.php';
 
         if (items.length === 0) {
             hidePickupStockBanner();
-            return;
+            return null;
         }
 
         try {
@@ -546,12 +628,14 @@ include __DIR__ . '/includes/header.php';
             const data = await response.json();
             if (!response.ok || !data?.success) {
                 hidePickupStockBanner();
-                return;
+                return null;
             }
             renderPickupStockBanner(data);
+            return latestPickupStockCheck;
         } catch (e) {
             console.error('No se pudo revisar stock pickup:', e);
             hidePickupStockBanner();
+            return null;
         }
     }
 
@@ -600,10 +684,30 @@ include __DIR__ . '/includes/header.php';
         validatePhone();
     }
 
-    document.getElementById('form-checkout').addEventListener('submit', function(e) {
+    document.getElementById('form-checkout').addEventListener('submit', async function(e) {
         e.preventDefault();
         const cart = getCart();
         if (cart.length === 0) return M.toast({html: 'Tu carrito está vacío'});
+
+        const tipoEntregaSeleccionada = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaSeleccionada === 'Sucursal') {
+            await checkPickupStockHint();
+            if (latestPickupStockCheck && latestPickupStockCheck.status === 'sin_stock') {
+                const detalleSinStock = getSinStockProductsText();
+                const detalleHtml = detalleSinStock !== ''
+                    ? `<br><small style="color:#b71c1c;"><b>Productos sin existencia:</b> ${detalleSinStock}</small>`
+                    : '';
+
+                Swal.fire({
+                    title: 'No disponible por el momento',
+                    html: `No podemos completar este pedido porque uno o más productos no tienen existencia ni en sucursal ni en bodega.${detalleHtml}<br><br><b>Elimina esos productos del carrito para continuar.</b>`,
+                    icon: 'error',
+                    confirmButtonText: 'Entendido',
+                    confirmButtonColor: '#b71c1c'
+                });
+                return;
+            }
+        }
 
         const phoneInput = document.getElementById('telefono');
         const phoneDigits = (phoneInput?.value || '').replace(/\D/g, '').slice(0, 10);
@@ -939,6 +1043,20 @@ include __DIR__ . '/includes/header.php';
     .pac-container {
         z-index: 1051 !important;
         border-radius: 4px;
+    }
+    .cart-row-sin-stock {
+        background: #ffebee;
+        box-shadow: inset 4px 0 0 #c62828;
+    }
+    .cart-sin-stock-chip {
+        margin-top: 5px;
+        display: inline-block;
+        background: #c62828;
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.73rem;
+        font-weight: 700;
     }
 </style>
 

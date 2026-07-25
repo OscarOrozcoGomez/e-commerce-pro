@@ -577,15 +577,46 @@ function dbCreatePublicOrder(array $data): array {
         if ($esPickupSucursal && (int)$pickupWarehouseId <= 0) {
             throw new Exception('No hay una sucursal pickup publica configurada para pedidos web.');
         }
-        $pickupStockHint = is_array($data['pickup_stock_hint'] ?? null) ? $data['pickup_stock_hint'] : null;
+
+        $pickupStockSnapshot = null;
+        $allowSupportTransferPickup = false;
+        if ($esPickupSucursal) {
+            $pickupStockSnapshot = dbBuildPickupStockHint($pdo, $data['items'] ?? []);
+            if (!($pickupStockSnapshot['success'] ?? false)) {
+                throw new Exception((string)($pickupStockSnapshot['message'] ?? 'No se pudo validar stock pickup.'));
+            }
+
+            $statusPickup = (string)($pickupStockSnapshot['status'] ?? 'ok');
+            if ($statusPickup === 'sin_stock') {
+                $faltantes = is_array($pickupStockSnapshot['faltantes'] ?? null) ? $pickupStockSnapshot['faltantes'] : [];
+                $sinStock = array_filter($faltantes, static fn($row) => isset($row['transferible']) && $row['transferible'] === false);
+                $source = !empty($sinStock) ? $sinStock : $faltantes;
+
+                $nombres = [];
+                foreach ($source as $row) {
+                    $nombre = trim((string)($row['nombre'] ?? ''));
+                    if ($nombre !== '') {
+                        $nombres[] = $nombre;
+                    }
+                }
+
+                $detalle = empty($nombres) ? '' : implode(', ', array_values(array_unique($nombres)));
+                throw new Exception('pickup_sin_stock::' . $detalle);
+            }
+
+            $allowSupportTransferPickup = $statusPickup === 'transferible';
+        }
         
-        // Definir el almacén de despacho: si no llega explícito, resolver automáticamente
-        // un almacén que pueda surtir todos los productos del carrito.
-        $id_almacen_despacho = resolveCheckoutWarehouse(
-            $pdo,
-            $data['items'] ?? [],
-            $pickupWarehouseId ?? ($data['id_almacen'] ?? null)
-        );
+        // Para pickup, el pedido siempre queda asignado a la sucursal pickup.
+        // Si hay faltantes transferibles, permitimos surtir desde almacenes de apoyo.
+        $id_almacen_pedido = $esPickupSucursal
+            ? (int)$pickupWarehouseId
+            : resolveCheckoutWarehouse($pdo, $data['items'] ?? [], $data['id_almacen'] ?? null);
+
+        // Almacén principal de salida para escenarios que no son pickup transferible.
+        $id_almacen_despacho = $esPickupSucursal
+            ? (int)$pickupWarehouseId
+            : $id_almacen_pedido;
         $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
@@ -606,9 +637,9 @@ function dbCreatePublicOrder(array $data): array {
             $infoCliente .= " | INCENTIVO_SUCURSAL: -$" . number_format($descuentoTotal, 2, '.', '');
         }
 
-        if ($esPickupSucursal && is_array($pickupStockHint) && (($pickupStockHint['status'] ?? '') === 'transferible')) {
-            $supportWarehouse = trim((string)($pickupStockHint['almacen_apoyo_nombre'] ?? 'almacen de apoyo'));
-            $faltantesRaw = is_array($pickupStockHint['faltantes'] ?? null) ? $pickupStockHint['faltantes'] : [];
+        if ($esPickupSucursal && is_array($pickupStockSnapshot) && (($pickupStockSnapshot['status'] ?? '') === 'transferible')) {
+            $supportWarehouse = trim((string)($pickupStockSnapshot['almacen_apoyo_nombre'] ?? 'almacen de apoyo'));
+            $faltantesRaw = is_array($pickupStockSnapshot['faltantes'] ?? null) ? $pickupStockSnapshot['faltantes'] : [];
             $faltantesTxt = [];
             foreach ($faltantesRaw as $row) {
                 $nombre = trim((string)($row['nombre'] ?? ''));
@@ -625,13 +656,13 @@ function dbCreatePublicOrder(array $data): array {
 
         // Corregido: id_usuario no puede ser NULL según la estructura de la tabla pedidos
         $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_cliente, id_almacen, id_metodo_pago, estado, subtotal, descuento_total, total, observaciones) VALUES (?, ?, ?, ?, 1, 'pendiente_pago', ?, ?, ?, ?)");
-        $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_despacho, $subtotal, $descuentoTotal, $totalPedido, $infoCliente]);
+        $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_pedido, $subtotal, $descuentoTotal, $totalPedido, $infoCliente]);
         $id_pedido = $pdo->lastInsertId();
 
         if (strcasecmp((string)$entrega, 'Sucursal') === 0) {
             dbCreatePickupNotification($pdo, [
                 'id_pedido' => (int)$id_pedido,
-                'id_almacen' => (int)$id_almacen_despacho,
+            'id_almacen' => (int)$pickupWarehouseId,
                 'id_cliente' => $id_cliente !== null ? (int)$id_cliente : null,
                 'numero_pedido' => (string)$numero_pedido,
                 'cliente_nombre' => (string)($data['cliente']['nombre'] ?? 'Cliente sin nombre'),
@@ -644,6 +675,15 @@ function dbCreatePublicOrder(array $data): array {
         $stmtDetalle = $pdo->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, monto_descuento, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         $stmtStock = $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?");
         $stmtStockCheck = $pdo->prepare("SELECT COALESCE(cantidad_actual, 0) FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ? FOR UPDATE");
+                $stmtSupportStocks = $pdo->prepare("SELECT ia.id_almacen, COALESCE(ia.cantidad_actual, 0) AS cantidad_actual
+                                                                                        FROM inventario_almacen ia
+                                                                                        INNER JOIN almacenes a ON a.id_almacen = ia.id_almacen
+                                                                                        WHERE ia.id_producto = ?
+                                                                                            AND ia.id_almacen <> ?
+                                                                                            AND a.estado = 'activo'
+                                                                                            AND ia.cantidad_actual > 0
+                                                                                        ORDER BY ia.cantidad_actual DESC, ia.id_almacen ASC
+                                                                                        FOR UPDATE");
         $stmtCosto = $pdo->prepare("SELECT COALESCE(precio_costo, 0) FROM productos WHERE id_producto = ?");
 
         $remainingDiscountCents = (int)round($descuentoTotal * 100);
@@ -658,10 +698,58 @@ function dbCreatePublicOrder(array $data): array {
                 throw new Exception('Producto o cantidad inválidos en el pedido.');
             }
 
-            $stmtStockCheck->execute([$idProducto, $id_almacen_despacho]);
-            $stockActual = (int)$stmtStockCheck->fetchColumn();
-            if ($stockActual < $cantidad) {
-                throw new Exception('Stock insuficiente para uno o más productos.');
+            $consumos = [];
+
+            if ($esPickupSucursal) {
+                // Consumir primero el stock de la sucursal pickup.
+                $stmtStockCheck->execute([$idProducto, (int)$pickupWarehouseId]);
+                $stockPickup = (int)$stmtStockCheck->fetchColumn();
+                $usarPickup = min($cantidad, max(0, $stockPickup));
+                $faltante = $cantidad - $usarPickup;
+
+                if ($usarPickup > 0) {
+                    $consumos[] = ['id_almacen' => (int)$pickupWarehouseId, 'cantidad' => $usarPickup];
+                }
+
+                if ($faltante > 0) {
+                    if (!$allowSupportTransferPickup) {
+                        throw new Exception('Stock insuficiente para uno o más productos.');
+                    }
+
+                    // Repartir faltantes entre almacenes de apoyo disponibles.
+                    $stmtSupportStocks->execute([$idProducto, (int)$pickupWarehouseId]);
+                    $supportRows = $stmtSupportStocks->fetchAll(PDO::FETCH_ASSOC);
+
+                    foreach ($supportRows as $row) {
+                        if ($faltante <= 0) {
+                            break;
+                        }
+
+                        $idAlmacenApoyo = (int)($row['id_almacen'] ?? 0);
+                        $stockApoyo = max(0, (int)($row['cantidad_actual'] ?? 0));
+                        if ($idAlmacenApoyo <= 0 || $stockApoyo <= 0) {
+                            continue;
+                        }
+
+                        $usarApoyo = min($faltante, $stockApoyo);
+                        if ($usarApoyo > 0) {
+                            $consumos[] = ['id_almacen' => $idAlmacenApoyo, 'cantidad' => $usarApoyo];
+                            $faltante -= $usarApoyo;
+                        }
+                    }
+
+                    if ($faltante > 0) {
+                        throw new Exception('Stock insuficiente para uno o más productos.');
+                    }
+                }
+            } else {
+                $stmtStockCheck->execute([$idProducto, $id_almacen_despacho]);
+                $stockActual = (int)$stmtStockCheck->fetchColumn();
+                if ($stockActual < $cantidad) {
+                    throw new Exception('Stock insuficiente para uno o más productos.');
+                }
+
+                $consumos[] = ['id_almacen' => (int)$id_almacen_despacho, 'cantidad' => $cantidad];
             }
 
             $stmtCosto->execute([$idProducto]);
@@ -688,7 +776,9 @@ function dbCreatePublicOrder(array $data): array {
             $netUnitPrice = $cantidad > 0 ? round($lineNet / $cantidad, 2) : $precio;
 
             $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $netUnitPrice, $costoUnitario, $lineDiscount, $lineNet]);
-            $stmtStock->execute([$cantidad, $idProducto, $id_almacen_despacho]);
+            foreach ($consumos as $consumo) {
+                $stmtStock->execute([(int)$consumo['cantidad'], $idProducto, (int)$consumo['id_almacen']]);
+            }
         }
 
         $pdo->commit();
@@ -701,6 +791,13 @@ function dbCreatePublicOrder(array $data): array {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log("Error en dbCreatePublicOrder: " . $e->getMessage());
         $msg = $e->getMessage();
+        if (stripos($msg, 'pickup_sin_stock::') === 0) {
+            $detalle = trim((string)substr($msg, strlen('pickup_sin_stock::')));
+            if ($detalle !== '') {
+                return ['success' => false, 'message' => 'No podemos completar el pedido: no hay existencia ni en sucursal ni en bodega para: ' . $detalle . '. Elimina esos productos del carrito para continuar.'];
+            }
+            return ['success' => false, 'message' => 'No podemos completar el pedido porque no hay existencia ni en sucursal ni en bodega para uno o más productos. Elimina esos productos del carrito para continuar.'];
+        }
         if (stripos($msg, 'stock insuficiente') !== false) {
             return ['success' => false, 'message' => 'No hay stock suficiente para uno o más productos del carrito. Actualiza tu carrito e intenta de nuevo.'];
         }
@@ -709,6 +806,108 @@ function dbCreatePublicOrder(array $data): array {
         }
         return ['success' => false, 'message' => 'Error interno al procesar pedido'];
     }
+}
+
+/**
+ * Evalua stock para pedidos pickup (sucursal) y determina si es:
+ * - ok: todo surtible en sucursal
+ * - transferible: faltantes en sucursal pero hay en almacenes de apoyo
+ * - sin_stock: no hay suficiente ni en sucursal ni en apoyo
+ */
+function dbBuildPickupStockHint(PDO $pdo, array $items): array
+{
+    $required = [];
+    foreach ($items as $item) {
+        $idProducto = (int)($item['id_producto'] ?? $item['id'] ?? 0);
+        $cantidad = max(0, (int)($item['quantity'] ?? 0));
+        if ($idProducto <= 0 || $cantidad <= 0) {
+            continue;
+        }
+        $required[$idProducto] = ($required[$idProducto] ?? 0) + $cantidad;
+    }
+
+    if (empty($required)) {
+        return ['success' => false, 'message' => 'Items invalidos'];
+    }
+
+    $pickupWarehouseId = resolvePickupWarehouseId($pdo);
+    if ($pickupWarehouseId <= 0) {
+        return ['success' => false, 'message' => 'No se pudo resolver sucursal pickup'];
+    }
+
+    $stmtPickupName = $pdo->prepare("SELECT nombre FROM almacenes WHERE id_almacen = ? LIMIT 1");
+    $stmtPickupName->execute([$pickupWarehouseId]);
+    $pickupWarehouseName = (string)($stmtPickupName->fetchColumn() ?: ('Sucursal #' . $pickupWarehouseId));
+
+    $selects = [];
+    $paramsRequired = [];
+    foreach ($required as $idProducto => $cantidad) {
+        $selects[] = 'SELECT ? AS id_producto, ? AS cantidad_requerida';
+        $paramsRequired[] = $idProducto;
+        $paramsRequired[] = $cantidad;
+    }
+    $requiredSql = implode(' UNION ALL ', $selects);
+
+    $sql = "SELECT
+                req.id_producto,
+                req.cantidad_requerida,
+                COALESCE(pr.nombre, CONCAT('Producto #', req.id_producto)) AS nombre,
+                COALESCE(MAX(CASE WHEN ia.id_almacen = ? AND a.estado = 'activo' THEN ia.cantidad_actual ELSE 0 END), 0) AS stock_pickup,
+                COALESCE(SUM(CASE WHEN ia.id_almacen <> ? AND a.estado = 'activo' THEN ia.cantidad_actual ELSE 0 END), 0) AS stock_otro,
+                MAX(CASE WHEN ia.id_almacen <> ? AND a.estado = 'activo' THEN a.nombre ELSE NULL END) AS almacen_apoyo_nombre
+            FROM ({$requiredSql}) req
+            LEFT JOIN inventario_almacen ia ON ia.id_producto = req.id_producto
+            LEFT JOIN almacenes a ON a.id_almacen = ia.id_almacen
+            LEFT JOIN productos pr ON pr.id_producto = req.id_producto
+            GROUP BY req.id_producto, req.cantidad_requerida, pr.nombre";
+
+    $stmt = $pdo->prepare($sql);
+    $params = array_merge([$pickupWarehouseId, $pickupWarehouseId, $pickupWarehouseId], $paramsRequired);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $faltantes = [];
+    $transferible = true;
+    $supportWarehouseName = '';
+
+    foreach ($rows as $row) {
+        $idProducto = (int)($row['id_producto'] ?? 0);
+        $requerido = (int)($row['cantidad_requerida'] ?? 0);
+        $stockPickup = (int)($row['stock_pickup'] ?? 0);
+        $stockOtro = (int)($row['stock_otro'] ?? 0);
+        $faltan = max(0, $requerido - $stockPickup);
+
+        if ($faltan > 0) {
+            $puedeTransfer = $stockOtro >= $faltan;
+            $transferible = $transferible && $puedeTransfer;
+            if ($supportWarehouseName === '' && !empty($row['almacen_apoyo_nombre'])) {
+                $supportWarehouseName = (string)$row['almacen_apoyo_nombre'];
+            }
+            $faltantes[] = [
+                'id_producto' => $idProducto,
+                'nombre' => (string)($row['nombre'] ?? ('Producto #' . $idProducto)),
+                'requerido' => $requerido,
+                'stock_pickup' => $stockPickup,
+                'stock_otro' => $stockOtro,
+                'faltan' => $faltan,
+                'transferible' => $puedeTransfer,
+            ];
+        }
+    }
+
+    $status = 'ok';
+    if (!empty($faltantes)) {
+        $status = $transferible ? 'transferible' : 'sin_stock';
+    }
+
+    return [
+        'success' => true,
+        'status' => $status,
+        'pickup_almacen_id' => $pickupWarehouseId,
+        'pickup_almacen_nombre' => $pickupWarehouseName,
+        'almacen_apoyo_nombre' => $supportWarehouseName !== '' ? $supportWarehouseName : 'almacen de apoyo',
+        'faltantes' => $faltantes,
+    ];
 }
 
 /**
