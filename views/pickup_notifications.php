@@ -18,6 +18,7 @@ $idAlmacenUsuario = (int)($usuario['id_almacen'] ?? 0);
 $error = '';
 $success = '';
 $cancelSupportReady = false;
+$hasFechaApartada = false;
 $cancelReasonOptions = [
     'cliente_no_llego' => 'Cliente no llego por su pedido',
     'cliente_solicito_cancelar' => 'Cliente solicito cancelar el pedido',
@@ -28,6 +29,53 @@ $cancelReasonOptions = [
     'tiempo_espera_excedido' => 'Tiempo de espera excedido',
     'otro' => 'Otro',
 ];
+
+function normalizePickupProductLabel(string $value): string
+{
+    $txt = trim(mb_strtolower($value));
+    $txt = str_replace(['á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ'], ['a', 'e', 'i', 'o', 'u', 'u', 'n'], $txt);
+    $txt = preg_replace('/[^a-z0-9]+/u', ' ', $txt);
+    return trim((string)$txt);
+}
+
+function parseSupportTransferItemsFromNotes(string $notes): array
+{
+    $result = [];
+    $notes = trim($notes);
+    if ($notes === '' || stripos($notes, 'TRASLADO_INTERNO_2_3H') === false) {
+        return $result;
+    }
+
+    if (!preg_match('/TRASLADO_INTERNO_2_3H:\s*.*?\.(.+)$/i', $notes, $m)) {
+        return $result;
+    }
+
+    $tail = trim((string)$m[1]);
+    if ($tail === '') {
+        return $result;
+    }
+
+    if (preg_match('/productos\s+pendientes\s+por\s+surtir/i', $tail)) {
+        return $result;
+    }
+
+    if (preg_match_all('/([^,]+?)\s*\(faltan\s*(\d+)\)/iu', $tail, $matches, PREG_SET_ORDER)) {
+        foreach ($matches as $item) {
+            $name = trim((string)($item[1] ?? ''));
+            $faltan = max(0, (int)($item[2] ?? 0));
+            if ($name === '' || $faltan <= 0) {
+                continue;
+            }
+            $result[] = [
+                'raw' => $name,
+                'normalized' => normalizePickupProductLabel($name),
+                'faltan' => $faltan,
+            ];
+        }
+    }
+
+    return $result;
+}
 
 try {
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
@@ -43,6 +91,9 @@ try {
     $stmtFechaCancel = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones' AND COLUMN_NAME = 'fecha_cancelada'");
     $stmtFechaCancel->execute();
     $hasFechaCancelada = ((int)$stmtFechaCancel->fetchColumn()) > 0;
+    $stmtFechaApartada = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones' AND COLUMN_NAME = 'fecha_apartada'");
+    $stmtFechaApartada->execute();
+    $hasFechaApartada = ((int)$stmtFechaApartada->fetchColumn()) > 0;
     $cancelSupportReady = (stripos($estadoColumnType, 'cancelada') !== false) && $hasFechaCancelada;
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
@@ -189,13 +240,20 @@ try {
                             } else {
                                 $pdo->beginTransaction();
                                 try {
+                                    $setParts = [
+                                        "estado = :estado",
+                                        "id_usuario_seguimiento = :id_usuario",
+                                        "fecha_vista = CASE WHEN :estado_vista IN ('vista','apartada','atendida') AND fecha_vista IS NULL THEN NOW() ELSE fecha_vista END",
+                                        "fecha_atendida = CASE WHEN :estado_atendida = 'atendida' THEN NOW() ELSE fecha_atendida END",
+                                        "actualizado_en = NOW()",
+                                    ];
+
+                                    if ($hasFechaApartada) {
+                                        $setParts[] = "fecha_apartada = CASE WHEN :estado_apartada = 'apartada' AND fecha_apartada IS NULL THEN NOW() ELSE fecha_apartada END";
+                                    }
+
                                     $sql = "UPDATE pickup_notificaciones
-                                            SET estado = :estado,
-                                                id_usuario_seguimiento = :id_usuario,
-                                                fecha_vista = CASE WHEN :estado_vista IN ('vista','apartada','atendida') AND fecha_vista IS NULL THEN NOW() ELSE fecha_vista END,
-                                                fecha_apartada = CASE WHEN :estado_apartada = 'apartada' AND fecha_apartada IS NULL THEN NOW() ELSE fecha_apartada END,
-                                                fecha_atendida = CASE WHEN :estado_atendida = 'atendida' THEN NOW() ELSE fecha_atendida END,
-                                                actualizado_en = NOW()
+                                            SET " . implode(",\n                                                ", $setParts) . "
                                             WHERE id_notificacion = :id_notificacion{$scopeWhere}";
 
                                     $stmt = $pdo->prepare($sql);
@@ -275,6 +333,69 @@ try {
     $stmtList->execute($params);
     $notificaciones = $stmtList->fetchAll(PDO::FETCH_ASSOC);
 
+    $detallesPorPedido = [];
+    $pedidosIndexados = [];
+    $pedidoIds = [];
+    foreach ($notificaciones as $n) {
+        $idPedidoTmp = (int)($n['id_pedido'] ?? 0);
+        if ($idPedidoTmp > 0) {
+            $pedidoIds[$idPedidoTmp] = $idPedidoTmp;
+            if (!isset($pedidosIndexados[$idPedidoTmp])) {
+                $pedidosIndexados[$idPedidoTmp] = [
+                    'id_pedido' => $idPedidoTmp,
+                    'numero_pedido' => (string)($n['numero_pedido'] ?? ''),
+                    'cliente' => (string)($n['cliente'] ?? 'N/A'),
+                    'sucursal' => (string)($n['sucursal'] ?? ''),
+                    'total' => (float)($n['total'] ?? 0),
+                    'fecha_pedido' => (string)($n['fecha_pedido'] ?? ''),
+                    'notas_seguimiento' => (string)($n['notas_seguimiento'] ?? ''),
+                ];
+            }
+        }
+    }
+
+    if (!empty($pedidoIds)) {
+        $pedidoIds = array_values($pedidoIds);
+        $placeholdersPedidos = implode(', ', array_fill(0, count($pedidoIds), '?'));
+        $sqlDetalles = "SELECT dp.id_pedido,
+                               dp.id_producto,
+                               dp.cantidad,
+                               COALESCE(dp.precio_unitario, dp.precio_original, 0) AS precio_unitario,
+                               COALESCE(dp.subtotal, 0) AS subtotal,
+                               p.nombre,
+                               p.nombre_variante,
+                               p.sku,
+                               COALESCE(
+                                   (SELECT pi.ruta_archivo
+                                    FROM producto_imagenes pi
+                                    WHERE pi.id_producto = p.id_producto
+                                    ORDER BY pi.orden ASC
+                                    LIMIT 1),
+                                   p.imagen,
+                                   p.imagen_url
+                               ) AS imagen_resuelta
+                        FROM detalle_pedidos dp
+                        INNER JOIN productos p ON p.id_producto = dp.id_producto
+                        WHERE dp.id_pedido IN ({$placeholdersPedidos})
+                        ORDER BY dp.id_pedido ASC, p.nombre ASC, p.nombre_variante ASC";
+
+        $stmtDetalles = $pdo->prepare($sqlDetalles);
+        $stmtDetalles->execute($pedidoIds);
+        $rowsDetalles = $stmtDetalles->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rowsDetalles as $rowDetalle) {
+            $idPedidoDet = (int)($rowDetalle['id_pedido'] ?? 0);
+            if ($idPedidoDet <= 0) {
+                continue;
+            }
+            if (!isset($detallesPorPedido[$idPedidoDet])) {
+                $detallesPorPedido[$idPedidoDet] = [];
+            }
+            $rowDetalle['imagen_render'] = getProductImageUrl((string)($rowDetalle['imagen_resuelta'] ?? ''));
+            $detallesPorPedido[$idPedidoDet][] = $rowDetalle;
+        }
+    }
+
     $whereCounts = '1=1';
     $paramsCounts = [];
     if (isEncargado() || isVendedor()) {
@@ -295,6 +416,8 @@ try {
 } catch (Throwable $e) {
     $error = $e->getMessage();
     $notificaciones = [];
+    $detallesPorPedido = [];
+    $pedidosIndexados = [];
     $counts = ['nueva' => 0, 'vista' => 0, 'apartada' => 0, 'atendida' => 0, 'cancelada' => 0];
     $estadoFiltro = '';
 }
@@ -414,7 +537,13 @@ include __DIR__ . '/includes/header.php';
                                 <?php foreach ($notificaciones as $n): ?>
                                     <tr>
                                         <td>
-                                            <strong><?php echo esc((string)$n['numero_pedido']); ?></strong><br>
+                                            <?php $idPedidoUi = (int)($n['id_pedido'] ?? 0); ?>
+                                            <?php if ($idPedidoUi > 0): ?>
+                                                <a href="#modal-pedido-<?php echo $idPedidoUi; ?>" class="modal-trigger pickup-order-link"><strong><?php echo esc((string)$n['numero_pedido']); ?></strong></a><br>
+                                                <a href="#modal-pedido-<?php echo $idPedidoUi; ?>" class="modal-trigger pickup-order-link-helper">Ver detalle de productos</a><br>
+                                            <?php else: ?>
+                                                <strong><?php echo esc((string)$n['numero_pedido']); ?></strong><br>
+                                            <?php endif; ?>
                                             <small class="grey-text">$<?php echo number_format((float)$n['total'], 2); ?> | <?php echo esc((string)$n['fecha_pedido']); ?></small>
                                         </td>
                                         <td>
@@ -489,17 +618,17 @@ include __DIR__ . '/includes/header.php';
                                                 <?php endif; ?>
 
                                                 <?php if ($cancelSupportReady && in_array((string)$n['estado'], ['nueva', 'vista', 'apartada'], true)): ?>
-                                                    <form method="POST" style="margin:0; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                                                    <form method="POST" data-cancel-form="1" style="margin:0; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                                                         <?php echo csrfInput(); ?>
                                                         <input type="hidden" name="accion" value="cancelar_pedido">
                                                         <input type="hidden" name="id_notificacion" value="<?php echo (int)$n['id_notificacion']; ?>">
-                                                        <select name="motivo_cancelacion" class="browser-default" style="min-width:220px; max-width:280px; border:1px solid #9e9e9e; height:30px;">
+                                                        <select name="motivo_cancelacion" data-cancel-reason="1" class="browser-default" style="min-width:220px; max-width:280px; border:1px solid #9e9e9e; height:30px;">
                                                             <option value="" selected disabled>Motivo de cancelacion</option>
                                                             <?php foreach ($cancelReasonOptions as $reasonKey => $reasonLabel): ?>
                                                                 <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
                                                             <?php endforeach; ?>
                                                         </select>
-                                                        <input type="text" name="motivo_cancelacion_otro" maxlength="180" placeholder="Si seleccionas Otro, especifica aqui" style="min-width:230px; max-width:320px;" />
+                                                        <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Si seleccionas Otro, especifica aqui" style="min-width:230px; max-width:320px; display:none;" />
                                                         <button type="submit" class="btn-small red darken-2 waves-effect waves-light">Cancelar y resurtir stock</button>
                                                     </form>
                                                 <?php endif; ?>
@@ -523,5 +652,195 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<?php if (!empty($pedidosIndexados)): ?>
+    <?php foreach ($pedidosIndexados as $idPedidoModal => $pedidoMeta): ?>
+        <?php
+            $rowsPedido = $detallesPorPedido[$idPedidoModal] ?? [];
+            $subtotalPreview = 0.0;
+            foreach ($rowsPedido as $prd) {
+                $subtotalPreview += (float)($prd['subtotal'] ?? 0);
+            }
+            $transferItems = parseSupportTransferItemsFromNotes((string)($pedidoMeta['notas_seguimiento'] ?? ''));
+            $hasSupportTransfer = !empty($transferItems);
+
+            $transferLookup = [];
+            foreach ($transferItems as $ti) {
+                $keyNorm = (string)($ti['normalized'] ?? '');
+                if ($keyNorm !== '') {
+                    $transferLookup[$keyNorm] = $ti;
+                }
+            }
+        ?>
+        <div id="modal-pedido-<?php echo (int)$idPedidoModal; ?>" class="modal modal-fixed-footer">
+            <div class="modal-content">
+                <h5 style="margin-top:0;">Detalle de pedido: <?php echo esc((string)$pedidoMeta['numero_pedido']); ?></h5>
+                <p class="grey-text" style="margin-top:4px;">
+                    Cliente: <?php echo esc((string)$pedidoMeta['cliente']); ?>
+                    | Sucursal: <?php echo esc((string)$pedidoMeta['sucursal']); ?>
+                    | Fecha: <?php echo esc((string)$pedidoMeta['fecha_pedido']); ?>
+                </p>
+
+                <?php if ($hasSupportTransfer): ?>
+                    <div class="pickup-transfer-alert z-depth-1">
+                        <i class="material-icons left">warning</i>
+                        <strong>ATENCION:</strong> Este pedido tiene faltantes en sucursal y <strong>debe surtirse desde almacen de apoyo</strong>.
+                        Identifica y prioriza los productos marcados en rojo.
+                    </div>
+                <?php endif; ?>
+
+                <?php if (empty($rowsPedido)): ?>
+                    <div class="card-panel amber lighten-5 amber-text text-darken-4" style="margin-top:16px;">
+                        No se encontraron productos en detalle para este pedido.
+                    </div>
+                <?php else: ?>
+                    <table class="striped responsive-table" style="margin-top:12px;">
+                        <thead>
+                            <tr>
+                                <th>Producto</th>
+                                <th>Foto</th>
+                                <th>SKU</th>
+                                <th>Cantidad</th>
+                                <th>P. Unitario</th>
+                                <th>Subtotal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($rowsPedido as $prd): ?>
+                                <?php
+                                    $nombrePrd = (string)($prd['nombre'] ?? 'Producto');
+                                    $variantePrd = trim((string)($prd['nombre_variante'] ?? ''));
+                                    $nombreFinal = $variantePrd !== '' ? ($nombrePrd . ' - ' . $variantePrd) : $nombrePrd;
+                                    $normalizedName = normalizePickupProductLabel($nombreFinal);
+                                    $supportHit = null;
+                                    if (isset($transferLookup[$normalizedName])) {
+                                        $supportHit = $transferLookup[$normalizedName];
+                                    } else {
+                                        foreach ($transferItems as $ti) {
+                                            $nTi = (string)($ti['normalized'] ?? '');
+                                            if ($nTi !== '' && (strpos($normalizedName, $nTi) !== false || strpos($nTi, $normalizedName) !== false)) {
+                                                $supportHit = $ti;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    $mustSupport = $supportHit !== null;
+                                ?>
+                                <tr class="<?php echo $mustSupport ? 'pickup-support-row' : ''; ?>">
+                                    <td>
+                                        <?php echo esc($nombreFinal); ?>
+                                        <?php if ($mustSupport): ?>
+                                            <div class="pickup-support-chip">SURTIR DESDE APOYO</div>
+                                            <div class="pickup-support-note">Faltan <?php echo (int)($supportHit['faltan'] ?? 0); ?> en sucursal</div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <img src="<?php echo esc((string)($prd['imagen_render'] ?? getDefaultProductImageUrl())); ?>"
+                                             onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';"
+                                             class="pickup-product-thumb"
+                                             alt="Producto <?php echo esc($nombreFinal); ?>">
+                                    </td>
+                                    <td><?php echo esc((string)($prd['sku'] ?? 'N/A')); ?></td>
+                                    <td><?php echo (int)($prd['cantidad'] ?? 0); ?></td>
+                                    <td>$<?php echo number_format((float)($prd['precio_unitario'] ?? 0), 2); ?></td>
+                                    <td>$<?php echo number_format((float)($prd['subtotal'] ?? 0), 2); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+
+                    <div class="right-align" style="margin-top:14px; padding:10px 12px; background:#f5f5f5; border-radius:6px;">
+                        <strong>Total pedido:</strong> $<?php echo number_format((float)$pedidoMeta['total'], 2); ?>
+                        <?php if ($subtotalPreview > 0): ?>
+                            <br><small class="grey-text">Subtotal detalle: $<?php echo number_format($subtotalPreview, 2); ?></small>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-close btn-flat">Cerrar</button>
+            </div>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
+
+<style>
+    .pickup-order-link {
+        color: #1a237e;
+        text-decoration: underline;
+        font-weight: 700;
+    }
+    .pickup-order-link-helper {
+        color: #1565c0;
+        font-size: 0.82rem;
+    }
+    .pickup-transfer-alert {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        border-left: 6px solid #c62828;
+        background: #ffebee;
+        color: #b71c1c;
+        font-size: 0.96rem;
+    }
+    .pickup-support-row {
+        background: #fff5f5;
+        box-shadow: inset 4px 0 0 #d32f2f;
+    }
+    .pickup-support-chip {
+        margin-top: 6px;
+        display: inline-block;
+        background: #d32f2f;
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+    }
+    .pickup-support-note {
+        margin-top: 4px;
+        color: #b71c1c;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .pickup-product-thumb {
+        width: 52px;
+        height: 52px;
+        border-radius: 8px;
+        object-fit: contain;
+        background: #fff;
+        border: 1px solid #e0e0e0;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const modalElems = document.querySelectorAll('.modal');
+    if (typeof M !== 'undefined' && M.Modal) {
+        M.Modal.init(modalElems);
+    }
+
+    document.querySelectorAll('form[data-cancel-form="1"]').forEach((formEl) => {
+        const reasonSelect = formEl.querySelector('select[data-cancel-reason="1"]');
+        const otherInput = formEl.querySelector('input[data-cancel-other="1"]');
+        if (!reasonSelect || !otherInput) {
+            return;
+        }
+
+        const syncOtherFieldVisibility = () => {
+            const mustShow = reasonSelect.value === 'otro';
+            otherInput.style.display = mustShow ? 'inline-block' : 'none';
+            otherInput.required = mustShow;
+            if (!mustShow) {
+                otherInput.value = '';
+            }
+        };
+
+        reasonSelect.addEventListener('change', syncOtherFieldVisibility);
+        syncOtherFieldVisibility();
+    });
+});
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

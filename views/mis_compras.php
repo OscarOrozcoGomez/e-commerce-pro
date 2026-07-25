@@ -15,17 +15,37 @@ $canViewPurchases = isCliente();
 $compras = [];
 if ($canViewPurchases) {
     try {
-        $sql = "SELECT p.*, a.nombre as almacen_nombre,
-                   pn.estado AS pickup_estado,
+        $stmtMetaPickup = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+        $stmtMetaPickup->execute();
+        $hasPickupTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
+
+        $hasPickupFechaApartada = false;
+        if ($hasPickupTable) {
+            $stmtMetaPickupApartada = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones' AND COLUMN_NAME = 'fecha_apartada'");
+            $stmtMetaPickupApartada->execute();
+            $hasPickupFechaApartada = ((int)$stmtMetaPickupApartada->fetchColumn()) > 0;
+        }
+
+        $pickupSelect = $hasPickupTable
+            ? "pn.estado AS pickup_estado,
                    pn.fecha_vista AS pickup_fecha_vista,
-                   pn.fecha_apartada AS pickup_fecha_apartada,
-                   pn.fecha_atendida AS pickup_fecha_atendida,
+                   " . ($hasPickupFechaApartada ? 'pn.fecha_apartada' : 'NULL') . " AS pickup_fecha_apartada,
+                   pn.fecha_atendida AS pickup_fecha_atendida,"
+            : "NULL AS pickup_estado,
+                   NULL AS pickup_fecha_vista,
+                   NULL AS pickup_fecha_apartada,
+                   NULL AS pickup_fecha_atendida,";
+
+        $pickupJoin = $hasPickupTable ? "LEFT JOIN pickup_notificaciones pn ON pn.id_pedido = p.id_pedido" : "";
+
+        $sql = "SELECT p.*, a.nombre as almacen_nombre,
+                   {$pickupSelect}
                        (SELECT COUNT(*) FROM detalle_pedidos dp0 WHERE dp0.id_pedido = p.id_pedido AND dp0.cantidad <= 0) AS items_liberados,
                        (SELECT COUNT(*) FROM detalle_pedidos dp1 WHERE dp1.id_pedido = p.id_pedido AND dp1.cantidad > 0) AS items_activos
                 FROM pedidos p 
                 JOIN clientes c ON p.id_cliente = c.id_cliente 
                 LEFT JOIN almacenes a ON p.id_almacen = a.id_almacen
-            LEFT JOIN pickup_notificaciones pn ON pn.id_pedido = p.id_pedido
+                {$pickupJoin}
                 WHERE c.id_usuario = :id_usuario 
                 ORDER BY p.fecha_creacion DESC";
         $stmt = $pdo->prepare($sql);

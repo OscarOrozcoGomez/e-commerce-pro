@@ -14,6 +14,31 @@ if ($isUserAuthenticated && isCliente()) {
     $stmtDir = $pdo->prepare("SELECT * FROM cliente_direcciones WHERE id_cliente = ? ORDER BY es_default DESC");
     $stmtDir->execute([$usuarioLogueado['id_cliente']]);
     $direcciones = $stmtDir->fetchAll();
+
+    if (function_exists('piiDecryptValue') && function_exists('piiIsEncryptedValue')) {
+        foreach ($direcciones as &$d) {
+            foreach (['alias', 'direccion', 'maps_link'] as $k) {
+                if (isset($d[$k]) && is_string($d[$k]) && piiIsEncryptedValue($d[$k])) {
+                    $raw = trim((string)$d[$k]);
+                    $dec = trim((string)piiDecryptValue($raw));
+
+                    // Si no se pudo descifrar (ej. llave distinta), evitar mostrar ENCv1 en UI.
+                    if ($dec === $raw) {
+                        if ($k === 'alias') {
+                            $dec = 'Direccion ' . (string)($d['id_direccion'] ?? '');
+                        } elseif ($k === 'maps_link') {
+                            $dec = '';
+                        } else {
+                            $dec = 'Direccion protegida';
+                        }
+                    }
+
+                    $d[$k] = $dec;
+                }
+            }
+        }
+        unset($d);
+    }
 }
 
 $telefonoGuardado = $usuarioLogueado['telefono_cliente'] ?? '';
@@ -184,8 +209,90 @@ include __DIR__ . '/includes/header.php';
     const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
     const CAN_VIEW_PICKUP_OFFER = <?php echo $canViewPickupOffer ? 'true' : 'false'; ?>;
     const PICKUP_STOCK_CHECK_URL = '<?php echo BASE_URL; ?>api/pickup_stock_check.php';
+    const CHECKOUT_DELIVERY_STORAGE_KEY = 'checkoutDeliveryType';
     let pickupStockCheckTimer = null;
     let latestPickupStockCheck = null;
+
+    function getCheckoutSubmitButton() {
+        return document.querySelector('#form-checkout button[type="submit"]');
+    }
+
+    function setPickupSubmitBlocked(blocked, helperText = '') {
+        const btn = getCheckoutSubmitButton();
+        if (!btn) return;
+
+        btn.disabled = !!blocked;
+        if (blocked) {
+            btn.dataset.originalText = btn.dataset.originalText || btn.innerHTML;
+            btn.innerHTML = 'Sin stock disponible <i class="material-icons right">block</i>';
+            btn.classList.remove('green');
+            btn.classList.add('red', 'darken-2');
+            if (helperText) {
+                btn.title = helperText;
+            }
+        } else {
+            btn.innerHTML = btn.dataset.originalText || 'Confirmar Pedido <i class="material-icons right">check</i>';
+            btn.classList.remove('red', 'darken-2');
+            btn.classList.add('green');
+            btn.title = '';
+        }
+    }
+
+    function getSinStockProductsText() {
+        const faltantes = Array.isArray(latestPickupStockCheck?.faltantes) ? latestPickupStockCheck.faltantes : [];
+        const noTransferibles = faltantes.filter((row) => row && row.transferible === false);
+        const source = noTransferibles.length > 0 ? noTransferibles : faltantes;
+
+        return source
+            .map((row) => {
+                const nombre = String(row?.nombre || 'Producto');
+                const faltan = Math.max(0, parseInt(row?.faltan, 10) || 0);
+                return faltan > 0 ? `${nombre} (faltan ${faltan})` : nombre;
+            })
+            .join(', ');
+    }
+
+    function getSinStockProductIdSet() {
+        const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaActual !== 'Sucursal') {
+            return new Set();
+        }
+
+        if (!latestPickupStockCheck || latestPickupStockCheck.status !== 'sin_stock') {
+            return new Set();
+        }
+
+        const faltantes = Array.isArray(latestPickupStockCheck.faltantes) ? latestPickupStockCheck.faltantes : [];
+        const noTransferibles = faltantes.filter((row) => row && row.transferible === false);
+        const source = noTransferibles.length > 0 ? noTransferibles : faltantes;
+
+        return new Set(source
+            .map((row) => parseInt(row?.id_producto, 10) || 0)
+            .filter((id) => id > 0)
+        );
+    }
+
+    function getSuggestedMaxByProductId() {
+        const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaActual !== 'Sucursal') {
+            return new Map();
+        }
+
+        const faltantes = Array.isArray(latestPickupStockCheck?.faltantes) ? latestPickupStockCheck.faltantes : [];
+        const suggestedMap = new Map();
+
+        faltantes.forEach((row) => {
+            const idProducto = parseInt(row?.id_producto, 10) || 0;
+            const stockPickup = Math.max(0, parseInt(row?.stock_pickup, 10) || 0);
+            const stockOtro = Math.max(0, parseInt(row?.stock_otro, 10) || 0);
+            const suggestedMax = stockPickup + stockOtro;
+            if (idProducto > 0 && suggestedMax > 0) {
+                suggestedMap.set(idProducto, suggestedMax);
+            }
+        });
+
+        return suggestedMap;
+    }
 
     function initAutocompleteCart() {
         if (typeof google === 'undefined') {
@@ -272,6 +379,8 @@ include __DIR__ . '/includes/header.php';
         const tbody = document.getElementById('cart-table-body');
         let total = 0;
         let totalPieces = 0;
+        const sinStockProductIds = getSinStockProductIdSet();
+        const suggestedMaxByProduct = getSuggestedMaxByProductId();
         
         tbody.innerHTML = cart.length === 0 ? '<tr><td colspan="5" class="center">El carrito está vacío</td></tr>' : '';
 
@@ -289,13 +398,36 @@ include __DIR__ . '/includes/header.php';
                 .replace(/\s*[\-||]\s*Unidades\s*$/i, '')
                 .trim();
 
+            const itemProductId = parseInt(item.id_producto || item.id, 10) || 0;
+            const isSinStockItem = sinStockProductIds.has(itemProductId);
+            const rowClass = isSinStockItem ? 'cart-row-sin-stock' : '';
+            const warningBadge = isSinStockItem
+                ? '<div class="cart-sin-stock-chip">Sin existencia. Elimina este producto para continuar.</div>'
+                : '';
+
+            const qtyValue = Math.max(1, parseInt(item.quantity, 10) || 1);
+            const suggestedMax = suggestedMaxByProduct.get(itemProductId) || null;
+            const maxAttr = suggestedMax ? `max="${suggestedMax}"` : '';
+            const maxTitle = suggestedMax ? `Máximo sugerido por stock actual: ${suggestedMax}` : 'Cantidad';
+            const maxHelper = suggestedMax
+                ? `<div class="cart-qty-hint">Máximo sugerido: ${suggestedMax}</div>`
+                : '';
+            const maxExceededClass = suggestedMax && qtyValue > suggestedMax ? ' cart-qty-input-warning' : '';
+
             total += subtotal;
             totalPieces += (parseInt(item.quantity, 10) || 0);
             tbody.innerHTML += `
-                <tr>
-                    <td>${cleanName}</td>
+                <tr class="${rowClass}">
+                    <td>${cleanName}${warningBadge}</td>
                     <td>$${price.toFixed(2)}</td>
-                    <td>${item.quantity}</td>
+                    <td>
+                        <div class="cart-qty-control">
+                            <button type="button" class="btn-flat cart-qty-btn" onclick="changeItemQty(${index}, -1)">-</button>
+                            <input type="number" min="1" step="1" ${maxAttr} value="${qtyValue}" class="cart-qty-input${maxExceededClass}" title="${maxTitle}" onchange="setItemQtyManual(${index}, this.value)" onblur="setItemQtyManual(${index}, this.value)">
+                            <button type="button" class="btn-flat cart-qty-btn" onclick="changeItemQty(${index}, 1)">+</button>
+                        </div>
+                        ${maxHelper}
+                    </td>
                     <td>$${subtotal.toFixed(2)}</td>
                     <td><a href="#" onclick="removeItem(${index})" class="red-text"><i class="material-icons">delete_forever</i></a></td>
                 </tr>`;
@@ -307,6 +439,10 @@ include __DIR__ . '/includes/header.php';
         // Mostrar u ocultar el botón de vaciar según si hay items
         const btnEmpty = document.getElementById('btn-empty-cart');
         if (btnEmpty) btnEmpty.style.display = cart.length > 0 ? 'inline-block' : 'none';
+
+        if (cart.length === 0) {
+            hidePickupStockBanner();
+        }
     }
 
     function resolvePieceTierDiscountClient(pieces, settings) {
@@ -416,12 +552,44 @@ include __DIR__ . '/includes/header.php';
         localStorage.setItem('cart', JSON.stringify(cart));
         renderCart();
         updateCartBadge();
+        schedulePickupStockCheck();
     }
+
+    function persistCartAndRefresh(cart) {
+        localStorage.setItem('cart', JSON.stringify(cart));
+        renderCart();
+        updateCartBadge();
+        schedulePickupStockCheck();
+    }
+
+    function changeItemQty(index, delta) {
+        const cart = getCart();
+        if (!Array.isArray(cart) || !cart[index]) return;
+
+        const currentQty = Math.max(1, parseInt(cart[index].quantity, 10) || 1);
+        const nextQty = Math.max(1, currentQty + (parseInt(delta, 10) || 0));
+        cart[index].quantity = nextQty;
+        persistCartAndRefresh(cart);
+    }
+
+    function setItemQtyManual(index, rawValue) {
+        const cart = getCart();
+        if (!Array.isArray(cart) || !cart[index]) return;
+
+        const parsedQty = parseInt(String(rawValue || '').trim(), 10);
+        const nextQty = Number.isInteger(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+        cart[index].quantity = nextQty;
+        persistCartAndRefresh(cart);
+    }
+
+    window.changeItemQty = changeItemQty;
+    window.setItemQtyManual = setItemQtyManual;
 
     function hidePickupStockBanner() {
         const banner = document.getElementById('pickup-stock-banner');
         if (banner) banner.style.display = 'none';
         latestPickupStockCheck = null;
+        setPickupSubmitBlocked(false);
     }
 
     function renderPickupStockBanner(payload) {
@@ -440,9 +608,14 @@ include __DIR__ . '/includes/header.php';
             faltantes: faltantes.map((row) => ({
                 id_producto: parseInt(row.id_producto, 10) || 0,
                 nombre: String(row.nombre || ''),
-                faltan: Math.max(0, parseInt(row.faltan, 10) || 0)
+                faltan: Math.max(0, parseInt(row.faltan, 10) || 0),
+                transferible: row.transferible === true,
+                stock_pickup: Math.max(0, parseInt(row.stock_pickup, 10) || 0),
+                stock_otro: Math.max(0, parseInt(row.stock_otro, 10) || 0)
             }))
         };
+
+        renderCart();
 
         banner.className = 'card-panel';
 
@@ -452,6 +625,7 @@ include __DIR__ . '/includes/header.php';
             message.style.color = '#1b5e20';
             message.innerHTML = `<strong>Listo para recoger en sucursal.</strong> Todo tu pedido tiene existencia disponible en punto de entrega.`;
             banner.style.display = 'block';
+            setPickupSubmitBlocked(false);
             return;
         }
 
@@ -470,6 +644,7 @@ include __DIR__ . '/includes/header.php';
                 Hay existencia en inventario de respaldo; en aprox. <strong>2 a 3 horas</strong> podriamos moverlo y dejarlo listo para recoger.<br>
                 <small>Productos a surtir: ${detalles}</small>`;
             banner.style.display = 'block';
+            setPickupSubmitBlocked(false);
             return;
         }
 
@@ -477,8 +652,12 @@ include __DIR__ . '/includes/header.php';
             banner.classList.add('red', 'lighten-5');
             banner.style.borderLeft = '5px solid #c62828';
             message.style.color = '#b71c1c';
-            message.innerHTML = `<strong>Sin stock suficiente para pickup.</strong> Algunos productos no tienen existencia en sucursal ni en almacen de apoyo por ahora.`;
+            message.innerHTML = `<strong>Sin inventario suficiente para recoger en sucursal.</strong><br>
+                No tenemos existencia en sucursal ni en almacén de apoyo para uno o más productos.<br>
+                <strong>Debes eliminar esos productos del carrito para continuar.</strong>`;
             banner.style.display = 'block';
+            const sinStockDetalle = getSinStockProductsText();
+            setPickupSubmitBlocked(true, sinStockDetalle !== '' ? `Sin stock: ${sinStockDetalle}` : 'Sin stock disponible para pickup');
             return;
         }
 
@@ -489,13 +668,13 @@ include __DIR__ . '/includes/header.php';
         const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
         if (tipoEntregaActual !== 'Sucursal') {
             hidePickupStockBanner();
-            return;
+            return null;
         }
 
         const cart = getCart();
         if (!Array.isArray(cart) || cart.length === 0) {
             hidePickupStockBanner();
-            return;
+            return null;
         }
 
         const items = cart
@@ -507,7 +686,7 @@ include __DIR__ . '/includes/header.php';
 
         if (items.length === 0) {
             hidePickupStockBanner();
-            return;
+            return null;
         }
 
         try {
@@ -521,12 +700,14 @@ include __DIR__ . '/includes/header.php';
             const data = await response.json();
             if (!response.ok || !data?.success) {
                 hidePickupStockBanner();
-                return;
+                return null;
             }
             renderPickupStockBanner(data);
+            return latestPickupStockCheck;
         } catch (e) {
             console.error('No se pudo revisar stock pickup:', e);
             hidePickupStockBanner();
+            return null;
         }
     }
 
@@ -575,10 +756,30 @@ include __DIR__ . '/includes/header.php';
         validatePhone();
     }
 
-    document.getElementById('form-checkout').addEventListener('submit', function(e) {
+    document.getElementById('form-checkout').addEventListener('submit', async function(e) {
         e.preventDefault();
         const cart = getCart();
         if (cart.length === 0) return M.toast({html: 'Tu carrito está vacío'});
+
+        const tipoEntregaSeleccionada = document.getElementById('tipo_entrega')?.value || '';
+        if (tipoEntregaSeleccionada === 'Sucursal') {
+            await checkPickupStockHint();
+            if (latestPickupStockCheck && latestPickupStockCheck.status === 'sin_stock') {
+                const detalleSinStock = getSinStockProductsText();
+                const detalleHtml = detalleSinStock !== ''
+                    ? `<br><small style="color:#b71c1c;"><b>Productos sin existencia:</b> ${detalleSinStock}</small>`
+                    : '';
+
+                Swal.fire({
+                    title: 'No disponible por el momento',
+                    html: `No podemos completar este pedido porque uno o más productos no tienen existencia ni en sucursal ni en bodega.${detalleHtml}<br><br><b>Elimina esos productos del carrito para continuar.</b>`,
+                    icon: 'error',
+                    confirmButtonText: 'Entendido',
+                    confirmButtonColor: '#b71c1c'
+                });
+                return;
+            }
+        }
 
         const phoneInput = document.getElementById('telefono');
         const phoneDigits = (phoneInput?.value || '').replace(/\D/g, '').slice(0, 10);
@@ -857,6 +1058,11 @@ include __DIR__ . '/includes/header.php';
     }
 
     tipoEntrega.addEventListener('change', function() {
+        try {
+            window.localStorage.setItem(CHECKOUT_DELIVERY_STORAGE_KEY, this.value || '');
+        } catch (err) {
+            // Ignorar bloqueo de storage.
+        }
         aplicarModoEntrega(this.value);
         renderCart();
         schedulePickupStockCheck();
@@ -890,6 +1096,18 @@ include __DIR__ . '/includes/header.php';
     });
 
     document.addEventListener('DOMContentLoaded', () => {
+        let storedDeliveryType = '';
+        try {
+            storedDeliveryType = String(window.localStorage.getItem(CHECKOUT_DELIVERY_STORAGE_KEY) || '');
+        } catch (err) {
+            storedDeliveryType = '';
+        }
+
+        if (storedDeliveryType === 'Sucursal' || storedDeliveryType === 'Domicilio') {
+            tipoEntrega.value = storedDeliveryType;
+        }
+
+        aplicarModoEntrega(tipoEntrega?.value || '');
         renderCart();
         updateCartBadge();
         bindPhoneMaskValidationCart('telefono');
@@ -914,6 +1132,54 @@ include __DIR__ . '/includes/header.php';
     .pac-container {
         z-index: 1051 !important;
         border-radius: 4px;
+    }
+    .cart-row-sin-stock {
+        background: #ffebee;
+        box-shadow: inset 4px 0 0 #c62828;
+    }
+    .cart-sin-stock-chip {
+        margin-top: 5px;
+        display: inline-block;
+        background: #c62828;
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.73rem;
+        font-weight: 700;
+    }
+    .cart-qty-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .cart-qty-btn {
+        min-width: 32px;
+        height: 32px;
+        line-height: 32px;
+        padding: 0;
+        border: 1px solid #cfcfcf;
+        border-radius: 6px;
+        font-weight: 700;
+    }
+    .cart-qty-input {
+        width: 64px;
+        text-align: center;
+        margin: 0;
+        height: 32px;
+        border: 1px solid #cfcfcf;
+        border-radius: 6px;
+        padding: 0 6px;
+        box-sizing: border-box;
+    }
+    .cart-qty-hint {
+        margin-top: 4px;
+        font-size: 0.72rem;
+        color: #6d4c41;
+        line-height: 1.2;
+    }
+    .cart-qty-input-warning {
+        border-color: #c62828;
+        background: #ffebee;
     }
 </style>
 

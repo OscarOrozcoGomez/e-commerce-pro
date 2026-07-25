@@ -21,9 +21,6 @@ $emojiCategories = [
 include __DIR__ . '/includes/header.php';
 ?>
 
-<!-- Elemento de audio para notificaciones -->
-<audio id="chat-notification-sound" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3" preload="auto"></audio>
-
 <div class="container" style="margin-top: 20px;">
     <div class="row" style="margin-bottom: 10px;">
         <div class="col s12">
@@ -170,12 +167,12 @@ include __DIR__ . '/includes/header.php';
                 <input type="hidden" id="quick-id" value="">
                 <div class="input-field col s12">
                     <input type="text" id="quick-titulo" placeholder="Ej: Saludo inicial" maxlength="50">
-                    <label class="active">Título corto</label>
+                    <label id="quick-titulo-label" class="active">Título corto</label>
                 </div>
                 <div class="col s12" style="position: relative;">
                     <div class="input-field" style="margin-bottom: 0;">
                         <textarea id="quick-mensaje" class="materialize-textarea" placeholder="Escribe aquí el texto que se enviará..."></textarea>
-                        <label class="active">Mensaje completo</label>
+                        <label id="quick-mensaje-label" class="active">Mensaje completo</label>
                     </div>
                     <button type="button" class="btn-flat btn-small amber-text text-darken-2" id="quick-emoji-trigger" style="position: absolute; right: 10px; bottom: 10px;" title="Insertar Emoji">
                         <i class="material-icons">sentiment_satisfied</i>
@@ -299,6 +296,55 @@ include __DIR__ . '/includes/header.php';
     .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
     .emoji-grid-mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
 
+    /* Fila de conversación: alinear nombre e insignias sin desfases. */
+    .chat-user-item {
+        display: flex !important;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    .chat-user-main {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .chat-user-name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .chat-user-indicators {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .chat-count-badge {
+        min-width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        background: #e53935;
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+        line-height: 24px;
+        text-align: center;
+        padding: 0 7px;
+        display: inline-block;
+    }
+    .chat-unassigned-badge {
+        background: #fff8e1;
+        color: #e65100;
+        border: 1px solid #ffcc80;
+        border-radius: 12px;
+        padding: 2px 8px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+    }
+
     .chat-product-card { background: white; border-radius: 8px; overflow: hidden; border: 1px solid #ddd; margin-top: 5px; width: 200px; }
     .chat-product-card img { width: 100%; height: 120px; object-fit: contain; background: #f9f9f9; }
     .chat-product-card .info { padding: 8px; }
@@ -314,11 +360,32 @@ const esStaff = <?php echo !$soyCliente ? 'true' : 'false'; ?>;
 let ultimoConteoMensajes = 0;
 let primeraCarga = true;
 let productosData = {};
+let productosIndex = [];
 let lastTypingSent = 0;
 let miAsignacionPrevia = 0;
 let chatEstabaActivo = false; // Rastrear transición de estado
 let diasExpandidos = new Set(); // Guardar qué días ha abierto el usuario
 let quickResponses = [];
+let primeraCargaListaClientes = true;
+let chatsSinAsignarPrevios = new Set();
+
+function syncQuickFormLabels() {
+    const titleLabel = document.getElementById('quick-titulo-label');
+    const messageLabel = document.getElementById('quick-mensaje-label');
+    if (titleLabel) titleLabel.classList.add('active');
+    if (messageLabel) messageLabel.classList.add('active');
+    if (typeof M !== 'undefined' && typeof M.updateTextFields === 'function') {
+        M.updateTextFields();
+    }
+}
+
+function normalizeSearchText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
 
 function formatFriendlyDate(dateStr) {
     const date = new Date(dateStr + 'T00:00:00');
@@ -338,18 +405,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (esStaff) cargarListaClientes();
     if (esStaff) {
         // Cargar productos para el buscador interno del chat
-        const idAlmacenStaff = <?php echo json_encode($_SESSION['usuario']['id_almacen'] ?? 1); ?>;
-        fetch('<?php echo BASE_URL; ?>api/products_manager.php?action=list&almacen_id=' + idAlmacenStaff)
+        fetch('<?php echo BASE_URL; ?>api/chat_handler.php?action=chat_products')
             .then(r => r.json())
             .then(data => {
-                if (data.success && data.data) {
+                if (data.success && Array.isArray(data.products)) {
                     const acData = {};
-                    data.data.forEach(p => {
-                        const label = `[${p.sku || 'S/S'}] ${p.nombre}${p.nombre_variante ? ' (' + p.nombre_variante + ')' : ''}`;
+                    productosIndex = [];
+                    data.products.forEach(p => {
+                        const nombreCompleto = `${p.nombre}${p.nombre_variante ? ' (' + p.nombre_variante + ')' : ''}`;
+                        const label = `${nombreCompleto} [${p.sku || 'S/S'}]`;
                         // No usamos p.imagen aquí porque el base64 es muy pesado para el buscador
                         acData[label] = null; 
                         productosData[label] = p;
+                        productosIndex.push({
+                            label,
+                            searchToken: normalizeSearchText(`${p.nombre} ${p.nombre_variante || ''} ${p.sku || ''}`),
+                            product: p
+                        });
                     });
+
+                    if (Object.keys(acData).length === 0) {
+                        M.toast({html: 'No hay productos activos para sugerir en chat.', classes: 'orange darken-2'});
+                        return;
+                    }
                     
                     const inputAC = document.getElementById('chat-product-autocomplete');
                     const instanceAC = M.Autocomplete.init(inputAC, {
@@ -367,17 +445,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Permitir seleccionar con la tecla Enter si hay una coincidencia exacta o sugerencia
                     inputAC.addEventListener('keydown', (e) => {
                         if (e.key === 'Enter') {
+                            e.preventDefault();
                             const val = inputAC.value.trim();
                             if (productosData[val]) {
                                 enviarProducto(productosData[val]);
                             } else {
-                                // Si no hay match exacto, intentar disparar el clic en la primera sugerencia
+                                // Si no hay match exacto, buscar por nombre/variante/SKU y tomar la primera coincidencia.
+                                const normalized = normalizeSearchText(val);
+                                const firstMatch = normalized === ''
+                                    ? null
+                                    : productosIndex.find(item => item.searchToken.includes(normalized));
+                                if (firstMatch && firstMatch.product) {
+                                    enviarProducto(firstMatch.product);
+                                    return;
+                                }
+
+                                // Como fallback final, intentar disparar la primera sugerencia visible.
                                 const first = document.querySelector('.autocomplete-content li');
-                                if (first) first.click();
+                                if (first) {
+                                    first.click();
+                                } else {
+                                    M.toast({html: 'No se encontro producto con ese texto.', classes: 'orange darken-2'});
+                                }
                             }
                         }
                     });
+                } else {
+                    M.toast({html: data.message || 'No se pudieron cargar productos para chat.', classes: 'red'});
                 }
+            })
+            .catch(() => {
+                M.toast({html: 'Error de conexion cargando productos de chat.', classes: 'red'});
             });
             
         // Cargar lista de staff
@@ -452,6 +550,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+
+    syncQuickFormLabels();
 });
 
 function cargarListaClientes() {
@@ -470,24 +570,40 @@ function renderListaClientes(clientes) {
     if (!list) return;
     const header = `<div class="collection-header blue darken-4 white-text"><h6>Conversaciones</h6></div>`;
     let html = header;
+    const chatsSinAsignarActuales = new Set();
+    const nuevosSinAsignar = [];
 
     clientes.forEach(c => {
+        const sinAsignar = c.asignado_a === null || String(c.asignado_a) === '';
+        if (sinAsignar) {
+            const chatId = String(c.id_usuario);
+            chatsSinAsignarActuales.add(chatId);
+            if (!primeraCargaListaClientes && !chatsSinAsignarPrevios.has(chatId)) {
+                nuevosSinAsignar.push(c.nombre);
+            }
+        }
+
         const isMe = c.asignado_a == currentUserId;
         const hasAlerts = parseInt(c.alertas_sistema) > 0;
         const activeClass = hasAlerts ? 'orange lighten-5' : (isMe ? 'blue lighten-5' : '');
         const textStyle = hasAlerts ? 'font-weight: bold; color: #e65100;' : '';
-        const alertPrefix = hasAlerts ? '⚠️ ' : '';
-        const badge = parseInt(c.pendientes) > 0 ? `<span class="new badge red" data-badge-caption="">${c.pendientes}</span>` : '';
-        const pin = (isMe && !hasAlerts) ? `<i class="material-icons tiny blue-text right">push_pin</i>` : '';
+        const alertPrefix = hasAlerts ? '⚠️ ' : (sinAsignar ? '🟢 ' : '');
+        const badge = parseInt(c.pendientes) > 0 ? `<span class="chat-count-badge" title="Mensajes pendientes">${c.pendientes}</span>` : '';
+        const pin = (isMe && !hasAlerts) ? `<i class="material-icons tiny blue-text" title="Asignado a mí">push_pin</i>` : '';
+        const unassignedBadge = sinAsignar ? `<span class="chat-unassigned-badge">Sin asignar</span>` : '';
 
         html += `
             <a href="#!" onclick="seleccionarChat(${c.id_usuario}, '${c.nombre.replace(/'/g, "\\'")}')" 
                class="collection-item black-text chat-user-item ${activeClass}" id="user-item-${c.id_usuario}">
-                <span style="${textStyle}">
-                    ${alertPrefix}${c.nombre}
+                <span class="chat-user-main" style="${textStyle}">
+                    <span>${alertPrefix}</span>
+                    <span class="chat-user-name">${c.nombre}</span>
                 </span>
-                ${pin}
-                ${badge}
+                <span class="chat-user-indicators">
+                    ${unassignedBadge}
+                    ${pin}
+                    ${badge}
+                </span>
             </a>`;
     });
 
@@ -496,6 +612,20 @@ function renderListaClientes(clientes) {
     }
 
     list.innerHTML = html;
+
+    if (nuevosSinAsignar.length > 0) {
+        const cantidad = nuevosSinAsignar.length;
+        const msg = cantidad === 1
+            ? `Nuevo chat entrante: ${nuevosSinAsignar[0]}`
+            : `${cantidad} chats nuevos esperando asignación`;
+        M.toast({html: msg, classes: 'blue darken-3'});
+        if (typeof window.playChatAlertSound === 'function') {
+            window.playChatAlertSound();
+        }
+    }
+
+    chatsSinAsignarPrevios = chatsSinAsignarActuales;
+    primeraCargaListaClientes = false;
 }
 
 function switchEmojiTab(category, pickerType) {
@@ -595,6 +725,7 @@ function renderQuickPickers() {
 function abrirGestionQuick() {
     document.getElementById('quick-msg-picker').style.display = 'none';
     M.Modal.getInstance(document.getElementById('modal-gestion-quick')).open();
+    setTimeout(syncQuickFormLabels, 0);
 }
 
 function guardarQuickRes() {
@@ -621,12 +752,18 @@ function cargarQuickForm(id, titulo, mensaje) {
     document.getElementById('quick-titulo').value = titulo;
     document.getElementById('quick-mensaje').value = mensaje;
     M.textareaAutoResize(document.getElementById('quick-mensaje'));
-    M.updateTextFields();
+    syncQuickFormLabels();
 }
 
 function limpiarFormQuick() {
     document.getElementById('form-quick-res').reset();
     document.getElementById('quick-id').value = '';
+    const msg = document.getElementById('quick-mensaje');
+    if (msg) {
+        msg.value = '';
+        M.textareaAutoResize(msg);
+    }
+    syncQuickFormLabels();
 }
 
 function borrarQuick(id) {
@@ -736,7 +873,9 @@ function cargarMensajes() {
                     // Notificación si me asignaron un chat nuevo
                     if (data.asignado_a == currentUserId && miAsignacionPrevia != currentUserId && !primeraCarga) {
                         M.toast({html: '⚠️ Se te ha asignado un nuevo cliente', classes: 'blue darken-4'});
-                        document.getElementById('chat-notification-sound').play();
+                        if (typeof window.playChatAlertSound === 'function') {
+                            window.playChatAlertSound();
+                        }
                     }
                     miAsignacionPrevia = data.asignado_a;
                 }
@@ -754,7 +893,9 @@ function cargarMensajes() {
                     const enviadoPorOtro = (esStaff && ultimoMsg.enviado_por === 'cliente') || (!esStaff && ultimoMsg.enviado_por === 'staff');
                     
                     if (enviadoPorOtro) {
-                        document.getElementById('chat-notification-sound').play().catch(e => console.log("Audio bloqueado por navegador"));
+                        if (typeof window.playChatAlertSound === 'function') {
+                            window.playChatAlertSound();
+                        }
                         if (!esStaff) M.toast({html: 'Nuevo mensaje del Chat', classes: 'blue'});
                     }
                 }
@@ -853,6 +994,18 @@ function getProductImgUrl(imgData) {
     // 1. Si ya es una URL completa o un data-uri
     if (imgData.startsWith('http') || imgData.startsWith('data:image')) return imgData;
 
+    // 1.1 Si ya es una ruta absoluta de la app, usarla tal cual.
+    if (imgData.startsWith('/')) {
+        if (baseUrl.endsWith('/') && imgData.startsWith(baseUrl)) {
+            return imgData;
+        }
+        return baseUrl + imgData.replace(/^\/+/, '');
+    }
+
+    if (imgData.startsWith(baseUrl)) {
+        return imgData;
+    }
+
     // 2. Detección de Base64 (PNG, JPG, WebP)
     if (/^(iVBORw|\/9j\/|UklGR)/.test(imgData)) {
         let mime = 'image/jpeg';
@@ -861,16 +1014,25 @@ function getProductImgUrl(imgData) {
         return `data:${mime};base64,${imgData}`;
     }
     
-    // 3. Ruta de archivo (asumimos que está en la carpeta de productos)
+    // 3. Ruta de archivo local (compatibilidad con rutas antiguas y nuevas)
     if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
         const cleanPath = imgData.replace(/^\/+/, '');
+        if (cleanPath.startsWith(baseUrl.replace(/^\/+/, ''))) {
+            return '/' + cleanPath.replace(/^\/+/, '');
+        }
+        if (cleanPath.startsWith('assets/img/products/')) {
+            return baseUrl + cleanPath;
+        }
+        if (cleanPath.startsWith('uploads/productos/')) {
+            return baseUrl + cleanPath;
+        }
         return baseUrl + 'assets/img/products/' + cleanPath;
     }
     return baseUrl + 'assets/img/no-product.png';
 }
 
 function renderProductCard(p, isMe) {
-    const img = getProductImgUrl(p.imagen);
+    const img = getProductImgUrl(p.imagen_resuelta || p.imagen);
     const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
@@ -933,7 +1095,7 @@ function enviarProducto(p) {
         id_producto: p.id_producto,
         nombre: nombreCompleto,
         precio_venta: p.precio_venta,
-        imagen: p.imagen,
+        imagen: p.imagen_resuelta || p.imagen,
         stock: Math.max(0, parseInt(p.chat_stock ?? p.total_stock ?? p.cantidad_actual) || 0)
     });
     enviarMensaje('producto', pData);

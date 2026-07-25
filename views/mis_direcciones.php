@@ -9,6 +9,23 @@ $pdo = getPDO();
 $idCliente = $_SESSION['usuario']['id_cliente'];
 $error = ''; $success = '';
 
+function normalizarDigitosTelefono(string $value): string {
+    return preg_replace('/\D+/', '', $value) ?? '';
+}
+
+function formatearTelefonoMxDesdeDigitos(string $digits): string {
+    $digits = substr($digits, 0, 10);
+    if ($digits === '') return '';
+    if (strlen($digits) <= 3) return '(' . $digits;
+    if (strlen($digits) <= 6) return '(' . substr($digits, 0, 3) . ') - ' . substr($digits, 3);
+    return '(' . substr($digits, 0, 3) . ') - ' . substr($digits, 3, 3) . ' - ' . substr($digits, 6, 4);
+}
+
+$telefonoClienteActual = trim((string)($_SESSION['usuario']['telefono_cliente'] ?? ''));
+if ($telefonoClienteActual !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($telefonoClienteActual)) {
+    $telefonoClienteActual = trim((string)piiDecryptValue($telefonoClienteActual));
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Token inválido.';
@@ -58,6 +75,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $pdo->prepare("UPDATE cliente_direcciones SET es_default = 1 WHERE id_direccion = ? AND id_cliente = ?")->execute([$id_dir, $idCliente]);
                 $pdo->commit();
                 $success = 'Dirección predeterminada actualizada.';
+            } elseif ($accion === 'actualizar_telefono') {
+                $telefonoRaw = trim((string)($_POST['telefono_contacto'] ?? ''));
+                $digits = normalizarDigitosTelefono($telefonoRaw);
+                if (strlen($digits) !== 10) {
+                    throw new Exception('El teléfono debe tener 10 dígitos.');
+                }
+
+                $telefonoFormateado = formatearTelefonoMxDesdeDigitos($digits);
+                $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefonoFormateado) : $telefonoFormateado;
+                $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ?")->execute([$telefonoStore, $idCliente]);
+                $_SESSION['usuario']['telefono_cliente'] = $telefonoFormateado;
+                $telefonoClienteActual = $telefonoFormateado;
+                $success = 'Teléfono de contacto actualizado correctamente.';
             }
         } catch (Exception $e) { $error = $e->getMessage(); }
     }
@@ -117,6 +147,22 @@ include __DIR__ . '/includes/header.php';
 
     <?php if ($error): ?><div class="card-panel red lighten-4 red-text"><?php echo esc($error); ?></div><?php endif; ?>
     <?php if ($success): ?><div class="card-panel green lighten-4 green-text"><?php echo esc($success); ?></div><?php endif; ?>
+
+    <div class="card" style="margin-top: 12px;">
+        <div class="card-content">
+            <span class="card-title" style="font-size:1.2rem;">Teléfono de contacto</span>
+            <p class="grey-text" style="margin:0 0 12px 0;">Este teléfono se usa para confirmar tus pedidos y entregas.</p>
+            <form method="POST" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                <?php echo csrfInput(); ?>
+                <input type="hidden" name="accion" value="actualizar_telefono">
+                <div class="input-field" style="margin:12px 0 0 0; min-width:260px; flex:1;">
+                    <input type="tel" id="telefono_contacto" name="telefono_contacto" required maxlength="19" inputmode="numeric" autocomplete="tel-national" value="<?php echo esc($telefonoClienteActual); ?>" placeholder="Ej: (331) - 863 - 5185">
+                    <label for="telefono_contacto" class="active">Teléfono</label>
+                </div>
+                <button type="submit" class="btn blue darken-3 waves-effect waves-light">Guardar teléfono</button>
+            </form>
+        </div>
+    </div>
 
     <div class="row">
         <div class="col s12 m7">
@@ -310,6 +356,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const direccionEl = document.getElementById('direccion');
     if (direccionEl && direccionEl.value.trim() !== '') {
         M.textareaAutoResize(direccionEl);
+    }
+
+    const phoneInput = document.getElementById('telefono_contacto');
+    const formatPhone = (digits) => {
+        if (!digits) return '';
+        if (digits.length <= 3) return `(${digits}`;
+        if (digits.length <= 6) return `(${digits.slice(0, 3)}) - ${digits.slice(3)}`;
+        return `(${digits.slice(0, 3)}) - ${digits.slice(3, 6)} - ${digits.slice(6, 10)}`;
+    };
+    if (phoneInput) {
+        const validatePhone = () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            if (digits.length !== 10) {
+                phoneInput.setCustomValidity('El teléfono debe tener 10 dígitos.');
+                return;
+            }
+            phoneInput.setCustomValidity('');
+        };
+
+        const syncPhone = () => {
+            const digits = (phoneInput.value || '').replace(/\D/g, '').slice(0, 10);
+            phoneInput.value = formatPhone(digits);
+            validatePhone();
+        };
+
+        phoneInput.addEventListener('input', syncPhone);
+        phoneInput.addEventListener('blur', syncPhone);
+        syncPhone();
     }
 });
 </script>

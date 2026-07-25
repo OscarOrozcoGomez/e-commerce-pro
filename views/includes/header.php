@@ -89,6 +89,7 @@
     </style>
 </head>
 <body class="grey lighten-4">
+    <audio id="global-chat-alert-sound" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3" preload="auto"></audio>
     <?php
         $headerDisplayName = '';
         $headerAvatarInitials = 'U';
@@ -206,11 +207,13 @@
                     ?>
                     <li>
                         <a href="<?php echo BASE_URL; ?>views/chat.php" title="Chat de Soporte" style="position: relative;">
-                            <i class="material-icons <?php echo $unreadChat > 0 ? ($hasSecurityAlert ? 'orange-text text-darken-2' : 'green-text text-lighten-2') : ''; ?>">chat</i>
+                            <i id="header-chat-icon" class="material-icons <?php echo $unreadChat > 0 ? ($hasSecurityAlert ? 'orange-text text-darken-2' : 'green-text text-lighten-2') : ''; ?>">chat</i>
                             <?php if ($unreadChat > 0): ?>
-                                <span class="new badge <?php echo $hasSecurityAlert ? 'orange darken-3' : 'green'; ?>" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;">
+                                <span id="header-chat-badge" class="new badge <?php echo $hasSecurityAlert ? 'orange darken-3' : 'green'; ?>" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;">
                                     <?php echo $unreadChat; ?>
                                 </span>
+                            <?php else: ?>
+                                <span id="header-chat-badge" class="new badge green" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px; display:none;">0</span>
                             <?php endif; ?>
                         </a>
                     </li>
@@ -323,7 +326,7 @@
                 <li><a href="<?php echo BASE_URL; ?>views/mi_perfil.php"><i class="material-icons">person_outline</i> Mi Perfil</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/mis_compras.php"><i class="material-icons">shopping_bag</i> Mis Compras</a></li>
                 <li><a href="<?php echo BASE_URL; ?>views/mis_direcciones.php"><i class="material-icons">place</i> Mis Direcciones</a></li>
-                <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo <span id="header-chat-badge-mobile" class="new badge green" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $unreadChat > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$unreadChat; ?></span></a></li>
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php else: ?>
                 <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
@@ -333,7 +336,7 @@
                         <span id="pickup-alert-badge-mobile" class="new badge deep-orange" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $pickupAlertCount > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$pickupAlertCount; ?></span>
                     </a>
                 </li>
-                <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes</a></li>
+                <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes <span id="header-chat-badge-mobile" class="new badge <?php echo $hasSecurityAlert ? 'orange darken-3' : 'green'; ?>" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $unreadChat > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$unreadChat; ?></span></a></li>
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php endif; ?>
             <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text"><i class="material-icons red-text">exit_to_app</i> Salir</a></li>
@@ -355,6 +358,7 @@
         const CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
         const BASE_URL_HEADER = '<?php echo BASE_URL; ?>';
         const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
+        const IS_CHAT_PAGE_VIEW = window.location.pathname.toLowerCase().includes('/views/chat.php');
 
         // Persistir parametros de marketing para atribucion de conversiones.
         (function persistAttribution() {
@@ -507,6 +511,113 @@
             }
         }
 
+        function getStaffChatUnreadStorageKey() {
+            return `bb_staff_chat_unread_last_u${CURRENT_USER_ID}`;
+        }
+
+        function getInitialHeaderChatUnread() {
+            const badge = document.getElementById('header-chat-badge');
+            if (!badge) return 0;
+            return Math.max(0, parseInt(badge.textContent || '0', 10) || 0);
+        }
+
+        function readLastChatUnreadFromStorage() {
+            try {
+                return localStorage.getItem(getStaffChatUnreadStorageKey());
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function writeLastChatUnreadToStorage(value) {
+            try {
+                localStorage.setItem(getStaffChatUnreadStorageKey(), String(value));
+            } catch (e) {
+                // Ignorar si el navegador bloquea almacenamiento.
+            }
+        }
+
+        function updateHeaderChatBadge(unreadTotal, unassignedUnread = 0) {
+            const total = Math.max(0, parseInt(unreadTotal, 10) || 0);
+            const waiting = Math.max(0, parseInt(unassignedUnread, 10) || 0);
+            const badges = document.querySelectorAll('#header-chat-badge, #header-chat-badge-mobile');
+            const icon = document.getElementById('header-chat-icon');
+
+            badges.forEach((badge) => {
+                badge.textContent = String(total);
+                badge.style.display = total > 0 ? 'inline-block' : 'none';
+                badge.classList.remove('green', 'orange', 'darken-3');
+                badge.classList.add(waiting > 0 ? 'orange' : 'green');
+                if (waiting > 0) {
+                    badge.classList.add('darken-3');
+                }
+            });
+
+            if (icon) {
+                icon.classList.remove('orange-text', 'text-darken-2', 'green-text', 'text-lighten-2');
+                if (total > 0) {
+                    if (waiting > 0) {
+                        icon.classList.add('orange-text', 'text-darken-2');
+                    } else {
+                        icon.classList.add('green-text', 'text-lighten-2');
+                    }
+                }
+            }
+        }
+
+        function playChatAlertSound() {
+            const audio = document.getElementById('global-chat-alert-sound');
+            if (!audio) return Promise.resolve(false);
+            audio.currentTime = 0;
+            return audio.play().then(() => true).catch(() => false);
+        }
+
+        function processStaffChatUnread(unreadTotal, unassignedUnread = 0) {
+            const normalized = Math.max(0, parseInt(unreadTotal, 10) || 0);
+            const waiting = Math.max(0, parseInt(unassignedUnread, 10) || 0);
+            const prev = Number.isFinite(window.__staffChatPrevUnread)
+                ? window.__staffChatPrevUnread
+                : (() => {
+                    const raw = readLastChatUnreadFromStorage();
+                    if (raw === null) return null;
+                    return Math.max(0, parseInt(raw, 10) || 0);
+                })();
+
+            updateHeaderChatBadge(normalized, waiting);
+            window.__staffChatPrevUnread = normalized;
+
+            if (!IS_CHAT_PAGE_VIEW && prev !== null && normalized > prev) {
+                playChatAlertSound();
+                if (typeof M !== 'undefined' && M.toast) {
+                    const diff = normalized - prev;
+                    const baseMsg = diff === 1 ? 'Nuevo mensaje de chat' : `${diff} mensajes nuevos de chat`;
+                    const suffix = waiting > 0 ? ' (hay chats sin asignar)' : '';
+                    M.toast({ html: baseMsg + suffix, classes: 'blue darken-3' });
+                }
+            }
+
+            writeLastChatUnreadToStorage(normalized);
+        }
+
+        async function pollStaffChatAlerts() {
+            if (!USER_IS_INTERNAL_STAFF) {
+                return;
+            }
+            try {
+                const response = await fetch(`${BASE_URL_HEADER}api/chat_handler.php?action=staff_alerts_summary`, {
+                    credentials: 'same-origin',
+                    cache: 'no-store'
+                });
+                const data = await response.json();
+                if (!response.ok || !data || !data.success) {
+                    return;
+                }
+                processStaffChatUnread(data.unread_total || 0, data.unassigned_unread || 0);
+            } catch (e) {
+                console.error('Error consultando alertas globales de chat:', e);
+            }
+        }
+
         function getPickupStorageKey() {
             return `bb_pickup_pending_last_u${CURRENT_USER_ID}_a${CURRENT_USER_WAREHOUSE_ID}`;
         }
@@ -618,6 +729,8 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            window.playChatAlertSound = playChatAlertSound;
+
             // Inicializar Menú Lateral
             var sidenavElems = document.querySelectorAll('.sidenav');
             M.Sidenav.init(sidenavElems);
@@ -653,6 +766,24 @@
             });
 
             if (USER_IS_INTERNAL_STAFF) {
+                const unlockChatAudio = () => {
+                    window.__chatAudioUnlocked = true;
+                };
+                window.__chatAudioUnlocked = false;
+                ['click', 'keydown', 'touchstart', 'mousemove'].forEach((evt) => {
+                    window.addEventListener(evt, unlockChatAudio, { once: true, passive: true });
+                });
+
+                window.__staffChatPrevUnread = getInitialHeaderChatUnread();
+                processStaffChatUnread(window.__staffChatPrevUnread, 0);
+                pollStaffChatAlerts();
+                setInterval(pollStaffChatAlerts, 5000);
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible') {
+                        pollStaffChatAlerts();
+                    }
+                });
+
                 const pickupLink = document.getElementById('pickup-alert-link');
                 const initialCount = pickupLink ? (parseInt(pickupLink.getAttribute('data-pickup-count') || '0', 10) || 0) : 0;
                 processPickupCount(initialCount);
