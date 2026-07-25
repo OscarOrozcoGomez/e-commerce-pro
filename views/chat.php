@@ -314,11 +314,20 @@ const esStaff = <?php echo !$soyCliente ? 'true' : 'false'; ?>;
 let ultimoConteoMensajes = 0;
 let primeraCarga = true;
 let productosData = {};
+let productosIndex = [];
 let lastTypingSent = 0;
 let miAsignacionPrevia = 0;
 let chatEstabaActivo = false; // Rastrear transición de estado
 let diasExpandidos = new Set(); // Guardar qué días ha abierto el usuario
 let quickResponses = [];
+
+function normalizeSearchText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
 
 function formatFriendlyDate(dateStr) {
     const date = new Date(dateStr + 'T00:00:00');
@@ -338,18 +347,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (esStaff) cargarListaClientes();
     if (esStaff) {
         // Cargar productos para el buscador interno del chat
-        const idAlmacenStaff = <?php echo json_encode($_SESSION['usuario']['id_almacen'] ?? 1); ?>;
-        fetch('<?php echo BASE_URL; ?>api/products_manager.php?action=list&almacen_id=' + idAlmacenStaff)
+        fetch('<?php echo BASE_URL; ?>api/chat_handler.php?action=chat_products')
             .then(r => r.json())
             .then(data => {
-                if (data.success && data.data) {
+                if (data.success && Array.isArray(data.products)) {
                     const acData = {};
-                    data.data.forEach(p => {
-                        const label = `[${p.sku || 'S/S'}] ${p.nombre}${p.nombre_variante ? ' (' + p.nombre_variante + ')' : ''}`;
+                    productosIndex = [];
+                    data.products.forEach(p => {
+                        const nombreCompleto = `${p.nombre}${p.nombre_variante ? ' (' + p.nombre_variante + ')' : ''}`;
+                        const label = `${nombreCompleto} [${p.sku || 'S/S'}]`;
                         // No usamos p.imagen aquí porque el base64 es muy pesado para el buscador
                         acData[label] = null; 
                         productosData[label] = p;
+                        productosIndex.push({
+                            label,
+                            searchToken: normalizeSearchText(`${p.nombre} ${p.nombre_variante || ''} ${p.sku || ''}`),
+                            product: p
+                        });
                     });
+
+                    if (Object.keys(acData).length === 0) {
+                        M.toast({html: 'No hay productos activos para sugerir en chat.', classes: 'orange darken-2'});
+                        return;
+                    }
                     
                     const inputAC = document.getElementById('chat-product-autocomplete');
                     const instanceAC = M.Autocomplete.init(inputAC, {
@@ -367,17 +387,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Permitir seleccionar con la tecla Enter si hay una coincidencia exacta o sugerencia
                     inputAC.addEventListener('keydown', (e) => {
                         if (e.key === 'Enter') {
+                            e.preventDefault();
                             const val = inputAC.value.trim();
                             if (productosData[val]) {
                                 enviarProducto(productosData[val]);
                             } else {
-                                // Si no hay match exacto, intentar disparar el clic en la primera sugerencia
+                                // Si no hay match exacto, buscar por nombre/variante/SKU y tomar la primera coincidencia.
+                                const normalized = normalizeSearchText(val);
+                                const firstMatch = normalized === ''
+                                    ? null
+                                    : productosIndex.find(item => item.searchToken.includes(normalized));
+                                if (firstMatch && firstMatch.product) {
+                                    enviarProducto(firstMatch.product);
+                                    return;
+                                }
+
+                                // Como fallback final, intentar disparar la primera sugerencia visible.
                                 const first = document.querySelector('.autocomplete-content li');
-                                if (first) first.click();
+                                if (first) {
+                                    first.click();
+                                } else {
+                                    M.toast({html: 'No se encontro producto con ese texto.', classes: 'orange darken-2'});
+                                }
                             }
                         }
                     });
+                } else {
+                    M.toast({html: data.message || 'No se pudieron cargar productos para chat.', classes: 'red'});
                 }
+            })
+            .catch(() => {
+                M.toast({html: 'Error de conexion cargando productos de chat.', classes: 'red'});
             });
             
         // Cargar lista de staff
@@ -853,6 +893,18 @@ function getProductImgUrl(imgData) {
     // 1. Si ya es una URL completa o un data-uri
     if (imgData.startsWith('http') || imgData.startsWith('data:image')) return imgData;
 
+    // 1.1 Si ya es una ruta absoluta de la app, usarla tal cual.
+    if (imgData.startsWith('/')) {
+        if (baseUrl.endsWith('/') && imgData.startsWith(baseUrl)) {
+            return imgData;
+        }
+        return baseUrl + imgData.replace(/^\/+/, '');
+    }
+
+    if (imgData.startsWith(baseUrl)) {
+        return imgData;
+    }
+
     // 2. Detección de Base64 (PNG, JPG, WebP)
     if (/^(iVBORw|\/9j\/|UklGR)/.test(imgData)) {
         let mime = 'image/jpeg';
@@ -861,16 +913,25 @@ function getProductImgUrl(imgData) {
         return `data:${mime};base64,${imgData}`;
     }
     
-    // 3. Ruta de archivo (asumimos que está en la carpeta de productos)
+    // 3. Ruta de archivo local (compatibilidad con rutas antiguas y nuevas)
     if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
         const cleanPath = imgData.replace(/^\/+/, '');
+        if (cleanPath.startsWith(baseUrl.replace(/^\/+/, ''))) {
+            return '/' + cleanPath.replace(/^\/+/, '');
+        }
+        if (cleanPath.startsWith('assets/img/products/')) {
+            return baseUrl + cleanPath;
+        }
+        if (cleanPath.startsWith('uploads/productos/')) {
+            return baseUrl + cleanPath;
+        }
         return baseUrl + 'assets/img/products/' + cleanPath;
     }
     return baseUrl + 'assets/img/no-product.png';
 }
 
 function renderProductCard(p, isMe) {
-    const img = getProductImgUrl(p.imagen);
+    const img = getProductImgUrl(p.imagen_resuelta || p.imagen);
     const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
     // Escapar comillas simples para evitar que rompan el atributo onclick
     const safeName = p.nombre.replace(/'/g, "\\'");
@@ -933,7 +994,7 @@ function enviarProducto(p) {
         id_producto: p.id_producto,
         nombre: nombreCompleto,
         precio_venta: p.precio_venta,
-        imagen: p.imagen,
+        imagen: p.imagen_resuelta || p.imagen,
         stock: Math.max(0, parseInt(p.chat_stock ?? p.total_stock ?? p.cantidad_actual) || 0)
     });
     enviarMensaje('producto', pData);

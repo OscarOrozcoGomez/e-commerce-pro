@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/chat_utils.php';
 
 header('Content-Type: application/json');
 if (!isAuthenticated()) {
@@ -233,6 +234,76 @@ try {
         // Obtener lista de staff para el dropdown de transferencia
         $stmt = $pdo->query("SELECT id_usuario, nombre FROM usuarios WHERE id_rol IN (1,2,3) AND estado = 'activo'");
         echo json_encode(['success' => true, 'staff' => $stmt->fetchAll()]);
+
+    } elseif ($action === 'chat_products') {
+        if ($soyCliente) {
+            throw new Exception('No autorizado');
+        }
+
+        $idAlmacen = resolveSalesWarehouseId($pdo);
+        $sql = "SELECT
+                    p.id_producto,
+                    p.id_padre,
+                    p.nombre,
+                    p.nombre_variante,
+                    p.sku,
+                    p.precio_venta,
+                    COALESCE(
+                        (SELECT pi2.ruta_archivo
+                         FROM producto_imagenes pi2
+                         INNER JOIN productos p_img ON pi2.id_producto = p_img.id_producto
+                         WHERE (
+                            p_img.id_producto = p.id_producto
+                            OR p_img.id_padre = p.id_producto
+                            OR (p.id_padre IS NOT NULL AND p.id_padre > 0 AND p_img.id_producto = p.id_padre)
+                            OR (p.id_padre IS NOT NULL AND p.id_padre > 0 AND p_img.id_padre = p.id_padre)
+                         )
+                         ORDER BY
+                            (p_img.id_producto = p.id_producto) DESC,
+                            (p_img.id_producto = p.id_padre) DESC,
+                            pi2.orden ASC
+                         LIMIT 1),
+                        p.imagen,
+                        p.imagen_url
+                    ) AS imagen,
+                    COALESCE(ia.cantidad_actual, 0) AS cantidad_actual,
+                    COALESCE((SELECT SUM(ia_total.cantidad_actual) FROM inventario_almacen ia_total WHERE ia_total.id_producto = p.id_producto), 0) AS total_stock
+                FROM productos p
+                LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_almacen
+                WHERE p.estado = 'activo'
+                ORDER BY p.nombre ASC, p.nombre_variante ASC
+                LIMIT 1500";
+        $stmtProducts = $pdo->prepare($sql);
+        $stmtProducts->execute([':id_almacen' => $idAlmacen]);
+        $products = normalizeChatProductList($stmtProducts->fetchAll(PDO::FETCH_ASSOC));
+
+        foreach ($products as &$product) {
+            $resolved = getProductImageUrl(
+                (string)($product['imagen'] ?? ''),
+                (int)($product['id_producto'] ?? 0)
+            );
+
+            $looksLikeDefault =
+                $resolved === ''
+                || stripos($resolved, 'default-product.') !== false
+                || stripos($resolved, '/assets/img/no-product.png') !== false
+                || strpos($resolved, 'data:image/svg+xml;utf8,') === 0;
+
+            if ($looksLikeDefault && (int)($product['id_padre'] ?? 0) > 0) {
+                $resolvedFromParent = getProductImageUrl(
+                    (string)($product['imagen'] ?? ''),
+                    (int)$product['id_padre']
+                );
+                if (trim($resolvedFromParent) !== '') {
+                    $resolved = $resolvedFromParent;
+                }
+            }
+
+            $product['imagen_resuelta'] = $resolved;
+        }
+        unset($product);
+
+        echo json_encode(['success' => true, 'products' => $products]);
 
     } elseif ($action === 'fetch_quick') {
         $stmt = $pdo->prepare("SELECT * FROM respuestas_rapidas WHERE id_usuario = ? ORDER BY titulo ASC");

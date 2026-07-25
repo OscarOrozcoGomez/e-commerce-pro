@@ -18,6 +18,7 @@ $idAlmacenUsuario = (int)($usuario['id_almacen'] ?? 0);
 $error = '';
 $success = '';
 $cancelSupportReady = false;
+$hasFechaApartada = false;
 $cancelReasonOptions = [
     'cliente_no_llego' => 'Cliente no llego por su pedido',
     'cliente_solicito_cancelar' => 'Cliente solicito cancelar el pedido',
@@ -43,6 +44,9 @@ try {
     $stmtFechaCancel = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones' AND COLUMN_NAME = 'fecha_cancelada'");
     $stmtFechaCancel->execute();
     $hasFechaCancelada = ((int)$stmtFechaCancel->fetchColumn()) > 0;
+    $stmtFechaApartada = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones' AND COLUMN_NAME = 'fecha_apartada'");
+    $stmtFechaApartada->execute();
+    $hasFechaApartada = ((int)$stmtFechaApartada->fetchColumn()) > 0;
     $cancelSupportReady = (stripos($estadoColumnType, 'cancelada') !== false) && $hasFechaCancelada;
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
@@ -189,13 +193,20 @@ try {
                             } else {
                                 $pdo->beginTransaction();
                                 try {
+                                    $setParts = [
+                                        "estado = :estado",
+                                        "id_usuario_seguimiento = :id_usuario",
+                                        "fecha_vista = CASE WHEN :estado_vista IN ('vista','apartada','atendida') AND fecha_vista IS NULL THEN NOW() ELSE fecha_vista END",
+                                        "fecha_atendida = CASE WHEN :estado_atendida = 'atendida' THEN NOW() ELSE fecha_atendida END",
+                                        "actualizado_en = NOW()",
+                                    ];
+
+                                    if ($hasFechaApartada) {
+                                        $setParts[] = "fecha_apartada = CASE WHEN :estado_apartada = 'apartada' AND fecha_apartada IS NULL THEN NOW() ELSE fecha_apartada END";
+                                    }
+
                                     $sql = "UPDATE pickup_notificaciones
-                                            SET estado = :estado,
-                                                id_usuario_seguimiento = :id_usuario,
-                                                fecha_vista = CASE WHEN :estado_vista IN ('vista','apartada','atendida') AND fecha_vista IS NULL THEN NOW() ELSE fecha_vista END,
-                                                fecha_apartada = CASE WHEN :estado_apartada = 'apartada' AND fecha_apartada IS NULL THEN NOW() ELSE fecha_apartada END,
-                                                fecha_atendida = CASE WHEN :estado_atendida = 'atendida' THEN NOW() ELSE fecha_atendida END,
-                                                actualizado_en = NOW()
+                                            SET " . implode(",\n                                                ", $setParts) . "
                                             WHERE id_notificacion = :id_notificacion{$scopeWhere}";
 
                                     $stmt = $pdo->prepare($sql);
