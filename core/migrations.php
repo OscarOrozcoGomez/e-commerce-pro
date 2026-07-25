@@ -104,7 +104,7 @@ function getMigrationFiles(string $directory = MIGRATIONS_DIR): array
     return array_values($files);
 }
 
-function acquireMigrationsLock(PDO $pdo, int $timeoutSeconds = 20): void
+function acquireMigrationsLock(PDO $pdo, int $timeoutSeconds = 5): void
 {
     $stmt = $pdo->prepare('SELECT GET_LOCK(:lock_name, :timeout_seconds)');
     $stmt->execute([

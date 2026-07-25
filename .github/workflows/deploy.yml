@@ -102,15 +102,30 @@ jobs:
           MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
           MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
         run: |
-          response=$(curl -sS -X POST "$MIGRATIONS_URL" \
-            -H "Content-Type: application/json" \
-            -H "X-Migrations-Token: $MIGRATIONS_DEPLOY_TOKEN" \
-            -d '{}')
+          max_attempts=3
+          attempt=0
+          response=""
+
+          while [ $attempt -lt $max_attempts ]; do
+            attempt=$((attempt + 1))
+            echo "Migration attempt $attempt of $max_attempts..."
+
+            response=$(curl -sS \
+              --connect-timeout 30 \
+              --max-time 360 \
+              -X POST "$MIGRATIONS_URL" \
+              -H "Content-Type: application/json" \
+              -H "X-Migrations-Token: $MIGRATIONS_DEPLOY_TOKEN" \
+              -d '{}') && break
+
+            echo "curl failed (exit $?), waiting 20s before retry..."
+            sleep 20
+          done
 
           echo "Migration response:"
           echo "$response"
 
           if ! echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-            echo "::error::Remote migrations failed"
+            echo "::error::Remote migrations failed after $attempt attempt(s)"
             exit 1
           fi
