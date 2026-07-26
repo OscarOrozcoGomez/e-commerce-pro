@@ -96,8 +96,9 @@ include __DIR__ . '/includes/header.php';
                             <small class="grey-text">Se usa en la URL del blog. Puedes editarlo manualmente.</small>
                         </div>
                         <div class="input-field">
-                            <textarea name="extracto" id="extracto" class="materialize-textarea" placeholder="Breve resumen que aparece en la lista..."></textarea>
-                            <label class="active">Extracto / Resumen</label>
+                            <textarea name="extracto" id="extracto" class="materialize-textarea"></textarea>
+                            <label for="extracto">Extracto / Resumen</label>
+                            <span class="helper-text">Breve resumen que aparece en la lista.</span>
                         </div>
                         <div class="row">
                             <div class="col s12">

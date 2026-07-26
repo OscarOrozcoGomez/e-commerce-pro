@@ -140,7 +140,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
 
                     <?php if ($error === ''): ?>
-                    <form method="post">
+                    <form method="post" id="complete-account-form">
                         <?php echo csrfInput(); ?>
 
                         <div class="input-field">
@@ -201,11 +201,47 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<div id="page-transition-overlay" class="page-transition-overlay" aria-live="polite" aria-busy="true">
+    <div class="page-transition-card">
+        <div class="preloader-wrapper active" style="width:52px; height:52px;">
+            <div class="spinner-layer spinner-blue-only">
+                <div class="circle-clipper left"><div class="circle"></div></div>
+                <div class="gap-patch"><div class="circle"></div></div>
+                <div class="circle-clipper right"><div class="circle"></div></div>
+            </div>
+        </div>
+        <p id="page-transition-text" class="page-transition-text">Estamos completando tu cuenta...</p>
+    </div>
+</div>
+
 <style>
     .w-100 { width: 100%; }
     .password-criteria-list { margin-top: -6px; margin-bottom: 20px; padding-left: 0; }
     .password-criteria-list li { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
     .password-criteria-list .criteria-icon { font-size: 16px; line-height: 1; }
+    .page-transition-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.65);
+        z-index: 9999;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+    .page-transition-card {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 24px 22px;
+        width: min(420px, 92vw);
+        text-align: center;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.25);
+    }
+    .page-transition-text {
+        margin: 14px 0 0 0;
+        color: #1f2937;
+        font-weight: 500;
+    }
 </style>
 
 <script>
@@ -276,6 +312,29 @@ include __DIR__ . '/includes/header.php';
         passwordInput.addEventListener('input', updateState);
         confirmInput.addEventListener('input', updateState);
         updateState();
+    }
+
+    function showTransitionOverlay(message) {
+        const overlay = document.getElementById('page-transition-overlay');
+        const text = document.getElementById('page-transition-text');
+        if (text && message) {
+            text.textContent = message;
+        }
+        if (overlay) {
+            overlay.style.display = 'flex';
+        }
+    }
+
+    const completeAccountForm = document.getElementById('complete-account-form');
+    if (completeAccountForm) {
+        completeAccountForm.addEventListener('submit', function () {
+            const submitBtn = document.getElementById('complete-submit-btn');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'PROCESANDO...';
+            }
+            showTransitionOverlay('Estamos validando tus datos y activando tu cuenta...');
+        });
     }
 
     bindPasswordRealtimeValidation('password', 'confirm_password', 'complete', 'complete-submit-btn');

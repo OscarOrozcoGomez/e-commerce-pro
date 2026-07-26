@@ -12,6 +12,31 @@ $pdo = getPDO();
 $error = '';
 $success = '';
 
+function generateTemporarySecurePassword(int $length = 12): string
+{
+    $length = max(10, $length);
+
+    $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    $lower = 'abcdefghijkmnpqrstuvwxyz';
+    $digits = '23456789';
+    $symbols = '!@#$%^&*()_+-=';
+
+    $password = [
+        $upper[random_int(0, strlen($upper) - 1)],
+        $lower[random_int(0, strlen($lower) - 1)],
+        $digits[random_int(0, strlen($digits) - 1)],
+        $symbols[random_int(0, strlen($symbols) - 1)],
+    ];
+
+    $all = $upper . $lower . $digits . $symbols;
+    while (count($password) < $length) {
+        $password[] = $all[random_int(0, strlen($all) - 1)];
+    }
+
+    shuffle($password);
+    return implode('', $password);
+}
+
 // Procesar formulario
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -69,6 +94,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")->execute([$id]);
             logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, "Cuenta desbloqueada manualmente por admin");
             $success = 'Usuario desbloqueado correctamente.';
+        } elseif ($accion === 'reset_password_staff') {
+            try {
+                $id = intval($_POST['id_usuario'] ?? 0);
+                $emailUsuario = trim((string)($_POST['email_usuario'] ?? ''));
+
+                if ($id <= 0) {
+                    throw new Exception('ID de usuario inválido para reset de contraseña.');
+                }
+
+                $tempPassword = generateTemporarySecurePassword(12);
+                $tempHash = password_hash($tempPassword, PASSWORD_BCRYPT);
+
+                $pdo->prepare("UPDATE usuarios SET contrasena = ?, intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
+                    ->execute([$tempHash, $id]);
+
+                logAudit('USUARIO_PASSWORD_RESETEADA', 'usuarios', $id, 'Reset manual de contraseña para staff');
+                $target = $emailUsuario !== '' ? $emailUsuario : ('usuario #' . $id);
+                $success = 'Contraseña temporal generada para ' . $target . ': ' . $tempPassword;
+            } catch (Throwable $e) {
+                $error = 'No se pudo resetear la contraseña: ' . $e->getMessage();
+            }
         }
     }
 }
@@ -234,6 +280,14 @@ include __DIR__ . '/includes/header.php';
                                                 </button>
                                             </form>
                                             <?php endif; ?>
+
+                                            <form method="POST" style="display:inline;" onsubmit="return confirm('¿Resetear contraseña de este usuario staff?');">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="accion" value="reset_password_staff">
+                                                <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                                <input type="hidden" name="email_usuario" value="<?php echo esc($user['email']); ?>">
+                                                <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Resetear contraseña">
+                                                    <i class="material-icons">vpn_key</i>
                                                 </button>
                                             </form>
                                         </td>
