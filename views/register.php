@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/phone_utils.php';
 
 if (isAuthenticated()) {
     header('Location: ' . BASE_URL . 'index.php');
@@ -11,6 +12,12 @@ if (isAuthenticated()) {
 
 $error = '';
 $success = '';
+$pendingRedirect = null;
+
+if (!empty($_SESSION['redirect_with_loader']) && is_array($_SESSION['redirect_with_loader'])) {
+    $pendingRedirect = $_SESSION['redirect_with_loader'];
+    unset($_SESSION['redirect_with_loader']);
+}
 
 /**
  * Valida si el correo tiene formato correcto y un dominio con registros DNS utiles.
@@ -51,18 +58,7 @@ function isLikelyDeliverableEmail(string $email): bool
  */
 function normalizeUsStylePhone(string $phone): ?string
 {
-    $digits = preg_replace('/\D+/', '', $phone);
-    if (!is_string($digits)) {
-        return null;
-    }
-    if ($digits === '') {
-        return '';
-    }
-    if (strlen($digits) !== 10) {
-        return null;
-    }
-
-    return sprintf('(%s) - %s - %s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+    return normalizePhoneMx($phone);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -96,6 +92,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$email]);
                 if ($stmt->fetch()) {
                     $error = 'El correo electrónico ya está registrado.';
+                } elseif ($telefonoNormalizado !== '' && findClienteByPhone($pdo, $telefonoNormalizado) !== null) {
+                    $clienteExistente = findClienteByPhone($pdo, $telefonoNormalizado);
+                    if (is_array($clienteExistente) && empty($clienteExistente['id_usuario'])) {
+                        $_SESSION['account_completion'] = [
+                            'telefono' => $telefonoNormalizado,
+                            'nombre' => $nombre,
+                            'email' => $email,
+                        ];
+                        $_SESSION['redirect_with_loader'] = [
+                            'to' => BASE_URL . 'views/complete_account.php',
+                            'message' => 'Encontramos tu teléfono en la plataforma. Te llevamos a completar tu cuenta...',
+                        ];
+                        if (session_status() === PHP_SESSION_ACTIVE) {
+                            session_write_close();
+                        }
+                        header('Location: ' . BASE_URL . 'views/register.php');
+                        exit;
+                    }
+
+                    $_SESSION['session_notice'] = 'Ese teléfono ya tiene una cuenta activa. Inicia sesión para continuar.';
+                    $_SESSION['redirect_with_loader'] = [
+                        'to' => BASE_URL . 'views/login.php',
+                        'message' => 'Ese teléfono ya tiene una cuenta activa. Te llevamos a iniciar sesión...',
+                    ];
+                    if (session_status() === PHP_SESSION_ACTIVE) {
+                        session_write_close();
+                    }
+                    header('Location: ' . BASE_URL . 'views/register.php');
+                    exit;
                 } else {
                     $hash = password_hash($password, PASSWORD_BCRYPT);
                     // id_rol = 4 es 'cliente' según vimos anteriormente
@@ -109,11 +134,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $telefonoCliente = $telefonoNormalizado === '' ? null : (function_exists('piiEncryptValue') ? piiEncryptValue($telefonoNormalizado) : $telefonoNormalizado);
                     
                     // Crear entrada en tabla clientes para este usuario
-                    $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, id_usuario) VALUES (?, ?, ?)");
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_usuario) VALUES (?, ?, ?, ?)");
                     $stmtCli->execute([$nombreCliente, $email, $telefonoCliente, $newUserId]);
-                    
-                    $success = 'Cuenta creada con éxito. Ya puedes iniciar sesión.';
+
+                    $_SESSION['session_notice'] = 'Cuenta creada con éxito. Ya puedes iniciar sesión.';
+                    if (session_status() === PHP_SESSION_ACTIVE) {
+                        session_write_close();
+                    }
+                    header('Location: ' . BASE_URL . 'views/login.php');
+                    exit;
                 }
             } catch (PDOException $e) {
                 $error = 'Error al registrar usuario: ' . $e->getMessage();
@@ -212,7 +241,43 @@ include __DIR__ . '/includes/header.php';
     .password-criteria-list { margin-top: -6px; margin-bottom: 20px; padding-left: 0; }
     .password-criteria-list li { list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
     .password-criteria-list .criteria-icon { font-size: 16px; line-height: 1; }
+    .page-transition-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.65);
+        z-index: 9999;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+    .page-transition-card {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 24px 22px;
+        width: min(420px, 92vw);
+        text-align: center;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.25);
+    }
+    .page-transition-text {
+        margin: 14px 0 0 0;
+        color: #1f2937;
+        font-weight: 500;
+    }
 </style>
+
+<div id="page-transition-overlay" class="page-transition-overlay" aria-live="polite" aria-busy="true">
+    <div class="page-transition-card">
+        <div class="preloader-wrapper active" style="width:52px; height:52px;">
+            <div class="spinner-layer spinner-blue-only">
+                <div class="circle-clipper left"><div class="circle"></div></div>
+                <div class="gap-patch"><div class="circle"></div></div>
+                <div class="circle-clipper right"><div class="circle"></div></div>
+            </div>
+        </div>
+        <p id="page-transition-text" class="page-transition-text">Cargando...</p>
+    </div>
+</div>
 
 <script>
     const blockedEmailDomains = new Set([
@@ -421,6 +486,29 @@ include __DIR__ . '/includes/header.php';
     bindPhoneMaskValidation('telefono');
     bindEmailValidation('email');
     bindPasswordRealtimeValidation('password', 'confirm_password', 'register', 'register-submit-btn');
+
+    function startPageTransition(url, message) {
+        const overlay = document.getElementById('page-transition-overlay');
+        const text = document.getElementById('page-transition-text');
+        if (text && message) {
+            text.textContent = message;
+        }
+        if (overlay) {
+            overlay.style.display = 'flex';
+        }
+        setTimeout(() => {
+            window.location.href = url;
+        }, 900);
+    }
+
+    <?php if (is_array($pendingRedirect) && !empty($pendingRedirect['to'])): ?>
+    document.addEventListener('DOMContentLoaded', function () {
+        startPageTransition(
+            <?php echo json_encode((string)$pendingRedirect['to']); ?>,
+            <?php echo json_encode((string)($pendingRedirect['message'] ?? 'Te estamos redirigiendo...')); ?>
+        );
+    });
+    <?php endif; ?>
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

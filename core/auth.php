@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/pickup_offer_utils.php';
+require_once __DIR__ . '/phone_utils.php';
 
 /**
  * Verifica si el usuario está autenticado.
@@ -272,13 +273,17 @@ function requirePermission(string $permiso, string $redirectUrl = ''): void
 /**
  * Intenta autenticar al usuario.
  *
- * @param string $email
+ * Acepta email o telefono como identificador de acceso.
+ *
+ * @param string $loginIdentifier
  * @param string $password
  * @return bool
  */
-function authenticate(string $email, string $password): bool
+function authenticate(string $loginIdentifier, string $password): bool
 {
     $pdo = getPDO();
+    $loginIdentifier = trim($loginIdentifier);
+    $loginDigits = normalizePhoneDigitsMx($loginIdentifier);
 
     // Evita esperas largas por bloqueos InnoDB durante login bajo carga.
     try {
@@ -287,24 +292,36 @@ function authenticate(string $email, string $password): bool
         // Continuar si el motor/usuario no permite cambiar esta variable.
     }
 
+    $userId = null;
+    if ($loginDigits !== null && $loginDigits !== '') {
+        try {
+            $clienteMatch = findClienteByPhone($pdo, $loginDigits);
+            if (is_array($clienteMatch) && !empty($clienteMatch['id_usuario'])) {
+                $userId = (int)$clienteMatch['id_usuario'];
+            }
+        } catch (Throwable $e) {
+            error_log('DEBUG LOGIN: No se pudo resolver usuario por teléfono: ' . $e->getMessage());
+        }
+    }
+
     // Se añadió u.contrasena a la lista de columnas seleccionadas
-    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol, 
+    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol,
                    GROUP_CONCAT(p.clave) as permisos,
                    c.id_cliente,
-                 c.telefono as telefono_cliente,
-                 u.intentos_fallidos, u.bloqueado_hasta
+                   c.telefono as telefono_cliente,
+                   u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
             LEFT JOIN permisos p ON rp.id_permiso = p.id_permiso
             LEFT JOIN clientes c ON u.id_usuario = c.id_usuario
-            WHERE u.email = :email AND u.estado = 'activo'
+            WHERE " . ($userId !== null ? 'u.id_usuario = :login_id' : 'u.email = :login') . " AND u.estado = 'activo'
             GROUP BY u.id_usuario";
 
     try {
-        error_log("DEBUG LOGIN: Intentando autenticar a: " . $email);
+        error_log("DEBUG LOGIN: Intentando autenticar a: " . $loginIdentifier);
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([':email' => $email]);
+        $stmt->execute($userId !== null ? [':login_id' => $userId] : [':login' => $loginIdentifier]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("DEBUG LOGIN ERROR SQL: " . $e->getMessage());
@@ -312,7 +329,7 @@ function authenticate(string $email, string $password): bool
     }
 
     if (!$user) {
-        error_log("DEBUG LOGIN: Usuario no encontrado o inactivo en la BD para: " . $email);
+        error_log("DEBUG LOGIN: Usuario no encontrado o inactivo en la BD para: " . $loginIdentifier);
         return false;
     }
 

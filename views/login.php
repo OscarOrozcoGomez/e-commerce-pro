@@ -87,8 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <?php echo csrfInput(); ?>
                     <div class="input-field">
                         <i class="material-icons prefix">email</i>
-                        <input type="email" id="email" name="email" required>
-                        <label for="email">Correo electrónico</label>
+                        <input type="text" id="email" name="email" required autocomplete="username">
+                        <label for="email">Correo electrónico o teléfono</label>
                     </div>
                     <div class="input-field">
                         <i class="material-icons prefix">lock</i>
