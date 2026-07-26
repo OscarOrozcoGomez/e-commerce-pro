@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/pickup_offer_utils.php';
 require_once __DIR__ . '/phone_utils.php';
+require_once __DIR__ . '/delivery_route_utils.php';
 
 /**
  * Verifica si el usuario está autenticado.
@@ -588,6 +589,21 @@ function dbCreatePublicOrder(array $data): array {
     try {
         $pdo->beginTransaction();
 
+        $columnExists = static function (PDO $pdo, string $table, string $column): bool {
+            $stmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+            );
+            $stmt->execute([$table, $column]);
+            return ((int)$stmt->fetchColumn()) > 0;
+        };
+
+        $hasPedidosTipoEntrega = $columnExists($pdo, 'pedidos', 'tipo_entrega');
+        $hasPedidosDireccionEntrega = $columnExists($pdo, 'pedidos', 'direccion_entrega');
+        $hasPedidosTelefonoEntrega = $columnExists($pdo, 'pedidos', 'telefono_entrega');
+        $hasPedidosMapsLinkEntrega = $columnExists($pdo, 'pedidos', 'maps_link_entrega');
+        $hasPedidosLatitud = $columnExists($pdo, 'pedidos', 'latitud');
+        $hasPedidosLongitud = $columnExists($pdo, 'pedidos', 'longitud');
+
         $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $esPickupSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0;
         $pickupWarehouseId = $esPickupSucursal ? resolvePickupWarehouseId($pdo) : null;
@@ -637,7 +653,27 @@ function dbCreatePublicOrder(array $data): array {
         $id_usuario = $data['id_usuario'] ?? 1; // Asignar al Admin (ID 1) si no hay un vendedor físico
         $id_cliente = $data['id_cliente'] ?? null; // Vincular al perfil del cliente si está logueado
 
-        $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$data['cliente']['telefono']} | Dir: {$data['cliente']['direccion']}";
+        $direccionEntrega = trim((string)($data['cliente']['direccion'] ?? ''));
+        $telefonoEntrega = trim((string)($data['cliente']['telefono'] ?? ''));
+        $mapsLinkEntrega = trim((string)($data['maps_link'] ?? ''));
+
+        if ($mapsLinkEntrega !== ''
+            && function_exists('piiIsEncryptedValue')
+            && function_exists('piiDecryptValue')
+            && piiIsEncryptedValue($mapsLinkEntrega)) {
+            $mapsLinkEntrega = trim((string)piiDecryptValue($mapsLinkEntrega));
+        }
+
+        $coordsEntrega = null;
+        if (strcasecmp((string)$entrega, 'Domicilio') === 0) {
+            $coordsEntrega = deliveryResolveCoordinates(
+                $mapsLinkEntrega,
+                $direccionEntrega,
+                getMapsApiKey(false)
+            );
+        }
+
+        $infoCliente = "ENTREGA: {$entrega} | Cliente: {$data['cliente']['nombre']} | Tel: {$telefonoEntrega} | Dir: {$direccionEntrega}";
         $subtotal = array_reduce($data['items'], fn($s, $i) => $s + ((float)($i['precio'] ?? 0) * (int)($i['quantity'] ?? 0)), 0.0);
         $subtotal = round(max(0.0, (float)$subtotal), 2);
         $totalPiezas = (int)array_reduce($data['items'], fn($s, $i) => $s + max(0, (int)($i['quantity'] ?? 0)), 0);
@@ -671,9 +707,83 @@ function dbCreatePublicOrder(array $data): array {
 
         $numero_pedido = 'WEB-' . strtoupper(uniqid());
 
-        // Corregido: id_usuario no puede ser NULL según la estructura de la tabla pedidos
-        $stmt = $pdo->prepare("INSERT INTO pedidos (numero_pedido, id_usuario, id_cliente, id_almacen, id_metodo_pago, estado, subtotal, descuento_total, total, observaciones) VALUES (?, ?, ?, ?, 1, 'pendiente_pago', ?, ?, ?, ?)");
-        $stmt->execute([$numero_pedido, $id_usuario, $id_cliente, $id_almacen_pedido, $subtotal, $descuentoTotal, $totalPedido, $infoCliente]);
+        $pedidoColumns = [
+            'numero_pedido',
+            'id_usuario',
+            'id_cliente',
+            'id_almacen',
+            'id_metodo_pago',
+            'estado',
+            'subtotal',
+            'descuento_total',
+            'total',
+            'observaciones',
+        ];
+        $pedidoPlaceholders = [
+            ':numero_pedido',
+            ':id_usuario',
+            ':id_cliente',
+            ':id_almacen',
+            ':id_metodo_pago',
+            ':estado',
+            ':subtotal',
+            ':descuento_total',
+            ':total',
+            ':observaciones',
+        ];
+        $pedidoParams = [
+            ':numero_pedido' => $numero_pedido,
+            ':id_usuario' => $id_usuario,
+            ':id_cliente' => $id_cliente,
+            ':id_almacen' => $id_almacen_pedido,
+            ':id_metodo_pago' => 1,
+            ':estado' => 'pendiente_pago',
+            ':subtotal' => $subtotal,
+            ':descuento_total' => $descuentoTotal,
+            ':total' => $totalPedido,
+            ':observaciones' => $infoCliente,
+        ];
+
+        if ($hasPedidosTipoEntrega) {
+            $pedidoColumns[] = 'tipo_entrega';
+            $pedidoPlaceholders[] = ':tipo_entrega';
+            $pedidoParams[':tipo_entrega'] = (string)$entrega;
+        }
+
+        if ($hasPedidosDireccionEntrega && $direccionEntrega !== '') {
+            $pedidoColumns[] = 'direccion_entrega';
+            $pedidoPlaceholders[] = ':direccion_entrega';
+            $pedidoParams[':direccion_entrega'] = $direccionEntrega;
+        }
+
+        if ($hasPedidosTelefonoEntrega && $telefonoEntrega !== '') {
+            $pedidoColumns[] = 'telefono_entrega';
+            $pedidoPlaceholders[] = ':telefono_entrega';
+            $pedidoParams[':telefono_entrega'] = $telefonoEntrega;
+        }
+
+        if ($hasPedidosMapsLinkEntrega && $mapsLinkEntrega !== '') {
+            $pedidoColumns[] = 'maps_link_entrega';
+            $pedidoPlaceholders[] = ':maps_link_entrega';
+            $pedidoParams[':maps_link_entrega'] = $mapsLinkEntrega;
+        }
+
+        if ($hasPedidosLatitud && $hasPedidosLongitud && is_array($coordsEntrega)) {
+            $pedidoColumns[] = 'latitud';
+            $pedidoColumns[] = 'longitud';
+            $pedidoPlaceholders[] = ':latitud';
+            $pedidoPlaceholders[] = ':longitud';
+            $pedidoParams[':latitud'] = $coordsEntrega['lat'];
+            $pedidoParams[':longitud'] = $coordsEntrega['lng'];
+        }
+
+        $sqlPedido = sprintf(
+            'INSERT INTO pedidos (%s) VALUES (%s)',
+            implode(', ', $pedidoColumns),
+            implode(', ', $pedidoPlaceholders)
+        );
+        $stmt = $pdo->prepare($sqlPedido);
+        $stmt->execute($pedidoParams);
         $id_pedido = $pdo->lastInsertId();
 
         if (strcasecmp((string)$entrega, 'Sucursal') === 0) {

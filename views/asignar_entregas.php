@@ -39,7 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                                   SET id_repartidor = :rep, fecha_entrega_programada = :fecha
                                   WHERE id_pedido = :pedido
                                     AND estado IN ('pendiente_pago','pagado')
-                                    AND tipo_entrega = 'Domicilio'";
+                                                                        AND (
+                                                                                tipo_entrega = 'Domicilio'
+                                                                                OR ((tipo_entrega IS NULL OR TRIM(tipo_entrega) = '') AND observaciones LIKE '%ENTREGA: Domicilio%')
+                                                                        )";
                 } else {
                     $sqlUpdate = "UPDATE pedidos
                                   SET id_repartidor = :rep, fecha_entrega_programada = :fecha
@@ -110,7 +113,10 @@ try {
     }
 
     if ($hasPedidosTipoEntrega) {
-        $deliveryFilter = "p.tipo_entrega = 'Domicilio'";
+        $deliveryFilter = "(
+            p.tipo_entrega = 'Domicilio'
+            OR ((p.tipo_entrega IS NULL OR TRIM(p.tipo_entrega) = '') AND p.observaciones LIKE '%ENTREGA: Domicilio%')
+        )";
     } else {
         // Compatibilidad con esquemas antiguos: tipo de entrega embebido en observaciones.
         $deliveryFilter = "p.observaciones LIKE '%ENTREGA: Domicilio%'";
