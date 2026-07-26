@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/phone_utils.php';
 requireAuth();
 if (!isCliente()) { header('Location: dashboard.php'); exit; }
 
@@ -10,15 +11,11 @@ $idCliente = $_SESSION['usuario']['id_cliente'];
 $error = ''; $success = '';
 
 function normalizarDigitosTelefono(string $value): string {
-    return preg_replace('/\D+/', '', $value) ?? '';
+    return normalizePhoneDigitsMx($value) ?? '';
 }
 
 function formatearTelefonoMxDesdeDigitos(string $digits): string {
-    $digits = substr($digits, 0, 10);
-    if ($digits === '') return '';
-    if (strlen($digits) <= 3) return '(' . $digits;
-    if (strlen($digits) <= 6) return '(' . substr($digits, 0, 3) . ') - ' . substr($digits, 3);
-    return '(' . substr($digits, 0, 3) . ') - ' . substr($digits, 3, 3) . ' - ' . substr($digits, 6, 4);
+    return formatPhoneMxDigits($digits);
 }
 
 $telefonoClienteActual = trim((string)($_SESSION['usuario']['telefono_cliente'] ?? ''));
@@ -80,6 +77,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $digits = normalizarDigitosTelefono($telefonoRaw);
                 if (strlen($digits) !== 10) {
                     throw new Exception('El teléfono debe tener 10 dígitos.');
+                }
+
+                if (findClienteByPhone($pdo, $digits, (int)$idCliente) !== null) {
+                    throw new Exception('Ese teléfono ya está asociado a otra cuenta.');
                 }
 
                 $telefonoFormateado = formatearTelefonoMxDesdeDigitos($digits);

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/phone_utils.php';
 
 requireAuth();
 if (!isCliente()) {
@@ -47,18 +48,7 @@ function isLikelyDeliverableEmailProfile(string $email): bool
 
 function normalizeMxPhone(string $phone): ?string
 {
-    $digits = preg_replace('/\D+/', '', $phone);
-    if (!is_string($digits)) {
-        return null;
-    }
-    if ($digits === '') {
-        return '';
-    }
-    if (strlen($digits) !== 10) {
-        return null;
-    }
-
-    return sprintf('(%s) - %s - %s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+    return normalizePhoneMx($phone);
 }
 
 function clientesHasAliasPerfil(PDO $pdo): bool
@@ -98,6 +88,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmtEmail->execute([':email' => $email, ':id' => $userId]);
                 if ($stmtEmail->fetch(PDO::FETCH_ASSOC)) {
                     throw new Exception('Ese correo ya está registrado por otro usuario.');
+                }
+
+                if ($telefono !== '' && findClienteByPhone($pdo, $telefono, (int)$perfil['id_cliente']) !== null) {
+                    throw new Exception('Ese teléfono ya está asociado a otra cuenta.');
                 }
 
                 $pdo->beginTransaction();
@@ -173,11 +167,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $selectAlias = $hasAliasPerfil ? 'c.alias_perfil' : 'NULL AS alias_perfil';
-$stmt = $pdo->prepare("SELECT u.nombre, u.email, c.telefono, {$selectAlias} FROM usuarios u LEFT JOIN clientes c ON c.id_usuario = u.id_usuario WHERE u.id_usuario = :id LIMIT 1");
+$stmt = $pdo->prepare("SELECT u.nombre, u.email, c.id_cliente, c.telefono, {$selectAlias} FROM usuarios u LEFT JOIN clientes c ON c.id_usuario = u.id_usuario WHERE u.id_usuario = :id LIMIT 1");
 $stmt->execute([':id' => $userId]);
 $perfil = $stmt->fetch(PDO::FETCH_ASSOC) ?: [
     'nombre' => $_SESSION['usuario']['nombre'] ?? '',
     'email' => $_SESSION['usuario']['email'] ?? '',
+    'id_cliente' => $_SESSION['usuario']['id_cliente'] ?? null,
     'telefono' => '',
     'alias_perfil' => '',
 ];

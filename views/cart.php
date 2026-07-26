@@ -262,6 +262,15 @@ include __DIR__ . '/includes/header.php';
             return new Set();
         }
 
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         const faltantes = Array.isArray(latestPickupStockCheck.faltantes) ? latestPickupStockCheck.faltantes : [];
         const noTransferibles = faltantes.filter((row) => row && row.transferible === false);
         const source = noTransferibles.length > 0 ? noTransferibles : faltantes;
@@ -863,6 +872,9 @@ include __DIR__ . '/includes/header.php';
                 const usedNewManualAddress = tipoEntregaValue === 'Domicilio' && (
                     !HAS_SAVED_ADDRESSES || selectedAddressMode === '__other__'
                 ) && direccionManual !== '';
+                const phoneWarningHtml = data.telefono_warning
+                    ? `<div class="card-panel amber lighten-5" style="text-align:left; margin:16px 0 0 0; border-left:5px solid #ff8f00; padding:12px 16px;"><strong>Importante:</strong> ${escapeHtml(data.telefono_warning)}</div>`
+                    : '';
 
                 const continuarFlujo = () => {
                     localStorage.removeItem('cart');
@@ -876,7 +888,7 @@ include __DIR__ . '/includes/header.php';
 
                 Swal.fire({
                     title: '¡Pedido Confirmado!',
-                    text: 'Tu pedido ha sido registrado con éxito. Puedes consultar el estado en tu sección de compras.',
+                    html: `Tu pedido ha sido registrado con éxito. Puedes consultar el estado en tu sección de compras.${phoneWarningHtml}`,
                     icon: 'success',
                     confirmButtonText: 'Continuar',
                     confirmButtonColor: '#0d47a1'

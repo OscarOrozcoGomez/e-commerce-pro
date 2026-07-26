@@ -1,9 +1,10 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/phone_utils.php';
 
 function normalizePhoneDigitsCheckout(string $value): string {
-    return preg_replace('/\D+/', '', $value) ?? '';
+    return normalizePhoneDigitsMx($value) ?? '';
 }
 
 function guardarDireccionCheckoutSiAplica(array $data): void {
@@ -93,6 +94,17 @@ if (isAuthenticated()) {
     $data['id_cliente'] = $usuario['id_cliente'] ?? null;
 }
 
+$telefonoMatch = null;
+$telefonoEntrada = trim((string)($data['cliente']['telefono'] ?? ''));
+if ($telefonoEntrada !== '') {
+    try {
+        $pdo = getPDO();
+        $telefonoMatch = findClienteByPhone($pdo, $telefonoEntrada, isAuthenticated() && !empty($data['id_cliente']) ? (int) $data['id_cliente'] : null);
+    } catch (Throwable $e) {
+        error_log('No se pudo verificar teléfono del checkout: ' . $e->getMessage());
+    }
+}
+
 $result = dbCreatePublicOrder($data);
 
 // Guardar o actualizar teléfono del cliente desde checkout cuando cambie.
@@ -112,11 +124,16 @@ if ($result['success'] && isAuthenticated() && !empty($data['cliente']['telefono
             $digitsActual = normalizePhoneDigitsCheckout($telActualPlain);
 
             if ($digitsNuevo !== '' && $digitsNuevo !== $digitsActual) {
+                if ($telefonoMatch !== null && isset($telefonoMatch['id_cliente']) && (int)$telefonoMatch['id_cliente'] !== (int)$idCliente) {
+                    // Mantener el pedido, pero no sobrescribir el teléfono de otra cuenta.
+                    $_SESSION['checkout_phone_warning'] = 'Ese teléfono ya existe en otra cuenta.';
+                } else {
                 $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefonoNuevo) : $telefonoNuevo;
                 $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ?")
                     ->execute([$telefonoStore, $idCliente]);
                 // Actualizar la sesión para futuros formularios.
                 $_SESSION['usuario']['telefono_cliente'] = $telefonoNuevo;
+                }
             }
         } catch (PDOException $e) {
             error_log('No se pudo guardar teléfono del cliente: ' . $e->getMessage());
@@ -129,12 +146,24 @@ if ($result['success']) {
 }
 
 if ($result['success']) {
-    echo json_encode([
+    $payload = [
         'success' => true,
         'pedido' => $result['pedido'],
         'id_pedido' => $result['id_pedido'] ?? null,
         'message' => "Gracias {$data['cliente']['nombre']}, tu pedido {$result['pedido']} registrado.",
-    ]);
+    ];
+
+    if ($telefonoMatch !== null) {
+        $payload['telefono_detectado'] = true;
+        $payload['telefono_warning'] = 'Ese teléfono ya está registrado. Completa tu cuenta o inicia sesión para tener tu perfil listo.';
+    }
+
+    if (!empty($_SESSION['checkout_phone_warning'])) {
+        $payload['telefono_warning'] = (string) $_SESSION['checkout_phone_warning'];
+        unset($_SESSION['checkout_phone_warning']);
+    }
+
+    echo json_encode($payload);
 } else {
     echo json_encode(['success' => false, 'message' => $result['message']]);
 }

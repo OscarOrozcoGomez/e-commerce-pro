@@ -46,3 +46,8 @@ scripts/_img_diag.php
 scripts/_img_diag_after.php
 scripts/_img_diag_after_report.txt
 scripts/_tmp_*.php
+
+# Datos de prueba locales para XAMPP
+/LOCAL_TEST_DATA.md
+/scripts/seed_phone_test_data.php
+/scripts/output/

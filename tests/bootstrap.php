@@ -10,6 +10,7 @@ if (!function_exists('esc')) {
 }
 
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/phone_utils.php';
 require_once __DIR__ . '/../core/migrations.php';
 require_once __DIR__ . '/../core/chat_utils.php';
 require_once __DIR__ . '/../core/product_display_utils.php';
