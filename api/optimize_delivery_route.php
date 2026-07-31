@@ -48,6 +48,24 @@ function routeToFloat($value): ?float
     return (float)$value;
 }
 
+function routeCleanPiiValue(string $value): string
+{
+    $clean = trim($value);
+    if ($clean === '') {
+        return '';
+    }
+
+    if (strpos($clean, 'ENCv1:') === 0) {
+        return '';
+    }
+
+    if (function_exists('piiIsEncryptedValue') && piiIsEncryptedValue($clean)) {
+        return '';
+    }
+
+    return $clean;
+}
+
 function routeGeocodeFromAddress(string $address, string $apiKey): ?array
 {
     $address = trim($address);
@@ -174,8 +192,14 @@ if (!validateCsrfToken($csrfToken)) {
     routeJsonResponse(['success' => false, 'error' => 'Token CSRF invalido.'], 422);
 }
 
-$originLat = routeToFloat($payload['origen']['lat'] ?? $payload['origin']['lat'] ?? null);
-$originLng = routeToFloat($payload['origen']['lng'] ?? $payload['origin']['lng'] ?? null);
+$originLatInput = routeToFloat($payload['origen']['lat'] ?? $payload['origin']['lat'] ?? null);
+$originLngInput = routeToFloat($payload['origen']['lng'] ?? $payload['origin']['lng'] ?? null);
+$useGuadalajaraDefault = $originLatInput === null
+    || $originLngInput === null
+    || (abs($originLatInput) < 0.0000001 && abs($originLngInput) < 0.0000001);
+
+$originLat = $useGuadalajaraDefault ? 20.65969880 : $originLatInput;
+$originLng = $useGuadalajaraDefault ? -103.34960920 : $originLngInput;
 $origin = deliveryNormalizeCoordinates($originLat, $originLng);
 if ($origin === null) {
     routeJsonResponse(['success' => false, 'error' => 'Origen invalido. Debes enviar lat y lng validos.'], 422);
@@ -424,9 +448,9 @@ try {
         $validStops[] = [
             'id_pedido' => $pedidoId,
             'numero_pedido' => (string)$pedido['numero_pedido'],
-            'cliente' => $nombreCliente,
-            'telefono' => $telefono,
-            'direccion' => $direccion,
+            'cliente' => routeCleanPiiValue($nombreCliente),
+            'telefono' => routeCleanPiiValue($telefono),
+            'direccion' => routeCleanPiiValue($direccion),
             'lat' => $coords['lat'],
             'lng' => $coords['lng'],
             'fecha_limite_entrega' => isset($pedido['fecha_limite_entrega']) ? (string)$pedido['fecha_limite_entrega'] : null,

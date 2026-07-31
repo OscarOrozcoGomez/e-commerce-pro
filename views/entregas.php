@@ -21,7 +21,7 @@ $repartidores = [];
 // Procesar cambio de estado de reparto
 if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
-        $error = 'Token CSRF inválido.';
+        $error = 'Token CSRF inv├ílido.';
     } else {
         $id_pedido = intval($_POST['id_pedido']);
         if ($_POST['accion'] === 'en_camino') {
@@ -39,7 +39,7 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
 
         if ($_POST['accion'] === 'entregar') {
             try {
-                // Confirma entrega y cobro simultáneamente (pago contra entrega)
+                // Confirma entrega y cobro simult├íneamente (pago contra entrega)
                 $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                 if ($stmt->rowCount() > 0) {
@@ -276,6 +276,9 @@ include __DIR__ . '/includes/header.php';
                                 <label for="route-start-time" class="active">Hora de salida (opcional)</label>
                             </div>
                             <div class="col s12 m3" style="display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap;">
+                                <button type="button" class="btn-flat waves-effect" id="route-use-location">
+                                    <i class="material-icons left">my_location</i> Usar mi ubicacion
+                                </button>
                                 <button type="button" class="btn-flat waves-effect" id="route-toggle-all">Seleccionar todo</button>
                                 <button type="button" class="btn amber darken-3 waves-effect waves-light" id="btn-generate-route">
                                     <i class="material-icons left">alt_route</i>Generar ruta
@@ -412,7 +415,7 @@ include __DIR__ . '/includes/header.php';
                                                                     data-repartidor-id="<?php echo (int)$ent['id_repartidor']; ?>"
                                                                     <?php if (!$tieneCoordenadas): ?>
                                                                     disabled
-                                                                    title="Este pedido no tiene coordenadas de ubicación"
+                                                                    title="Este pedido no tiene coordenadas de ubicaci├│n"
                                                                     <?php endif; ?>
                                                                 />
                                                                 <span>Agregar a ruta</span>
@@ -439,7 +442,7 @@ include __DIR__ . '/includes/header.php';
                             </p>
                             <p>
                                 <i class="material-icons tiny indigo-text">phone</i>
-                                <strong>Teléfono:</strong>
+                                <strong>Tel├⌐fono:</strong>
                                 <span class="delivery-value"></span>
                                 <?php if ($clienteTel && $clienteTel !== 'N/A'): ?>
                                     <a href="tel:<?php echo esc($telLimpio); ?>" class="indigo-text"><?php echo esc($clienteTel); ?></a>
@@ -453,7 +456,7 @@ include __DIR__ . '/includes/header.php';
                             </p>
                             <p>
                                 <i class="material-icons tiny indigo-text">place</i>
-                                <strong>Dirección:</strong>
+                                <strong>Direcci├│n:</strong>
                                 <span class="delivery-value"><?php echo esc($clienteDir !== '' ? $clienteDir : 'No especificada'); ?></span>
                             </p>
 
@@ -474,7 +477,7 @@ include __DIR__ . '/includes/header.php';
                                     <a href="<?php echo esc($mapsUrl); ?>" target="_blank"
                                        class="btn waves-effect waves-light blue darken-2"
                                        style="width:100%; text-align:center;">
-                                        <i class="material-icons left">navigation</i> Abrir Navegación
+                                        <i class="material-icons left">navigation</i> Abrir Navegaci├│n
                                     </a>
                                 </div>
                             <?php else: ?>
@@ -512,7 +515,7 @@ include __DIR__ . '/includes/header.php';
                                                 <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                             </p>
                                         <?php endif; ?>
-                                        <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('¿Salir a entregar este pedido?')">
+                                        <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('┬┐Salir a entregar este pedido?')">
                                             SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
                                         </button>
                                     <?php else: ?>
@@ -520,7 +523,7 @@ include __DIR__ . '/includes/header.php';
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('¿Confirmar entrega y cobro del pedido?')">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('┬┐Confirmar entrega y cobro del pedido?')">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
                                     <?php endif; ?>
@@ -541,6 +544,7 @@ include __DIR__ . '/includes/header.php';
 const routeCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
 const routeEndpoint = <?php echo json_encode(BASE_URL . 'api/optimize_delivery_route.php', JSON_UNESCAPED_UNICODE); ?>;
 const isAdminRouteView = <?php echo $isAdminView ? 'true' : 'false'; ?>;
+const routeDefaultOrigin = { lat: 20.6596988, lng: -103.3496092 };
 
 function routeEscapeHtml(value) {
     return String(value ?? '')
@@ -556,7 +560,7 @@ function routeGetSelectedCheckboxes() {
 }
 
 function routeToggleAll(button) {
-    const checks = Array.from(document.querySelectorAll('.route-check'));
+    const checks = Array.from(document.querySelectorAll('.route-check:not(:disabled)'));
     if (!checks.length) {
         return;
     }
@@ -567,9 +571,107 @@ function routeToggleAll(button) {
     button.textContent = allChecked ? 'Seleccionar todo' : 'Quitar seleccion';
 }
 
+function routeSafeText(value) {
+    const raw = String(value ?? '');
+    if (raw.startsWith('ENCv1:')) {
+        return '';
+    }
+    return raw;
+}
+
 function routeParseNumber(raw) {
-    const val = Number(raw);
+    if (raw === null || raw === undefined) {
+        return null;
+    }
+    const text = String(raw).trim();
+    if (text === '') {
+        return null;
+    }
+    const val = Number(text);
     return Number.isFinite(val) ? val : null;
+}
+
+function routeSetOriginInputs(lat, lng) {
+    const latInput = document.getElementById('route-origin-lat');
+    const lngInput = document.getElementById('route-origin-lng');
+    if (latInput) {
+        latInput.value = Number(lat).toFixed(8);
+    }
+    if (lngInput) {
+        lngInput.value = Number(lng).toFixed(8);
+    }
+}
+
+function routeResolveOrigin() {
+    const lat = routeParseNumber(document.getElementById('route-origin-lat')?.value);
+    const lng = routeParseNumber(document.getElementById('route-origin-lng')?.value);
+
+    if (lat === null && lng === null) {
+        routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
+        return { lat: routeDefaultOrigin.lat, lng: routeDefaultOrigin.lng };
+    }
+
+    if (lat === null || lng === null) {
+        M.toast({html: 'Completa latitud y longitud del origen.', classes: 'orange darken-2'});
+        return null;
+    }
+
+    if (Math.abs(lat) < 0.0000001 && Math.abs(lng) < 0.0000001) {
+        routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
+        return { lat: routeDefaultOrigin.lat, lng: routeDefaultOrigin.lng };
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        M.toast({html: 'Origen invalido. Revisa latitud y longitud.', classes: 'red darken-2'});
+        return null;
+    }
+
+    return { lat, lng };
+}
+
+function routeUseCurrentLocation(button) {
+    if (!navigator.geolocation) {
+        M.toast({html: 'Tu navegador no soporta geolocalizacion.', classes: 'red darken-2'});
+        return;
+    }
+
+    const originalHtml = button ? button.innerHTML : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Obteniendo...';
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            routeSetOriginInputs(position.coords.latitude, position.coords.longitude);
+            M.toast({html: 'Ubicacion actual cargada.', classes: 'green darken-2'});
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+            }
+        },
+        (error) => {
+            let message = 'No se pudo obtener tu ubicacion.';
+            if (error.code === error.PERMISSION_DENIED) {
+                message = 'Permiso de ubicacion denegado.';
+            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                message = 'Ubicacion no disponible en este momento.';
+            } else if (error.code === error.TIMEOUT) {
+                message = 'Tiempo agotado al obtener ubicacion.';
+            }
+
+            M.toast({html: message, classes: 'red darken-2'});
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+            }
+        },
+        {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0,
+        }
+    );
 }
 
 function routeRenderResult(data) {
@@ -594,9 +696,9 @@ function routeRenderResult(data) {
         return `
             <li class="route-stop-item ${warningClass}">
                 <div><strong>${index + 1}. Pedido ${routeEscapeHtml(stop.numero_pedido || stop.id_pedido)}</strong></div>
-                <div>${routeEscapeHtml(stop.cliente || 'Cliente')}</div>
-                <div>${routeEscapeHtml(stop.telefono || 'Sin telefono')}</div>
-                <div>${routeEscapeHtml(stop.direccion || 'Sin direccion')}</div>
+                <div>${routeEscapeHtml(routeSafeText(stop.cliente) || 'Cliente')}</div>
+                <div>${routeEscapeHtml(routeSafeText(stop.telefono) || 'Sin telefono')}</div>
+                <div>${routeEscapeHtml(routeSafeText(stop.direccion) || 'Sin direccion')}</div>
                 ${limitText}
                 ${etaText}
             </li>
@@ -662,10 +764,8 @@ async function routeGenerateOptimized() {
         return;
     }
 
-    const lat = routeParseNumber(document.getElementById('route-origin-lat')?.value);
-    const lng = routeParseNumber(document.getElementById('route-origin-lng')?.value);
-    if (lat === null || lng === null) {
-        M.toast({html: 'Completa latitud y longitud del origen.', classes: 'orange darken-2'});
+    const origin = routeResolveOrigin();
+    if (!origin) {
         return;
     }
 
@@ -689,7 +789,7 @@ async function routeGenerateOptimized() {
     const payload = {
         csrf_token: routeCsrfToken,
         pedidosIds: pedidoIds,
-        origen: { lat, lng },
+        origen: { lat: origin.lat, lng: origin.lng },
         hora_salida: horaSalida
     };
 
@@ -742,11 +842,21 @@ async function routeGenerateOptimized() {
 document.addEventListener('DOMContentLoaded', () => {
     const toggleBtn = document.getElementById('route-toggle-all');
     const generateBtn = document.getElementById('btn-generate-route');
+    const useLocationBtn = document.getElementById('route-use-location');
     if (toggleBtn) {
         toggleBtn.addEventListener('click', () => routeToggleAll(toggleBtn));
     }
     if (generateBtn) {
         generateBtn.addEventListener('click', routeGenerateOptimized);
+    }
+    if (useLocationBtn) {
+        useLocationBtn.addEventListener('click', () => routeUseCurrentLocation(useLocationBtn));
+    }
+
+    const latInput = document.getElementById('route-origin-lat');
+    const lngInput = document.getElementById('route-origin-lng');
+    if (latInput && lngInput && String(latInput.value).trim() === '' && String(lngInput.value).trim() === '') {
+        routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
     }
 });
 </script>
