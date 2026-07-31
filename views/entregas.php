@@ -21,7 +21,7 @@ $repartidores = [];
 // Procesar cambio de estado de reparto
 if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
-        $error = 'Token CSRF inv├ílido.';
+        $error = 'Token CSRF invalido.';
     } else {
         $id_pedido = intval($_POST['id_pedido']);
         if ($_POST['accion'] === 'en_camino') {
@@ -39,7 +39,7 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
 
         if ($_POST['accion'] === 'entregar') {
             try {
-                // Confirma entrega y cobro simult├íneamente (pago contra entrega)
+                // Confirma entrega y cobro simultaneamente (pago contra entrega)
                 $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                 if ($stmt->rowCount() > 0) {
@@ -415,7 +415,7 @@ include __DIR__ . '/includes/header.php';
                                                                     data-repartidor-id="<?php echo (int)$ent['id_repartidor']; ?>"
                                                                     <?php if (!$tieneCoordenadas): ?>
                                                                     disabled
-                                                                    title="Este pedido no tiene coordenadas de ubicaci├│n"
+                                                                    title="Este pedido no tiene coordenadas de ubicacion"
                                                                     <?php endif; ?>
                                                                 />
                                                                 <span>Agregar a ruta</span>
@@ -442,7 +442,7 @@ include __DIR__ . '/includes/header.php';
                             </p>
                             <p>
                                 <i class="material-icons tiny indigo-text">phone</i>
-                                <strong>Tel├⌐fono:</strong>
+                                <strong>Telefono:</strong>
                                 <span class="delivery-value"></span>
                                 <?php if ($clienteTel && $clienteTel !== 'N/A'): ?>
                                     <a href="tel:<?php echo esc($telLimpio); ?>" class="indigo-text"><?php echo esc($clienteTel); ?></a>
@@ -456,7 +456,7 @@ include __DIR__ . '/includes/header.php';
                             </p>
                             <p>
                                 <i class="material-icons tiny indigo-text">place</i>
-                                <strong>Direcci├│n:</strong>
+                                <strong>Direccion:</strong>
                                 <span class="delivery-value"><?php echo esc($clienteDir !== '' ? $clienteDir : 'No especificada'); ?></span>
                             </p>
 
@@ -477,7 +477,7 @@ include __DIR__ . '/includes/header.php';
                                     <a href="<?php echo esc($mapsUrl); ?>" target="_blank"
                                        class="btn waves-effect waves-light blue darken-2"
                                        style="width:100%; text-align:center;">
-                                        <i class="material-icons left">navigation</i> Abrir Navegaci├│n
+                                        <i class="material-icons left">navigation</i> Abrir Navegacion
                                     </a>
                                 </div>
                             <?php else: ?>
@@ -515,7 +515,7 @@ include __DIR__ . '/includes/header.php';
                                                 <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                             </p>
                                         <?php endif; ?>
-                                        <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('┬┐Salir a entregar este pedido?')">
+                                        <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('Salir a entregar este pedido?')">
                                             SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
                                         </button>
                                     <?php else: ?>
@@ -523,7 +523,7 @@ include __DIR__ . '/includes/header.php';
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('┬┐Confirmar entrega y cobro del pedido?')">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('Confirmar entrega y cobro del pedido?')">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
                                     <?php endif; ?>
