@@ -107,6 +107,93 @@ function obtenerCoordenadasDesdeUrl(string $urlCorta): ?array
 }
 
 /**
+ * Fallback sin llave para geocodificar texto con Nominatim (OSM).
+ * Se usa solo cuando Google Geocoding no esta disponible o no responde OK.
+ *
+ * @return array{lat: float, lng: float}|null
+ */
+function deliveryGeocodeAddressFallback(string $address): ?array
+{
+    $address = trim($address);
+    if ($address === '' || !function_exists('gsmHttpRequest')) {
+        return null;
+    }
+
+    $normalized = str_replace(
+        ['Jal.', 'Jal', 'México', 'mexico'],
+        ['Jalisco', 'Jalisco', 'Mexico', 'Mexico'],
+        $address
+    );
+    $normalized = preg_replace('/\s+/', ' ', (string)$normalized);
+    $normalized = trim((string)$normalized);
+
+    $withoutZip = preg_replace('/\b\d{5}\b/u', '', $normalized);
+    $withoutZip = preg_replace('/\s*,\s*/', ', ', (string)$withoutZip);
+    $withoutZip = preg_replace('/\s+/', ' ', (string)$withoutZip);
+    $withoutZip = trim((string)$withoutZip, " ,");
+
+    $candidates = [];
+    $candidates[] = $normalized;
+    if ($withoutZip !== '' && $withoutZip !== $normalized) {
+        $candidates[] = $withoutZip;
+    }
+
+    $parts = array_values(array_filter(array_map('trim', explode(',', $withoutZip)), static function ($p) {
+        return $p !== '';
+    }));
+    if (count($parts) >= 3) {
+        $first = $parts[0];
+        $country = $parts[count($parts) - 1];
+        for ($i = 1; $i < count($parts) - 1; $i++) {
+            $mid = trim((string)preg_replace('/\b\d{5}\b/u', '', $parts[$i]));
+            $mid = preg_replace('/\s+/', ' ', $mid);
+            $mid = trim((string)$mid, ' ,');
+            if ($mid === '') {
+                continue;
+            }
+            $candidates[] = $first . ', ' . $mid . ', ' . $country;
+        }
+    }
+
+    $seen = [];
+    foreach ($candidates as $candidate) {
+        $candidate = trim((string)$candidate, ' ,');
+        if ($candidate === '') {
+            continue;
+        }
+        $key = function_exists('mb_strtolower') ? mb_strtolower($candidate, 'UTF-8') : strtolower($candidate);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+
+        $url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&q='
+            . rawurlencode($candidate);
+
+        $response = gsmHttpRequest('GET', $url, '', [
+            'User-Agent' => 'e-commerce-pro/route-backfill',
+            'Accept' => 'application/json',
+        ], 12);
+
+        if (!$response['ok']) {
+            continue;
+        }
+
+        $data = json_decode((string)($response['body'] ?? ''), true);
+        if (!is_array($data) || empty($data[0]) || !is_array($data[0])) {
+            continue;
+        }
+
+        $coords = deliveryNormalizeCoordinates($data[0]['lat'] ?? null, $data[0]['lon'] ?? null);
+        if ($coords !== null) {
+            return $coords;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Geocodifica una direccion de texto usando Geocoding API.
  *
  * @return array{lat: float, lng: float}|null
@@ -115,27 +202,44 @@ function deliveryGeocodeAddress(string $address, string $apiKey): ?array
 {
     $address = trim($address);
     $apiKey = trim($apiKey);
-    if ($address === '' || $apiKey === '' || !function_exists('gsmHttpRequest')) {
+    if ($address === '' || !function_exists('gsmHttpRequest')) {
         return null;
     }
 
+    // Si la direccion viene muy corta, agregar contexto para mejorar precision en MX.
+    $addressForQuery = $address;
+    if (strpos($addressForQuery, ',') === false) {
+        $addressForQuery .= ', Guadalajara, Jalisco, Mexico';
+    }
+
+    if ($apiKey === '') {
+        return deliveryGeocodeAddressFallback($addressForQuery);
+    }
+
     $url = 'https://maps.googleapis.com/maps/api/geocode/json?address='
-        . rawurlencode($address)
+        . rawurlencode($addressForQuery)
+        . '&components=country:MX'
+        . '&region=mx&language=es'
         . '&key=' . rawurlencode($apiKey);
 
     $response = gsmHttpRequest('GET', $url, '', [], 12);
     if (!$response['ok']) {
-        return null;
+        return deliveryGeocodeAddressFallback($addressForQuery);
     }
 
     $data = json_decode((string)($response['body'] ?? ''), true);
-    if (!is_array($data) || (string)($data['status'] ?? '') !== 'OK') {
-        return null;
+    if (!is_array($data)) {
+        return deliveryGeocodeAddressFallback($addressForQuery);
+    }
+
+    $status = (string)($data['status'] ?? '');
+    if ($status !== 'OK') {
+        return deliveryGeocodeAddressFallback($addressForQuery);
     }
 
     $location = $data['results'][0]['geometry']['location'] ?? null;
     if (!is_array($location)) {
-        return null;
+        return deliveryGeocodeAddressFallback($addressForQuery);
     }
 
     return deliveryNormalizeCoordinates($location['lat'] ?? null, $location['lng'] ?? null);

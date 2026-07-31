@@ -583,6 +583,8 @@ function routeRenderResult(data) {
     const stops = Array.isArray(data.orderedStops) ? data.orderedStops : [];
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
     const risk = Array.isArray(data.incumplibles_probables) ? data.incumplibles_probables : [];
+    const fallbackNotice = typeof data.fallback_notice === 'string' ? data.fallback_notice.trim() : '';
+    const provider = String(data.routing_provider || 'google_routes');
 
     const stopsHtml = stops.map((stop, index) => {
         const warningClass = stop.en_riesgo ? 'route-stop-risk' : '';
@@ -609,6 +611,10 @@ function routeRenderResult(data) {
         ? `<div class="card-panel red lighten-5"><strong>Riesgo de incumplimiento:</strong><ul>${risk.map((r) => `<li>Pedido ${routeEscapeHtml(r.numero_pedido || r.id_pedido)} (limite ${routeEscapeHtml(r.fecha_limite_entrega || 'N/A')}, ETA ${routeEscapeHtml(r.eta_estimada || 'N/A')})</li>`).join('')}</ul></div>`
         : '';
 
+    const fallbackHtml = (provider === 'local_fallback')
+        ? `<div class="card-panel amber lighten-5"><strong>Modo respaldo:</strong> Se calculo el orden por cercania local porque Google Routes API no devolvio una ruta.${fallbackNotice ? `<br><small>${routeEscapeHtml(fallbackNotice)}</small>` : ''}</div>`
+        : '';
+
     content.innerHTML = `
         <span class="card-title">Ruta optimizada generada</span>
         <p class="grey-text" style="margin-top:0;">
@@ -616,6 +622,7 @@ function routeRenderResult(data) {
             Distancia: <strong>${routeEscapeHtml(((summary.distancia_total_m || 0) / 1000).toFixed(2))} km</strong> |
             Duracion: <strong>${routeEscapeHtml(summary.duracion_total_hhmm || '00:00')}</strong>
         </p>
+        ${fallbackHtml}
         ${warningsHtml}
         ${riskHtml}
         <ol class="route-stops-list">${stopsHtml}</ol>
@@ -717,7 +724,11 @@ async function routeGenerateOptimized() {
         }
 
         routeRenderResult(data);
-        M.toast({html: 'Ruta optimizada correctamente.', classes: 'green darken-2'});
+        if (String(data.routing_provider || 'google_routes') === 'local_fallback') {
+            M.toast({html: 'Ruta generada en modo respaldo local.', classes: 'orange darken-2'});
+        } else {
+            M.toast({html: 'Ruta optimizada correctamente.', classes: 'green darken-2'});
+        }
     } catch (error) {
         M.toast({html: 'Error de red al generar la ruta.', classes: 'red darken-2'});
     } finally {

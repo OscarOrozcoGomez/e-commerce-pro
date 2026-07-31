@@ -82,6 +82,90 @@ function routeGeocodeFromAddress(string $address, string $apiKey): ?array
     return deliveryNormalizeCoordinates($location['lat'] ?? null, $location['lng'] ?? null);
 }
 
+function routeHaversineMeters(float $lat1, float $lng1, float $lat2, float $lng2): float
+{
+    $earthRadius = 6371000.0;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLng = deg2rad($lng2 - $lng1);
+    $a = sin($dLat / 2) * sin($dLat / 2)
+        + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) * sin($dLng / 2);
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+    return $earthRadius * $c;
+}
+
+/**
+ * @param array<int, array<string, mixed>> $stops
+ * @return array{optimizedIndex: array<int, int>, legs: array<int, array{duration: string}>, distanceMeters: int, durationSeconds: int}
+ */
+function routeBuildLocalFallback(array $origin, array $stops): array
+{
+    $remaining = array_keys($stops);
+    $optimizedIndex = [];
+    $legs = [];
+    $totalDistance = 0.0;
+    $totalSeconds = 0;
+
+    $currentLat = (float)$origin['lat'];
+    $currentLng = (float)$origin['lng'];
+    $metersPerSecond = 8.3333333333; // ~30 km/h urbano
+
+    while (!empty($remaining)) {
+        $closestKey = null;
+        $closestDistance = null;
+
+        foreach ($remaining as $idx) {
+            $stop = $stops[$idx];
+            $distance = routeHaversineMeters(
+                $currentLat,
+                $currentLng,
+                (float)$stop['lat'],
+                (float)$stop['lng']
+            );
+
+            if ($closestDistance === null || $distance < $closestDistance) {
+                $closestDistance = $distance;
+                $closestKey = $idx;
+            }
+        }
+
+        if ($closestKey === null || $closestDistance === null) {
+            break;
+        }
+
+        $optimizedIndex[] = (int)$closestKey;
+        $seconds = (int)max(60, round($closestDistance / $metersPerSecond));
+        $legs[] = ['duration' => $seconds . 's'];
+        $totalDistance += $closestDistance;
+        $totalSeconds += $seconds;
+
+        $currentLat = (float)$stops[$closestKey]['lat'];
+        $currentLng = (float)$stops[$closestKey]['lng'];
+
+        $remaining = array_values(array_filter($remaining, static function ($value) use ($closestKey): bool {
+            return (int)$value !== (int)$closestKey;
+        }));
+    }
+
+    // Cerrar circuito regresando al origen para resumen de distancia/tiempo.
+    if (!empty($optimizedIndex)) {
+        $returnDistance = routeHaversineMeters(
+            $currentLat,
+            $currentLng,
+            (float)$origin['lat'],
+            (float)$origin['lng']
+        );
+        $totalDistance += $returnDistance;
+        $totalSeconds += (int)max(60, round($returnDistance / $metersPerSecond));
+    }
+
+    return [
+        'optimizedIndex' => $optimizedIndex,
+        'legs' => $legs,
+        'distanceMeters' => (int)round($totalDistance),
+        'durationSeconds' => $totalSeconds,
+    ];
+}
+
 $raw = json_decode((string)file_get_contents('php://input'), true);
 $payload = is_array($raw) ? $raw : [];
 
@@ -458,17 +542,31 @@ try {
     }
 
     $route = $decoded['routes'][0] ?? null;
+    $usingFallbackRoute = false;
+    $fallbackReason = '';
     if (!is_array($route)) {
         $apiErrorMsg = '';
         if (isset($decoded['error']['message']) && is_string($decoded['error']['message'])) {
             $apiErrorMsg = $decoded['error']['message'];
         }
-        routeJsonResponse([
-            'success' => false,
-            'error' => 'No se obtuvo una ruta valida desde Google.',
-            'detail' => $apiErrorMsg,
-            'http_code' => $httpCode,
-        ], 502);
+        $fallback = routeBuildLocalFallback($origin, $validStops);
+        if (count($fallback['optimizedIndex']) < count($validStops)) {
+            routeJsonResponse([
+                'success' => false,
+                'error' => 'No se obtuvo una ruta valida desde Google.',
+                'detail' => $apiErrorMsg,
+                'http_code' => $httpCode,
+            ], 502);
+        }
+
+        $route = [
+            'optimizedIntermediateWaypointIndex' => $fallback['optimizedIndex'],
+            'legs' => $fallback['legs'],
+            'distanceMeters' => $fallback['distanceMeters'],
+            'duration' => $fallback['durationSeconds'] . 's',
+        ];
+        $usingFallbackRoute = true;
+        $fallbackReason = $apiErrorMsg !== '' ? $apiErrorMsg : 'Google Routes API no devolvio rutas.';
     }
 
     $optimizedIndex = $route['optimizedIntermediateWaypointIndex'] ?? [];
@@ -555,7 +653,11 @@ try {
 
     routeJsonResponse([
         'success' => true,
-        'message' => 'Ruta optimizada correctamente.',
+        'message' => $usingFallbackRoute
+            ? 'Ruta generada con optimizacion local (respaldo sin Google Routes).'
+            : 'Ruta optimizada correctamente.',
+        'routing_provider' => $usingFallbackRoute ? 'local_fallback' : 'google_routes',
+        'fallback_notice' => $usingFallbackRoute ? $fallbackReason : null,
         'googleMapsUrl' => $mapsUrl,
         'orderedStops' => $orderedWithEta,
         'googleOrderStops' => $orderedByGoogle,
