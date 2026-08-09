@@ -296,6 +296,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content">
                         <span class="card-title">Optimizacion de Ruta de Entrega</span>
                         <p class="grey-text" style="margin-top:0;">Selecciona pedidos, define origen y genera una ruta optimizada para Google Maps.</p>
+                        <p id="route-location-status" class="blue-text text-darken-2" style="margin:0 0 10px 0; font-size:0.9rem;"></p>
 
                         <div class="row" style="margin-bottom:6px;">
                             <div class="input-field col s12 m3">
@@ -326,6 +327,16 @@ include __DIR__ . '/includes/header.php';
                                     <i class="material-icons left">alt_route</i>Generar ruta
                                 </button>
                             </div>
+                        </div>
+
+                        <div id="route-location-guide" class="card-panel amber lighten-5" style="display:none; margin-top:6px;">
+                            <strong>Se necesita habilitar ubicacion</strong>
+                            <p style="margin:6px 0 0 0;">Si bloqueaste el permiso, habilitalo en el navegador y vuelve a intentar. Tambien puedes capturar latitud/longitud manualmente para continuar.</p>
+                            <ul style="margin:8px 0 0 18px;">
+                                <li>Android Chrome: candado en la barra -> Permisos -> Ubicacion -> Permitir.</li>
+                                <li>iPhone Safari: Configuracion -> Safari -> Ubicacion -> Permitir.</li>
+                                <li>Desktop: revisa permisos del navegador y de ubicacion del sistema operativo.</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
@@ -590,6 +601,8 @@ const isAdminRouteView = <?php echo $isAdminView ? 'true' : 'false'; ?>;
 const routeDefaultOrigin = { lat: 20.6596988, lng: -103.3496092 };
 const routeSelectedDate = <?php echo json_encode($selectedFechaEntrega, JSON_UNESCAPED_UNICODE); ?>;
 const routeTodayDate = <?php echo json_encode(date('Y-m-d'), JSON_UNESCAPED_UNICODE); ?>;
+let routeOriginSource = 'none';
+let routeGeoPermissionState = 'unknown';
 
 function routeEscapeHtml(value) {
     return String(value ?? '')
@@ -651,7 +664,7 @@ function routeParseNumber(raw) {
     return Number.isFinite(val) ? val : null;
 }
 
-function routeSetOriginInputs(lat, lng) {
+function routeSetOriginInputs(lat, lng, source = 'manual') {
     const latInput = document.getElementById('route-origin-lat');
     const lngInput = document.getElementById('route-origin-lng');
     if (latInput) {
@@ -660,30 +673,102 @@ function routeSetOriginInputs(lat, lng) {
     if (lngInput) {
         lngInput.value = Number(lng).toFixed(8);
     }
+    routeOriginSource = source;
+}
+
+function routeShowLocationGuide(visible) {
+    const guide = document.getElementById('route-location-guide');
+    if (guide) {
+        guide.style.display = visible ? '' : 'none';
+    }
+}
+
+function routeUpdateLocationStatus(message, level = 'info') {
+    const status = document.getElementById('route-location-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = '';
+    if (level === 'ok') {
+        status.classList.add('green-text', 'text-darken-2');
+    } else if (level === 'warn') {
+        status.classList.add('orange-text', 'text-darken-3');
+    } else if (level === 'error') {
+        status.classList.add('red-text', 'text-darken-2');
+    } else {
+        status.classList.add('blue-text', 'text-darken-2');
+    }
+}
+
+function routeMarkManualOriginIfValid() {
+    const lat = routeParseNumber(document.getElementById('route-origin-lat')?.value);
+    const lng = routeParseNumber(document.getElementById('route-origin-lng')?.value);
+    if (lat === null || lng === null) {
+        return false;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return false;
+    }
+
+    routeOriginSource = 'manual';
+    routeUpdateLocationStatus('Usando origen manual confirmado.', 'warn');
+    return true;
+}
+
+async function routeCheckGeolocationPermission() {
+    if (!navigator.geolocation) {
+        routeGeoPermissionState = 'unsupported';
+        routeUpdateLocationStatus('Este navegador no soporta geolocalizacion. Captura coordenadas manualmente.', 'warn');
+        routeShowLocationGuide(true);
+        return;
+    }
+
+    if (!navigator.permissions || typeof navigator.permissions.query !== 'function') {
+        routeUpdateLocationStatus('Ubicacion disponible. Pulsa "Usar mi ubicacion" para autorizar.', 'info');
+        return;
+    }
+
+    try {
+        const result = await navigator.permissions.query({ name: 'geolocation' });
+        routeGeoPermissionState = String(result.state || 'unknown');
+        if (routeGeoPermissionState === 'granted') {
+            routeUpdateLocationStatus('Permiso de ubicacion concedido. Puedes usar tu ubicacion actual.', 'ok');
+            routeShowLocationGuide(false);
+        } else if (routeGeoPermissionState === 'denied') {
+            routeUpdateLocationStatus('Permiso de ubicacion denegado. Habilitalo o captura origen manual.', 'error');
+            routeShowLocationGuide(true);
+        } else {
+            routeUpdateLocationStatus('Permiso de ubicacion pendiente. Pulsa "Usar mi ubicacion" para autorizar.', 'info');
+            routeShowLocationGuide(false);
+        }
+    } catch (error) {
+        routeUpdateLocationStatus('No se pudo leer estado del permiso. Intenta usar tu ubicacion.', 'warn');
+    }
 }
 
 function routeResolveOrigin() {
     const lat = routeParseNumber(document.getElementById('route-origin-lat')?.value);
     const lng = routeParseNumber(document.getElementById('route-origin-lng')?.value);
 
-    if (lat === null && lng === null) {
-        routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
-        return { lat: routeDefaultOrigin.lat, lng: routeDefaultOrigin.lng };
-    }
-
     if (lat === null || lng === null) {
-        M.toast({html: 'Completa latitud y longitud del origen.', classes: 'orange darken-2'});
+        M.toast({html: 'Captura un origen manual o usa tu ubicacion actual.', classes: 'orange darken-2'});
+        routeUpdateLocationStatus('Falta origen valido para calcular ruta.', 'error');
         return null;
     }
 
     if (Math.abs(lat) < 0.0000001 && Math.abs(lng) < 0.0000001) {
-        routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
-        return { lat: routeDefaultOrigin.lat, lng: routeDefaultOrigin.lng };
+        M.toast({html: 'Origen invalido: no uses 0,0.', classes: 'red darken-2'});
+        routeUpdateLocationStatus('Origen invalido (0,0). Usa ubicacion real o manual.', 'error');
+        return null;
     }
 
     if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
         M.toast({html: 'Origen invalido. Revisa latitud y longitud.', classes: 'red darken-2'});
+        routeUpdateLocationStatus('Origen fuera de rango valido.', 'error');
         return null;
+    }
+
+    if (routeOriginSource !== 'geo') {
+        routeOriginSource = 'manual';
     }
 
     return { lat, lng };
@@ -764,6 +849,8 @@ function routeComposeDepartureDateTime() {
 function routeUseCurrentLocation(button) {
     if (!navigator.geolocation) {
         M.toast({html: 'Tu navegador no soporta geolocalizacion.', classes: 'red darken-2'});
+        routeUpdateLocationStatus('Geolocalizacion no disponible en este dispositivo.', 'error');
+        routeShowLocationGuide(true);
         return;
     }
 
@@ -775,7 +862,10 @@ function routeUseCurrentLocation(button) {
 
     navigator.geolocation.getCurrentPosition(
         (position) => {
-            routeSetOriginInputs(position.coords.latitude, position.coords.longitude);
+            routeSetOriginInputs(position.coords.latitude, position.coords.longitude, 'geo');
+            routeGeoPermissionState = 'granted';
+            routeUpdateLocationStatus('Ubicacion actual capturada correctamente.', 'ok');
+            routeShowLocationGuide(false);
             M.toast({html: 'Ubicacion actual cargada.', classes: 'green darken-2'});
             if (button) {
                 button.disabled = false;
@@ -786,10 +876,15 @@ function routeUseCurrentLocation(button) {
             let message = 'No se pudo obtener tu ubicacion.';
             if (error.code === error.PERMISSION_DENIED) {
                 message = 'Permiso de ubicacion denegado.';
+                routeGeoPermissionState = 'denied';
+                routeUpdateLocationStatus('Permiso denegado. Habilitalo o usa origen manual.', 'error');
+                routeShowLocationGuide(true);
             } else if (error.code === error.POSITION_UNAVAILABLE) {
                 message = 'Ubicacion no disponible en este momento.';
+                routeUpdateLocationStatus('No se pudo resolver la ubicacion del dispositivo.', 'warn');
             } else if (error.code === error.TIMEOUT) {
                 message = 'Tiempo agotado al obtener ubicacion.';
+                routeUpdateLocationStatus('Tiempo agotado al pedir ubicacion. Reintenta o usa origen manual.', 'warn');
             }
 
             M.toast({html: message, classes: 'red darken-2'});
@@ -901,6 +996,12 @@ async function routeGenerateOptimized() {
         return;
     }
 
+    if (routeOriginSource !== 'geo' && routeOriginSource !== 'manual') {
+        M.toast({html: 'Primero define origen valido (ubicacion o manual).', classes: 'orange darken-2'});
+        routeUpdateLocationStatus('No se puede generar ruta sin origen confirmado.', 'error');
+        return;
+    }
+
 
 
 
@@ -1004,9 +1105,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const latInput = document.getElementById('route-origin-lat');
     const lngInput = document.getElementById('route-origin-lng');
-    if (latInput && lngInput && String(latInput.value).trim() === '' && String(lngInput.value).trim() === '') {
-        routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
+    if (latInput && lngInput) {
+        const markManual = () => {
+            routeMarkManualOriginIfValid();
+        };
+        latInput.addEventListener('input', markManual);
+        lngInput.addEventListener('input', markManual);
+        latInput.addEventListener('blur', markManual);
+        lngInput.addEventListener('blur', markManual);
     }
+
+    routeCheckGeolocationPermission();
 
     const routeTimeInput = document.getElementById('route-start-time');
     const routeMeridiemInput = document.getElementById('route-start-meridiem');
