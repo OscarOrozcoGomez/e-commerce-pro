@@ -357,33 +357,71 @@ function deliveryNormalizeWeekdayKey(?string $value): ?string
 
 /**
  * Normaliza una hora manual escrita por el admin.
- * Acepta valores como 9:30, 09:30 o 930.
+ * Acepta valores como 9:30, 09:30, 930, 9:30 AM o 10:15 PM.
  */
 function deliveryNormalizeManualHour(?string $value): string
 {
     $raw = trim((string) ($value ?? ''));
     if ($raw === '') {
-        throw new InvalidArgumentException('Debes escribir una hora valida en formato HH:MM.');
+        throw new InvalidArgumentException('Debes escribir una hora valida en formato HH:MM o 12 horas con AM/PM.');
     }
 
-    $normalized = preg_replace('/[^0-9]/', '', $raw);
-    if (!is_string($normalized) || $normalized === '') {
-        throw new InvalidArgumentException('La hora debe tener formato real, por ejemplo 09:30.');
+    $upperRaw = strtoupper($raw);
+    $meridiem = null;
+    if (preg_match('/\b(AM|PM)\b$/', $upperRaw)) {
+        $meridiem = substr($upperRaw, -2);
+        $raw = trim(substr($raw, 0, -2));
     }
 
-    if (strlen($normalized) === 3) {
-        $normalized = substr($normalized, 0, 1) . ':' . substr($normalized, 1);
-    } elseif (strlen($normalized) === 4) {
-        $normalized = substr($normalized, 0, 2) . ':' . substr($normalized, 2);
+    $digits = preg_replace('/[^0-9]/', '', $raw);
+    if (!is_string($digits) || $digits === '') {
+        throw new InvalidArgumentException('La hora debe tener formato real, por ejemplo 09:30 o 9:30 AM.');
     }
 
-    if (!preg_match('/^(?:[01]?\d|2[0-3]):[0-5]\d$/', $normalized)) {
-        throw new InvalidArgumentException('Hora invalida: usa un valor real entre 00:00 y 23:59.');
+    if (strlen($digits) === 3) {
+        $digits = substr($digits, 0, 1) . ':' . substr($digits, 1);
+    } elseif (strlen($digits) === 4) {
+        $digits = substr($digits, 0, 2) . ':' . substr($digits, 2);
     }
 
-    $parts = explode(':', $normalized);
+    if (!preg_match('/^(?:[01]?\d|2[0-3]):[0-5]\d$/', $digits)) {
+        throw new InvalidArgumentException('Hora invalida: usa un valor real entre 00:00 y 23:59 o un formato de 12 horas con AM/PM.');
+    }
+
+    $parts = explode(':', $digits);
     $hour = (int) $parts[0];
-    return sprintf('%02d:%02d', $hour, (int) $parts[1]);
+    $minute = (int) $parts[1];
+
+    if ($meridiem !== null) {
+        if ($hour < 1 || $hour > 12) {
+            throw new InvalidArgumentException('La hora debe estar entre 1 y 12 cuando uses AM/PM.');
+        }
+        if ($meridiem === 'AM' && $hour === 12) {
+            $hour = 0;
+        } elseif ($meridiem === 'PM' && $hour < 12) {
+            $hour += 12;
+        }
+    }
+
+    return sprintf('%02d:%02d', $hour, $minute);
+}
+
+/**
+ * Devuelve un alias humano para una direccion cuando no hay uno definido.
+ */
+function deliveryFormatAddressAlias(?string $alias, int $position = 0): string
+{
+    $cleanAlias = trim((string) ($alias ?? ''));
+    $isLegacySyntheticAlias = (bool) preg_match('/^direccion\s+\d+$/i', $cleanAlias);
+    if ($cleanAlias !== '' && !$isLegacySyntheticAlias) {
+        return $cleanAlias;
+    }
+
+    if ($position > 0) {
+        return 'Domicilio ' . $position;
+    }
+
+    return 'Domicilio';
 }
 
 /**
@@ -488,14 +526,107 @@ function deliveryParseDeliveryPreferences($raw): array
         $defaultWindow = ['day' => null, 'start' => '00:00', 'end' => '23:59', 'source' => 'default'];
     }
 
-    if (empty($windows)) {
-        $windows[] = $defaultWindow;
-    }
-
     return [
         'ventanas' => $windows,
         'default_window' => $defaultWindow,
     ];
+}
+
+/**
+ * Convierte una hora HH:MM a minutos desde medianoche.
+ */
+function deliveryTimeToMinutes(string $time): int
+{
+    if (!preg_match('/^\d{1,2}:\d{2}$/', $time)) {
+        return 0;
+    }
+
+    [$hourRaw, $minuteRaw] = explode(':', $time);
+    $hour = max(0, min(23, (int)$hourRaw));
+    $minute = max(0, min(59, (int)$minuteRaw));
+    return ($hour * 60) + $minute;
+}
+
+/**
+ * Estima distancia entre dos coordenadas usando Haversine.
+ */
+function deliveryHaversineMeters(float $lat1, float $lng1, float $lat2, float $lng2): float
+{
+    $earthRadius = 6371000.0;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLng = deg2rad($lng2 - $lng1);
+    $a = sin($dLat / 2) * sin($dLat / 2)
+        + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) * sin($dLng / 2);
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+    return $earthRadius * $c;
+}
+
+/**
+ * Estima tiempo de traslado en segundos con velocidad urbana promedio.
+ */
+function deliveryEstimateTravelSeconds(array $fromPoint, array $toPoint): int
+{
+    if (!isset($fromPoint['lat'], $fromPoint['lng'], $toPoint['lat'], $toPoint['lng'])) {
+        return 900;
+    }
+
+    $distance = deliveryHaversineMeters(
+        (float)$fromPoint['lat'],
+        (float)$fromPoint['lng'],
+        (float)$toPoint['lat'],
+        (float)$toPoint['lng']
+    );
+
+    $metersPerSecond = 8.3333333333; // ~30 km/h urbano
+    return (int)max(60, round($distance / $metersPerSecond));
+}
+
+/**
+ * Extrae coordenadas de una parada y devuelve null cuando faltan.
+ */
+function deliveryExtractPoint(array $stop): ?array
+{
+    if (!isset($stop['lat'], $stop['lng'])) {
+        return null;
+    }
+
+    return [
+        'lat' => (float)$stop['lat'],
+        'lng' => (float)$stop['lng'],
+    ];
+}
+
+/**
+ * Calcula el timestamp de cierre de una ventana respecto a la salida.
+ */
+function deliveryWindowDeadlineTimestamp(array $window, DateTimeImmutable $departure): ?int
+{
+    $dayKey = deliveryNormalizeWeekdayKey((string)($window['day'] ?? ''));
+    if ($dayKey === null) {
+        return null;
+    }
+
+    $weekdayMap = [
+        'lunes' => 1,
+        'martes' => 2,
+        'miercoles' => 3,
+        'jueves' => 4,
+        'viernes' => 5,
+        'sabado' => 6,
+        'domingo' => 7,
+    ];
+
+    $targetDay = $weekdayMap[$dayKey] ?? null;
+    if ($targetDay === null) {
+        return null;
+    }
+
+    $currentDay = (int)$departure->format('N');
+    $delta = (($targetDay - $currentDay) + 7) % 7;
+    $targetDate = $departure->modify('+' . $delta . ' days');
+    $endMinutes = deliveryTimeToMinutes((string)($window['end'] ?? '23:59'));
+    $deadline = $targetDate->setTime(intdiv($endMinutes, 60), $endMinutes % 60);
+    return $deadline->getTimestamp();
 }
 
 /**
@@ -504,67 +635,134 @@ function deliveryParseDeliveryPreferences($raw): array
  * @param array<int, array<string, mixed>> $stops
  * @return array<int, array<string, mixed>>
  */
-function deliveryOrderStopsByWindowPriority(array $stops, DateTimeImmutable $departure): array
+function deliveryOrderStopsByWindowPriority(array $stops, DateTimeImmutable $departure, ?array $origin = null): array
 {
-    $normalized = [];
+    $scheduled = [];
+    $unscheduled = [];
 
     foreach ($stops as $index => $stop) {
         $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
+        $bestDeadline = null;
         $bestWindow = null;
-        $bestWindowScore = PHP_INT_MAX;
 
         foreach ($preferences['ventanas'] as $window) {
-            $dayKey = $window['day'];
-            if ($dayKey === null) {
-                $minuteStart = (int) substr($window['start'], 0, 2) * 60 + (int) substr($window['start'], 3, 2);
-                $minuteEnd = (int) substr($window['end'], 0, 2) * 60 + (int) substr($window['end'], 3, 2);
-                $score = $minuteEnd;
-                if ($score < $bestWindowScore) {
-                    $bestWindowScore = $score;
-                    $bestWindow = $window;
-                }
+            $deadline = deliveryWindowDeadlineTimestamp($window, $departure);
+            if ($deadline === null) {
                 continue;
             }
 
-            $weekdayMap = [
-                'lunes' => 1, 'martes' => 2, 'miercoles' => 3, 'miércoles' => 3,
-                'jueves' => 4, 'viernes' => 5, 'sabado' => 6, 'sábado' => 6,
-                'domingo' => 7,
-            ];
-            $dayNumber = $weekdayMap[$dayKey] ?? 1;
-            $currentDay = (int) $departure->format('N');
-            $delta = (($dayNumber - $currentDay) + 7) % 7;
-            $targetDate = $departure->modify('+' . $delta . ' days');
-
-            $startMinutes = (int) substr($window['start'], 0, 2) * 60 + (int) substr($window['start'], 3, 2);
-            $endMinutes = (int) substr($window['end'], 0, 2) * 60 + (int) substr($window['end'], 3, 2);
-            $deadline = $targetDate->setTime(intdiv($endMinutes, 60), $endMinutes % 60);
-
-            $baseScore = $deadline->getTimestamp();
-            if ($baseScore < $bestWindowScore) {
-                $bestWindowScore = $baseScore;
+            if ($bestDeadline === null || $deadline < $bestDeadline) {
+                $bestDeadline = $deadline;
                 $bestWindow = $window;
             }
         }
 
-        $normalized[] = [
+        $enrichedStop = [
             'index' => $index,
             'stop' => $stop,
-            'sortKey' => $bestWindowScore,
+            'window' => $bestWindow,
+            'deadline' => $bestDeadline,
             'priority' => (int) ($stop['prioridad_entrega'] ?? 0),
         ];
+
+        if ($bestDeadline !== null) {
+            $scheduled[] = $enrichedStop;
+        } else {
+            $unscheduled[] = $enrichedStop;
+        }
     }
 
-    usort($normalized, static function (array $left, array $right): int {
-        if ($left['sortKey'] === $right['sortKey']) {
-            return $left['priority'] <=> $right['priority'];
+    usort($scheduled, static function (array $left, array $right): int {
+        if ($left['deadline'] === $right['deadline']) {
+            return $right['priority'] <=> $left['priority'];
         }
-        return $left['sortKey'] <=> $right['sortKey'];
+        return $left['deadline'] <=> $right['deadline'];
     });
 
+    $currentPoint = $origin !== null && isset($origin['lat'], $origin['lng'])
+        ? ['lat' => (float)$origin['lat'], 'lng' => (float)$origin['lng']]
+        : null;
+    if ($currentPoint === null && !empty($scheduled)) {
+        $currentPoint = deliveryExtractPoint($scheduled[0]['stop']) ?? null;
+    } elseif ($currentPoint === null && !empty($unscheduled)) {
+        $currentPoint = deliveryExtractPoint($unscheduled[0]['stop']) ?? null;
+    }
+
+    $clockTs = $departure->getTimestamp();
     $ordered = [];
-    foreach ($normalized as $item) {
-        $ordered[] = $item['stop'];
+
+    foreach ($scheduled as $scheduledIndex => $scheduledItem) {
+        $scheduledStop = $scheduledItem['stop'];
+
+        while (!empty($unscheduled) && $currentPoint !== null) {
+            $directToScheduled = deliveryEstimateTravelSeconds($currentPoint, $scheduledStop);
+            $arrivalIfDirect = $clockTs + $directToScheduled;
+            $deadline = (int)$scheduledItem['deadline'];
+            $slack = $deadline - $arrivalIfDirect;
+
+            if ($slack <= 600) {
+                break;
+            }
+
+            $bestUnscheduledKey = null;
+            $bestAddedCost = null;
+            foreach ($unscheduled as $key => $candidate) {
+                $candidateStop = $candidate['stop'];
+                $toCandidate = deliveryEstimateTravelSeconds($currentPoint, $candidateStop);
+                $candidateToScheduled = deliveryEstimateTravelSeconds($candidateStop, $scheduledStop);
+                $addedCost = ($toCandidate + max(0, ((int)($candidateStop['tiempo_servicio_min'] ?? 5)) * 60) + $candidateToScheduled) - $directToScheduled;
+
+                if ($bestAddedCost === null || $addedCost < $bestAddedCost) {
+                    $bestAddedCost = $addedCost;
+                    $bestUnscheduledKey = $key;
+                }
+            }
+
+            if ($bestUnscheduledKey === null || $bestAddedCost === null || $bestAddedCost > ($slack - 300)) {
+                break;
+            }
+
+            $chosen = $unscheduled[$bestUnscheduledKey]['stop'];
+            $travelToChosen = deliveryEstimateTravelSeconds($currentPoint, $chosen);
+            $ordered[] = $chosen;
+            $clockTs += $travelToChosen + max(0, ((int)($chosen['tiempo_servicio_min'] ?? 5)) * 60);
+            $currentPoint = deliveryExtractPoint($chosen) ?? $currentPoint;
+            unset($unscheduled[$bestUnscheduledKey]);
+            $unscheduled = array_values($unscheduled);
+        }
+
+        if ($currentPoint !== null) {
+            $clockTs += deliveryEstimateTravelSeconds($currentPoint, $scheduledStop);
+        }
+        $ordered[] = $scheduledStop;
+        $clockTs += max(0, ((int)($scheduledStop['tiempo_servicio_min'] ?? 5)) * 60);
+        $currentPoint = deliveryExtractPoint($scheduledStop) ?? $currentPoint;
+    }
+
+    while (!empty($unscheduled)) {
+        if ($currentPoint === null) {
+            $chosenKey = array_key_first($unscheduled);
+        } else {
+            $chosenKey = null;
+            $chosenDistance = null;
+            foreach ($unscheduled as $key => $candidate) {
+                $distance = deliveryEstimateTravelSeconds($currentPoint, $candidate['stop']);
+                if ($chosenDistance === null || $distance < $chosenDistance) {
+                    $chosenDistance = $distance;
+                    $chosenKey = $key;
+                }
+            }
+        }
+
+        if ($chosenKey === null) {
+            break;
+        }
+
+        $stop = $unscheduled[$chosenKey]['stop'];
+        $ordered[] = $stop;
+        $currentPoint = deliveryExtractPoint($stop) ?? $currentPoint;
+        unset($unscheduled[$chosenKey]);
+        $unscheduled = array_values($unscheduled);
     }
 
     return $ordered;

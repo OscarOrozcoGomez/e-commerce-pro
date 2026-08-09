@@ -14,6 +14,13 @@ $isAdminView = isAdmin();
 $isRepartidorView = isRepartidor();
 $isRouteOptimizationAllowed = $isAdminView || $isRepartidorView;
 $selectedRepartidorId = $isAdminView ? max(0, (int)($_GET['repartidor_id'] ?? 0)) : (int)($usuario['id_usuario'] ?? 0);
+$selectedFechaEntrega = trim((string)($_GET['fecha_entrega'] ?? ''));
+if ($selectedFechaEntrega === '') {
+    $selectedFechaEntrega = date('Y-m-d');
+}
+if ($selectedFechaEntrega !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedFechaEntrega)) {
+    $selectedFechaEntrega = date('Y-m-d');
+}
 $error = '';
 $success = '';
 $repartidores = [];
@@ -158,10 +165,19 @@ try {
             $sql .= ' AND p.id_repartidor = :repartidor';
             $params[':repartidor'] = $selectedRepartidorId;
         }
+        if ($selectedFechaEntrega !== '') {
+            $sql .= ' AND DATE(p.fecha_entrega_programada) = :fecha_entrega';
+            $params[':fecha_entrega'] = $selectedFechaEntrega;
+        }
         $sql .= ' ORDER BY p.id_repartidor ASC, p.fecha_entrega_programada ASC, p.fecha_creacion DESC';
     } else {
-        $sql .= ' AND p.id_repartidor = :repartidor ORDER BY p.fecha_entrega_programada ASC, p.fecha_creacion DESC';
+        $sql .= ' AND p.id_repartidor = :repartidor';
         $params[':repartidor'] = (int)($usuario['id_usuario'] ?? 0);
+        if ($selectedFechaEntrega !== '') {
+            $sql .= ' AND DATE(p.fecha_entrega_programada) = :fecha_entrega';
+            $params[':fecha_entrega'] = $selectedFechaEntrega;
+        }
+        $sql .= ' ORDER BY p.fecha_entrega_programada ASC, p.fecha_creacion DESC';
     }
 
     $stmt = $pdo->prepare($sql);
@@ -215,13 +231,13 @@ include __DIR__ . '/includes/header.php';
             <?php if ($isAdminView): ?>
                 <p class="grey-text">Desde aqui puedes visualizar y optimizar rutas de repartidores asignados.</p>
             <?php else: ?>
-                <p class="grey-text">Aqui aparecen los pedidos que debes entregar hoy.</p>
+                <p class="grey-text">Aqui aparecen los pedidos asignados para el dia seleccionado.</p>
             <?php endif; ?>
 
             <?php if ($isAdminView): ?>
                 <div class="card" style="margin-top: 12px;">
                     <div class="card-content" style="padding-bottom: 10px;">
-                        <span class="card-title" style="font-size: 1.1rem;">Filtrar por repartidor</span>
+                        <span class="card-title" style="font-size: 1.1rem;">Filtrar pedidos asignados</span>
                         <form method="GET" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
                             <div style="min-width:240px; flex:1;">
                                 <label for="repartidor_id" class="active">Repartidor</label>
@@ -235,7 +251,26 @@ include __DIR__ . '/includes/header.php';
                                     <?php endforeach; ?>
                                 </select>
                             </div>
+                            <div style="min-width:220px; flex:1;">
+                                <label for="fecha_entrega" class="active">Dia de entrega</label>
+                                <input id="fecha_entrega" name="fecha_entrega" type="date" value="<?php echo esc($selectedFechaEntrega); ?>">
+                            </div>
                             <button type="submit" class="btn indigo waves-effect waves-light">Aplicar filtro</button>
+                            <a href="?" class="btn-flat waves-effect">Limpiar</a>
+                        </form>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="card" style="margin-top: 12px;">
+                    <div class="card-content" style="padding-bottom: 10px;">
+                        <span class="card-title" style="font-size: 1.1rem;">Filtrar por dia</span>
+                        <form method="GET" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+                            <div style="min-width:220px; flex:1;">
+                                <label for="fecha_entrega" class="active">Dia de entrega</label>
+                                <input id="fecha_entrega" name="fecha_entrega" type="date" value="<?php echo esc($selectedFechaEntrega); ?>" required>
+                            </div>
+                            <button type="submit" class="btn indigo waves-effect waves-light">Aplicar filtro</button>
+                            <a href="?fecha_entrega=<?php echo esc(urlencode(date('Y-m-d'))); ?>" class="btn-flat waves-effect">Hoy</a>
                         </form>
                     </div>
                 </div>
@@ -272,14 +307,21 @@ include __DIR__ . '/includes/header.php';
                                 <label for="route-origin-lng" class="active">Longitud origen</label>
                             </div>
                             <div class="input-field col s12 m3">
-                                <input id="route-start-time" type="datetime-local">
-                                <label for="route-start-time" class="active">Hora de salida (opcional)</label>
+                                <input id="route-start-time" type="text" placeholder="09:30" inputmode="numeric" pattern="^(?:[0-9]|0[0-9]|1[0-2]):[0-5][0-9]$">
+                                <label for="route-start-time" class="active">Hora de salida (editable)</label>
                             </div>
-                            <div class="col s12 m3" style="display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap;">
+                            <div class="input-field col s12 m2">
+                                <select id="route-start-meridiem" class="browser-default">
+                                    <option value="AM">AM</option>
+                                    <option value="PM">PM</option>
+                                </select>
+                                <label for="route-start-meridiem" class="active">AM/PM</label>
+                            </div>
+                            <div class="col s12 m4" style="display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap;">
                                 <button type="button" class="btn-flat waves-effect" id="route-use-location">
                                     <i class="material-icons left">my_location</i> Usar mi ubicacion
                                 </button>
-                                <button type="button" class="btn-flat waves-effect" id="route-toggle-all">Seleccionar todo</button>
+                                <button type="button" class="btn blue-grey darken-1 waves-effect waves-light" id="route-toggle-all">Seleccionar todo</button>
                                 <button type="button" class="btn amber darken-3 waves-effect waves-light" id="btn-generate-route">
                                     <i class="material-icons left">alt_route</i>Generar ruta
                                 </button>
@@ -413,6 +455,7 @@ include __DIR__ . '/includes/header.php';
                                                                     class="filled-in route-check"
                                                                     value="<?php echo (int)$ent['id_pedido']; ?>"
                                                                     data-repartidor-id="<?php echo (int)$ent['id_repartidor']; ?>"
+                                                                    data-fecha-entrega="<?php echo esc($ent['fecha_entrega_programada'] ? date('Y-m-d', strtotime((string)$ent['fecha_entrega_programada'])) : ''); ?>"
                                                                     <?php if (!$tieneCoordenadas): ?>
                                                                     disabled
                                                                     title="Este pedido no tiene coordenadas de ubicacion"
@@ -545,6 +588,8 @@ const routeCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNI
 const routeEndpoint = <?php echo json_encode(BASE_URL . 'api/optimize_delivery_route.php', JSON_UNESCAPED_UNICODE); ?>;
 const isAdminRouteView = <?php echo $isAdminView ? 'true' : 'false'; ?>;
 const routeDefaultOrigin = { lat: 20.6596988, lng: -103.3496092 };
+const routeSelectedDate = <?php echo json_encode($selectedFechaEntrega, JSON_UNESCAPED_UNICODE); ?>;
+const routeTodayDate = <?php echo json_encode(date('Y-m-d'), JSON_UNESCAPED_UNICODE); ?>;
 
 function routeEscapeHtml(value) {
     return String(value ?? '')
@@ -564,6 +609,21 @@ function routeToggleAll(button) {
     if (!checks.length) {
         return;
     }
+
+    if (routeSelectedDate) {
+        const dateChecks = checks.filter((check) => String(check.dataset.fechaEntrega || '') === routeSelectedDate);
+        if (!dateChecks.length) {
+            M.toast({html: 'No hay pedidos del dia seleccionado para agregar.', classes: 'orange darken-2'});
+            return;
+        }
+        const allDateChecked = dateChecks.every((check) => check.checked);
+        dateChecks.forEach((check) => {
+            check.checked = !allDateChecked;
+        });
+        button.textContent = allDateChecked ? 'Seleccionar todo' : 'Quitar seleccion';
+        return;
+    }
+
     const allChecked = checks.every((check) => check.checked);
     checks.forEach((check) => {
         check.checked = !allChecked;
@@ -627,6 +687,78 @@ function routeResolveOrigin() {
     }
 
     return { lat, lng };
+}
+
+function routeFormatTimeInputValue(value) {
+    if (!value) return '';
+    const digits = String(value).replace(/[^0-9]/g, '').slice(0, 4);
+    if (digits.length <= 2) {
+        return digits;
+    }
+    return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+function routeNormalizeTimeInput(input) {
+    const formatted = routeFormatTimeInputValue(input.value || '');
+    input.value = formatted;
+    return /^(?:[0-9]|0[0-9]|1[0-2]):[0-5][0-9]$/.test(formatted);
+}
+
+function routeGetNow12hParts() {
+    const now = new Date();
+    const hours24 = now.getHours();
+    const minutes = now.getMinutes();
+    const meridiem = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = (hours24 % 12) || 12;
+    return {
+        time: `${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+        meridiem,
+    };
+}
+
+function routeComposeDepartureDateTime() {
+    const timeInput = document.getElementById('route-start-time');
+    const meridiemInput = document.getElementById('route-start-meridiem');
+
+    if (!timeInput || !meridiemInput) {
+        return '';
+    }
+
+    let timeRaw = String(timeInput.value || '').trim();
+    let meridiem = String(meridiemInput.value || 'AM').toUpperCase() === 'PM' ? 'PM' : 'AM';
+
+    if (timeRaw === '') {
+        const nowParts = routeGetNow12hParts();
+        timeRaw = nowParts.time;
+        meridiem = nowParts.meridiem;
+        timeInput.value = timeRaw;
+        meridiemInput.value = meridiem;
+    } else if (!routeNormalizeTimeInput(timeInput)) {
+        M.toast({html: 'Hora invalida. Usa formato como 09:30.', classes: 'orange darken-2'});
+        timeInput.focus();
+        return '';
+    } else {
+        timeRaw = timeInput.value;
+    }
+
+    const [hhRaw, mmRaw] = timeRaw.split(':');
+    let hh = parseInt(hhRaw || '0', 10);
+    const mm = parseInt(mmRaw || '0', 10);
+
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 12 || mm < 0 || mm > 59) {
+        M.toast({html: 'Hora invalida. Revisa el valor de salida.', classes: 'orange darken-2'});
+        timeInput.focus();
+        return '';
+    }
+
+    if (hh === 12) {
+        hh = (meridiem === 'AM') ? 0 : 12;
+    } else if (meridiem === 'PM') {
+        hh += 12;
+    }
+
+    const fechaBase = (routeSelectedDate && /^\d{4}-\d{2}-\d{2}$/.test(routeSelectedDate)) ? routeSelectedDate : routeTodayDate;
+    return `${fechaBase}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
 function routeUseCurrentLocation(button) {
@@ -783,14 +915,31 @@ async function routeGenerateOptimized() {
 
 
 
-    const horaSalida = (document.getElementById('route-start-time')?.value || '').trim();
+    const horaSalida = routeComposeDepartureDateTime();
+    if (!horaSalida) {
+        return;
+    }
     const pedidoIds = selected.map((el) => parseInt(el.value, 10)).filter((v) => Number.isFinite(v) && v > 0);
+    const fechasSeleccionadas = Array.from(new Set(selected.map((el) => String(el.dataset.fechaEntrega || '').trim()).filter((v) => v !== '')));
+    if (!routeSelectedDate && fechasSeleccionadas.length > 1) {
+        M.toast({html: 'Selecciona pedidos del mismo dia para generar la ruta.', classes: 'orange darken-2'});
+        return;
+    }
+
+    if (routeSelectedDate) {
+        const mismatchedDate = selected.some((el) => String(el.dataset.fechaEntrega || '') !== routeSelectedDate);
+        if (mismatchedDate) {
+            M.toast({html: 'Hay pedidos fuera del dia filtrado. Ajusta la seleccion.', classes: 'orange darken-2'});
+            return;
+        }
+    }
 
     const payload = {
         csrf_token: routeCsrfToken,
         pedidosIds: pedidoIds,
         origen: { lat: origin.lat, lng: origin.lng },
-        hora_salida: horaSalida
+        hora_salida: horaSalida,
+        fecha_entrega_filtro: routeSelectedDate || (fechasSeleccionadas.length === 1 ? fechasSeleccionadas[0] : '')
     };
 
     const btn = document.getElementById('btn-generate-route');
@@ -857,6 +1006,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const lngInput = document.getElementById('route-origin-lng');
     if (latInput && lngInput && String(latInput.value).trim() === '' && String(lngInput.value).trim() === '') {
         routeSetOriginInputs(routeDefaultOrigin.lat, routeDefaultOrigin.lng);
+    }
+
+    const routeTimeInput = document.getElementById('route-start-time');
+    const routeMeridiemInput = document.getElementById('route-start-meridiem');
+    if (routeTimeInput) {
+        routeTimeInput.addEventListener('input', () => {
+            routeTimeInput.value = routeFormatTimeInputValue(routeTimeInput.value || '');
+        });
+        routeTimeInput.addEventListener('blur', () => {
+            routeNormalizeTimeInput(routeTimeInput);
+        });
+    }
+    if (routeMeridiemInput && !routeMeridiemInput.value) {
+        routeMeridiemInput.value = 'AM';
     }
 });
 </script>

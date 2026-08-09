@@ -27,7 +27,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
         try {
             if ($accion === 'asignar' && isset($_POST['id_repartidor'])) {
                 $id_repartidor = intval($_POST['id_repartidor']);
-                $fecha = $_POST['fecha_entrega'] ?? null;
+                $fechaRaw = trim((string)($_POST['fecha_entrega'] ?? ''));
+                $fecha = null;
+                if ($fechaRaw !== '') {
+                    $fechaParsed = DateTimeImmutable::createFromFormat('Y-m-d', $fechaRaw);
+                    if ($fechaParsed instanceof DateTimeImmutable) {
+                        $fecha = $fechaParsed->format('Y-m-d 00:00:00');
+                    } else {
+                        throw new Exception('La fecha de entrega no es valida.');
+                    }
+                }
                 // El repartidor cobra al momento de entregar, no se requiere pago previo
                 $hasPedidosTipoEntrega = false;
                 $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
@@ -179,7 +188,7 @@ include __DIR__ . '/includes/header.php';
                                     <th>Cliente / Dirección</th>
                                     <th>Total</th>
                                     <th>Asignar Repartidor</th>
-                                    <th>Fecha Entrega</th>
+                                    <th>Dia Entrega</th>
                                     <th>Acción</th>
                                 </tr>
                             </thead>
@@ -211,7 +220,7 @@ include __DIR__ . '/includes/header.php';
                                                 </select>
                                             </td>
                                             <td>
-                                                <input type="datetime-local" name="fecha_entrega" style="font-size: 0.8rem;">
+                                                <input type="date" name="fecha_entrega" style="font-size: 0.8rem;">
                                             </td>
                                             <td>
                                                 <button type="submit" class="btn-small indigo waves-effect waves-light">
