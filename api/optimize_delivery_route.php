@@ -219,8 +219,8 @@ foreach ($idsRaw as $idValue) {
 }
 $pedidoIds = array_values(array_unique($pedidoIds));
 
-if (count($pedidoIds) < 2) {
-    routeJsonResponse(['success' => false, 'error' => 'Selecciona al menos 2 pedidos para generar ruta.'], 422);
+if (count($pedidoIds) < 1) {
+    routeJsonResponse(['success' => false, 'error' => 'Selecciona al menos 1 pedido para generar ruta.'], 422);
 }
 
 $usuario = $_SESSION['usuario'];
@@ -241,6 +241,7 @@ try {
     $hasClientesTelefono = false;
     $hasClientesUbicacionMapa = false;
     $hasClienteDirecciones = false;
+    $hasClienteHorariosEntrega = false;
 
     $metaSqlColumn = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name";
     $metaSqlTable = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name";
@@ -283,6 +284,9 @@ try {
     $metaTableStmt = $pdo->prepare($metaSqlTable);
     $metaTableStmt->execute([':table_name' => 'cliente_direcciones']);
     $hasClienteDirecciones = ((int)$metaTableStmt->fetchColumn()) > 0;
+
+    $metaTableStmt->execute([':table_name' => 'cliente_horarios_entrega']);
+    $hasClienteHorariosEntrega = ((int)$metaTableStmt->fetchColumn()) > 0;
 
     $pedidoLatExpr = $hasPedidosLat ? 'p.latitud' : 'NULL';
     $pedidoLngExpr = $hasPedidosLng ? 'p.longitud' : 'NULL';
@@ -361,7 +365,21 @@ try {
     $stmt->execute($params);
     $pedidos = $stmt->fetchAll();
 
-    if (count($pedidos) < 2) {
+    $preferenciasPorCliente = [];
+    if ($hasClienteHorariosEntrega && !empty($pedidos)) {
+        $idsClientes = array_values(array_unique(array_filter(array_map(static fn($row): int => (int)($row['id_cliente'] ?? 0), $pedidos), static fn(int $id): bool => $id > 0)));
+        if (!empty($idsClientes)) {
+            $placeholdersClientes = implode(',', array_fill(0, count($idsClientes), '?'));
+            $stmtPrefs = $pdo->prepare("SELECT id_cliente, id_direccion, dia_semana, hora_inicio, hora_fin, activo, nota FROM cliente_horarios_entrega WHERE activo = 1 AND id_cliente IN ({$placeholdersClientes}) ORDER BY id_cliente ASC, id_direccion ASC, dia_semana ASC");
+            $stmtPrefs->execute($idsClientes);
+            foreach ($stmtPrefs->fetchAll() as $row) {
+                $clienteId = (int)($row['id_cliente'] ?? 0);
+                $preferenciasPorCliente[$clienteId][] = $row;
+            }
+        }
+    }
+
+    if (count($pedidos) < 1) {
         routeJsonResponse([
             'success' => false,
             'error' => 'No hay suficientes pedidos validos para optimizar. Verifica asignacion y estado.',
@@ -445,8 +463,38 @@ try {
             $direccion = (string)piiDecryptValue($direccion);
         }
 
+        $deliveryPreferences = ['ventanas' => []];
+        if ($hasClienteHorariosEntrega) {
+            $clienteId = (int)($pedido['id_cliente'] ?? 0);
+            $direccionActual = routeCleanPiiValue($direccion);
+            $direccionAtualLower = strtolower($direccionActual);
+            $matchedRows = $preferenciasPorCliente[$clienteId] ?? [];
+            $matchedWindows = [];
+            foreach ($matchedRows as $pref) {
+                $prefDia = deliveryNormalizeWeekdayKey((string)($pref['dia_semana'] ?? ''));
+                $prefInicio = trim((string)($pref['hora_inicio'] ?? '00:00'));
+                $prefFin = trim((string)($pref['hora_fin'] ?? '23:59'));
+                if ($prefDia === null || $prefInicio === '' || $prefFin === '') {
+                    continue;
+                }
+                $prefDireccion = trim((string)($pref['direccion'] ?? ''));
+                if ($prefDireccion !== '' && $prefDireccion !== $direccionAtualLower && strtolower($prefDireccion) !== $direccionAtualLower) {
+                    continue;
+                }
+                $matchedWindows[] = [
+                    'dia' => $prefDia,
+                    'inicio' => $prefInicio,
+                    'fin' => $prefFin,
+                ];
+            }
+            if (!empty($matchedWindows)) {
+                $deliveryPreferences = ['ventanas' => array_map(static fn(array $window): array => deliveryNormalizeWindow($window, 'cliente_horario'), $matchedWindows)];
+            }
+        }
+
         $validStops[] = [
             'id_pedido' => $pedidoId,
+            'id_cliente' => (int)($pedido['id_cliente'] ?? 0),
             'numero_pedido' => (string)$pedido['numero_pedido'],
             'cliente' => routeCleanPiiValue($nombreCliente),
             'telefono' => routeCleanPiiValue($telefono),
@@ -456,16 +504,30 @@ try {
             'fecha_limite_entrega' => isset($pedido['fecha_limite_entrega']) ? (string)$pedido['fecha_limite_entrega'] : null,
             'prioridad_entrega' => (int)($pedido['prioridad_entrega'] ?? 0),
             'tiempo_servicio_min' => max(0, (int)($pedido['tiempo_servicio_min'] ?? 5)),
+            'delivery_preferences' => $deliveryPreferences,
         ];
     }
 
-    if (count($validStops) < 2) {
+    if (count($validStops) < 1) {
         routeJsonResponse([
             'success' => false,
             'error' => 'No hay suficientes pedidos con coordenadas validas para optimizar.',
             'hint' => 'Cada pedido seleccionado debe tener link de mapa resoluble o direccion geocodificable.',
             'warnings' => $warnings,
         ], 422);
+    }
+
+    $departureForOrdering = new DateTimeImmutable('now');
+    $horaSalidaRaw = trim((string)($payload['hora_salida'] ?? ''));
+    if ($horaSalidaRaw !== '') {
+        $departureCandidate = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $horaSalidaRaw);
+        if ($departureCandidate instanceof DateTimeImmutable) {
+            $departureForOrdering = $departureCandidate;
+        }
+    }
+
+    if (count($validStops) > 1) {
+        $validStops = deliveryOrderStopsByWindowPriority($validStops, $departureForOrdering);
     }
 
     $body = [
@@ -614,6 +676,12 @@ try {
     $departure = $horaSalidaRaw !== '' ? DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $horaSalidaRaw) : null;
     if (!$departure instanceof DateTimeImmutable) {
         $departure = new DateTimeImmutable('now');
+    }
+
+    foreach ($orderedByGoogle as $pos => $stop) {
+        $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
+        $stop['delivery_preferences'] = $preferences;
+        $orderedByGoogle[$pos] = $stop;
     }
 
     $legs = is_array($route['legs'] ?? null) ? $route['legs'] : [];

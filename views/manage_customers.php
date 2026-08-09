@@ -8,6 +8,18 @@ if (!isAdmin()) { header('Location: dashboard.php'); exit; }
 $pdo = getPDO();
 $error = '';
 $success = '';
+$sessionFlashKey = 'manage_customers_flash';
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (isset($_SESSION[$sessionFlashKey]) && is_array($_SESSION[$sessionFlashKey])) {
+    $flash = $_SESSION[$sessionFlashKey];
+    unset($_SESSION[$sessionFlashKey]);
+    $error = isset($flash['type']) && $flash['type'] === 'error' ? (string)($flash['message'] ?? '') : $error;
+    $success = isset($flash['type']) && $flash['type'] === 'success' ? (string)($flash['message'] ?? '') : $success;
+}
 
 $hasClienteDireccionesTable = false;
 try {
@@ -271,6 +283,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
                 $pdo->commit();
                 $success = 'Direccion eliminada.';
+            } elseif ($accion === 'guardar_horario_direccion') {
+                if (!$hasClienteDireccionesTable) {
+                    throw new Exception('La tabla de direcciones no esta disponible para horarios.');
+                }
+
+                $idDireccion = (int)($_POST['id_direccion'] ?? 0);
+                $idHorario = (int)($_POST['id_horario'] ?? 0);
+                $diaSemana = deliveryNormalizeDeliveryDay((string)($_POST['dia_semana'] ?? ''));
+                $horaInicio = deliveryNormalizeManualHour((string)($_POST['hora_inicio'] ?? ''));
+                $horaFin = deliveryNormalizeManualHour((string)($_POST['hora_fin'] ?? ''));
+                $activo = ((int)($_POST['activo'] ?? 1)) === 1 ? 1 : 0;
+                $nota = trim((string)($_POST['nota'] ?? ''));
+
+                if ($idCliente <= 0) {
+                    throw new Exception('Cliente invalido para guardar el horario.');
+                }
+                if ($idDireccion <= 0) {
+                    throw new Exception('Debes seleccionar un domicilio valido.');
+                }
+                if ($horaFin <= $horaInicio) {
+                    throw new Exception('La hora final debe ser mayor que la hora de inicio.');
+                }
+                if (mb_strlen($nota) > 255) {
+                    throw new Exception('La nota no puede exceder 255 caracteres.');
+                }
+
+                $existingStmt = $pdo->prepare('SELECT id_horario FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? ORDER BY id_horario ASC LIMIT 1');
+                $existingStmt->execute([$idCliente, $idDireccion]);
+                $existingHorarioId = (int)($existingStmt->fetchColumn() ?? 0);
+
+                if ($idHorario > 0) {
+                    $existingHorarioId = $idHorario;
+                } elseif ($existingHorarioId > 0) {
+                    $existingHorarioId = $existingHorarioId;
+                }
+
+                if ($existingHorarioId > 0) {
+                    $pdo->prepare('UPDATE cliente_horarios_entrega SET dia_semana = ?, hora_inicio = ?, hora_fin = ?, activo = ?, nota = ? WHERE id_horario = ? AND id_cliente = ?')
+                        ->execute([$diaSemana, $horaInicio, $horaFin, $activo, $nota !== '' ? $nota : null, $existingHorarioId, $idCliente]);
+                    $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? AND id_horario <> ?')->execute([$idCliente, $idDireccion, $existingHorarioId]);
+                    $success = 'Horario de entrega actualizado.';
+                } else {
+                    $pdo->beginTransaction();
+                    $pdo->prepare('INSERT INTO cliente_horarios_entrega (id_cliente, id_direccion, dia_semana, hora_inicio, hora_fin, activo, nota) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                        ->execute([$idCliente, $idDireccion, $diaSemana, $horaInicio, $horaFin, $activo, $nota !== '' ? $nota : null]);
+                    $lastInsertedId = (int)$pdo->lastInsertId();
+                    $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? AND id_horario <> ?')->execute([$idCliente, $idDireccion, $lastInsertedId]);
+                    $pdo->commit();
+                    $success = 'Horario de entrega guardado.';
+                }
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -278,10 +340,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             }
             $error = $e->getMessage();
         }
+
+        if ($success !== '' || $error !== '') {
+            $_SESSION[$sessionFlashKey] = [
+                'type' => $error !== '' ? 'error' : 'success',
+                'message' => $error !== '' ? $error : $success,
+            ];
+            header('Location: ' . basename($_SERVER['PHP_SELF']));
+            exit;
+        }
     }
 }
 
 $clientes = $pdo->query("SELECT c.*, u.id_usuario, u.estado AS estado_usuario, u.contrasena, COALESCE(u.estado, c.estado, 'activo') AS estado_visible, CASE WHEN u.id_usuario IS NULL THEN 'sucursal' ELSE 'sitio_web' END AS origen_registro, CASE WHEN u.id_usuario IS NOT NULL AND u.contrasena IS NOT NULL AND TRIM(u.contrasena) <> '' THEN 1 ELSE 0 END AS tiene_acceso_web, (SELECT a.nombre FROM pedidos p0 INNER JOIN almacenes a ON a.id_almacen = p0.id_almacen WHERE p0.id_cliente = c.id_cliente ORDER BY p0.id_pedido ASC LIMIT 1) AS sucursal_origen FROM clientes c LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario ORDER BY c.nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+$horariosPorCliente = [];
+try {
+    $stmtHorarios = $pdo->prepare("SELECT id_horario, id_cliente, id_direccion, dia_semana, hora_inicio, hora_fin, activo, nota FROM cliente_horarios_entrega ORDER BY id_cliente ASC, id_direccion ASC, dia_semana ASC");
+    $stmtHorarios->execute();
+    foreach ($stmtHorarios->fetchAll(PDO::FETCH_ASSOC) as $horario) {
+        $clienteId = (int)($horario['id_cliente'] ?? 0);
+        $horariosPorCliente[$clienteId][] = $horario;
+    }
+} catch (Throwable $e) {
+    $horariosPorCliente = [];
+}
 
 $idsClientes = [];
 foreach ($clientes as &$cliente) {
@@ -386,6 +469,21 @@ include __DIR__ . '/includes/header.php';
 
     .manage-customers-col-hidden {
         display: none;
+    }
+
+    .modal {
+        max-width: 960px !important;
+        width: 92% !important;
+    }
+
+    .modal-content {
+        max-height: 82vh;
+        overflow-y: auto;
+    }
+
+    .manual-time-input {
+        font-size: 1.1rem;
+        letter-spacing: 0.05em;
     }
 </style>
 <div class="container">
@@ -678,6 +776,95 @@ include __DIR__ . '/includes/header.php';
                                             </div>
                                         </form>
                                     </div>
+
+                                    <div class="card-panel amber lighten-5" style="margin-top:18px;">
+                                        <strong>Preferencias de entrega por horario</strong>
+                                        <p class="grey-text" style="margin:8px 0 0;">Registra ventanas por dia para este cliente y domicilio. La ruta los tomara en cuenta al ordenar las paradas.</p>
+
+                                        <?php $horariosCliente = $horariosPorCliente[(int)$c['id_cliente']] ?? []; ?>
+                                        <?php if (!empty($horariosCliente)): ?>
+                                            <ul class="collection" style="margin-top:12px;">
+                                                <?php foreach ($horariosCliente as $horario): ?>
+                                                    <?php $dirAlias = 'General'; ?>
+                                                    <?php foreach ($c['direcciones'] as $dir): ?>
+                                                        <?php if ((int)($dir['id_direccion'] ?? 0) === (int)($horario['id_direccion'] ?? 0)): ?>
+                                                            <?php $dirAlias = (string)($dir['alias'] ?? 'General'); ?>
+                                                        <?php endif; ?>
+                                                    <?php endforeach; ?>
+                                                    <li class="collection-item">
+                                                        <div><strong><?php echo esc((string)$horario['dia_semana']); ?></strong> · <?php echo esc((string)$dirAlias); ?></div>
+                                                        <div class="grey-text text-darken-1"><?php echo esc((string)$horario['hora_inicio']); ?> - <?php echo esc((string)$horario['hora_fin']); ?></div>
+                                                        <?php if (trim((string)($horario['nota'] ?? '')) !== ''): ?><div class="grey-text text-darken-1"><?php echo esc((string)$horario['nota']); ?></div><?php endif; ?>
+                                                        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                                                            <button type="button" class="btn-small amber darken-2 waves-effect waves-light" onclick='cargarEdicionHorario(<?php echo (int)$c['id_cliente']; ?>, <?php echo json_encode([
+                                                                'id_horario' => (int)($horario['id_horario'] ?? 0),
+                                                                'id_direccion' => (int)($horario['id_direccion'] ?? 0),
+                                                                'dia_semana' => (string)($horario['dia_semana'] ?? ''),
+                                                                'hora_inicio' => (string)($horario['hora_inicio'] ?? ''),
+                                                                'hora_fin' => (string)($horario['hora_fin'] ?? ''),
+                                                                'activo' => ((int)($horario['activo'] ?? 1)) === 1,
+                                                                'nota' => (string)($horario['nota'] ?? ''),
+                                                            ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>)'>Editar</button>
+                                                        </div>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        <?php else: ?>
+                                            <p class="grey-text" style="margin:12px 0 0;">Todavia no hay horarios registrados para este cliente.</p>
+                                        <?php endif; ?>
+
+                                        <form method="POST" style="margin-top:16px;" data-schedule-form id="schedule-form-<?php echo (int)$c['id_cliente']; ?>">
+                                            <?php echo csrfInput(); ?>
+                                            <input type="hidden" name="accion" value="guardar_horario_direccion">
+                                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                                            <input type="hidden" name="id_horario" value="0" class="schedule-id">
+                                            <div class="row" style="margin-bottom:0;">
+                                                <div class="input-field col s12 m4">
+                                                    <select name="id_direccion" class="browser-default schedule-direccion" required>
+                                                        <option value="">Selecciona domicilio</option>
+                                                        <?php foreach ($c['direcciones'] as $dir): ?>
+                                                            <option value="<?php echo (int)$dir['id_direccion']; ?>"><?php echo esc((string)$dir['alias']); ?></option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                    <label class="active">Domicilio</label>
+                                                </div>
+                                                <div class="input-field col s12 m3">
+                                                    <select name="dia_semana" class="browser-default schedule-dia" required>
+                                                        <option value="">Dia</option>
+                                                        <option value="lunes">Lunes</option>
+                                                        <option value="martes">Martes</option>
+                                                        <option value="miercoles">Miercoles</option>
+                                                        <option value="jueves">Jueves</option>
+                                                        <option value="viernes">Viernes</option>
+                                                        <option value="sabado">Sabado</option>
+                                                        <option value="domingo">Domingo</option>
+                                                    </select>
+                                                </div>
+                                                <div class="input-field col s12 m2">
+                                                    <input type="text" name="hora_inicio" class="manual-time-input schedule-hora-inicio" inputmode="numeric" pattern="^([01]?\d|2[0-3]):[0-5]\d$|^([01]?\d|2[0-3])[0-5]\d$" placeholder="09:30" required data-time-label="hora de inicio">
+                                                    <label class="active">Inicio</label>
+                                                </div>
+                                                <div class="input-field col s12 m2">
+                                                    <input type="text" name="hora_fin" class="manual-time-input schedule-hora-fin" inputmode="numeric" pattern="^([01]?\d|2[0-3]):[0-5]\d$|^([01]?\d|2[0-3])[0-5]\d$" placeholder="18:45" required data-time-label="hora final">
+                                                    <label class="active">Fin</label>
+                                                </div>
+                                                <div class="input-field col s12 m1">
+                                                    <label>
+                                                        <input type="checkbox" name="activo" value="1" checked class="filled-in schedule-activo">
+                                                        <span></span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="input-field">
+                                                <input type="text" name="nota" maxlength="255" placeholder="Ej: Entrega solo antes de la comida" class="schedule-nota">
+                                                <label class="active">Nota opcional</label>
+                                            </div>
+                                            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                                                <button type="submit" class="btn amber darken-3 waves-effect waves-light schedule-submit-btn">Guardar horario</button>
+                                                <button type="button" class="btn-flat waves-effect" onclick='resetHorarioForm(<?php echo (int)$c['id_cliente']; ?>)'>Cancelar edicion</button>
+                                            </div>
+                                        </form>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -773,6 +960,75 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ignora bloqueos de storage sin romper la vista.
         }
     }
+
+    function normalizeManualTime(value) {
+        if (!value) return '';
+        const digits = (value + '').replace(/[^0-9]/g, '');
+        if (!digits) return '';
+        if (digits.length === 3) {
+            return `${digits.slice(0, 1)}:${digits.slice(1)}`;
+        }
+        if (digits.length === 4) {
+            return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+        }
+        return value;
+    }
+
+    function ensureValidManualTime(input) {
+        const raw = normalizeManualTime(input.value || '');
+        if (!raw) {
+            return false;
+        }
+
+        const match = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+        if (!match) {
+            input.setCustomValidity(`Hora invalida para ${input.dataset.timeLabel || 'esta entrada'}. Usa valores reales como 09:30.`);
+            return false;
+        }
+
+        input.value = raw;
+        input.setCustomValidity('');
+        return true;
+    }
+
+    document.querySelectorAll('.manual-time-input').forEach((input) => {
+        input.addEventListener('blur', () => {
+            const normalized = normalizeManualTime(input.value || '');
+            if (normalized) {
+                input.value = normalized;
+            }
+            ensureValidManualTime(input);
+        });
+
+        input.addEventListener('input', () => {
+            const next = normalizeManualTime(input.value || '');
+            if (next && next.length === 5) {
+                input.value = next;
+            }
+            input.setCustomValidity('');
+        });
+    });
+
+    document.querySelectorAll('[data-schedule-form]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            const inputs = form.querySelectorAll('.manual-time-input');
+            let ok = true;
+
+            inputs.forEach((input) => {
+                if (!ensureValidManualTime(input)) {
+                    ok = false;
+                }
+            });
+
+            if (!ok) {
+                event.preventDefault();
+                const invalid = form.querySelector(':invalid');
+                if (invalid) {
+                    invalid.focus();
+                }
+            }
+        });
+    });
 
     function applyColumnVisibility(columnName, visible) {
         document.querySelectorAll(`.js-col-${columnName}`).forEach((cell) => {
@@ -883,6 +1139,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     applyFilters();
 });
+
+function resetHorarioForm(idCliente) {
+    const form = document.getElementById(`schedule-form-${idCliente}`);
+    if (!form) return;
+    form.querySelector('.schedule-id').value = '0';
+    form.querySelector('.schedule-direccion').value = '';
+    form.querySelector('.schedule-dia').value = '';
+    form.querySelector('.schedule-hora-inicio').value = '';
+    form.querySelector('.schedule-hora-fin').value = '';
+    form.querySelector('.schedule-nota').value = '';
+    const activo = form.querySelector('.schedule-activo');
+    if (activo) activo.checked = true;
+    const submitBtn = form.querySelector('.schedule-submit-btn');
+    if (submitBtn) submitBtn.textContent = 'Guardar horario';
+    M.updateTextFields();
+    form.reset();
+}
+
+function cargarEdicionHorario(idCliente, data) {
+    const form = document.getElementById(`schedule-form-${idCliente}`);
+    if (!form || !data) return;
+    form.querySelector('.schedule-id').value = String(data.id_horario || '0');
+    form.querySelector('.schedule-direccion').value = String(data.id_direccion || '');
+    form.querySelector('.schedule-dia').value = String(data.dia_semana || '');
+    form.querySelector('.schedule-hora-inicio').value = String(data.hora_inicio || '');
+    form.querySelector('.schedule-hora-fin').value = String(data.hora_fin || '');
+    form.querySelector('.schedule-nota').value = String(data.nota || '');
+    const activo = form.querySelector('.schedule-activo');
+    if (activo) activo.checked = !!data.activo;
+    const submitBtn = form.querySelector('.schedule-submit-btn');
+    if (submitBtn) submitBtn.textContent = 'Actualizar horario';
+    M.updateTextFields();
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 
 function resetDireccionForm(idCliente) {
     const form = document.getElementById(`dir-form-${idCliente}`);

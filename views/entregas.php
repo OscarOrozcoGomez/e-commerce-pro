@@ -745,8 +745,8 @@ function routeRenderResult(data) {
 
 async function routeGenerateOptimized() {
     const selected = routeGetSelectedCheckboxes();
-    if (selected.length < 2) {
-        M.toast({html: 'Selecciona al menos 2 pedidos.', classes: 'orange darken-2'});
+    if (selected.length < 1) {
+        M.toast({html: 'Selecciona al menos 1 pedido para generar la ruta.', classes: 'orange darken-2'});
         return;
     }
 

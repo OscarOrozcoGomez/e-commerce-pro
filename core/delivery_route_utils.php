@@ -325,3 +325,247 @@ function deliveryFormatSecondsToHm(int $seconds): string
 
     return sprintf('%02d:%02d', $hours, $minutes);
 }
+
+/**
+ * Normaliza un nombre de dia para comparar semanas de entrega.
+ */
+function deliveryNormalizeWeekdayKey(?string $value): ?string
+{
+    $raw = strtolower(trim((string) ($value ?? '')));
+    if ($raw === '') {
+        return null;
+    }
+
+    $map = [
+        'mon' => 'lunes', 'monday' => 'lunes', 'lun' => 'lunes', 'lunes' => 'lunes',
+        'tue' => 'martes', 'tuesday' => 'martes', 'mar' => 'martes', 'martes' => 'martes',
+        'wed' => 'miercoles', 'wednesday' => 'miercoles', 'mie' => 'miercoles', 'miercoles' => 'miercoles', 'miércoles' => 'miercoles',
+        'thu' => 'jueves', 'thursday' => 'jueves', 'jue' => 'jueves', 'jueves' => 'jueves',
+        'fri' => 'viernes', 'friday' => 'viernes', 'vie' => 'viernes', 'viernes' => 'viernes',
+        'sat' => 'sabado', 'saturday' => 'sabado', 'sab' => 'sabado', 'sabado' => 'sabado', 'sábado' => 'sabado',
+        'sun' => 'domingo', 'sunday' => 'domingo', 'dom' => 'domingo', 'domingo' => 'domingo',
+    ];
+
+    foreach ($map as $token => $day) {
+        if ($raw === $token || $raw === $day || str_starts_with($raw, $token)) {
+            return $day;
+        }
+    }
+
+    return $raw;
+}
+
+/**
+ * Normaliza una hora manual escrita por el admin.
+ * Acepta valores como 9:30, 09:30 o 930.
+ */
+function deliveryNormalizeManualHour(?string $value): string
+{
+    $raw = trim((string) ($value ?? ''));
+    if ($raw === '') {
+        throw new InvalidArgumentException('Debes escribir una hora valida en formato HH:MM.');
+    }
+
+    $normalized = preg_replace('/[^0-9]/', '', $raw);
+    if (!is_string($normalized) || $normalized === '') {
+        throw new InvalidArgumentException('La hora debe tener formato real, por ejemplo 09:30.');
+    }
+
+    if (strlen($normalized) === 3) {
+        $normalized = substr($normalized, 0, 1) . ':' . substr($normalized, 1);
+    } elseif (strlen($normalized) === 4) {
+        $normalized = substr($normalized, 0, 2) . ':' . substr($normalized, 2);
+    }
+
+    if (!preg_match('/^(?:[01]?\d|2[0-3]):[0-5]\d$/', $normalized)) {
+        throw new InvalidArgumentException('Hora invalida: usa un valor real entre 00:00 y 23:59.');
+    }
+
+    $parts = explode(':', $normalized);
+    $hour = (int) $parts[0];
+    return sprintf('%02d:%02d', $hour, (int) $parts[1]);
+}
+
+/**
+ * Normaliza el dia de entrega usando nombres reales y permitiendo acentos o variantes.
+ */
+function deliveryNormalizeDeliveryDay(?string $value): string
+{
+    $normalized = deliveryNormalizeWeekdayKey($value);
+    if ($normalized === null || $normalized === '') {
+        throw new InvalidArgumentException('Debes elegir un dia valido para la entrega.');
+    }
+
+    $allowed = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+    if (!in_array($normalized, $allowed, true)) {
+        throw new InvalidArgumentException('El dia de entrega no es valido.');
+    }
+
+    return $normalized === 'miercoles' ? 'miercoles' : $normalized;
+}
+
+/**
+ * Normaliza una ventana de entrega a un formato estándar usado por la ruta.
+ *
+ * @return array{day: ?string, start: string, end: string, source: string}
+ */
+function deliveryNormalizeWindow(array $window, string $fallbackSource = 'default'): array
+{
+    $day = deliveryNormalizeWeekdayKey((string) ($window['dia'] ?? $window['day'] ?? $window['weekday'] ?? ''));
+    $start = trim((string) ($window['inicio'] ?? $window['start'] ?? $window['hora_inicio'] ?? '00:00'));
+    $end = trim((string) ($window['fin'] ?? $window['end'] ?? $window['hora_fin'] ?? '23:59'));
+
+    if (!preg_match('/^\d{1,2}:\d{2}$/', $start)) {
+        $start = '00:00';
+    }
+    if (!preg_match('/^\d{1,2}:\d{2}$/', $end)) {
+        $end = '23:59';
+    }
+
+    return [
+        'day' => $day,
+        'start' => $start,
+        'end' => $end,
+        'source' => $fallbackSource,
+    ];
+}
+
+/**
+ * Parsea preferencias de entrega desde JSON o array.
+ *
+ * @param mixed $raw
+ * @return array{ventanas: array<int, array{day: ?string, start: string, end: string, source: string}>, default_window: array{day: ?string, start: string, end: string, source: string}}
+ */
+function deliveryParseDeliveryPreferences($raw): array
+{
+    $decoded = $raw;
+    if (is_string($raw)) {
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            $decoded = [];
+        } else {
+            $json = json_decode($trimmed, true);
+            $decoded = is_array($json) ? $json : [];
+        }
+    }
+
+    if (!is_array($decoded)) {
+        $decoded = [];
+    }
+
+    $windows = [];
+    $candidateGroups = [
+        'ventanas', 'windows', 'delivery_windows', 'preferencias', 'preferences', 'horarios', 'schedules'
+    ];
+
+    foreach ($candidateGroups as $groupName) {
+        if (!array_key_exists($groupName, $decoded) || !is_array($decoded[$groupName])) {
+            continue;
+        }
+
+        foreach ($decoded[$groupName] as $window) {
+            if (!is_array($window)) {
+                continue;
+            }
+            $normalized = deliveryNormalizeWindow($window, $groupName);
+            if ($normalized['start'] === '00:00' && $normalized['end'] === '23:59' && isset($window['dia'])) {
+                $normalized['start'] = '00:00';
+            }
+            $windows[] = $normalized;
+        }
+    }
+
+    $defaultWindow = null;
+    foreach (['default_window', 'ventana_default', 'defaultWindow', 'horario_regular', 'regular_hours'] as $key) {
+        if (!array_key_exists($key, $decoded) || !is_array($decoded[$key])) {
+            continue;
+        }
+        $defaultWindow = deliveryNormalizeWindow($decoded[$key], $key);
+        break;
+    }
+
+    if ($defaultWindow === null) {
+        $defaultWindow = ['day' => null, 'start' => '00:00', 'end' => '23:59', 'source' => 'default'];
+    }
+
+    if (empty($windows)) {
+        $windows[] = $defaultWindow;
+    }
+
+    return [
+        'ventanas' => $windows,
+        'default_window' => $defaultWindow,
+    ];
+}
+
+/**
+ * Ordena paradas por urgencia de horario de entrega antes de generar la ruta.
+ *
+ * @param array<int, array<string, mixed>> $stops
+ * @return array<int, array<string, mixed>>
+ */
+function deliveryOrderStopsByWindowPriority(array $stops, DateTimeImmutable $departure): array
+{
+    $normalized = [];
+
+    foreach ($stops as $index => $stop) {
+        $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
+        $bestWindow = null;
+        $bestWindowScore = PHP_INT_MAX;
+
+        foreach ($preferences['ventanas'] as $window) {
+            $dayKey = $window['day'];
+            if ($dayKey === null) {
+                $minuteStart = (int) substr($window['start'], 0, 2) * 60 + (int) substr($window['start'], 3, 2);
+                $minuteEnd = (int) substr($window['end'], 0, 2) * 60 + (int) substr($window['end'], 3, 2);
+                $score = $minuteEnd;
+                if ($score < $bestWindowScore) {
+                    $bestWindowScore = $score;
+                    $bestWindow = $window;
+                }
+                continue;
+            }
+
+            $weekdayMap = [
+                'lunes' => 1, 'martes' => 2, 'miercoles' => 3, 'miércoles' => 3,
+                'jueves' => 4, 'viernes' => 5, 'sabado' => 6, 'sábado' => 6,
+                'domingo' => 7,
+            ];
+            $dayNumber = $weekdayMap[$dayKey] ?? 1;
+            $currentDay = (int) $departure->format('N');
+            $delta = (($dayNumber - $currentDay) + 7) % 7;
+            $targetDate = $departure->modify('+' . $delta . ' days');
+
+            $startMinutes = (int) substr($window['start'], 0, 2) * 60 + (int) substr($window['start'], 3, 2);
+            $endMinutes = (int) substr($window['end'], 0, 2) * 60 + (int) substr($window['end'], 3, 2);
+            $deadline = $targetDate->setTime(intdiv($endMinutes, 60), $endMinutes % 60);
+
+            $baseScore = $deadline->getTimestamp();
+            if ($baseScore < $bestWindowScore) {
+                $bestWindowScore = $baseScore;
+                $bestWindow = $window;
+            }
+        }
+
+        $normalized[] = [
+            'index' => $index,
+            'stop' => $stop,
+            'sortKey' => $bestWindowScore,
+            'priority' => (int) ($stop['prioridad_entrega'] ?? 0),
+        ];
+    }
+
+    usort($normalized, static function (array $left, array $right): int {
+        if ($left['sortKey'] === $right['sortKey']) {
+            return $left['priority'] <=> $right['priority'];
+        }
+        return $left['sortKey'] <=> $right['sortKey'];
+    });
+
+    $ordered = [];
+    foreach ($normalized as $item) {
+        $ordered[] = $item['stop'];
+    }
+
+    return $ordered;
+}

@@ -110,6 +110,24 @@ CREATE TABLE IF NOT EXISTS `cliente_direcciones` (
   CONSTRAINT `fk_direccion_cliente_rel` FOREIGN KEY (`id_cliente`) REFERENCES `clientes` (`id_cliente`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+CREATE TABLE IF NOT EXISTS `cliente_horarios_entrega` (
+  `id_horario` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_cliente` INT UNSIGNED NOT NULL,
+  `id_direccion` INT UNSIGNED DEFAULT NULL,
+  `dia_semana` ENUM('lunes','martes','miercoles','jueves','viernes','sabado','domingo') NOT NULL,
+  `hora_inicio` TIME NOT NULL DEFAULT '00:00:00',
+  `hora_fin` TIME NOT NULL DEFAULT '23:59:00',
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `nota` VARCHAR(255) DEFAULT NULL,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_horario`),
+  KEY `idx_horarios_cliente` (`id_cliente`),
+  KEY `idx_horarios_direccion` (`id_direccion`),
+  UNIQUE KEY `uq_horario_cliente_direccion` (`id_cliente`, `id_direccion`),
+  CONSTRAINT `fk_horarios_cliente` FOREIGN KEY (`id_cliente`) REFERENCES `clientes` (`id_cliente`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_horarios_direccion` FOREIGN KEY (`id_direccion`) REFERENCES `cliente_direcciones` (`id_direccion`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Productos
 CREATE TABLE IF NOT EXISTS `productos` (
   `id_producto` INT UNSIGNED NOT NULL AUTO_INCREMENT,
