@@ -46,10 +46,14 @@ function guardarDireccionCheckoutSiAplica(array $data): void {
         }
 
         $maxAlias = 0;
+        $occupiedAliases = [];
         foreach ($direcciones as $dir) {
             $alias = trim((string)($dir['alias'] ?? ''));
             if (function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($alias)) {
                 $alias = trim((string)piiDecryptValue($alias));
+            }
+            if ($alias !== '') {
+                $occupiedAliases[$alias] = true;
             }
             if (preg_match('/^(?:Direccion|Direcci[oó]n)\s+(\d+)$/iu', $alias, $m)) {
                 $maxAlias = max($maxAlias, (int)$m[1]);
@@ -57,6 +61,12 @@ function guardarDireccionCheckoutSiAplica(array $data): void {
         }
 
         $nuevoAlias = 'Direccion ' . ($maxAlias + 1);
+        $baseAlias = $nuevoAlias;
+        $counter = $maxAlias + 1;
+        while (isset($occupiedAliases[$nuevoAlias])) {
+            $counter++;
+            $nuevoAlias = 'Direccion ' . $counter;
+        }
         $esDefault = empty($direcciones) ? 1 : 0;
 
         $aliasStore = function_exists('piiEncryptValue') ? piiEncryptValue($nuevoAlias) : $nuevoAlias;

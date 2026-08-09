@@ -11,6 +11,11 @@ Agrega estos secrets en Settings > Secrets and variables > Actions:
 - MIGRATIONS_URL
 - MIGRATIONS_DEPLOY_TOKEN
 
+Nota importante:
+- `MIGRATIONS_DEPLOY_TOKEN` es un secreto sensible y NO debe escribirse ni documentarse en el repositorio.
+- Solo se debe guardar en GitHub Secrets y, si hace falta, en el entorno/host de produccion con la misma cadena exacta.
+- En esta guia no se pone el valor real del token; solo se indica la variable/uso correcto.
+
 Compatibilidad legacy:
 
 - El workflow tambien acepta `PTF_HOST`, `PTF_USERNAME`, `PTF_PASSWORD`, `PTF_PORT`, `PTF_PROTOCOL`.
@@ -30,7 +35,7 @@ Define variables de entorno en el host remoto:
 - APP_ENV=production en Produccion
 - DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_CHARSET
 - PII_ENCRYPTION_KEY (si no usas GSM) o CUSTOMER_PII_KEY/PII_ENCRYPTION_KEY en Google Secret Manager
-- MIGRATIONS_DEPLOY_TOKEN (igual al secret global de GitHub del repositorio)
+- `MIGRATIONS_DEPLOY_TOKEN` (igual al secret global de GitHub del repositorio; NO se escribe en el archivo de configuracion ni en la documentacion)
 - LOGIN_DEGRADED_MODE=0 (poner en 1 solo durante incidentes de latencia/522)
 - GCP_PROJECT_ID=vendimia-497305
 - GCP_SA_KEY_FILE=/home/<usuario>/.gcp/sa.json (fuera de public_html)

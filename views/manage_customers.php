@@ -8,6 +8,18 @@ if (!isAdmin()) { header('Location: dashboard.php'); exit; }
 $pdo = getPDO();
 $error = '';
 $success = '';
+$sessionFlashKey = 'manage_customers_flash';
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (isset($_SESSION[$sessionFlashKey]) && is_array($_SESSION[$sessionFlashKey])) {
+    $flash = $_SESSION[$sessionFlashKey];
+    unset($_SESSION[$sessionFlashKey]);
+    $error = isset($flash['type']) && $flash['type'] === 'error' ? (string)($flash['message'] ?? '') : $error;
+    $success = isset($flash['type']) && $flash['type'] === 'success' ? (string)($flash['message'] ?? '') : $success;
+}
 
 $hasClienteDireccionesTable = false;
 try {
@@ -271,6 +283,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
                 $pdo->commit();
                 $success = 'Direccion eliminada.';
+            } elseif ($accion === 'guardar_horario_direccion') {
+                if (!$hasClienteDireccionesTable) {
+                    throw new Exception('La tabla de direcciones no esta disponible para horarios.');
+                }
+
+                $idDireccion = (int)($_POST['id_direccion'] ?? 0);
+                $idHorario = (int)($_POST['id_horario'] ?? 0);
+                $diaSemana = deliveryNormalizeDeliveryDay((string)($_POST['dia_semana'] ?? ''));
+                $horaInicioInput = trim((string)($_POST['hora_inicio'] ?? '')) . ' ' . trim((string)($_POST['hora_inicio_meridiem'] ?? ''));
+                $horaFinInput = trim((string)($_POST['hora_fin'] ?? '')) . ' ' . trim((string)($_POST['hora_fin_meridiem'] ?? ''));
+                $horaInicio = deliveryNormalizeManualHour($horaInicioInput);
+                $horaFin = deliveryNormalizeManualHour($horaFinInput);
+                $activo = ((int)($_POST['activo'] ?? 1)) === 1 ? 1 : 0;
+                $nota = trim((string)($_POST['nota'] ?? ''));
+
+                if ($idCliente <= 0) {
+                    throw new Exception('Cliente invalido para guardar el horario.');
+                }
+                if ($idDireccion <= 0) {
+                    throw new Exception('Debes seleccionar un domicilio valido.');
+                }
+                if ($horaFin <= $horaInicio) {
+                    throw new Exception('La hora final debe ser mayor que la hora de inicio.');
+                }
+                if (mb_strlen($nota) > 255) {
+                    throw new Exception('La nota no puede exceder 255 caracteres.');
+                }
+
+                $existingStmt = $pdo->prepare('SELECT id_horario FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? ORDER BY id_horario ASC LIMIT 1');
+                $existingStmt->execute([$idCliente, $idDireccion]);
+                $existingHorarioId = (int)($existingStmt->fetchColumn() ?? 0);
+
+                if ($idHorario > 0) {
+                    $existingHorarioId = $idHorario;
+                } elseif ($existingHorarioId > 0) {
+                    $existingHorarioId = $existingHorarioId;
+                }
+
+                if ($existingHorarioId > 0) {
+                    $pdo->prepare('UPDATE cliente_horarios_entrega SET dia_semana = ?, hora_inicio = ?, hora_fin = ?, activo = ?, nota = ? WHERE id_horario = ? AND id_cliente = ?')
+                        ->execute([$diaSemana, $horaInicio, $horaFin, $activo, $nota !== '' ? $nota : null, $existingHorarioId, $idCliente]);
+                    $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? AND id_horario <> ?')->execute([$idCliente, $idDireccion, $existingHorarioId]);
+                    $success = 'Horario de entrega actualizado.';
+                } else {
+                    $pdo->beginTransaction();
+                    $pdo->prepare('INSERT INTO cliente_horarios_entrega (id_cliente, id_direccion, dia_semana, hora_inicio, hora_fin, activo, nota) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                        ->execute([$idCliente, $idDireccion, $diaSemana, $horaInicio, $horaFin, $activo, $nota !== '' ? $nota : null]);
+                    $lastInsertedId = (int)$pdo->lastInsertId();
+                    $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? AND id_horario <> ?')->execute([$idCliente, $idDireccion, $lastInsertedId]);
+                    $pdo->commit();
+                    $success = 'Horario de entrega guardado.';
+                }
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -278,10 +342,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             }
             $error = $e->getMessage();
         }
+
+        if ($success !== '' || $error !== '') {
+            $_SESSION[$sessionFlashKey] = [
+                'type' => $error !== '' ? 'error' : 'success',
+                'message' => $error !== '' ? $error : $success,
+            ];
+            header('Location: ' . basename($_SERVER['PHP_SELF']));
+            exit;
+        }
     }
 }
 
 $clientes = $pdo->query("SELECT c.*, u.id_usuario, u.estado AS estado_usuario, u.contrasena, COALESCE(u.estado, c.estado, 'activo') AS estado_visible, CASE WHEN u.id_usuario IS NULL THEN 'sucursal' ELSE 'sitio_web' END AS origen_registro, CASE WHEN u.id_usuario IS NOT NULL AND u.contrasena IS NOT NULL AND TRIM(u.contrasena) <> '' THEN 1 ELSE 0 END AS tiene_acceso_web, (SELECT a.nombre FROM pedidos p0 INNER JOIN almacenes a ON a.id_almacen = p0.id_almacen WHERE p0.id_cliente = c.id_cliente ORDER BY p0.id_pedido ASC LIMIT 1) AS sucursal_origen FROM clientes c LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario ORDER BY c.nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+$horariosPorCliente = [];
+try {
+    $stmtHorarios = $pdo->prepare("SELECT id_horario, id_cliente, id_direccion, dia_semana, hora_inicio, hora_fin, activo, nota FROM cliente_horarios_entrega ORDER BY id_cliente ASC, id_direccion ASC, dia_semana ASC");
+    $stmtHorarios->execute();
+    foreach ($stmtHorarios->fetchAll(PDO::FETCH_ASSOC) as $horario) {
+        $clienteId = (int)($horario['id_cliente'] ?? 0);
+        $horariosPorCliente[$clienteId][] = $horario;
+    }
+} catch (Throwable $e) {
+    $horariosPorCliente = [];
+}
 
 $idsClientes = [];
 foreach ($clientes as &$cliente) {
@@ -297,12 +382,19 @@ $direccionesPorCliente = [];
 if ($hasClienteDireccionesTable && !empty($idsClientes)) {
     $idsClientes = array_values(array_filter(array_unique($idsClientes), static fn(int $id): bool => $id > 0));
     if (!empty($idsClientes)) {
+        $addressCountersByClient = [];
         $placeholders = implode(', ', array_fill(0, count($idsClientes), '?'));
         $stmtDirecciones = $pdo->prepare("SELECT id_direccion, id_cliente, alias, direccion, maps_link, es_default FROM cliente_direcciones WHERE id_cliente IN ({$placeholders}) ORDER BY id_cliente ASC, es_default DESC, id_direccion ASC");
         $stmtDirecciones->execute($idsClientes);
         $direccionesRaw = $stmtDirecciones->fetchAll(PDO::FETCH_ASSOC);
         foreach ($direccionesRaw as $dir) {
-            $dir['alias'] = $safeDisplayValue((string)($dir['alias'] ?? ''), 'Direccion ' . (string)($dir['id_direccion'] ?? ''));
+            $clienteDireccionId = (int)($dir['id_cliente'] ?? 0);
+            if (!isset($addressCountersByClient[$clienteDireccionId])) {
+                $addressCountersByClient[$clienteDireccionId] = 0;
+            }
+            $addressCountersByClient[$clienteDireccionId]++;
+            $dir['alias'] = $safeDisplayValue((string)($dir['alias'] ?? ''), '');
+            $dir['alias'] = deliveryFormatAddressAlias($dir['alias'], (int)$addressCountersByClient[$clienteDireccionId]);
             $dir['direccion'] = $safeDisplayValue((string)($dir['direccion'] ?? ''), 'Direccion protegida');
             $dir['maps_link'] = $safeDisplayValue((string)($dir['maps_link'] ?? ''), '');
             $direccionesPorCliente[(int)$dir['id_cliente']][] = $dir;
@@ -386,6 +478,21 @@ include __DIR__ . '/includes/header.php';
 
     .manage-customers-col-hidden {
         display: none;
+    }
+
+    .modal {
+        max-width: 960px !important;
+        width: 92% !important;
+    }
+
+    .modal-content {
+        max-height: 82vh;
+        overflow-y: auto;
+    }
+
+    .manual-time-input {
+        font-size: 1.1rem;
+        letter-spacing: 0.05em;
     }
 </style>
 <div class="container">
@@ -558,136 +665,253 @@ include __DIR__ . '/includes/header.php';
                             </form>
                         </td>
                     </tr>
-
-                    <div id="modal-editar-cliente-<?php echo (int)$c['id_cliente']; ?>" class="modal" style="max-width: 640px;">
-                        <div class="modal-content">
-                            <h5>Editar cliente</h5>
-                            <form method="POST">
-                                <?php echo csrfInput(); ?>
-                                <input type="hidden" name="accion" value="editar_cliente">
-                                <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
-                                <div class="row">
-                                    <div class="input-field col s12 m6">
-                                        <input type="text" name="nombre" required value="<?php echo esc((string)$c['nombre']); ?>">
-                                        <label class="active">Nombre</label>
-                                    </div>
-                                    <div class="input-field col s12 m6">
-                                        <input type="email" name="email" value="<?php echo esc((string)($c['email'] ?? '')); ?>">
-                                        <label class="active">Email</label>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="input-field col s12 m6">
-                                        <input type="tel" name="telefono" maxlength="19" inputmode="numeric" autocomplete="tel-national" value="<?php echo esc((string)($c['telefono'] ?? '')); ?>">
-                                        <label class="active">Telefono</label>
-                                    </div>
-                                    <div class="col s12 m6" style="display:flex; align-items:center; min-height:72px; color:#546e7a;">
-                                        Administra direcciones en el boton de ubicacion para agregar una o varias con alias.
-                                    </div>
-                                </div>
-                                <div class="modal-footer" style="padding:0; background:transparent;">
-                                    <a href="#!" class="modal-close waves-effect btn-flat">Cancelar</a>
-                                    <button type="submit" class="btn blue darken-2 waves-effect waves-light">Guardar cambios</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-
-                    <div id="modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="modal modal-fixed-footer" style="max-width: 760px;">
-                        <div class="modal-content">
-                            <h5>Direcciones de <?php echo esc((string)$c['nombre']); ?></h5>
-                            <p class="grey-text" style="margin-top:0;">Agrega una o varias direcciones con alias para que ventas y reparto puedan elegir correctamente el domicilio.</p>
-                            <div class="divider"></div>
-                            <div class="row" style="margin-top:20px;">
-                                <div class="col s12 m6">
-                                    <ul class="collection">
-                                        <?php if (empty($direccionesCliente)): ?>
-                                            <li class="collection-item grey-text center">Sin direcciones registradas.</li>
-                                        <?php else: ?>
-                                            <?php foreach ($direccionesCliente as $d): ?>
-                                                <li class="collection-item">
-                                                    <strong><?php echo esc((string)$d['alias']); ?></strong>
-                                                    <?php if ((int)($d['es_default'] ?? 0) === 1): ?><span class="new badge blue" data-badge-caption="Predeterminada"></span><?php endif; ?><br>
-                                                    <span class="grey-text text-darken-1"><?php echo esc((string)$d['direccion']); ?></span>
-                                                    <?php if (trim((string)($d['maps_link'] ?? '')) !== ''): ?>
-                                                        <div style="margin-top:6px;">
-                                                            <a href="<?php echo esc((string)$d['maps_link']); ?>" target="_blank" rel="noopener noreferrer" class="blue-text">
-                                                                <i class="material-icons tiny">map</i> Abrir mapa
-                                                            </a>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                                                        <button type="button" class="btn-small amber darken-2 waves-effect waves-light" onclick='cargarEdicionDireccion(<?php echo (int)$c['id_cliente']; ?>, <?php echo json_encode([
-                                                            'id_direccion' => (int)$d['id_direccion'],
-                                                            'alias' => (string)$d['alias'],
-                                                            'direccion' => (string)$d['direccion'],
-                                                            'maps_link' => (string)($d['maps_link'] ?? ''),
-                                                            'es_default' => ((int)($d['es_default'] ?? 0)) === 1,
-                                                        ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>)'>Editar</button>
-                                                        <?php if ((int)($d['es_default'] ?? 0) !== 1): ?>
-                                                            <form method="POST" style="display:inline;">
-                                                                <?php echo csrfInput(); ?>
-                                                                <input type="hidden" name="accion" value="set_default_direccion">
-                                                                <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
-                                                                <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
-                                                                <button type="submit" class="btn-small blue lighten-1 waves-effect waves-light">Predeterminada</button>
-                                                            </form>
-                                                        <?php endif; ?>
-                                                        <form method="POST" style="display:inline;">
-                                                            <?php echo csrfInput(); ?>
-                                                            <input type="hidden" name="accion" value="eliminar_direccion">
-                                                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
-                                                            <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
-                                                            <button type="submit" class="btn-small red waves-effect waves-light" onclick="return confirm('¿Eliminar esta direccion?')">Eliminar</button>
-                                                        </form>
-                                                    </div>
-                                                </li>
-                                            <?php endforeach; ?>
-                                        <?php endif; ?>
-                                    </ul>
-                                </div>
-                                <div class="col s12 m6">
-                                    <div class="card-panel blue lighten-5" style="margin-top:0;">
-                                        <strong id="dir-form-title-<?php echo (int)$c['id_cliente']; ?>">Agregar direccion</strong>
-                                        <form method="POST" id="dir-form-<?php echo (int)$c['id_cliente']; ?>" style="margin-top:14px;">
-                                            <?php echo csrfInput(); ?>
-                                            <input type="hidden" name="accion" value="agregar_direccion" class="dir-accion">
-                                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
-                                            <input type="hidden" name="id_direccion" value="0" class="dir-id">
-                                            <div class="input-field">
-                                                <input type="text" name="alias" class="dir-alias" maxlength="50" required>
-                                                <label class="active">Alias</label>
-                                            </div>
-                                            <div class="input-field">
-                                                <textarea name="direccion" class="materialize-textarea dir-direccion" required></textarea>
-                                                <label class="active">Direccion</label>
-                                            </div>
-                                            <div class="input-field">
-                                                <input type="url" name="maps_link" class="dir-maps-link">
-                                                <label class="active">Link de Google Maps</label>
-                                            </div>
-                                            <p>
-                                                <label>
-                                                    <input type="checkbox" name="es_default" value="1" class="filled-in dir-default">
-                                                    <span>Marcar como predeterminada</span>
-                                                </label>
-                                            </p>
-                                            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
-                                                <button type="submit" class="btn blue darken-2 waves-effect waves-light">Guardar direccion</button>
-                                                <button type="button" class="btn-flat waves-effect" onclick="resetDireccionForm(<?php echo (int)$c['id_cliente']; ?>)">Cancelar edicion</button>
-                                            </div>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <a href="#!" class="modal-close waves-effect waves-green btn-flat">Cerrar</a>
-                        </div>
-                    </div>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <?php foreach ($clientes as $c): ?>
+                <?php
+                    $origenRegistro = (string)($c['origen_registro'] ?? 'sucursal');
+                    $direccionesCliente = $c['direcciones'] ?? [];
+                    $horariosCliente = $horariosPorCliente[(int)$c['id_cliente']] ?? [];
+                ?>
+                <div id="modal-editar-cliente-<?php echo (int)$c['id_cliente']; ?>" class="modal" style="max-width: 640px;">
+                    <div class="modal-content">
+                        <h5>Editar cliente</h5>
+                        <form method="POST">
+                            <?php echo csrfInput(); ?>
+                            <input type="hidden" name="accion" value="editar_cliente">
+                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                            <div class="row">
+                                <div class="input-field col s12 m6">
+                                    <input type="text" name="nombre" required value="<?php echo esc((string)$c['nombre']); ?>">
+                                    <label class="active">Nombre</label>
+                                </div>
+                                <div class="input-field col s12 m6">
+                                    <input type="email" name="email" value="<?php echo esc((string)($c['email'] ?? '')); ?>">
+                                    <label class="active">Email</label>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="input-field col s12 m6">
+                                    <input type="tel" name="telefono" maxlength="19" inputmode="numeric" autocomplete="tel-national" value="<?php echo esc((string)($c['telefono'] ?? '')); ?>">
+                                    <label class="active">Telefono</label>
+                                </div>
+                                <div class="col s12 m6" style="display:flex; align-items:center; min-height:72px; color:#546e7a;">
+                                    Administra direcciones en el boton de ubicacion para agregar una o varias con alias.
+                                </div>
+                            </div>
+                            <div class="modal-footer" style="padding:0; background:transparent;">
+                                <a href="#!" class="modal-close waves-effect btn-flat">Cancelar</a>
+                                <button type="submit" class="btn blue darken-2 waves-effect waves-light">Guardar cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="modal modal-fixed-footer" style="max-width: 760px;">
+                    <div class="modal-content">
+                        <h5>Direcciones de <?php echo esc((string)$c['nombre']); ?></h5>
+                        <p class="grey-text" style="margin-top:0;">Agrega una o varias direcciones con alias para que ventas y reparto puedan elegir correctamente el domicilio.</p>
+                        <div class="divider"></div>
+                        <div class="row" style="margin-top:20px;">
+                            <div class="col s12 m6">
+                                <ul class="collection">
+                                    <?php if (empty($direccionesCliente)): ?>
+                                        <li class="collection-item grey-text center">Sin direcciones registradas.</li>
+                                    <?php else: ?>
+                                        <?php foreach ($direccionesCliente as $d): ?>
+                                            <li class="collection-item">
+                                                <strong><?php echo esc((string)$d['alias']); ?></strong>
+                                                <?php if ((int)($d['es_default'] ?? 0) === 1): ?><span class="new badge blue" data-badge-caption="Predeterminada"></span><?php endif; ?><br>
+                                                <span class="grey-text text-darken-1"><?php echo esc((string)$d['direccion']); ?></span>
+                                                <?php if (trim((string)($d['maps_link'] ?? '')) !== ''): ?>
+                                                    <div style="margin-top:6px;">
+                                                        <a href="<?php echo esc((string)$d['maps_link']); ?>" target="_blank" rel="noopener noreferrer" class="blue-text">
+                                                            <i class="material-icons tiny">map</i> Abrir mapa
+                                                        </a>
+                                                    </div>
+                                                <?php endif; ?>
+                                                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                                                    <button type="button" class="btn-small amber darken-2 waves-effect waves-light" onclick='cargarEdicionDireccion(<?php echo (int)$c['id_cliente']; ?>, <?php echo json_encode([
+                                                        'id_direccion' => (int)$d['id_direccion'],
+                                                        'alias' => (string)$d['alias'],
+                                                        'direccion' => (string)$d['direccion'],
+                                                        'maps_link' => (string)($d['maps_link'] ?? ''),
+                                                        'es_default' => ((int)($d['es_default'] ?? 0)) === 1,
+                                                    ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>)'>Editar</button>
+                                                    <?php if ((int)($d['es_default'] ?? 0) !== 1): ?>
+                                                        <form method="POST" style="display:inline;">
+                                                            <?php echo csrfInput(); ?>
+                                                            <input type="hidden" name="accion" value="set_default_direccion">
+                                                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                                                            <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
+                                                            <button type="submit" class="btn-small blue lighten-1 waves-effect waves-light">Predeterminada</button>
+                                                        </form>
+                                                    <?php endif; ?>
+                                                    <form method="POST" style="display:inline;">
+                                                        <?php echo csrfInput(); ?>
+                                                        <input type="hidden" name="accion" value="eliminar_direccion">
+                                                        <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                                                        <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
+                                                        <button type="submit" class="btn-small red waves-effect waves-light" onclick="return confirm('¿Eliminar esta direccion?')">Eliminar</button>
+                                                    </form>
+                                                </div>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </ul>
+                            </div>
+                            <div class="col s12 m6">
+                                <div class="card-panel blue lighten-5" style="margin-top:0;">
+                                    <strong id="dir-form-title-<?php echo (int)$c['id_cliente']; ?>">Agregar direccion</strong>
+                                    <form method="POST" id="dir-form-<?php echo (int)$c['id_cliente']; ?>" style="margin-top:14px;">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="accion" value="agregar_direccion" class="dir-accion">
+                                        <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                                        <input type="hidden" name="id_direccion" value="0" class="dir-id">
+                                        <div class="input-field">
+                                            <input type="text" name="alias" class="dir-alias" maxlength="50" required>
+                                            <label class="active">Alias</label>
+                                        </div>
+                                        <div class="input-field">
+                                            <textarea name="direccion" class="materialize-textarea dir-direccion" required></textarea>
+                                            <label class="active">Direccion</label>
+                                        </div>
+                                        <div class="input-field">
+                                            <input type="url" name="maps_link" class="dir-maps-link">
+                                            <label class="active">Link de Google Maps</label>
+                                        </div>
+                                        <p>
+                                            <label>
+                                                <input type="checkbox" name="es_default" value="1" class="filled-in dir-default">
+                                                <span>Marcar como predeterminada</span>
+                                            </label>
+                                        </p>
+                                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
+                                            <button type="submit" class="btn blue darken-2 waves-effect waves-light">Guardar direccion</button>
+                                            <button type="button" class="btn-flat waves-effect" onclick="resetDireccionForm(<?php echo (int)$c['id_cliente']; ?>)">Cancelar edicion</button>
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <div class="card-panel amber lighten-5" style="margin-top:18px;">
+                                    <strong>Preferencias de entrega por horario</strong>
+                                    <p class="grey-text" style="margin:8px 0 0;">Registra ventanas por dia para este cliente y domicilio. La ruta los tomara en cuenta al ordenar las paradas.</p>
+
+                                    <?php if (!empty($horariosCliente)): ?>
+                                        <ul class="collection" style="margin-top:12px;">
+                                            <?php foreach ($horariosCliente as $horario): ?>
+                                                <?php $dirAlias = 'General'; ?>
+                                                <?php foreach ($c['direcciones'] as $dir): ?>
+                                                    <?php if ((int)($dir['id_direccion'] ?? 0) === (int)($horario['id_direccion'] ?? 0)): ?>
+                                                        <?php $dirAlias = (string)($dir['alias'] ?? 'General'); ?>
+                                                    <?php endif; ?>
+                                                <?php endforeach; ?>
+                                                <li class="collection-item">
+                                                    <div><strong><?php echo esc((string)$horario['dia_semana']); ?></strong> · <?php echo esc((string)$dirAlias); ?></div>
+                                                    <div class="grey-text text-darken-1"><?php echo esc((string)$horario['hora_inicio']); ?> - <?php echo esc((string)$horario['hora_fin']); ?></div>
+                                                    <?php if (trim((string)($horario['nota'] ?? '')) !== ''): ?><div class="grey-text text-darken-1"><?php echo esc((string)$horario['nota']); ?></div><?php endif; ?>
+                                                    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                                                        <button type="button" class="btn-small amber darken-2 waves-effect waves-light" onclick='cargarEdicionHorario(<?php echo (int)$c['id_cliente']; ?>, <?php echo json_encode([
+                                                            'id_horario' => (int)($horario['id_horario'] ?? 0),
+                                                            'id_direccion' => (int)($horario['id_direccion'] ?? 0),
+                                                            'dia_semana' => (string)($horario['dia_semana'] ?? ''),
+                                                            'hora_inicio' => (string)($horario['hora_inicio'] ?? ''),
+                                                            'hora_fin' => (string)($horario['hora_fin'] ?? ''),
+                                                            'activo' => ((int)($horario['activo'] ?? 1)) === 1,
+                                                            'nota' => (string)($horario['nota'] ?? ''),
+                                                        ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>)'>Editar</button>
+                                                    </div>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    <?php else: ?>
+                                        <p class="grey-text" style="margin:12px 0 0;">Todavia no hay horarios registrados para este cliente.</p>
+                                    <?php endif; ?>
+
+                                    <form method="POST" style="margin-top:16px;" data-schedule-form id="schedule-form-<?php echo (int)$c['id_cliente']; ?>">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="accion" value="guardar_horario_direccion">
+                                        <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                                        <input type="hidden" name="id_horario" value="0" class="schedule-id">
+                                        <div class="row" style="margin-bottom:0;">
+                                            <div class="input-field col s12 m4">
+                                                <select name="id_direccion" class="browser-default schedule-direccion" required>
+                                                    <option value="">Selecciona domicilio</option>
+                                                    <?php foreach ($c['direcciones'] as $dir): ?>
+                                                        <option value="<?php echo (int)$dir['id_direccion']; ?>"><?php echo esc((string)$dir['alias']); ?></option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                                <label class="active">Domicilio</label>
+                                            </div>
+                                            <div class="input-field col s12 m3">
+                                                <select name="dia_semana" class="browser-default schedule-dia" required>
+                                                    <option value="">Dia</option>
+                                                    <option value="lunes">Lunes</option>
+                                                    <option value="martes">Martes</option>
+                                                    <option value="miercoles">Miercoles</option>
+                                                    <option value="jueves">Jueves</option>
+                                                    <option value="viernes">Viernes</option>
+                                                    <option value="sabado">Sabado</option>
+                                                    <option value="domingo">Domingo</option>
+                                                </select>
+                                            </div>
+                                            <div class="input-field col s12 m1">
+                                                <label>
+                                                    <input type="checkbox" name="activo" value="1" checked class="filled-in schedule-activo">
+                                                    <span></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="row" style="margin-bottom:8px;">
+                                            <div class="input-field col s12 m6">
+                                                <label class="active">Inicio</label>
+                                                <div class="row" style="margin-bottom:0;">
+                                                    <div class="col s8" style="padding-right:4px;">
+                                                        <input type="text" name="hora_inicio" class="schedule-hora-inicio" placeholder="09:30" required inputmode="numeric" pattern="^(?:[0-9]|0[0-9]|1[0-2]):[0-5][0-9]$">
+                                                    </div>
+                                                    <div class="col s4" style="padding-left:4px;">
+                                                        <select name="hora_inicio_meridiem" class="browser-default schedule-hora-inicio-meridiem" required>
+                                                            <option value="AM">AM</option>
+                                                            <option value="PM">PM</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="input-field col s12 m6">
+                                                <label class="active">Fin</label>
+                                                <div class="row" style="margin-bottom:0;">
+                                                    <div class="col s8" style="padding-right:4px;">
+                                                        <input type="text" name="hora_fin" class="schedule-hora-fin" placeholder="06:45" required inputmode="numeric" pattern="^(?:[0-9]|0[0-9]|1[0-2]):[0-5][0-9]$">
+                                                    </div>
+                                                    <div class="col s4" style="padding-left:4px;">
+                                                        <select name="hora_fin_meridiem" class="browser-default schedule-hora-fin-meridiem" required>
+                                                            <option value="AM">AM</option>
+                                                            <option value="PM">PM</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="input-field">
+                                            <input type="text" name="nota" maxlength="255" placeholder="Ej: Entrega solo antes de la comida" class="schedule-nota">
+                                            <label class="active">Nota opcional</label>
+                                        </div>
+                                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                                            <button type="submit" class="btn amber darken-3 waves-effect waves-light schedule-submit-btn">Guardar horario</button>
+                                            <button type="button" class="btn-flat waves-effect" onclick='resetHorarioForm(<?php echo (int)$c['id_cliente']; ?>)'>Cancelar edicion</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Cerrar</a>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         </div>
     </div>
 </div>
@@ -773,6 +997,65 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ignora bloqueos de storage sin romper la vista.
         }
     }
+
+    function formatTimeInputValue(value) {
+        if (!value) return '';
+        const digits = String(value).replace(/[^0-9]/g, '').slice(0, 4);
+        if (digits.length <= 2) {
+            return digits;
+        }
+        return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+    }
+
+    function normalizeTimeInput(input) {
+        const formatted = formatTimeInputValue(input.value || '');
+        input.value = formatted;
+        return /^(?:[0-9]|0[0-9]|1[0-2]):[0-5][0-9]$/.test(formatted);
+    }
+
+    document.querySelectorAll('.schedule-hora-inicio, .schedule-hora-fin').forEach((input) => {
+        input.addEventListener('input', () => {
+            input.value = formatTimeInputValue(input.value || '');
+        });
+
+        input.addEventListener('blur', () => {
+            const formatted = formatTimeInputValue(input.value || '');
+            input.value = formatted.includes(':') ? formatted : `${formatted.slice(0, 2)}:${formatted.slice(2)}`;
+            normalizeTimeInput(input);
+        });
+    });
+
+    document.querySelectorAll('[data-schedule-form]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+            const startTime = form.querySelector('.schedule-hora-inicio');
+            const startMeridiem = form.querySelector('.schedule-hora-inicio-meridiem');
+            const endTime = form.querySelector('.schedule-hora-fin');
+            const endMeridiem = form.querySelector('.schedule-hora-fin-meridiem');
+            let ok = true;
+
+            [startTime, startMeridiem, endTime, endMeridiem].forEach((field) => {
+                if (field && !field.value) {
+                    ok = false;
+                }
+            });
+
+            if (startTime && !normalizeTimeInput(startTime)) {
+                ok = false;
+            }
+
+            if (endTime && !normalizeTimeInput(endTime)) {
+                ok = false;
+            }
+
+            if (!ok) {
+                event.preventDefault();
+                const invalid = form.querySelector(':invalid');
+                if (invalid) {
+                    invalid.focus();
+                }
+            }
+        });
+    });
 
     function applyColumnVisibility(columnName, visible) {
         document.querySelectorAll(`.js-col-${columnName}`).forEach((cell) => {
@@ -883,6 +1166,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
     applyFilters();
 });
+
+function resetHorarioForm(idCliente) {
+    const form = document.getElementById(`schedule-form-${idCliente}`);
+    if (!form) return;
+    form.querySelector('.schedule-id').value = '0';
+    form.querySelector('.schedule-direccion').value = '';
+    form.querySelector('.schedule-dia').value = '';
+    form.querySelector('.schedule-hora-inicio').value = '09:00';
+    form.querySelector('.schedule-hora-inicio-meridiem').value = 'AM';
+    form.querySelector('.schedule-hora-fin').value = '06:00';
+    form.querySelector('.schedule-hora-fin-meridiem').value = 'PM';
+    form.querySelector('.schedule-nota').value = '';
+    const activo = form.querySelector('.schedule-activo');
+    if (activo) activo.checked = true;
+    const submitBtn = form.querySelector('.schedule-submit-btn');
+    if (submitBtn) submitBtn.textContent = 'Guardar horario';
+    M.updateTextFields();
+    form.reset();
+}
+
+function cargarEdicionHorario(idCliente, data) {
+    const form = document.getElementById(`schedule-form-${idCliente}`);
+    if (!form || !data) return;
+    form.querySelector('.schedule-id').value = String(data.id_horario || '0');
+    form.querySelector('.schedule-direccion').value = String(data.id_direccion || '');
+    form.querySelector('.schedule-dia').value = String(data.dia_semana || '');
+    const startValue = String(data.hora_inicio || '');
+    const endValue = String(data.hora_fin || '');
+    const parseTimeValue = (value) => {
+        if (!value) {
+            return { time: '09:00', meridiem: 'AM' };
+        }
+        const [timePart, meridiemPart] = String(value).split(' ');
+        const [hourRaw, minuteRaw] = (timePart || '00:00').split(':');
+        let hour = parseInt(hourRaw || '0', 10);
+        if (Number.isNaN(hour)) {
+            hour = 0;
+        }
+        let meridiem = 'AM';
+        if (meridiemPart && (meridiemPart === 'PM' || meridiemPart === 'AM')) {
+            meridiem = meridiemPart;
+        } else if (hour >= 12) {
+            meridiem = 'PM';
+        }
+        const hourString = String(hour % 12 || 12).padStart(2, '0');
+        const minuteString = String(parseInt(minuteRaw || '0', 10)).padStart(2, '0');
+        return { time: `${hourString}:${minuteString}`, meridiem };
+    };
+
+    const startParts = parseTimeValue(startValue);
+    const endParts = parseTimeValue(endValue);
+    form.querySelector('.schedule-hora-inicio').value = startParts.time;
+    form.querySelector('.schedule-hora-inicio-meridiem').value = startParts.meridiem;
+    form.querySelector('.schedule-hora-fin').value = endParts.time;
+    form.querySelector('.schedule-hora-fin-meridiem').value = endParts.meridiem;
+    form.querySelector('.schedule-nota').value = String(data.nota || '');
+    const activo = form.querySelector('.schedule-activo');
+    if (activo) activo.checked = !!data.activo;
+    const submitBtn = form.querySelector('.schedule-submit-btn');
+    if (submitBtn) submitBtn.textContent = 'Actualizar horario';
+    M.updateTextFields();
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 
 function resetDireccionForm(idCliente) {
     const form = document.getElementById(`dir-form-${idCliente}`);

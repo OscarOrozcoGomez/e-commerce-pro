@@ -48,6 +48,61 @@ function routeToFloat($value): ?float
     return (float)$value;
 }
 
+function routeParseBoolEnv(?string $value): ?bool
+{
+    if ($value === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($value));
+    if ($normalized === '') {
+        return null;
+    }
+
+    if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+        return true;
+    }
+
+    if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+        return false;
+    }
+
+    return null;
+}
+
+function routeIsLocalNoCostMode(): bool
+{
+    $forceEnv = getenv('ROUTE_FORCE_LOCAL_NO_COST');
+    if ($forceEnv === false) {
+        $forceEnv = $_SERVER['ROUTE_FORCE_LOCAL_NO_COST'] ?? $_ENV['ROUTE_FORCE_LOCAL_NO_COST'] ?? null;
+    }
+    $forced = routeParseBoolEnv(is_string($forceEnv) ? $forceEnv : null);
+    if ($forced !== null) {
+        return $forced;
+    }
+
+    $allowGoogleLocalEnv = getenv('ALLOW_GOOGLE_ROUTES_LOCAL');
+    if ($allowGoogleLocalEnv === false) {
+        $allowGoogleLocalEnv = $_SERVER['ALLOW_GOOGLE_ROUTES_LOCAL'] ?? $_ENV['ALLOW_GOOGLE_ROUTES_LOCAL'] ?? null;
+    }
+    $allowGoogleLocal = routeParseBoolEnv(is_string($allowGoogleLocalEnv) ? $allowGoogleLocalEnv : null) ?? false;
+
+    $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $isLocalHost = strpos($host, 'localhost') !== false
+        || strpos($host, '127.0.0.1') !== false
+        || strpos($host, '[::1]') !== false
+        || strpos($host, '::1') !== false;
+
+    $appEnv = defined('APP_ENV') ? strtolower((string)APP_ENV) : '';
+    $isLocalEnv = in_array($appEnv, ['qa', 'local', 'dev', 'development', 'test'], true);
+
+    if (($isLocalHost || $isLocalEnv) && !$allowGoogleLocal) {
+        return true;
+    }
+
+    return false;
+}
+
 function routeCleanPiiValue(string $value): string
 {
     $clean = trim($value);
@@ -219,14 +274,23 @@ foreach ($idsRaw as $idValue) {
 }
 $pedidoIds = array_values(array_unique($pedidoIds));
 
-if (count($pedidoIds) < 2) {
-    routeJsonResponse(['success' => false, 'error' => 'Selecciona al menos 2 pedidos para generar ruta.'], 422);
+if (count($pedidoIds) < 1) {
+    routeJsonResponse(['success' => false, 'error' => 'Selecciona al menos 1 pedido para generar ruta.'], 422);
+}
+
+$fechaEntregaFiltro = trim((string)($payload['fecha_entrega_filtro'] ?? ''));
+if ($fechaEntregaFiltro !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaEntregaFiltro)) {
+    routeJsonResponse([
+        'success' => false,
+        'error' => 'La fecha de filtro no es valida. Usa formato YYYY-MM-DD.',
+    ], 422);
 }
 
 $usuario = $_SESSION['usuario'];
 $usuarioId = (int)($usuario['id_usuario'] ?? 0);
 
 $pdo = getPDO();
+$forceLocalNoCostMode = routeIsLocalNoCostMode();
 
 try {
     $hasPedidosLat = false;
@@ -241,6 +305,7 @@ try {
     $hasClientesTelefono = false;
     $hasClientesUbicacionMapa = false;
     $hasClienteDirecciones = false;
+    $hasClienteHorariosEntrega = false;
 
     $metaSqlColumn = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name";
     $metaSqlTable = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name";
@@ -283,6 +348,9 @@ try {
     $metaTableStmt = $pdo->prepare($metaSqlTable);
     $metaTableStmt->execute([':table_name' => 'cliente_direcciones']);
     $hasClienteDirecciones = ((int)$metaTableStmt->fetchColumn()) > 0;
+
+    $metaTableStmt->execute([':table_name' => 'cliente_horarios_entrega']);
+    $hasClienteHorariosEntrega = ((int)$metaTableStmt->fetchColumn()) > 0;
 
     $pedidoLatExpr = $hasPedidosLat ? 'p.latitud' : 'NULL';
     $pedidoLngExpr = $hasPedidosLng ? 'p.longitud' : 'NULL';
@@ -334,7 +402,8 @@ try {
 
     $placeholders = implode(',', array_fill(0, count($pedidoIds), '?'));
 
-    $sql = "SELECT p.id_pedido, p.numero_pedido, p.id_repartidor, p.estado,
+    $sql = "SELECT p.id_pedido, p.numero_pedido, p.id_repartidor, p.id_cliente, p.estado,
+                   p.fecha_entrega_programada,
                    {$pedidoLatExpr} AS latitud,
                    {$pedidoLngExpr} AS longitud,
                    {$mapsExpr} AS maps_link,
@@ -361,7 +430,21 @@ try {
     $stmt->execute($params);
     $pedidos = $stmt->fetchAll();
 
-    if (count($pedidos) < 2) {
+    $preferenciasPorCliente = [];
+    if ($hasClienteHorariosEntrega && !empty($pedidos)) {
+        $idsClientes = array_values(array_unique(array_filter(array_map(static fn($row): int => (int)($row['id_cliente'] ?? 0), $pedidos), static fn(int $id): bool => $id > 0)));
+        if (!empty($idsClientes)) {
+            $placeholdersClientes = implode(',', array_fill(0, count($idsClientes), '?'));
+            $stmtPrefs = $pdo->prepare("SELECT id_cliente, id_direccion, dia_semana, hora_inicio, hora_fin, activo, nota FROM cliente_horarios_entrega WHERE activo = 1 AND id_cliente IN ({$placeholdersClientes}) ORDER BY id_cliente ASC, id_direccion ASC, dia_semana ASC");
+            $stmtPrefs->execute($idsClientes);
+            foreach ($stmtPrefs->fetchAll() as $row) {
+                $clienteId = (int)($row['id_cliente'] ?? 0);
+                $preferenciasPorCliente[$clienteId][] = $row;
+            }
+        }
+    }
+
+    if (count($pedidos) < 1) {
         routeJsonResponse([
             'success' => false,
             'error' => 'No hay suficientes pedidos validos para optimizar. Verifica asignacion y estado.',
@@ -383,9 +466,39 @@ try {
         ], 422);
     }
 
+    $fechasDetectadas = [];
+    foreach ($pedidos as $pedidoTmp) {
+        $fechaProgramadaRaw = trim((string)($pedidoTmp['fecha_entrega_programada'] ?? ''));
+        $fechaProgramada = '';
+        if ($fechaProgramadaRaw !== '') {
+            $timestampFecha = strtotime($fechaProgramadaRaw);
+            if ($timestampFecha !== false) {
+                $fechaProgramada = date('Y-m-d', $timestampFecha);
+            }
+        }
+
+        if ($fechaEntregaFiltro !== '' && $fechaProgramada !== $fechaEntregaFiltro) {
+            routeJsonResponse([
+                'success' => false,
+                'error' => 'Hay pedidos fuera del dia seleccionado. Filtra por dia y vuelve a generar la ruta.',
+            ], 422);
+        }
+
+        if ($fechaProgramada !== '') {
+            $fechasDetectadas[$fechaProgramada] = true;
+        }
+    }
+
+    if ($fechaEntregaFiltro === '' && count($fechasDetectadas) > 1) {
+        routeJsonResponse([
+            'success' => false,
+            'error' => 'Selecciona pedidos de un solo dia para generar una ruta coherente.',
+        ], 422);
+    }
+
     $warnings = [];
     $validStops = [];
-    $routesKey = getMapsApiKey(true);
+    $routesKey = $forceLocalNoCostMode ? '' : getMapsApiKey(true);
 
     foreach ($pedidos as $pedido) {
         $pedidoId = (int)$pedido['id_pedido'];
@@ -406,7 +519,7 @@ try {
 
         if ($coords === null) {
             $direccionPedido = trim((string)($pedido['direccion'] ?? ''));
-            if ($direccionPedido !== '') {
+            if (!$forceLocalNoCostMode && $direccionPedido !== '') {
                 if (function_exists('piiIsEncryptedValue')
                     && function_exists('piiDecryptValue')
                     && piiIsEncryptedValue($direccionPedido)) {
@@ -420,7 +533,9 @@ try {
             $warnings[] = [
                 'id_pedido' => $pedidoId,
                 'numero_pedido' => (string)$pedido['numero_pedido'],
-                'reason' => 'No fue posible obtener coordenadas desde la URL de ubicacion.',
+                'reason' => $forceLocalNoCostMode
+                    ? 'Sin coordenadas locales disponibles (modo sin costo activo: no se consulto Google Geocoding).'
+                    : 'No fue posible obtener coordenadas desde la URL de ubicacion.',
             ];
             continue;
         }
@@ -445,8 +560,38 @@ try {
             $direccion = (string)piiDecryptValue($direccion);
         }
 
+        $deliveryPreferences = ['ventanas' => []];
+        if ($hasClienteHorariosEntrega) {
+            $clienteId = (int)($pedido['id_cliente'] ?? 0);
+            $direccionActual = routeCleanPiiValue($direccion);
+            $direccionAtualLower = strtolower($direccionActual);
+            $matchedRows = $preferenciasPorCliente[$clienteId] ?? [];
+            $matchedWindows = [];
+            foreach ($matchedRows as $pref) {
+                $prefDia = deliveryNormalizeWeekdayKey((string)($pref['dia_semana'] ?? ''));
+                $prefInicio = trim((string)($pref['hora_inicio'] ?? '00:00'));
+                $prefFin = trim((string)($pref['hora_fin'] ?? '23:59'));
+                if ($prefDia === null || $prefInicio === '' || $prefFin === '') {
+                    continue;
+                }
+                $prefDireccion = trim((string)($pref['direccion'] ?? ''));
+                if ($prefDireccion !== '' && $prefDireccion !== $direccionAtualLower && strtolower($prefDireccion) !== $direccionAtualLower) {
+                    continue;
+                }
+                $matchedWindows[] = [
+                    'dia' => $prefDia,
+                    'inicio' => $prefInicio,
+                    'fin' => $prefFin,
+                ];
+            }
+            if (!empty($matchedWindows)) {
+                $deliveryPreferences = ['ventanas' => array_map(static fn(array $window): array => deliveryNormalizeWindow($window, 'cliente_horario'), $matchedWindows)];
+            }
+        }
+
         $validStops[] = [
             'id_pedido' => $pedidoId,
+            'id_cliente' => (int)($pedido['id_cliente'] ?? 0),
             'numero_pedido' => (string)$pedido['numero_pedido'],
             'cliente' => routeCleanPiiValue($nombreCliente),
             'telefono' => routeCleanPiiValue($telefono),
@@ -456,16 +601,30 @@ try {
             'fecha_limite_entrega' => isset($pedido['fecha_limite_entrega']) ? (string)$pedido['fecha_limite_entrega'] : null,
             'prioridad_entrega' => (int)($pedido['prioridad_entrega'] ?? 0),
             'tiempo_servicio_min' => max(0, (int)($pedido['tiempo_servicio_min'] ?? 5)),
+            'delivery_preferences' => $deliveryPreferences,
         ];
     }
 
-    if (count($validStops) < 2) {
+    if (count($validStops) < 1) {
         routeJsonResponse([
             'success' => false,
             'error' => 'No hay suficientes pedidos con coordenadas validas para optimizar.',
             'hint' => 'Cada pedido seleccionado debe tener link de mapa resoluble o direccion geocodificable.',
             'warnings' => $warnings,
         ], 422);
+    }
+
+    $departureForOrdering = new DateTimeImmutable('now');
+    $horaSalidaRaw = trim((string)($payload['hora_salida'] ?? ''));
+    if ($horaSalidaRaw !== '') {
+        $departureCandidate = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $horaSalidaRaw);
+        if ($departureCandidate instanceof DateTimeImmutable) {
+            $departureForOrdering = $departureCandidate;
+        }
+    }
+
+    if (count($validStops) > 1) {
+        $validStops = deliveryOrderStopsByWindowPriority($validStops, $departureForOrdering, $origin);
     }
 
     $body = [
@@ -495,7 +654,7 @@ try {
                 ],
             ];
         }, $validStops),
-        'optimizeWaypointOrder' => true,
+        'optimizeWaypointOrder' => false,
         'travelMode' => 'DRIVE',
     ];
 
@@ -504,83 +663,17 @@ try {
         routeJsonResponse(['success' => false, 'error' => 'No se pudo serializar la solicitud de optimizacion.'], 500);
     }
 
-    $endpoint = 'https://routes.googleapis.com/directions/v2:computeRoutes';
-
-    $responseBody = '';
-    $httpCode = 0;
-    $curlErr = '';
-
-    if (function_exists('curl_init')) {
-        $ch = curl_init($endpoint);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-            'X-Goog-Api-Key: ' . $routesKey,
-            'X-Goog-FieldMask: routes.optimizedIntermediateWaypointIndex,routes.legs,routes.distanceMeters,routes.duration',
-        ]);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-
-        $exec = curl_exec($ch);
-        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr = (string)curl_error($ch);
-        curl_close($ch);
-
-        if ($exec === false) {
-            routeJsonResponse([
-                'success' => false,
-                'error' => 'Fallo de conexion al consultar Google Routes API.',
-                'detail' => $curlErr,
-            ], 502);
-        }
-
-        $responseBody = (string)$exec;
-    } else {
-        $res = gsmHttpRequest('POST', $endpoint, $requestBody, [
-            'Content-Type' => 'application/json',
-            'X-Goog-Api-Key' => $routesKey,
-            'X-Goog-FieldMask' => 'routes.optimizedIntermediateWaypointIndex,routes.legs,routes.distanceMeters,routes.duration',
-        ], 20);
-
-        $httpCode = (int)($res['code'] ?? 0);
-        $responseBody = (string)($res['body'] ?? '');
-        if (!$res['ok']) {
-            routeJsonResponse([
-                'success' => false,
-                'error' => 'Google Routes API rechazo la solicitud.',
-                'detail' => (string)($res['error'] ?? ''),
-                'http_code' => $httpCode,
-            ], 502);
-        }
-    }
-
-    $decoded = json_decode($responseBody, true);
-    if (!is_array($decoded)) {
-        routeJsonResponse([
-            'success' => false,
-            'error' => 'Respuesta invalida de Google Routes API.',
-            'http_code' => $httpCode,
-        ], 502);
-    }
-
-    $route = $decoded['routes'][0] ?? null;
+    $route = null;
     $usingFallbackRoute = false;
     $fallbackReason = '';
-    if (!is_array($route)) {
-        $apiErrorMsg = '';
-        if (isset($decoded['error']['message']) && is_string($decoded['error']['message'])) {
-            $apiErrorMsg = $decoded['error']['message'];
-        }
+
+    if ($forceLocalNoCostMode) {
         $fallback = routeBuildLocalFallback($origin, $validStops);
         if (count($fallback['optimizedIndex']) < count($validStops)) {
             routeJsonResponse([
                 'success' => false,
-                'error' => 'No se obtuvo una ruta valida desde Google.',
-                'detail' => $apiErrorMsg,
-                'http_code' => $httpCode,
-            ], 502);
+                'error' => 'No se pudo generar ruta local valida en modo sin costo.',
+            ], 422);
         }
 
         $route = [
@@ -590,7 +683,94 @@ try {
             'duration' => $fallback['durationSeconds'] . 's',
         ];
         $usingFallbackRoute = true;
-        $fallbackReason = $apiErrorMsg !== '' ? $apiErrorMsg : 'Google Routes API no devolvio rutas.';
+        $fallbackReason = 'Modo local sin costo activo: no se consulto Google Routes API.';
+    } else {
+        $endpoint = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+
+        $responseBody = '';
+        $httpCode = 0;
+        $curlErr = '';
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init($endpoint);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Content-Type: application/json',
+                'X-Goog-Api-Key: ' . $routesKey,
+                'X-Goog-FieldMask: routes.optimizedIntermediateWaypointIndex,routes.legs,routes.distanceMeters,routes.duration',
+            ]);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+
+            $exec = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlErr = (string)curl_error($ch);
+            curl_close($ch);
+
+            if ($exec === false) {
+                routeJsonResponse([
+                    'success' => false,
+                    'error' => 'Fallo de conexion al consultar Google Routes API.',
+                    'detail' => $curlErr,
+                ], 502);
+            }
+
+            $responseBody = (string)$exec;
+        } else {
+            $res = gsmHttpRequest('POST', $endpoint, $requestBody, [
+                'Content-Type' => 'application/json',
+                'X-Goog-Api-Key' => $routesKey,
+                'X-Goog-FieldMask' => 'routes.optimizedIntermediateWaypointIndex,routes.legs,routes.distanceMeters,routes.duration',
+            ], 20);
+
+            $httpCode = (int)($res['code'] ?? 0);
+            $responseBody = (string)($res['body'] ?? '');
+            if (!$res['ok']) {
+                routeJsonResponse([
+                    'success' => false,
+                    'error' => 'Google Routes API rechazo la solicitud.',
+                    'detail' => (string)($res['error'] ?? ''),
+                    'http_code' => $httpCode,
+                ], 502);
+            }
+        }
+
+        $decoded = json_decode($responseBody, true);
+        if (!is_array($decoded)) {
+            routeJsonResponse([
+                'success' => false,
+                'error' => 'Respuesta invalida de Google Routes API.',
+                'http_code' => $httpCode,
+            ], 502);
+        }
+
+        $route = $decoded['routes'][0] ?? null;
+        if (!is_array($route)) {
+            $apiErrorMsg = '';
+            if (isset($decoded['error']['message']) && is_string($decoded['error']['message'])) {
+                $apiErrorMsg = $decoded['error']['message'];
+            }
+            $fallback = routeBuildLocalFallback($origin, $validStops);
+            if (count($fallback['optimizedIndex']) < count($validStops)) {
+                routeJsonResponse([
+                    'success' => false,
+                    'error' => 'No se obtuvo una ruta valida desde Google.',
+                    'detail' => $apiErrorMsg,
+                    'http_code' => $httpCode,
+                ], 502);
+            }
+
+            $route = [
+                'optimizedIntermediateWaypointIndex' => $fallback['optimizedIndex'],
+                'legs' => $fallback['legs'],
+                'distanceMeters' => $fallback['distanceMeters'],
+                'duration' => $fallback['durationSeconds'] . 's',
+            ];
+            $usingFallbackRoute = true;
+            $fallbackReason = $apiErrorMsg !== '' ? $apiErrorMsg : 'Google Routes API no devolvio rutas.';
+        }
     }
 
     $optimizedIndex = $route['optimizedIntermediateWaypointIndex'] ?? [];
@@ -614,6 +794,12 @@ try {
     $departure = $horaSalidaRaw !== '' ? DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $horaSalidaRaw) : null;
     if (!$departure instanceof DateTimeImmutable) {
         $departure = new DateTimeImmutable('now');
+    }
+
+    foreach ($orderedByGoogle as $pos => $stop) {
+        $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
+        $stop['delivery_preferences'] = $preferences;
+        $orderedByGoogle[$pos] = $stop;
     }
 
     $legs = is_array($route['legs'] ?? null) ? $route['legs'] : [];
