@@ -23,6 +23,7 @@ function thankYouEnv(string $name, ?string $default = null): ?string
 $host = $_SERVER['HTTP_HOST'] ?? '';
 $isLocal = strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false;
 $baseUrl = $isLocal ? '/e-commerce-pro/' : '/';
+$allowMarketingLocal = filter_var((string) thankYouEnv('ALLOW_MARKETING_LOCAL', '0'), FILTER_VALIDATE_BOOLEAN);
 
 $orderId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, [
     'options' => ['min_range' => 1],
@@ -53,6 +54,10 @@ if ($hasValidOrder) {
         $_SESSION['thanks_page_seen'][$sessionKey] = $now;
         $shouldTriggerConversion = true;
     }
+}
+
+if ($isLocal && !$allowMarketingLocal) {
+    $shouldTriggerConversion = false;
 }
 
 $detailUrl = $hasValidOrder

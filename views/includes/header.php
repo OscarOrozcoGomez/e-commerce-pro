@@ -2,6 +2,20 @@
     $gtmContainerId = trim((string) (getenv('GTM_CONTAINER_ID') ?: 'GTM-TPZG9NDT'));
     $ga4MeasurementId = trim((string) (getenv('GA4_MEASUREMENT_ID') ?: 'G-R2BFK5J1BJ'));
     $ga4DirectEnabled = filter_var((string) (getenv('GA4_DIRECT_ENABLED') ?: '0'), FILTER_VALIDATE_BOOLEAN);
+
+    $hostForTracking = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $isLocalTrackingContext = strpos($hostForTracking, 'localhost') !== false
+        || strpos($hostForTracking, '127.0.0.1') !== false
+        || strpos($hostForTracking, '[::1]') !== false
+        || strpos($hostForTracking, '::1') !== false
+        || (defined('APP_ENV') && in_array(strtolower((string)APP_ENV), ['qa', 'local', 'dev', 'development', 'test'], true));
+
+    $allowMarketingLocal = filter_var((string) (getenv('ALLOW_MARKETING_LOCAL') ?: '0'), FILTER_VALIDATE_BOOLEAN);
+    $trackingEnabled = !$isLocalTrackingContext || $allowMarketingLocal;
+    if (!$trackingEnabled) {
+        $gtmContainerId = '';
+        $ga4DirectEnabled = false;
+    }
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -76,6 +90,19 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         .banner-content { display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .local-metrics-banner {
+            background: #1b5e20;
+            color: #e8f5e9;
+            padding: 6px 0;
+            text-align: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-top: 1px solid rgba(255,255,255,0.15);
+            border-bottom: 1px solid rgba(0,0,0,0.15);
+        }
+        .local-metrics-banner .banner-content {
+            gap: 8px;
+        }
 
         /* Estilo para Leyendas Legales / Advertencias */
         .legal-disclaimer {
@@ -163,6 +190,16 @@
             </div>
         </div>
     </div>
+    <?php if (!$trackingEnabled): ?>
+        <div class="local-metrics-banner">
+            <div class="container">
+                <div class="banner-content">
+                    <i class="material-icons tiny">shield</i>
+                    <span>Modo local sin metricas activo: no se envian eventos a Google en este entorno.</span>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
     <nav class="blue darken-4">
         <div class="nav-wrapper">
             <a href="<?php echo BASE_URL; ?>" class="brand-logo" style="margin-left: 10px;">
