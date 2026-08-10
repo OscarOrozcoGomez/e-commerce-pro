@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 ]);
                 logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
                 $success = 'Usuario creado correctamente.';
-            } catch (PDOException $e) {
+            } catch (Throwable $e) {
                 $error = 'Error: ' . $e->getMessage();
             }
         } elseif ($accion === 'cambiar_estado') {
