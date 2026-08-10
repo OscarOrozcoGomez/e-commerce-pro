@@ -116,16 +116,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $idUsuarioVinculado = (int)($clienteDelete['id_usuario'] ?? 0);
-                if ($idUsuarioVinculado > 0 || $idUsuario > 0) {
-                    throw new Exception('No se puede eliminar un cliente con acceso web vinculado. Bloquealo o revisalo manualmente.');
+                $pdo->beginTransaction();
+                try {
+                    if ($idUsuarioVinculado > 0) {
+                        $pdo->prepare("UPDATE usuarios SET estado = 'inactivo' WHERE id_usuario = ?")->execute([$idUsuarioVinculado]);
+                        $pdo->prepare('UPDATE clientes SET id_usuario = NULL WHERE id_cliente = ?')->execute([$idCliente]);
+                    }
+                    $pdo->prepare('DELETE FROM cliente_direcciones WHERE id_cliente = ?')->execute([$idCliente]);
+                    $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ?')->execute([$idCliente]);
+                    $pdo->prepare('DELETE FROM clientes WHERE id_cliente = ?')->execute([$idCliente]);
+                    $pdo->commit();
+                } catch (Throwable $e) {
+                    $pdo->rollBack();
+                    throw $e;
                 }
 
-                $pdo->beginTransaction();
-                $pdo->prepare('DELETE FROM clientes WHERE id_cliente = ?')->execute([$idCliente]);
-                $pdo->commit();
-
                 $nombreEliminado = $safeDisplayValue((string)($clienteDelete['nombre'] ?? ''), 'Cliente');
-                $success = 'Cliente eliminado correctamente: ' . $nombreEliminado . '.';
+                $success = 'Cliente eliminado correctamente: ' . $nombreEliminado . '. La cuenta web vinculada fue desactivada y desconectada.';
             } elseif ($accion === 'crear_cliente') {
                 $nombre = trim((string)($_POST['nombre'] ?? ''));
                 $email = trim((string)($_POST['email'] ?? ''));

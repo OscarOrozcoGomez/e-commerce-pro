@@ -151,6 +151,57 @@ final class UserRolesPermissionsTest extends TestCase
         $this->assertFalse(isSuperAdmin());
     }
 
+    public function testCanDeleteUserAccountAllowsAdminToDeleteNonAdminUsers(): void
+    {
+        $_SESSION['usuario'] = [
+            'id_usuario' => 1,
+            'rol' => 'admin',
+            'es_superadmin' => 0,
+        ];
+
+        $targetUser = [
+            'id_usuario' => 2,
+            'rol' => 'encargado',
+            'es_superadmin' => 0,
+        ];
+
+        $this->assertTrue(canDeleteUserAccount($targetUser, 1));
+    }
+
+    public function testCanDeleteUserAccountBlocksAdminFromDeletingOtherAdmins(): void
+    {
+        $_SESSION['usuario'] = [
+            'id_usuario' => 1,
+            'rol' => 'admin',
+            'es_superadmin' => 0,
+        ];
+
+        $targetUser = [
+            'id_usuario' => 2,
+            'rol' => 'admin',
+            'es_superadmin' => 0,
+        ];
+
+        $this->assertFalse(canDeleteUserAccount($targetUser, 1));
+    }
+
+    public function testCanDeleteUserAccountAllowsSuperAdminToDeleteAdminUsers(): void
+    {
+        $_SESSION['usuario'] = [
+            'id_usuario' => 1,
+            'rol' => 'admin',
+            'es_superadmin' => 1,
+        ];
+
+        $targetUser = [
+            'id_usuario' => 2,
+            'rol' => 'admin',
+            'es_superadmin' => 0,
+        ];
+
+        $this->assertTrue(canDeleteUserAccount($targetUser, 1));
+    }
+
     public function testHasPermissionReturnsTrueForExplicitPermissionInArray(): void
     {
         $_SESSION['usuario'] = [
