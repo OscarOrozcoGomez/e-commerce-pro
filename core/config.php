@@ -230,6 +230,10 @@ function preloadSecretSources(): void
             'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
             'TELEGRAM_CHAT_ID' => ['TELEGRAM_CHAT_ID'],
             'TELEGRAM_NOTIFICATIONS_ENABLED' => ['TELEGRAM_NOTIFICATIONS_ENABLED'],
+            'GTM_CONTAINER_ID' => ['GTM_CONTAINER_ID'],
+            'GA4_MEASUREMENT_ID' => ['GA4_MEASUREMENT_ID'],
+            'GA4_DIRECT_ENABLED' => ['GA4_DIRECT_ENABLED'],
+            'GOOGLE_ADS_SEND_TO' => ['GOOGLE_ADS_SEND_TO'],
         ];
 
         if (function_exists('gsmLoadSecretsCached')) {
@@ -438,14 +442,36 @@ if (!is_dir(UPLOAD_DIR)) {
  */
 function getPDO(): PDO
 {
-    $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
     $options = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
+        PDO::ATTR_TIMEOUT => 5,
     ];
 
-    return new PDO($dsn, DB_USER, DB_PASS, $options);
+    $hostCandidates = array_values(array_unique(array_filter([
+        DB_HOST,
+        DB_HOST === '127.0.0.1' ? 'localhost' : '127.0.0.1',
+        DB_HOST === 'localhost' ? '127.0.0.1' : 'localhost',
+    ], static function ($host) {
+        return is_string($host) && trim($host) !== '';
+    })));
+
+    $lastException = null;
+    foreach ($hostCandidates as $hostCandidate) {
+        $dsn = 'mysql:host=' . $hostCandidate . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
+        try {
+            return new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $exception) {
+            $lastException = $exception;
+        }
+    }
+
+    if ($lastException instanceof PDOException) {
+        throw $lastException;
+    }
+
+    throw new RuntimeException('No se pudo establecer conexión con la base de datos.');
 }
 
 /**
@@ -549,7 +575,7 @@ function sendSecurityHeaders(): void
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 
     // Evitar que páginas autenticadas queden en cache del navegador/proxies compartidos.

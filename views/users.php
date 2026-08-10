@@ -37,6 +37,19 @@ function generateTemporarySecurePassword(int $length = 12): string
     return implode('', $password);
 }
 
+function getStaffUserById(PDO $pdo, int $id): ?array
+{
+    $stmt = $pdo->prepare("SELECT u.id_usuario, u.estado, COALESCE(u.es_superadmin, 0) AS es_superadmin, r.nombre AS rol
+                           FROM usuarios u
+                           JOIN roles r ON u.id_rol = r.id_rol
+                           WHERE u.id_usuario = ?
+                           LIMIT 1");
+    $stmt->execute([$id]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $user !== false ? $user : null;
+}
+
 // Procesar formulario
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -63,6 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $stmtRol->execute([$id_rol]);
                 $rolNombre = $stmtRol->fetchColumn();
 
+                if ($rolNombre === 'admin' && !isSuperAdmin()) {
+                    throw new Exception('Solo un super admin puede crear otros administradores.');
+                }
+
                 if (in_array($rolNombre, ['vendedor', 'encargado']) && !$id_almacen) {
                     throw new Exception("Los vendedores y encargados deben tener una sucursal asignada obligatoriamente.");
                 }
@@ -79,18 +96,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 ]);
                 logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
                 $success = 'Usuario creado correctamente.';
-            } catch (PDOException $e) {
+            } catch (Throwable $e) {
                 $error = 'Error: ' . $e->getMessage();
             }
         } elseif ($accion === 'cambiar_estado') {
             $id = intval($_POST['id_usuario']);
             $nuevo_estado = $_POST['estado'] === 'activo' ? 'inactivo' : 'activo';
+
+            $targetUser = getStaffUserById($pdo, $id);
+            if (!$targetUser) {
+                throw new Exception('Usuario no encontrado.');
+            }
+
+            if (isAdminAccount($targetUser) && !isSuperAdmin()) {
+                throw new Exception('Solo un super admin puede modificar cuentas de administrador.');
+            }
+
+            if (($targetUser['es_superadmin'] ?? 0) && $nuevo_estado === 'inactivo') {
+                $stmtSuper = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE estado = 'activo' AND COALESCE(es_superadmin, 0) = 1");
+                $stmtSuper->execute();
+                if ((int)$stmtSuper->fetchColumn() <= 1) {
+                    throw new Exception('No puedes desactivar el último super admin activo.');
+                }
+            }
+
             $stmt = $pdo->prepare("UPDATE usuarios SET estado = ? WHERE id_usuario = ?");
             $stmt->execute([$nuevo_estado, $id]);
             logAudit('USUARIO_ESTADO_CAMBIADO', 'usuarios', $id, "Nuevo estado: $nuevo_estado");
             $success = 'Estado de usuario actualizado.';
         } elseif ($accion === 'desbloquear') {
             $id = intval($_POST['id_usuario']);
+
+            $targetUser = getStaffUserById($pdo, $id);
+            if (!$targetUser) {
+                throw new Exception('Usuario no encontrado.');
+            }
+
+            if (isAdminAccount($targetUser) && !isSuperAdmin()) {
+                throw new Exception('Solo un super admin puede desbloquear cuentas de administrador.');
+            }
+
             $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")->execute([$id]);
             logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, "Cuenta desbloqueada manualmente por admin");
             $success = 'Usuario desbloqueado correctamente.';
@@ -101,6 +146,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
                 if ($id <= 0) {
                     throw new Exception('ID de usuario inválido para reset de contraseña.');
+                }
+
+                $targetUser = getStaffUserById($pdo, $id);
+                if (!$targetUser) {
+                    throw new Exception('Usuario no encontrado.');
+                }
+
+                if (isAdminAccount($targetUser) && !isSuperAdmin()) {
+                    throw new Exception('Solo un super admin puede resetear la contraseña de cuentas de administrador.');
                 }
 
                 $tempPassword = generateTemporarySecurePassword(12);
@@ -121,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
 // Obtener usuarios
 try {
-    $sql = "SELECT u.id_usuario, u.nombre, u.email, r.nombre as rol, a.nombre as almacen, u.estado, u.intentos_fallidos, u.bloqueado_hasta
+    $sql = "SELECT u.id_usuario, u.nombre, u.email, r.nombre as rol, a.nombre as almacen, u.estado, u.es_superadmin, u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN almacenes a ON u.id_almacen = a.id_almacen
@@ -213,6 +267,7 @@ include __DIR__ . '/includes/header.php';
                             <select name="id_rol" required>
                                 <option value="">-- Selecciona rol --</option>
                                 <?php foreach ($roles as $rol): ?>
+                                    <?php if (!isSuperAdmin() && $rol['nombre'] === 'admin') continue; ?>
                                     <option value="<?php echo $rol['id_rol']; ?>"><?php echo esc($rol['nombre']); ?></option>
                                 <?php endforeach; ?>
                             </select>

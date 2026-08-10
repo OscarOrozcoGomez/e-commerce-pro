@@ -16,14 +16,28 @@
         $gtmContainerId = '';
         $ga4DirectEnabled = false;
     }
+    $shouldLoadDirectGtag = $trackingEnabled && $ga4MeasurementId !== '' && ($ga4DirectEnabled || $gtmContainerId !== '');
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo $pageTitle ?? 'POS Sistema'; ?></title>
     <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>assets/img/logo.png">
+    <!-- Google Tag Manager -->
+    <?php if ($gtmContainerId !== ''): ?>
+        <script>
+            (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES, 'UTF-8'); ?>');
+        </script>
+    <?php endif; ?>
+    <!-- End Google Tag Manager -->
+    <?php if ($shouldLoadDirectGtag && $ga4MeasurementId !== ''): ?>
+        <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>"></script>
+        <script>
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>');
+        </script>
+    <?php endif; ?>
     <?php if ($gtmContainerId !== ''): ?>
         <script>
             (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES, 'UTF-8'); ?>');
@@ -126,18 +140,11 @@
     </style>
 </head>
 <body class="grey lighten-4">
+    <!-- Google Tag Manager (noscript) -->
     <?php if ($gtmContainerId !== ''): ?>
         <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES, 'UTF-8'); ?>" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <?php endif; ?>
-    <?php if ($ga4DirectEnabled && $ga4MeasurementId !== ''): ?>
-        <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>"></script>
-        <script>
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>', { send_page_view: true });
-        </script>
-    <?php endif; ?>
+    <!-- End Google Tag Manager (noscript) -->
     <audio id="global-chat-alert-sound" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3" preload="auto"></audio>
     <?php
         $headerDisplayName = '';
@@ -181,15 +188,17 @@
             }
         }
     ?>
-    <!-- Banner Informativo de Entregas -->
-    <div class="delivery-banner">
-        <div class="container">
-            <div class="banner-content">
-                <i class="material-icons tiny">info</i>
-                <span><strong>¡Entregas Programadas!</strong> Solo Miércoles y Sábados. Garantiza tu lugar enviando el anticipo de $50.</span>
+    <?php if ($trackingEnabled): ?>
+        <!-- Banner Informativo de Entregas -->
+        <div class="delivery-banner">
+            <div class="container">
+                <div class="banner-content">
+                    <i class="material-icons tiny">info</i>
+                    <span><strong>¡Entregas Programadas!</strong> Solo Miércoles y Sábados. Garantiza tu lugar enviando el anticipo de $50.</span>
+                </div>
             </div>
         </div>
-    </div>
+    <?php endif; ?>
     <?php if (!$trackingEnabled): ?>
         <div class="local-metrics-banner">
             <div class="container">
@@ -787,20 +796,36 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', () => {
             window.playChatAlertSound = playChatAlertSound;
 
-            // Inicializar Menú Lateral
-            var sidenavElems = document.querySelectorAll('.sidenav');
-            M.Sidenav.init(sidenavElems);
-
-            var elems = document.querySelectorAll('.dropdown-trigger');
-            var instances = M.Dropdown.init(elems, {
-                alignment: 'right',
-                constrainWidth: false,
-                coverTrigger: false,
-                closeOnClick: true
+            // Carga inicial del contador al entrar a cualquier página
+            updateCartBadge();
+            syncLegacyFavoritesToServer().finally(() => {
+                updateFavoritesBadge();
             });
+
+            // Inicializar componentes de Materialize de forma global y segura
+            if (typeof M !== 'undefined') {
+                if (typeof M.AutoInit === 'function') {
+                    M.AutoInit();
+                } else {
+                    const sidenavElems = document.querySelectorAll('.sidenav');
+                    if (typeof M.Sidenav !== 'undefined') {
+                        M.Sidenav.init(sidenavElems);
+                    }
+
+                    const dropdownElems = document.querySelectorAll('.dropdown-trigger');
+                    if (typeof M.Dropdown !== 'undefined') {
+                        M.Dropdown.init(dropdownElems, {
+                            alignment: 'right',
+                            constrainWidth: false,
+                            coverTrigger: false,
+                            closeOnClick: true
+                        });
+                    }
+                }
+            }
 
             // Lógica para el botón "Ir Arriba"
             const scrollBtn = document.getElementById('scroll-to-top');
@@ -817,12 +842,6 @@
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 });
             }
-
-            // Carga inicial del contador al entrar a cualquier página
-            updateCartBadge();
-            syncLegacyFavoritesToServer().finally(() => {
-                updateFavoritesBadge();
-            });
 
             if (USER_IS_INTERNAL_STAFF) {
                 const unlockChatAudio = () => {
@@ -878,7 +897,7 @@
                 });
             }
 
-            window.addEventListener('storage', function(event) {
+            window.addEventListener('storage', (event) => {
                 if (event.key === 'cart') {
                     updateCartBadge();
                 }

@@ -141,6 +141,27 @@ function isAdmin(): bool
 }
 
 /**
+ * Verifica si el usuario autenticado es super admin.
+ *
+ * @return bool
+ */
+function isSuperAdmin(): bool
+{
+    return isAdmin() && !empty($_SESSION['usuario']['es_superadmin']);
+}
+
+/**
+ * Verifica si un registro de usuario corresponde a una cuenta de admin.
+ *
+ * @param array<string, mixed> $usuario
+ * @return bool
+ */
+function isAdminAccount(array $usuario): bool
+{
+    return (($usuario['rol'] ?? '') === 'admin') || !empty($usuario['es_superadmin']);
+}
+
+/**
  * Verifica si el usuario es encargado.
  *
  * @return bool
@@ -306,7 +327,7 @@ function authenticate(string $loginIdentifier, string $password): bool
     }
 
     // Se añadió u.contrasena a la lista de columnas seleccionadas
-    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, r.nombre as rol,
+    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, u.es_superadmin, r.nombre as rol,
                    GROUP_CONCAT(p.clave) as permisos,
                    c.id_cliente,
                    c.telefono as telefono_cliente,

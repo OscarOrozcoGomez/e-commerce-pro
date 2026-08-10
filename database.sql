@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS `usuarios` (
   `id_rol` INT UNSIGNED NOT NULL,
   `id_almacen` INT UNSIGNED DEFAULT NULL,
   `estado` ENUM('activo','inactivo') NOT NULL DEFAULT 'activo',
+  `es_superadmin` TINYINT(1) NOT NULL DEFAULT 0,
   `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `ultimo_tecleo` TIMESTAMP NULL DEFAULT NULL,
   `tecleando_para` INT UNSIGNED DEFAULT NULL COMMENT 'ID del usuario al que se le escribe',

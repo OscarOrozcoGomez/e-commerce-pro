@@ -86,6 +86,54 @@ Checklist rapido local antes de push:
 
 ## 5) Validacion de migraciones
 
+### Ejecucion manual remota (PowerShell)
+
+Si necesitas correr migraciones manualmente en Produccion desde Windows/PowerShell:
+
+1. Define token y endpoint.
+2. Corre primero `dry_run=true`.
+3. Si todo esta bien, corre `dry_run=false`.
+
+Dry-run:
+
+```powershell
+$token = "<MIGRATIONS_DEPLOY_TOKEN>"
+$headers = @{
+   "X-Migrations-Token" = $token
+   "Content-Type" = "application/json"
+}
+$body = '{"dry_run":true}'
+
+Invoke-WebRequest -Method Post `
+   -Uri "https://bellezaybienestar.com.mx/api/run_migrations.php" `
+   -Headers $headers `
+   -Body $body `
+   -ErrorAction Stop
+```
+
+Ejecucion real:
+
+```powershell
+$token = "<MIGRATIONS_DEPLOY_TOKEN>"
+$headers = @{
+   "X-Migrations-Token" = $token
+   "Content-Type" = "application/json"
+}
+$body = '{"dry_run":false}'
+
+Invoke-WebRequest -Method Post `
+   -Uri "https://bellezaybienestar.com.mx/api/run_migrations.php" `
+   -Headers $headers `
+   -Body $body `
+   -ErrorAction Stop
+```
+
+Opcional: apuntar a una version objetivo.
+
+```powershell
+$body = '{"dry_run":false,"target_version":"20260809_000001"}'
+```
+
 El endpoint responde JSON con:
 
 - applied_count

@@ -439,3 +439,13 @@
 [25-Jul-2026 21:26:55 America/Mexico_City] INFO: Secretos cargados desde: C:\xampp\htdocs\e-commerce-pro\core/app_secrets.qa.php
 [08-Aug-2026 23:08:40 America/Mexico_City] INFO: Secretos cargados desde: C:\xampp\htdocs\e-commerce-pro\core/app_secrets.qa.php
 [08-Aug-2026 23:08:40 America/Mexico_City] INFO: Secretos cargados desde: C:\xampp\htdocs\e-commerce-pro\core/app_secrets.qa.php
+[09-Aug-2026 20:59:40 America/Mexico_City]  [EXCEPCIÓN CRÍTICA] ReqID: cfcc39ddfea1 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 464
+[09-Aug-2026 20:59:40 America/Mexico_City] STACK TRACE (ReqID cfcc39ddfea1): #0 C:\xampp\htdocs\e-commerce-pro\core\config.php(464): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\api\chat_handler.php(13): getPDO()
+#2 {main}
+[2026-08-09 20:59:40]  [EXCEPCIÓN CRÍTICA] ReqID: cfcc39ddfea1 | Mensaje: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it | Archivo: C:\xampp\htdocs\e-commerce-pro\core\config.php | Línea: 464
+#0 C:\xampp\htdocs\e-commerce-pro\core\config.php(464): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 C:\xampp\htdocs\e-commerce-pro\api\chat_handler.php(13): getPDO()
+#2 {main}
+
+[09-Aug-2026 20:59:40 America/Mexico_City] INFO: Secretos cargados desde: C:\xampp\htdocs\e-commerce-pro\core/app_secrets.qa.php
