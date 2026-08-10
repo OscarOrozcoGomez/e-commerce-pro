@@ -52,7 +52,9 @@ Notas de seguridad para secretos en produccion:
 
 1. Crear migracion SQL en database/migrations.
 2. Probar local en QA.
-3. Push a main para desplegar a Produccion (migraciones se ejecutan automatico en host).
+3. Push/merge a main para versionar cambios.
+4. Desplegar manualmente por FTP desde tu equipo.
+5. Ejecutar migraciones remotas manualmente con token (dry-run y luego apply).
 
 ## 4) Paso a paso local de migraciones (recomendado)
 
@@ -74,7 +76,7 @@ Este flujo es el que debes usar siempre antes de mandar cambios a Produccion.
 7. Prueba funcionalmente la app local.
    - Verifica pantallas o procesos afectados por el cambio de esquema.
 8. Haz commit y push a main.
-   - El workflow despliega y llama automaticamente al endpoint remoto de migraciones.
+   - El despliegue y migraciones remotas se ejecutan manualmente (sin workflow de deploy).
 
 Checklist rapido local antes de push:
 
