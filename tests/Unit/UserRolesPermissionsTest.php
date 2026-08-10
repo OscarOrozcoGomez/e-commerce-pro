@@ -168,6 +168,13 @@ final class UserRolesPermissionsTest extends TestCase
         $this->assertTrue(canDeleteUserAccount($targetUser, 1));
     }
 
+    public function testShouldReactivateExistingUserOnlyForInactiveAccounts(): void
+    {
+        $this->assertTrue(shouldReactivateExistingUser(['estado' => 'inactivo']));
+        $this->assertFalse(shouldReactivateExistingUser(['estado' => 'activo']));
+        $this->assertFalse(shouldReactivateExistingUser(null));
+    }
+
     public function testCanDeleteUserAccountBlocksAdminFromDeletingOtherAdmins(): void
     {
         $_SESSION['usuario'] = [

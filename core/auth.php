@@ -189,6 +189,21 @@ function isAdminAccount(array $usuario): bool
 }
 
 /**
+ * Determina si una cuenta existente con el mismo correo puede reutilizarse.
+ *
+ * @param array<string, mixed>|null $usuario
+ * @return bool
+ */
+function shouldReactivateExistingUser(?array $usuario): bool
+{
+    if ($usuario === null) {
+        return false;
+    }
+
+    return (string)($usuario['estado'] ?? '') === 'inactivo';
+}
+
+/**
  * Verifica si el usuario es encargado.
  *
  * @return bool
