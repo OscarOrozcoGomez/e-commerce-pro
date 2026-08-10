@@ -124,6 +124,33 @@ final class UserRolesPermissionsTest extends TestCase
         $this->assertTrue(hasPermission('cualquier_permiso'));
     }
 
+    public function testIsSuperAdminRequiresAdminRoleAndFlag(): void
+    {
+        $_SESSION['usuario'] = [
+            'id_usuario' => 1,
+            'rol' => 'admin',
+            'es_superadmin' => 1,
+        ];
+
+        $this->assertTrue(isSuperAdmin());
+
+        $_SESSION['usuario'] = [
+            'id_usuario' => 2,
+            'rol' => 'admin',
+            'es_superadmin' => 0,
+        ];
+
+        $this->assertFalse(isSuperAdmin());
+
+        $_SESSION['usuario'] = [
+            'id_usuario' => 3,
+            'rol' => 'encargado',
+            'es_superadmin' => 1,
+        ];
+
+        $this->assertFalse(isSuperAdmin());
+    }
+
     public function testHasPermissionReturnsTrueForExplicitPermissionInArray(): void
     {
         $_SESSION['usuario'] = [
