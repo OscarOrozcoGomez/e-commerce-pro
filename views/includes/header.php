@@ -1,6 +1,7 @@
 <?php
     $gtmContainerId = trim((string) (getenv('GTM_CONTAINER_ID') ?: 'GTM-TPZG9NDT'));
     $ga4MeasurementId = trim((string) (getenv('GA4_MEASUREMENT_ID') ?: 'G-R2BFK5J1BJ'));
+    $googleAdsId = trim((string) (getenv('GOOGLE_ADS_ID') ?: 'AW-18369681241'));
     $ga4DirectEnabled = filter_var((string) (getenv('GA4_DIRECT_ENABLED') ?: '0'), FILTER_VALIDATE_BOOLEAN);
 
     $hostForTracking = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
@@ -38,12 +39,8 @@
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>');
-        </script>
-    <?php endif; ?>
-    <?php if ($gtmContainerId !== ''): ?>
-        <script>
-            (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES, 'UTF-8'); ?>');
+            gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>'); // GA4
+            gtag('config', '<?php echo htmlspecialchars($googleAdsId, ENT_QUOTES, 'UTF-8'); ?>'); // Google Ads Global Site Tag
         </script>
     <?php endif; ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
@@ -424,8 +421,6 @@
     <!-- Contenedor Principal para empujar el footer hacia abajo -->
     <main style="flex: 1 0 auto;">
 
-    <!-- Scripts para Inicializar Componentes -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
         window.USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
         window.USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
@@ -815,32 +810,6 @@
             syncLegacyFavoritesToServer().finally(() => {
                 updateFavoritesBadge();
             });
-
-            // Inicializar componentes de Materialize de forma global y segura
-            if (typeof M !== 'undefined') {
-                try {
-                    if (typeof M.AutoInit === 'function') {
-                        M.AutoInit();
-                    } else {
-                        const sidenavElems = document.querySelectorAll('.sidenav');
-                        if (typeof M.Sidenav !== 'undefined') {
-                            M.Sidenav.init(sidenavElems);
-                        }
-
-                        const dropdownElems = document.querySelectorAll('.dropdown-trigger');
-                        if (typeof M.Dropdown !== 'undefined') {
-                            M.Dropdown.init(dropdownElems, {
-                                alignment: 'right',
-                                constrainWidth: false,
-                                coverTrigger: false,
-                                closeOnClick: true
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.warn('Materialize AutoInit fallo en header:', err);
-                }
-            }
 
             // Lógica para el botón "Ir Arriba"
             const scrollBtn = document.getElementById('scroll-to-top');

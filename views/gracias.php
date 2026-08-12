@@ -60,6 +60,11 @@ $host = $_SERVER['HTTP_HOST'] ?? '';
 $isLocal = strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false;
 $baseUrl = $isLocal ? '/e-commerce-pro/' : '/';
 $allowMarketingLocal = filter_var((string) thankYouEnv('ALLOW_MARKETING_LOCAL', '0'), FILTER_VALIDATE_BOOLEAN);
+$gtmContainerId = trim((string) thankYouEnv('GTM_CONTAINER_ID', 'GTM-TPZG9NDT'));
+$ga4MeasurementId = trim((string) thankYouEnv('GA4_MEASUREMENT_ID', 'G-R2BFK5J1BJ'));
+$googleAdsId = trim((string) thankYouEnv('GOOGLE_ADS_ID', 'AW-18369681241'));
+$googleAdsConversionSendTo = trim((string) thankYouEnv('GOOGLE_ADS_PURCHASE_SEND_TO', 'AW-18369681241/oT3sCIewyNscENmurLdE'));
+$trackingEnabled = !$isLocal || $allowMarketingLocal;
 
 $orderId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, [
     'options' => ['min_range' => 1],
@@ -108,8 +113,6 @@ $detailLabel = $hasValidOrder && $isAuthenticated
     : ($hasValidOrder ? 'Iniciar sesión para ver mi pedido' : 'Explorar catálogo');
 $detailButtonClass = $hasValidOrder && $isAuthenticated ? 'primary' : 'secondary';
 
-$googleAdsSendTo = thankYouEnv('GOOGLE_ADS_SEND_TO', '');
-
 $recommendedProducts = [];
 $offerProduct = null;
 $offerDiscountPercent = 0;
@@ -146,6 +149,21 @@ try {
     $offerDiscountPercent = 0;
 }
 ?>
+<?php
+// Fetch order total securely for conversion tracking
+$orderTotal = 0.0;
+if ($hasValidOrder) {
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare("SELECT total FROM pedidos WHERE id_pedido = ? LIMIT 1");
+        $stmt->execute([$orderId]);
+        $orderTotal = (float)($stmt->fetchColumn() ?: 0.0);
+    } catch (Throwable $e) {
+        error_log("Error fetching order total for conversion: " . $e->getMessage());
+        $orderTotal = 0.0; // Fallback to 0 if error
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -153,6 +171,22 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow">
     <title>Gracias por tu compra</title>
+        <?php if ($trackingEnabled): ?>
+                <!-- Google Tag Manager -->
+                <script>
+                        (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>');
+                </script>
+                <!-- End Google Tag Manager -->
+                <!-- Global site tag (gtag.js) - Google Analytics / Google Ads -->
+                <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"></script>
+                <script>
+                    window.dataLayer = window.dataLayer || [];
+                    function gtag(){dataLayer.push(arguments);}
+                    gtag('js', new Date());
+                    gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>');
+                    gtag('config', '<?php echo htmlspecialchars($googleAdsId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>');
+                </script>
+        <?php endif; ?>
     <style>
         :root {
             --bg1: #f7f9fc;
@@ -521,6 +555,12 @@ try {
     </style>
 </head>
 <body>
+    <?php if ($trackingEnabled): ?>
+        <!-- Google Tag Manager (noscript) -->
+        <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+        <!-- End Google Tag Manager (noscript) -->
+    <?php endif; ?>
+
     <main class="card" role="main" aria-live="polite">
         <section class="hero">
             <?php if ($hasValidOrder && !$isDuplicateView): ?>
@@ -675,10 +715,13 @@ try {
                 attribution: storedAttribution
             });
 
-            if (typeof window.gtag === 'function' && '<?php echo htmlspecialchars($googleAdsSendTo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>' !== '') {
+            if (typeof window.gtag === 'function') {
+                // Google Ads Conversion Snippet
                 window.gtag('event', 'conversion', {
-                    send_to: '<?php echo htmlspecialchars($googleAdsSendTo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>',
-                    transaction_id: orderReference
+                    'send_to': '<?php echo htmlspecialchars($googleAdsConversionSendTo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>',
+                    'value': <?php echo number_format($orderTotal, 2, '.', ''); ?>,
+                    'currency': 'MXN',
+                    'transaction_id': orderReference
                 });
             }
 

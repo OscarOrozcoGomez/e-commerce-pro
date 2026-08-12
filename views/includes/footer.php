@@ -73,5 +73,27 @@
         border-color: white;
     }
 </style>
+<!-- Scripts JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // Inicializar componentes de Materialize de forma global y segura
+        if (typeof M !== 'undefined') {
+            try {
+                M.AutoInit();
+            } catch (err) {
+                console.warn('Materialize AutoInit falló en el footer:', err);
+                // Fallback por si AutoInit no está disponible o falla
+                const sidenavElems = document.querySelectorAll('.sidenav');
+                if (M.Sidenav && sidenavElems.length) M.Sidenav.init(sidenavElems);
+
+                const dropdownElems = document.querySelectorAll('.dropdown-trigger');
+                if (M.Dropdown && dropdownElems.length) M.Dropdown.init(dropdownElems, {
+                    alignment: 'right', constrainWidth: false, coverTrigger: false, closeOnClick: true
+                });
+            }
+        }
+    });
+</script>
 </body>
 </html>
