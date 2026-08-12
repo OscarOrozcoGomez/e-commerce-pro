@@ -57,6 +57,24 @@ try {
     $productos = [];
 }
 
+// Si el descifrado falla (llave distinta, dato corrupto, etc.) NUNCA debemos
+// mostrar el texto cifrado crudo (ENCv1:...) al usuario; se usa un fallback seguro.
+$safeDecryptValue = static function (?string $value, string $fallback = ''): string {
+    $raw = trim((string)$value);
+    if ($raw === '') {
+        return $fallback;
+    }
+    if (!function_exists('piiIsEncryptedValue') || !function_exists('piiDecryptValue') || !piiIsEncryptedValue($raw)) {
+        return $raw;
+    }
+    $decrypted = trim((string)piiDecryptValue($raw));
+    if ($decrypted === $raw || piiIsEncryptedValue($decrypted)) {
+        // El descifrado no funcionó (misma llave requerida no disponible o coincide con el crudo).
+        return $fallback;
+    }
+    return $decrypted;
+};
+
 try {
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones'");
     $stmtMeta->execute();
@@ -75,12 +93,8 @@ try {
         $cliente['direccion'] = '';
         $cliente['maps_link'] = '';
         $cliente['direcciones'] = [];
-        foreach (['nombre', 'telefono'] as $campo) {
-            $valor = (string)($cliente[$campo] ?? '');
-            if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
-                $cliente[$campo] = (string)piiDecryptValue($valor);
-            }
-        }
+        $cliente['nombre'] = $safeDecryptValue($cliente['nombre'] ?? '', 'Cliente protegido');
+        $cliente['telefono'] = $safeDecryptValue($cliente['telefono'] ?? '', '');
     }
     unset($cliente);
 
@@ -99,23 +113,22 @@ try {
 
             $direccionesPorCliente = [];
             foreach ($direccionesRaw as $direccion) {
-                foreach (['alias', 'direccion', 'maps_link'] as $campo) {
-                    $valor = (string)($direccion[$campo] ?? '');
-                    if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
-                        $direccion[$campo] = (string)piiDecryptValue($valor);
-                    }
-                }
-
                 $idClienteDireccion = (int)($direccion['id_cliente'] ?? 0);
                 if ($idClienteDireccion <= 0) {
                     continue;
                 }
 
+                $direccionDescifrada = $safeDecryptValue($direccion['direccion'] ?? '', '');
+                if ($direccionDescifrada === '') {
+                    // Direccion ilegible (no se pudo descifrar): no la ofrecemos como opcion de entrega.
+                    continue;
+                }
+
                 $direccionesPorCliente[$idClienteDireccion][] = [
                     'id_direccion' => (int)($direccion['id_direccion'] ?? 0),
-                    'alias' => (string)($direccion['alias'] ?? ''),
-                    'direccion' => (string)($direccion['direccion'] ?? ''),
-                    'maps_link' => (string)($direccion['maps_link'] ?? ''),
+                    'alias' => $safeDecryptValue($direccion['alias'] ?? '', ''),
+                    'direccion' => $direccionDescifrada,
+                    'maps_link' => $safeDecryptValue($direccion['maps_link'] ?? '', ''),
                     'es_default' => ((int)($direccion['es_default'] ?? 0)) === 1,
                 ];
             }
@@ -222,6 +235,9 @@ include __DIR__ . '/includes/header.php';
                         <div class="row">
                             <div class="col s12 m8">
                                 <input type="hidden" class="direccion_entrega" name="direccion_entrega" value="">
+                                <div class="delivery-address-preview" style="display:none;">
+                                    <i class="material-icons tiny">place</i><span class="delivery-address-preview-text"></span>
+                                </div>
                                 <div class="delivery-map-link" style="display:none; margin-top:8px;">
                                     <a href="#" target="_blank" rel="noopener noreferrer" class="btn-small blue darken-2 waves-effect waves-light delivery-map-link-anchor">
                                         <i class="material-icons left">map</i><span class="delivery-map-link-text">Abrir ubicación</span>
@@ -352,6 +368,22 @@ include __DIR__ . '/includes/header.php';
     .sales-qty-control { display: flex; align-items: center; gap: 8px; }
     .sales-qty-control input { margin: 0 !important; text-align: center; }
     .sales-line-total { font-size: 1.15rem; font-weight: 700; color: #2e7d32; padding-top: 18px; }
+    .delivery-address-preview {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        margin-top: 8px;
+        padding: 10px 12px;
+        background: #f5f7fa;
+        border: 1px solid #dde3e8;
+        border-radius: 4px;
+        color: #37474f;
+        font-size: 0.92rem;
+        line-height: 1.35;
+    }
+    .delivery-address-preview i { color: #607d8b; margin-top: 1px; }
+    .delivery-address-preview.delivery-address-preview-missing { color: #b71c1c; background: #fdecea; border-color: #f5c6c3; }
+    .delivery-address-preview.delivery-address-preview-missing i { color: #c62828; }
     .sales-customer-input-wrap {
         position: relative;
         min-height: 3rem;
@@ -468,6 +500,17 @@ include __DIR__ . '/includes/header.php';
             .replace(/[\u0300-\u036f]/g, '')
             .toLowerCase()
             .trim();
+    }
+
+    const ADDRESS_PLACEHOLDER_TEXTS = [
+        'por confirmar', 'pendiente', 'pendiente de confirmar', 'sin direccion',
+        'sin especificar', 'direccion pendiente', 'n/a', 'na', 'tbd', 'por definir',
+    ];
+
+    function isPlaceholderAddressText(value) {
+        const normalized = normalizeSearchTerm(value);
+        if (normalized === '') return false;
+        return ADDRESS_PLACEHOLDER_TEXTS.includes(normalized);
     }
 
     function normalizePhoneDigits(value) {
@@ -871,9 +914,15 @@ include __DIR__ . '/includes/header.php';
         const options = ['<option value="">-- Selecciona un domicilio --</option>'];
         addresses.forEach((direccion) => {
             const suffix = direccion.es_default ? ' (Predeterminada)' : '';
-            options.push(
-                `<option value="${direccion.id_direccion}">${escapeHtml(direccion.alias || `Direccion ${direccion.id_direccion}`)}${suffix}: ${escapeHtml(direccion.direccion)}</option>`
-            );
+            const esPlaceholder = isPlaceholderAddressText(direccion.direccion);
+            // Sin alias, usamos la direccion real como etiqueta en vez de un ID generico sin sentido.
+            let label = direccion.alias
+                ? `${direccion.alias}${suffix}: ${direccion.direccion}`
+                : `${direccion.direccion}${suffix}`;
+            if (esPlaceholder) {
+                label = `⚠ Sin direccion capturada (${label})`;
+            }
+            options.push(`<option value="${direccion.id_direccion}">${escapeHtml(label)}</option>`);
         });
         select.innerHTML = options.join('');
         block.style.display = 'block';
@@ -902,6 +951,35 @@ include __DIR__ . '/includes/header.php';
         M.updateTextFields();
     }
 
+    function updateDeliveryAddressPreview(context, direccionActual) {
+        const preview = context.querySelector('.delivery-address-preview');
+        const previewText = context.querySelector('.delivery-address-preview-text');
+        if (!preview || !previewText) return;
+
+        if (direccionActual === '') {
+            const selectedCustomerId = String(context.dataset.selectedCustomerId || '').trim();
+            if (selectedCustomerId !== '') {
+                preview.style.display = 'flex';
+                preview.classList.add('delivery-address-preview-missing');
+                previewText.textContent = 'Este cliente no tiene una direccion valida. Busca una con Google o agregala en Administrar Clientes.';
+                return;
+            }
+            preview.style.display = 'none';
+            previewText.textContent = '';
+            preview.classList.remove('delivery-address-preview-missing');
+            return;
+        }
+
+        preview.style.display = 'flex';
+        if (isPlaceholderAddressText(direccionActual)) {
+            preview.classList.add('delivery-address-preview-missing');
+            previewText.textContent = `El domicilio guardado dice "${direccionActual}": no es una direccion real. Pidele la direccion al cliente y captúrala antes de agendar.`;
+            return;
+        }
+        preview.classList.remove('delivery-address-preview-missing');
+        previewText.textContent = direccionActual;
+    }
+
     function updateDeliveryMapLink(context) {
         if (!context) return;
 
@@ -912,6 +990,8 @@ include __DIR__ . '/includes/header.php';
         const manualMapsLink = String(context.querySelector('.maps_link_entrega')?.value || '').trim();
         const savedMapsLink = String(context.dataset.customerMapsLink || '').trim();
         const savedAddress = String(context.dataset.customerAddress || '').trim();
+
+        updateDeliveryAddressPreview(context, direccionActual);
 
         if (!wrapper || !anchor || !text) return;
 
@@ -1485,6 +1565,10 @@ include __DIR__ . '/includes/header.php';
             M.toast({ html: 'Selecciona una direccion guardada o busca una direccion en Google.', classes: 'red darken-2' });
             return;
         }
+        if (isPlaceholderAddressText(direccionEntrega)) {
+            M.toast({ html: 'El domicilio guardado no tiene una direccion real ("Por confirmar"). Busca la direccion con Google o actualizala en Administrar Clientes antes de agendar.', classes: 'red darken-2' });
+            return;
+        }
 
         const form = e.target;
         const submitButton = form.querySelector('button[type="submit"]');
@@ -1498,7 +1582,7 @@ include __DIR__ . '/includes/header.php';
                     M.toast({ html: data.message || 'Pedido agendado con éxito', classes: 'green darken-2' });
                     document.getElementById(`tab-li-${tabId}`).remove();
                     context.remove();
-                    scheduleSalesDraftSave();
+                    saveSalesDraftNow();
                     if (document.querySelectorAll('.tab').length === 0) location.reload();
                 } else {
                     M.toast({ html: data.message || 'Error al procesar el pedido', classes: 'red darken-2' });

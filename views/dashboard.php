@@ -529,6 +529,80 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Clientes</span>
+                        <p>Consultar clientes y mantener sus direcciones guardadas para ventas a domicilio</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_customers.php" class="btn waves-effect waves-light blue darken-2">Clientes</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row dashboard-actions">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Pedidos Agendados de mi Sucursal</span>
+                        <p class="grey-text" style="margin-top:0;">Revisa que tipo de ventas se estan agendando: entrega a domicilio o retiro en sucursal, y su estado.</p>
+                        <div class="row" style="margin-bottom: 10px;">
+                            <div class="input-field col s12 m3">
+                                <input type="date" id="manager-sales-date-from">
+                                <label for="manager-sales-date-from" class="active">Desde</label>
+                            </div>
+                            <div class="input-field col s12 m3">
+                                <input type="date" id="manager-sales-date-to">
+                                <label for="manager-sales-date-to" class="active">Hasta</label>
+                            </div>
+                            <div class="input-field col s12 m3">
+                                <select id="manager-sales-status-filter">
+                                    <option value="" selected>Todos</option>
+                                    <option value="pendiente_pago">Pendiente pago</option>
+                                    <option value="pagado">Pagado</option>
+                                    <option value="en_reparto">En reparto</option>
+                                    <option value="entregado">Entregado</option>
+                                    <option value="apartado">Apartado</option>
+                                    <option value="cancelado">Cancelado</option>
+                                </select>
+                                <label>Estado</label>
+                            </div>
+                            <div class="input-field col s12 m3">
+                                <select id="manager-sales-tipo-filter">
+                                    <option value="" selected>Todos</option>
+                                    <option value="domicilio">Domicilio</option>
+                                    <option value="sucursal">Retiro en sucursal</option>
+                                </select>
+                                <label>Tipo de entrega</label>
+                            </div>
+                            <div class="col s12" style="display:flex; gap:8px; align-items:center; margin-top: 4px;">
+                                <button type="button" id="btn-manager-sales-filter" class="btn waves-effect waves-light blue">Filtrar</button>
+                                <button type="button" id="btn-manager-sales-clear" class="btn-flat waves-effect">Limpiar</button>
+                            </div>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="striped highlight">
+                                <thead>
+                                    <tr>
+                                        <th>Pedido</th>
+                                        <th>Cliente / Referencia</th>
+                                        <th>Vendedor</th>
+                                        <th>Tipo</th>
+                                        <th>Fecha</th>
+                                        <th class="right-align">Total</th>
+                                        <th>Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="manager-recent-sales-body">
+                                    <tr><td colspan="7" class="center grey-text">Cargando pedidos de la sucursal...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">inventory_2</i> Inventario y Operación</h5></div></div>
@@ -989,7 +1063,7 @@ include __DIR__ . '/includes/header.php';
     document.addEventListener('DOMContentLoaded', function() {
         const csrfToken = '<?php echo esc(getCsrfToken()); ?>';
         const settlementSuggested = { dia: 0 };
-        const sellerSalesFilters = { fechaInicio: '', fechaFin: '', estado: '' };
+        const sellerSalesFilters = { fechaInicio: '', fechaFin: '', estado: '', tipo: '' };
         const financeDailyState = { expanded: false, rows: [] };
 
         const currency = (value) => '$ ' + parseFloat(value || 0).toFixed(2);
@@ -1052,6 +1126,7 @@ include __DIR__ . '/includes/header.php';
             sellerSalesFilters.fechaInicio = String(params.get('ventas_fecha_inicio') || '').trim();
             sellerSalesFilters.fechaFin = String(params.get('ventas_fecha_fin') || '').trim();
             sellerSalesFilters.estado = String(params.get('ventas_estado') || '').trim();
+            sellerSalesFilters.tipo = String(params.get('ventas_tipo') || '').trim();
 
             const fromInput = document.getElementById('seller-sales-date-from');
             const toInput = document.getElementById('seller-sales-date-to');
@@ -1064,6 +1139,21 @@ include __DIR__ . '/includes/header.php';
             if (estadoInput) {
                 M.FormSelect.init(estadoInput);
             }
+
+            const managerFromInput = document.getElementById('manager-sales-date-from');
+            const managerToInput = document.getElementById('manager-sales-date-to');
+            const managerEstadoInput = document.getElementById('manager-sales-status-filter');
+            const managerTipoInput = document.getElementById('manager-sales-tipo-filter');
+
+            if (managerFromInput) managerFromInput.value = sellerSalesFilters.fechaInicio;
+            if (managerToInput) managerToInput.value = sellerSalesFilters.fechaFin;
+            if (managerEstadoInput) managerEstadoInput.value = sellerSalesFilters.estado;
+            if (managerTipoInput) managerTipoInput.value = sellerSalesFilters.tipo;
+
+            if (managerEstadoInput || managerTipoInput) {
+                M.FormSelect.init(document.querySelectorAll('#manager-sales-status-filter, #manager-sales-tipo-filter'));
+            }
+
             M.updateTextFields();
         };
 
@@ -1085,6 +1175,12 @@ include __DIR__ . '/includes/header.php';
                 url.searchParams.set('ventas_estado', filters.estado);
             } else {
                 url.searchParams.delete('ventas_estado');
+            }
+
+            if (filters?.tipo) {
+                url.searchParams.set('ventas_tipo', filters.tipo);
+            } else {
+                url.searchParams.delete('ventas_tipo');
             }
 
             window.history.replaceState({}, '', url.toString());
@@ -1200,11 +1296,36 @@ include __DIR__ . '/includes/header.php';
             }).join('');
         };
 
+        const renderManagerRecentSales = (d) => {
+            const body = document.getElementById('manager-recent-sales-body');
+            if (!body) return;
+
+            if (!Array.isArray(d.ventas_recientes_sucursal) || d.ventas_recientes_sucursal.length === 0) {
+                body.innerHTML = '<tr><td colspan="7" class="center grey-text">No hay pedidos registrados con esos filtros.</td></tr>';
+                return;
+            }
+
+            body.innerHTML = d.ventas_recientes_sucursal.map(row => {
+                const fecha = row.fecha_creacion ? fmtDateTime(row.fecha_creacion) : 'N/A';
+                return `
+                    <tr>
+                        <td>${row.numero_pedido || 'N/A'}</td>
+                        <td>${row.cliente_referencia || 'Sin referencia'}</td>
+                        <td>${row.vendedor || 'N/A'}</td>
+                        <td>${row.tipo_entrega || 'N/A'}</td>
+                        <td>${fecha}</td>
+                        <td class="right-align">${currency(row.total)}</td>
+                        <td>${row.estado || 'N/A'}</td>
+                    </tr>`;
+            }).join('');
+        };
+
         const loadDashboardData = (filters = sellerSalesFilters) => {
             const params = new URLSearchParams();
             if (filters?.fechaInicio) params.set('ventas_fecha_inicio', filters.fechaInicio);
             if (filters?.fechaFin) params.set('ventas_fecha_fin', filters.fechaFin);
             if (filters?.estado) params.set('ventas_estado', filters.estado);
+            if (filters?.tipo) params.set('ventas_tipo', filters.tipo);
 
             const query = params.toString();
             const url = '<?php echo BASE_URL; ?>api/dashboard_data.php' + (query ? ('?' + query) : '');
@@ -1249,6 +1370,7 @@ include __DIR__ . '/includes/header.php';
                 renderAdminSellers(d);
                 renderSellerSettlement(d);
                 renderSellerRecentSales(d);
+                renderManagerRecentSales(d);
 
                 financeDailyState.rows = Array.isArray(d.finanzas_mes?.diario) ? d.finanzas_mes.diario : [];
                 renderFinanceDaily();
@@ -1304,6 +1426,54 @@ include __DIR__ . '/includes/header.php';
                 sellerSalesFilters.fechaInicio = '';
                 sellerSalesFilters.fechaFin = '';
                 sellerSalesFilters.estado = '';
+                syncUrlWithFilters(sellerSalesFilters);
+                loadDashboardData(sellerSalesFilters);
+            });
+        }
+
+        const btnManagerFilter = document.getElementById('btn-manager-sales-filter');
+        if (btnManagerFilter) {
+            btnManagerFilter.addEventListener('click', () => {
+                const fromInput = document.getElementById('manager-sales-date-from');
+                const toInput = document.getElementById('manager-sales-date-to');
+                const estadoInput = document.getElementById('manager-sales-status-filter');
+                const tipoInput = document.getElementById('manager-sales-tipo-filter');
+                const fechaInicio = fromInput ? String(fromInput.value || '').trim() : '';
+                const fechaFin = toInput ? String(toInput.value || '').trim() : '';
+                const estado = estadoInput ? String(estadoInput.value || '').trim() : '';
+                const tipo = tipoInput ? String(tipoInput.value || '').trim() : '';
+
+                if (fechaInicio !== '' && fechaFin !== '' && fechaInicio > fechaFin) {
+                    M.toast({html: 'La fecha inicial no puede ser mayor a la final.', classes: 'orange darken-3'});
+                    return;
+                }
+
+                sellerSalesFilters.fechaInicio = fechaInicio;
+                sellerSalesFilters.fechaFin = fechaFin;
+                sellerSalesFilters.estado = estado;
+                sellerSalesFilters.tipo = tipo;
+                syncUrlWithFilters(sellerSalesFilters);
+                loadDashboardData(sellerSalesFilters);
+            });
+        }
+
+        const btnManagerClear = document.getElementById('btn-manager-sales-clear');
+        if (btnManagerClear) {
+            btnManagerClear.addEventListener('click', () => {
+                const fromInput = document.getElementById('manager-sales-date-from');
+                const toInput = document.getElementById('manager-sales-date-to');
+                const estadoInput = document.getElementById('manager-sales-status-filter');
+                const tipoInput = document.getElementById('manager-sales-tipo-filter');
+                if (fromInput) fromInput.value = '';
+                if (toInput) toInput.value = '';
+                if (estadoInput) estadoInput.value = '';
+                if (tipoInput) tipoInput.value = '';
+                M.FormSelect.init(document.querySelectorAll('select'));
+
+                sellerSalesFilters.fechaInicio = '';
+                sellerSalesFilters.fechaFin = '';
+                sellerSalesFilters.estado = '';
+                sellerSalesFilters.tipo = '';
                 syncUrlWithFilters(sellerSalesFilters);
                 loadDashboardData(sellerSalesFilters);
             });

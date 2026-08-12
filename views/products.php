@@ -67,11 +67,13 @@ include __DIR__ . '/includes/header.php';
                         <div class="input-field">
                             <input type="text" id="sku" name="sku">
                             <label for="sku">SKU (Código Interno)</label>
+                            <span class="helper-text">Opcional</span>
                         </div>
-                        
+
                         <div class="input-field">
                             <input type="text" id="codigo_barras" name="codigo_barras">
                             <label for="codigo_barras">Código de Barras</label>
+                            <span class="helper-text">Opcional</span>
                         </div>
                         
                         <div class="input-field">

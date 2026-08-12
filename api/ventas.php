@@ -46,12 +46,19 @@ $tableExists = static function (PDO $pdo, string $table): bool {
     return ((int)$stmt->fetchColumn()) > 0;
 };
 
+// Si el descifrado falla (llave distinta, dato corrupto, etc.) NUNCA se debe guardar/mostrar
+// el texto cifrado crudo (ENCv1:...) en el pedido; se trata como dato ausente para que las
+// validaciones de cliente/telefono/direccion lo detecten.
 $decryptValue = static function (?string $value): string {
-    $value = trim((string)$value);
-    if ($value !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($value)) {
-        return trim((string)piiDecryptValue($value));
+    $raw = trim((string)$value);
+    if ($raw === '' || !function_exists('piiIsEncryptedValue') || !function_exists('piiDecryptValue') || !piiIsEncryptedValue($raw)) {
+        return $raw;
     }
-    return $value;
+    $decrypted = trim((string)piiDecryptValue($raw));
+    if ($decrypted === $raw || piiIsEncryptedValue($decrypted)) {
+        return '';
+    }
+    return $decrypted;
 };
 
 $storeValue = static function (?string $value): ?string {

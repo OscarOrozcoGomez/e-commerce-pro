@@ -91,18 +91,24 @@ try {
             $id = (int)($data['id_producto'] ?? 0);
             $estado = ($data['visible_catalogo'] ?? '0') === '1' ? 'activo' : 'archivado';
             $mostrar_tabla = ($data['mostrar_tabla'] ?? '0') === '1' ? 1 : 0;
-            
+            // SKU y código de barras son opcionales; se guardan como NULL (no '') para no chocar
+            // con sus índices únicos cuando varios productos se quedan sin este dato.
+            $sku = trim((string)($data['sku'] ?? ''));
+            $sku = $sku === '' ? null : $sku;
+            $codigoBarras = trim((string)($data['codigo_barras'] ?? ''));
+            $codigoBarras = $codigoBarras === '' ? null : $codigoBarras;
+
             if ($id > 0) {
                 // EDITAR
-                $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras, 
+                $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras,
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
-                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo, 
+                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo,
                         `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '', ':nombre_variante' => $data['nombre_variante'] ?? null,
-                    ':sku' => $data['sku'] ?? null, ':codigo_barras' => $data['codigo_barras'] ?? null,
+                    ':sku' => $sku, ':codigo_barras' => $codigoBarras,
                     ':descripcion' => $data['descripcion'] ?? '', ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '', ':tabla' => $data['tabla_nutrimental'] ?? '[]',
                     ':mostrar_tabla' => $mostrar_tabla,
@@ -119,8 +125,8 @@ try {
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '',
                     ':nombre_variante' => $data['nombre_variante'] ?? null,
-                    ':sku' => $data['sku'] ?? null,
-                    ':codigo_barras' => $data['codigo_barras'] ?? null,
+                    ':sku' => $sku,
+                    ':codigo_barras' => $codigoBarras,
                     ':descripcion' => $data['descripcion'] ?? '',
                     ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '',
