@@ -12,7 +12,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ (secrets.FTP_HOST != '' || secrets.PTF_HOST != '') && (secrets.FTP_USERNAME != '' || secrets.PTF_USERNAME != '') && (secrets.FTP_PASSWORD != '' || secrets.PTF_PASSWORD != '') && secrets.MIGRATIONS_URL != '' && secrets.MIGRATIONS_DEPLOY_TOKEN != '' }}
     name: Deploy + Run Migrations
     runs-on: ubuntu-latest
     permissions:
