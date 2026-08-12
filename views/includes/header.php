@@ -21,6 +21,9 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo isset($pageTitle) ? esc($pageTitle) . ' - Belleza y Bienestar' : 'Belleza y Bienestar'; ?></title>
     <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>assets/img/logo.png">
     <!-- Google Tag Manager -->
     <?php if ($gtmContainerId !== ''): ?>
@@ -47,6 +50,10 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
+        html {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
         .product-card { margin-bottom: 20px; }
         .search-container { margin-bottom: 30px; }
         .product-image { height: 150px; object-fit: cover; }
