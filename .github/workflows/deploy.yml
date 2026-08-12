@@ -102,30 +102,43 @@ jobs:
           MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
           MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
         run: |
-          max_attempts=3
+          max_attempts=5
           attempt=0
+          http_code=""
           response=""
+          body_file="$RUNNER_TEMP/migration_response.json"
 
           while [ $attempt -lt $max_attempts ]; do
             attempt=$((attempt + 1))
             echo "Migration attempt $attempt of $max_attempts..."
 
-            response=$(curl -sS \
+            http_code=$(curl -sS \
               --connect-timeout 30 \
               --max-time 360 \
+              -o "$body_file" \
+              -w '%{http_code}' \
               -X POST "$MIGRATIONS_URL" \
               -H "Content-Type: application/json" \
               -H "X-Migrations-Token: $MIGRATIONS_DEPLOY_TOKEN" \
-              -d '{}') && break
+              -d '{}')
+            curl_exit=$?
+            response=$(cat "$body_file" 2>/dev/null || echo "")
 
-            echo "curl failed (exit $?), waiting 20s before retry..."
-            sleep 20
+            if [ "$curl_exit" -eq 0 ] && [ "$http_code" = "200" ] && echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+              break
+            fi
+
+            echo "Attempt $attempt failed (curl exit $curl_exit, HTTP ${http_code:-none}): $response"
+            if [ $attempt -lt $max_attempts ]; then
+              echo "Waiting 20s before retry..."
+              sleep 20
+            fi
           done
 
-          echo "Migration response:"
+          echo "Migration response (HTTP ${http_code:-none}):"
           echo "$response"
 
-          if ! echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-            echo "::error::Remote migrations failed after $attempt attempt(s)"
+          if [ "$http_code" != "200" ] || ! echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+            echo "::error::Remote migrations failed after $attempt attempt(s) (last HTTP status: ${http_code:-none})"
             exit 1
           fi
