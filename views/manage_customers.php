@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 requireAuth();
-if (!isAdmin()) { header('Location: dashboard.php'); exit; }
+if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
 $pdo = getPDO();
 $error = '';

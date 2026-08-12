@@ -303,6 +303,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Gestionar Clientes</span>
+                        <p>Consultar clientes y mantener sus direcciones guardadas para ventas a domicilio</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_customers.php" class="btn waves-effect waves-light blue darken-2">Clientes</a>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- SECCIÓN 2: LOGÍSTICA E INVENTARIO -->

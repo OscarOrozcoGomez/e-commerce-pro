@@ -13,6 +13,7 @@ if (!canScheduleSalesOrders()) {
 $pageTitle = 'Agendar Pedido a Domicilio';
 $pdo = getPDO();
 $error = '';
+$canManageCustomers = isAdmin() || isEncargado();
 
 $id_almacen_actual = resolveSalesWarehouseId($pdo);
 $almacenActualNombre = '';
@@ -190,7 +191,11 @@ include __DIR__ . '/includes/header.php';
                                 <input type="hidden" class="cliente_id" name="id_cliente" value="">
                                 <input type="text" class="cliente_nombre" name="cliente_nombre" placeholder="Busca un cliente existente" oninput="actualizarTituloTab('{{id}}', this.value)" autocomplete="off">
                                 <label class="active">Cliente</label>
-                                <span class="helper-text">Selecciona un cliente existente. Si no existe, registralo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.</span>
+                                <?php if ($canManageCustomers): ?>
+                                    <span class="helper-text">Selecciona un cliente existente. Si no existe, registralo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.</span>
+                                <?php else: ?>
+                                    <span class="helper-text">Selecciona un cliente existente. Si no aparece, solicita al administrador darlo de alta en Administrar Clientes.</span>
+                                <?php endif; ?>
                                 <div class="selected-client-status grey-text text-darken-1" style="font-size:0.85rem; margin-top:4px;"></div>
                             </div>
                             <div class="input-field col s12 m5">
@@ -347,6 +352,15 @@ include __DIR__ . '/includes/header.php';
     const autocompleteData = {};
     const customerMap = {};
     const customerAutocompleteData = {};
+    const customerSearchIndex = [];
+    const CAN_MANAGE_CUSTOMERS = <?php echo $canManageCustomers ? 'true' : 'false'; ?>;
+    const MANAGE_CUSTOMERS_URL = '<?php echo BASE_URL; ?>views/manage_customers.php';
+    const CUSTOMER_SUPPORT_HTML = CAN_MANAGE_CUSTOMERS
+        ? `Busca un cliente existente. Si necesitas darlo de alta, hazlo en <a href="${MANAGE_CUSTOMERS_URL}" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`
+        : 'Busca un cliente existente. Si no aparece, solicita al administrador darlo de alta en Administrar Clientes.';
+    const CUSTOMER_NO_ADDRESS_HTML = (customerId) => CAN_MANAGE_CUSTOMERS
+        ? `Cliente existente seleccionado: #${customerId}. Este cliente no tiene direcciones guardadas. Agregalas en <a href="${MANAGE_CUSTOMERS_URL}" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`
+        : `Cliente existente seleccionado: #${customerId}. Este cliente no tiene direcciones guardadas. Solicita al administrador registrar sus direcciones.`;
     let salesDraftSaveTimer = null;
     let isRestoringDrafts = false;
     let pendingCloseVentaId = null;
@@ -360,6 +374,54 @@ include __DIR__ . '/includes/header.php';
             return value;
         }
         return `data:image/jpeg;base64,${value}`;
+    }
+
+    function normalizeSearchTerm(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+    }
+
+    function normalizePhoneDigits(value) {
+        return String(value || '').replace(/\D+/g, '');
+    }
+
+    function registerCustomerAlias(label, customerRecord) {
+        const key = String(label || '').trim();
+        if (key === '') return;
+        customerAutocompleteData[key] = null;
+        customerMap[key.toLowerCase()] = customerRecord;
+    }
+
+    function findCustomerByInput(value) {
+        const raw = String(value || '').trim();
+        if (raw === '') return null;
+
+        const key = raw.toLowerCase();
+        if (customerMap[key]) {
+            return customerMap[key];
+        }
+
+        const normalized = normalizeSearchTerm(raw);
+        const digits = normalizePhoneDigits(raw);
+
+        const exact = customerSearchIndex.filter((entry) => {
+            return entry.normalizedLabel === normalized
+                || entry.normalizedName === normalized
+                || (digits !== '' && entry.phoneDigits === digits);
+        });
+        if (exact.length === 1) return exact[0].customer;
+        if (exact.length > 1) return null;
+
+        const partial = customerSearchIndex.filter((entry) => {
+            return entry.normalizedLabel.includes(normalized)
+                || entry.normalizedName.includes(normalized)
+                || (digits !== '' && entry.phoneDigits.includes(digits));
+        });
+
+        return partial.length === 1 ? partial[0].customer : null;
     }
 
     function hasVentaData(context) {
@@ -518,7 +580,7 @@ include __DIR__ . '/includes/header.php';
         context.dataset.customerMapsLink = '';
         context.dataset.customerAddress = '';
         context.dataset.selectedCustomerId = '';
-        if (statusNode) statusNode.innerHTML = 'Busca un cliente existente. Si necesitas darlo de alta, hazlo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.';
+        if (statusNode) statusNode.textContent = '';
         renderCustomerAddressOptions(context, null);
         updateDeliveryMapLink(context);
     }
@@ -562,7 +624,7 @@ include __DIR__ . '/includes/header.php';
             context.dataset.addressMode = 'none';
             const statusNode = context.querySelector('.selected-client-status');
             if (statusNode && cliente && cliente.id_cliente) {
-                statusNode.innerHTML = `Cliente existente seleccionado: #${cliente.id_cliente}. Este cliente no tiene direcciones guardadas. Agregalas en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`;
+                statusNode.innerHTML = CUSTOMER_NO_ADDRESS_HTML(cliente.id_cliente);
             }
             updateDeliveryMapLink(context);
             return;
@@ -671,10 +733,27 @@ include __DIR__ . '/includes/header.php';
             const direccion = String(c.direccion || '').trim();
             const mapsLink = String(c.maps_link || '').trim();
             const direcciones = Array.isArray(c.direcciones) ? c.direcciones : [];
-            if (nombre === '') return;
+            if (nombre === '' || telefono === '') return;
             const label = telefono !== '' ? `${nombre} (${telefono})` : nombre;
-            customerAutocompleteData[label] = null;
-            customerMap[label.toLowerCase()] = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, direcciones, label };
+            const customerRecord = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, direcciones, label };
+            registerCustomerAlias(label, customerRecord);
+            registerCustomerAlias(nombre, customerRecord);
+            if (telefono !== '') {
+                registerCustomerAlias(`${telefono} ${nombre}`, customerRecord);
+                registerCustomerAlias(`${nombre} ${telefono}`, customerRecord);
+                const phoneDigits = normalizePhoneDigits(telefono);
+                if (phoneDigits !== '') {
+                    registerCustomerAlias(`${phoneDigits} ${nombre}`, customerRecord);
+                    registerCustomerAlias(`${nombre} ${phoneDigits}`, customerRecord);
+                }
+            }
+
+            customerSearchIndex.push({
+                normalizedLabel: normalizeSearchTerm(label),
+                normalizedName: normalizeSearchTerm(nombre),
+                phoneDigits: normalizePhoneDigits(telefono),
+                customer: customerRecord,
+            });
         });
 
         M.FormSelect.init(document.querySelectorAll('select'));
@@ -725,9 +804,14 @@ include __DIR__ . '/includes/header.php';
         containers.insertAdjacentHTML('beforeend', template.replace(/{{id}}/g, id));
 
         const context = document.getElementById(`venta-${id}`);
-        let tabsInstance = M.Tabs.getInstance(tabsUl);
-        if (tabsInstance) tabsInstance.destroy();
-        tabsInstance = M.Tabs.init(tabsUl);
+        let tabsInstance = null;
+        try {
+            tabsInstance = M.Tabs.getInstance(tabsUl);
+            if (tabsInstance) tabsInstance.destroy();
+            tabsInstance = M.Tabs.init(tabsUl);
+        } catch (err) {
+            console.warn('No se pudo inicializar Tabs en ventas:', err);
+        }
 
         M.FormSelect.init(context.querySelectorAll('select'));
         M.updateTextFields();
@@ -753,22 +837,52 @@ include __DIR__ . '/includes/header.php';
         });
 
         if (clienteNombreInput) {
-            M.Autocomplete.init(clienteNombreInput, {
-                data: customerAutocompleteData,
-                limit: 8,
-                minLength: 1,
-                onAutocomplete: function(val) {
-                    const cliente = customerMap[String(val || '').toLowerCase()];
-                    if (!cliente) return;
-                    setSelectedCustomer(context, cliente);
-                    if (clienteTelefonoInput) clienteTelefonoInput.value = cliente.telefono || clienteTelefonoInput.value || '';
-                    if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
-                        direccionEntregaInput.value = cliente.direccion || '';
+            try {
+                M.Autocomplete.init(clienteNombreInput, {
+                    data: customerAutocompleteData,
+                    limit: 8,
+                    minLength: 1,
+                    dropdownOptions: {
+                        container: document.body
+                    },
+                    onAutocomplete: function(val) {
+                        const cliente = customerMap[String(val || '').toLowerCase()] || findCustomerByInput(val);
+                        if (!cliente) return;
+                        setSelectedCustomer(context, cliente);
+                        if (clienteTelefonoInput) clienteTelefonoInput.value = cliente.telefono || clienteTelefonoInput.value || '';
+                        if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
+                            direccionEntregaInput.value = cliente.direccion || '';
+                        }
+                        renderCustomerAddressOptions(context, cliente);
+                        actualizarTituloTab(id, cliente.nombre);
+                        M.updateTextFields();
                     }
-                    renderCustomerAddressOptions(context, cliente);
-                    actualizarTituloTab(id, cliente.nombre);
-                    M.updateTextFields();
+                });
+            } catch (err) {
+                console.warn('No se pudo inicializar autocomplete de cliente:', err);
+            }
+
+            const resolveTypedCustomer = () => {
+                const resolved = findCustomerByInput(clienteNombreInput.value);
+                if (!resolved) return;
+                setSelectedCustomer(context, resolved);
+                if (clienteTelefonoInput) clienteTelefonoInput.value = resolved.telefono || clienteTelefonoInput.value || '';
+                if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
+                    direccionEntregaInput.value = resolved.direccion || '';
                 }
+                renderCustomerAddressOptions(context, resolved);
+                actualizarTituloTab(id, resolved.nombre);
+                M.updateTextFields();
+            };
+
+            clienteNombreInput.addEventListener('change', resolveTypedCustomer);
+            clienteNombreInput.addEventListener('blur', resolveTypedCustomer);
+            clienteNombreInput.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== 'Tab') return;
+                const resolved = findCustomerByInput(clienteNombreInput.value);
+                if (!resolved) return;
+                e.preventDefault();
+                resolveTypedCustomer();
             });
 
             clienteNombreInput.addEventListener('input', () => {
@@ -780,18 +894,23 @@ include __DIR__ . '/includes/header.php';
             });
         }
 
-        const instance = M.Autocomplete.init(buscador, {
-            data: autocompleteData,
-            limit: 10,
-            minLength: 1,
-            onAutocomplete: function(val) {
-                const prod = productMap[val.toLowerCase()];
-                if (!prod) return;
-                agregarProductoALista(id, prod);
-                buscador.value = '';
-                setTimeout(() => buscador.focus(), 100);
-            }
-        });
+        let instance = null;
+        try {
+            instance = M.Autocomplete.init(buscador, {
+                data: autocompleteData,
+                limit: 10,
+                minLength: 1,
+                onAutocomplete: function(val) {
+                    const prod = productMap[val.toLowerCase()];
+                    if (!prod) return;
+                    agregarProductoALista(id, prod);
+                    buscador.value = '';
+                    setTimeout(() => buscador.focus(), 100);
+                }
+            });
+        } catch (err) {
+            console.warn('No se pudo inicializar autocomplete de producto:', err);
+        }
 
         buscador.addEventListener('keydown', function(e) {
             if (e.key !== 'Enter' && e.key !== 'Tab') return;
@@ -996,7 +1115,11 @@ include __DIR__ . '/includes/header.php';
             </div>
         `;
         context.querySelector('.carrito-items').insertAdjacentHTML('afterbegin', html);
-        M.Materialbox.init(context.querySelectorAll('.materialboxed'));
+        try {
+            M.Materialbox.init(context.querySelectorAll('.materialboxed'));
+        } catch (err) {
+            console.warn('No se pudo inicializar materialbox:', err);
+        }
 
         productoIndex++;
         actualizarTotal(tabId);

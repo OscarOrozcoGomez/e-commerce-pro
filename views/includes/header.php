@@ -427,10 +427,14 @@
     <!-- Scripts para Inicializar Componentes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
-        const USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
-        const USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
-        const CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
-        const CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
+        window.USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+        window.USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
+        window.CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
+        window.CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
+        var USER_IS_AUTHENTICATED = window.USER_IS_AUTHENTICATED;
+        var USER_IS_INTERNAL_STAFF = window.USER_IS_INTERNAL_STAFF;
+        var CURRENT_USER_ID = window.CURRENT_USER_ID;
+        var CURRENT_USER_WAREHOUSE_ID = window.CURRENT_USER_WAREHOUSE_ID;
         const BASE_URL_HEADER = '<?php echo BASE_URL; ?>';
         const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
         const IS_CHAT_PAGE_VIEW = window.location.pathname.toLowerCase().includes('/views/chat.php');
@@ -814,23 +818,27 @@
 
             // Inicializar componentes de Materialize de forma global y segura
             if (typeof M !== 'undefined') {
-                if (typeof M.AutoInit === 'function') {
-                    M.AutoInit();
-                } else {
-                    const sidenavElems = document.querySelectorAll('.sidenav');
-                    if (typeof M.Sidenav !== 'undefined') {
-                        M.Sidenav.init(sidenavElems);
-                    }
+                try {
+                    if (typeof M.AutoInit === 'function') {
+                        M.AutoInit();
+                    } else {
+                        const sidenavElems = document.querySelectorAll('.sidenav');
+                        if (typeof M.Sidenav !== 'undefined') {
+                            M.Sidenav.init(sidenavElems);
+                        }
 
-                    const dropdownElems = document.querySelectorAll('.dropdown-trigger');
-                    if (typeof M.Dropdown !== 'undefined') {
-                        M.Dropdown.init(dropdownElems, {
-                            alignment: 'right',
-                            constrainWidth: false,
-                            coverTrigger: false,
-                            closeOnClick: true
-                        });
+                        const dropdownElems = document.querySelectorAll('.dropdown-trigger');
+                        if (typeof M.Dropdown !== 'undefined') {
+                            M.Dropdown.init(dropdownElems, {
+                                alignment: 'right',
+                                constrainWidth: false,
+                                coverTrigger: false,
+                                closeOnClick: true
+                            });
+                        }
                     }
+                } catch (err) {
+                    console.warn('Materialize AutoInit fallo en header:', err);
                 }
             }
 
