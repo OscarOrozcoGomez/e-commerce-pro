@@ -54,13 +54,33 @@ try {
 
         $passwordHash = password_hash($passwordRaw, PASSWORD_BCRYPT);
 
-        $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
-                VALUES (?, ?, ?, ?, ?, 'activo')";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$nombre, $email, $passwordHash, $id_rol, $id_almacen]);
-        
-        logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
-        echo json_encode(['success' => true, 'message' => 'Usuario creado']);
+        $stmtExistingUser = $pdo->prepare("SELECT u.id_usuario, u.estado, COALESCE(u.es_superadmin, 0) AS es_superadmin, r.nombre AS rol
+                                           FROM usuarios u
+                                           JOIN roles r ON u.id_rol = r.id_rol
+                                           WHERE LOWER(u.email) = LOWER(?)
+                                           LIMIT 1");
+        $stmtExistingUser->execute([$email]);
+        $existingUser = $stmtExistingUser->fetch(PDO::FETCH_ASSOC);
+
+        if ($existingUser && !shouldReactivateExistingUser($existingUser)) {
+            throw new Exception('El correo ya está asociado a otra cuenta activa.');
+        }
+
+        if ($existingUser && shouldReactivateExistingUser($existingUser)) {
+            $targetUserId = (int)$existingUser['id_usuario'];
+            $pdo->prepare("UPDATE usuarios SET nombre = ?, email = ?, contrasena = ?, id_rol = ?, id_almacen = ?, estado = 'activo', intentos_fallidos = 0, bloqueado_hasta = NULL, es_superadmin = 0 WHERE id_usuario = ?")
+                ->execute([$nombre, $email, $passwordHash, $id_rol, $id_almacen, $targetUserId]);
+            logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email");
+            echo json_encode(['success' => true, 'message' => 'Cuenta existente reactivada y actualizada']);
+        } else {
+            $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
+                    VALUES (?, ?, ?, ?, ?, 'activo')";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$nombre, $email, $passwordHash, $id_rol, $id_almacen]);
+            
+            logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
+            echo json_encode(['success' => true, 'message' => 'Usuario creado']);
+        }
     } 
     elseif ($accion === 'cambiar_estado') {
         $id = (int)$data['id_usuario'];

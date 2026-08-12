@@ -13,6 +13,7 @@ if (!canScheduleSalesOrders()) {
 $pageTitle = 'Agendar Pedido a Domicilio';
 $pdo = getPDO();
 $error = '';
+$canManageCustomers = isAdmin() || isEncargado();
 
 $id_almacen_actual = resolveSalesWarehouseId($pdo);
 $almacenActualNombre = '';
@@ -48,13 +49,31 @@ try {
     $productos = $stmt->fetchAll();
 
     foreach ($productos as &$producto) {
-        $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''));
+        $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''), (int)($producto['id_producto'] ?? 0));
     }
     unset($producto);
 } catch (PDOException $e) {
     $error = 'Error al obtener productos: ' . $e->getMessage();
     $productos = [];
 }
+
+// Si el descifrado falla (llave distinta, dato corrupto, etc.) NUNCA debemos
+// mostrar el texto cifrado crudo (ENCv1:...) al usuario; se usa un fallback seguro.
+$safeDecryptValue = static function (?string $value, string $fallback = ''): string {
+    $raw = trim((string)$value);
+    if ($raw === '') {
+        return $fallback;
+    }
+    if (!function_exists('piiIsEncryptedValue') || !function_exists('piiDecryptValue') || !piiIsEncryptedValue($raw)) {
+        return $raw;
+    }
+    $decrypted = trim((string)piiDecryptValue($raw));
+    if ($decrypted === $raw || piiIsEncryptedValue($decrypted)) {
+        // El descifrado no funcionó (misma llave requerida no disponible o coincide con el crudo).
+        return $fallback;
+    }
+    return $decrypted;
+};
 
 try {
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones'");
@@ -74,12 +93,8 @@ try {
         $cliente['direccion'] = '';
         $cliente['maps_link'] = '';
         $cliente['direcciones'] = [];
-        foreach (['nombre', 'telefono'] as $campo) {
-            $valor = (string)($cliente[$campo] ?? '');
-            if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
-                $cliente[$campo] = (string)piiDecryptValue($valor);
-            }
-        }
+        $cliente['nombre'] = $safeDecryptValue($cliente['nombre'] ?? '', 'Cliente protegido');
+        $cliente['telefono'] = $safeDecryptValue($cliente['telefono'] ?? '', '');
     }
     unset($cliente);
 
@@ -98,23 +113,22 @@ try {
 
             $direccionesPorCliente = [];
             foreach ($direccionesRaw as $direccion) {
-                foreach (['alias', 'direccion', 'maps_link'] as $campo) {
-                    $valor = (string)($direccion[$campo] ?? '');
-                    if ($valor !== '' && function_exists('piiIsEncryptedValue') && function_exists('piiDecryptValue') && piiIsEncryptedValue($valor)) {
-                        $direccion[$campo] = (string)piiDecryptValue($valor);
-                    }
-                }
-
                 $idClienteDireccion = (int)($direccion['id_cliente'] ?? 0);
                 if ($idClienteDireccion <= 0) {
                     continue;
                 }
 
+                $direccionDescifrada = $safeDecryptValue($direccion['direccion'] ?? '', '');
+                if ($direccionDescifrada === '') {
+                    // Direccion ilegible (no se pudo descifrar): no la ofrecemos como opcion de entrega.
+                    continue;
+                }
+
                 $direccionesPorCliente[$idClienteDireccion][] = [
                     'id_direccion' => (int)($direccion['id_direccion'] ?? 0),
-                    'alias' => (string)($direccion['alias'] ?? ''),
-                    'direccion' => (string)($direccion['direccion'] ?? ''),
-                    'maps_link' => (string)($direccion['maps_link'] ?? ''),
+                    'alias' => $safeDecryptValue($direccion['alias'] ?? '', ''),
+                    'direccion' => $direccionDescifrada,
+                    'maps_link' => $safeDecryptValue($direccion['maps_link'] ?? '', ''),
                     'es_default' => ((int)($direccion['es_default'] ?? 0)) === 1,
                 ];
             }
@@ -188,14 +202,21 @@ include __DIR__ . '/includes/header.php';
                             <div class="input-field col s12 m7">
                                 <i class="material-icons prefix">person_outline</i>
                                 <input type="hidden" class="cliente_id" name="id_cliente" value="">
-                                <input type="text" class="cliente_nombre" name="cliente_nombre" placeholder="Busca un cliente existente" oninput="actualizarTituloTab('{{id}}', this.value)" autocomplete="off">
+                                <div class="sales-customer-input-wrap">
+                                    <input type="text" class="cliente_nombre" name="cliente_nombre" placeholder="Busca un cliente existente" oninput="actualizarTituloTab('{{id}}', this.value)" autocomplete="off">
+                                    <div class="selected-customer-chip-wrap"></div>
+                                </div>
                                 <label class="active">Cliente</label>
-                                <span class="helper-text">Selecciona un cliente existente. Si no existe, registralo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.</span>
+                                <?php if ($canManageCustomers): ?>
+                                    <span class="helper-text">Selecciona un cliente existente. Si no existe, registralo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.</span>
+                                <?php else: ?>
+                                    <span class="helper-text">Selecciona un cliente existente. Si no aparece, solicita al administrador darlo de alta en Administrar Clientes.</span>
+                                <?php endif; ?>
                                 <div class="selected-client-status grey-text text-darken-1" style="font-size:0.85rem; margin-top:4px;"></div>
                             </div>
                             <div class="input-field col s12 m5">
                                 <i class="material-icons prefix">phone</i>
-                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Telefono del cliente seleccionado" maxlength="19" inputmode="numeric" autocomplete="tel-national" required readonly>
+                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Telefono del cliente seleccionado" maxlength="19" inputmode="numeric" autocomplete="tel-national" required>
                                 <label class="active">Telefono</label>
                                 <span class="helper-text">Obligatorio para la entrega a domicilio.</span>
                             </div>
@@ -212,11 +233,11 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="row">
-                            <div class="input-field col s12 m8">
-                                <i class="material-icons prefix">place</i>
-                                <textarea class="materialize-textarea direccion_entrega" name="direccion_entrega" required placeholder="Se llena al elegir un domicilio guardado" readonly></textarea>
-                                <label class="active">Direccion exacta de entrega</label>
-                                <span class="helper-text">Se toma de la direccion guardada del cliente y queda reflejada para el repartidor.</span>
+                            <div class="col s12 m8">
+                                <input type="hidden" class="direccion_entrega" name="direccion_entrega" value="">
+                                <div class="delivery-address-preview" style="display:none;">
+                                    <i class="material-icons tiny">place</i><span class="delivery-address-preview-text"></span>
+                                </div>
                                 <div class="delivery-map-link" style="display:none; margin-top:8px;">
                                     <a href="#" target="_blank" rel="noopener noreferrer" class="btn-small blue darken-2 waves-effect waves-light delivery-map-link-anchor">
                                         <i class="material-icons left">map</i><span class="delivery-map-link-text">Abrir ubicación</span>
@@ -225,16 +246,28 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             <div class="input-field col s12 m4">
                                 <i class="material-icons prefix">map</i>
-                                <input type="url" class="maps_link_entrega" name="maps_link_entrega" placeholder="Link guardado del domicilio" autocomplete="off" readonly>
+                                <input type="url" class="maps_link_entrega" name="maps_link_entrega" placeholder="Link guardado del domicilio" autocomplete="off">
                                 <label class="active">Link de Google Maps</label>
-                                <span class="helper-text">Opcional. Si el cliente ya lo tiene guardado, aparecerá aquí.</span>
+                                <span class="helper-text">Se llena automáticamente cuando eliges direccion guardada o Google.</span>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">search</i>
+                                <input type="text" class="autocomplete_search_sales" placeholder="Buscar direccion con Google Maps" autocomplete="off">
+                                <label class="active">Buscar direccion con Google</label>
+                                <span class="helper-text">Selecciona una sugerencia para llenar direccion y link de Maps automáticamente.</span>
+                            </div>
+                            <div class="col s12">
+                                <div class="sales-map-preview z-depth-1" style="height: 180px; width: 100%; border-radius: 4px; display: none; border: 1px solid #ddd;"></div>
                             </div>
                         </div>
 
                         <div class="row" style="background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px dashed #ccc; margin-bottom: 20px;">
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">search</i>
-                                <input type="text" class="buscador-producto autocomplete" placeholder="Escribe el nombre o escanea código de barras..." autocomplete="off">
+                                <input type="text" class="buscador-producto" placeholder="Escribe el nombre o escanea código de barras..." autocomplete="off">
                                 <label class="active">Buscar Producto</label>
                                 <span class="helper-text">Presiona Enter para agregar por código de barras</span>
                             </div>
@@ -335,6 +368,71 @@ include __DIR__ . '/includes/header.php';
     .sales-qty-control { display: flex; align-items: center; gap: 8px; }
     .sales-qty-control input { margin: 0 !important; text-align: center; }
     .sales-line-total { font-size: 1.15rem; font-weight: 700; color: #2e7d32; padding-top: 18px; }
+    .delivery-address-preview {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        margin-top: 8px;
+        padding: 10px 12px;
+        background: #f5f7fa;
+        border: 1px solid #dde3e8;
+        border-radius: 4px;
+        color: #37474f;
+        font-size: 0.92rem;
+        line-height: 1.35;
+    }
+    .delivery-address-preview i { color: #607d8b; margin-top: 1px; }
+    .delivery-address-preview.delivery-address-preview-missing { color: #b71c1c; background: #fdecea; border-color: #f5c6c3; }
+    .delivery-address-preview.delivery-address-preview-missing i { color: #c62828; }
+    .sales-customer-input-wrap {
+        position: relative;
+        min-height: 3rem;
+    }
+    .sales-customer-input-wrap .selected-customer-chip-wrap {
+        position: absolute;
+        left: 52px;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 2;
+        pointer-events: none;
+    }
+    .sales-customer-input-wrap.has-selection .cliente_nombre {
+        color: transparent;
+        caret-color: transparent;
+    }
+    .sales-customer-input-wrap.has-selection .cliente_nombre::placeholder {
+        color: transparent;
+    }
+    .selected-customer-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: #e3f2fd;
+        color: #0d47a1;
+        border: 1px solid #90caf9;
+        border-radius: 16px;
+        padding: 4px 10px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        max-width: 100%;
+        pointer-events: auto;
+    }
+    .selected-customer-chip > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .selected-customer-chip-remove {
+        border: none;
+        background: transparent;
+        color: #0d47a1;
+        cursor: pointer;
+        line-height: 1;
+        font-size: 1rem;
+        font-weight: 700;
+        padding: 0;
+    }
 </style>
 
 <script>
@@ -347,19 +445,118 @@ include __DIR__ . '/includes/header.php';
     const autocompleteData = {};
     const customerMap = {};
     const customerAutocompleteData = {};
+    const customerSearchIndex = [];
+    const CAN_MANAGE_CUSTOMERS = <?php echo $canManageCustomers ? 'true' : 'false'; ?>;
+    const MANAGE_CUSTOMERS_URL = '<?php echo BASE_URL; ?>views/manage_customers.php';
+    const CUSTOMER_SUPPORT_HTML = CAN_MANAGE_CUSTOMERS
+        ? `Busca un cliente existente. Si necesitas darlo de alta, hazlo en <a href="${MANAGE_CUSTOMERS_URL}" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`
+        : 'Busca un cliente existente. Si no aparece, solicita al administrador darlo de alta en Administrar Clientes.';
+    const CUSTOMER_NO_ADDRESS_HTML = (customerId) => CAN_MANAGE_CUSTOMERS
+        ? `Cliente existente seleccionado: #${customerId}. Este cliente no tiene direcciones guardadas. Agregalas en <a href="${MANAGE_CUSTOMERS_URL}" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`
+        : `Cliente existente seleccionado: #${customerId}. Este cliente no tiene direcciones guardadas. Solicita al administrador registrar sus direcciones.`;
     let salesDraftSaveTimer = null;
     let isRestoringDrafts = false;
     let pendingCloseVentaId = null;
     let closeVentaModalInstance = null;
+    let googlePlacesReadySales = false;
 
     function resolveProductImageSrc(rawImage) {
         if (!rawImage) return '../assets/img/no-product.png';
         const value = String(rawImage).trim();
         if (value === '') return '../assets/img/no-product.png';
+
+        // Some environments don't render inline SVG placeholders consistently in autocomplete lists.
+        if (value.startsWith('data:image/svg+xml')) {
+            return '../assets/img/no-product.png';
+        }
+
         if (value.startsWith('data:') || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/') || value.startsWith('../') || value.startsWith('./')) {
             return value;
         }
-        return `data:image/jpeg;base64,${value}`;
+
+        const normalized = value.replace(/\\/g, '/');
+
+        // Common case: DB stores file names or relative image paths.
+        if (/\.(png|jpe?g|webp|gif|avif|svg)$/i.test(normalized)) {
+            if (normalized.startsWith('assets/')) return `../${normalized}`;
+            if (normalized.startsWith('uploads/')) return `../${normalized}`;
+            if (normalized.startsWith('img/')) return `../assets/${normalized}`;
+            if (normalized.startsWith('products/')) return `../assets/img/${normalized}`;
+            return `../assets/img/products/${normalized}`;
+        }
+
+        // Only treat as base64 when it really looks like encoded binary content.
+        const maybeBase64 = /^[A-Za-z0-9+/=\r\n]+$/.test(value) && value.length > 80;
+        if (maybeBase64) {
+            return `data:image/jpeg;base64,${value}`;
+        }
+
+        return '../assets/img/no-product.png';
+    }
+
+    function normalizeSearchTerm(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+    }
+
+    const ADDRESS_PLACEHOLDER_TEXTS = [
+        'por confirmar', 'pendiente', 'pendiente de confirmar', 'sin direccion',
+        'sin especificar', 'direccion pendiente', 'n/a', 'na', 'tbd', 'por definir',
+    ];
+
+    function isPlaceholderAddressText(value) {
+        const normalized = normalizeSearchTerm(value);
+        if (normalized === '') return false;
+        return ADDRESS_PLACEHOLDER_TEXTS.includes(normalized);
+    }
+
+    function normalizePhoneDigits(value) {
+        return String(value || '').replace(/\D+/g, '');
+    }
+
+    function registerCustomerOption(label, customerRecord) {
+        const key = String(label || '').trim();
+        if (key === '') return;
+        customerAutocompleteData[key] = null;
+        customerMap[key.toLowerCase()] = customerRecord;
+    }
+
+    function registerCustomerLookupAlias(label, customerRecord) {
+        const key = String(label || '').trim();
+        if (key === '') return;
+        customerMap[key.toLowerCase()] = customerRecord;
+    }
+
+    function findCustomerByInput(value) {
+        const raw = String(value || '').trim();
+        if (raw === '') return null;
+
+        const key = raw.toLowerCase();
+        if (customerMap[key]) {
+            return customerMap[key];
+        }
+
+        const normalized = normalizeSearchTerm(raw);
+        const digits = normalizePhoneDigits(raw);
+
+        const exact = customerSearchIndex.filter((entry) => {
+            return entry.normalizedLabel === normalized
+                || entry.normalizedName === normalized
+                || (digits !== '' && entry.phoneDigits === digits);
+        });
+        if (exact.length === 1) return exact[0].customer;
+        if (exact.length > 1) return null;
+
+        const partial = customerSearchIndex.filter((entry) => {
+            return entry.normalizedLabel.includes(normalized)
+                || entry.normalizedName.includes(normalized)
+                || (digits !== '' && entry.phoneDigits.includes(digits));
+        });
+
+        return partial.length === 1 ? partial[0].customer : null;
     }
 
     function hasVentaData(context) {
@@ -477,11 +674,13 @@ include __DIR__ . '/includes/header.php';
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
         const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
         const statusNode = context.querySelector('.selected-client-status');
+        const customerSearchInput = context.querySelector('.autocomplete_search_sales');
 
         if (clienteIdInput) clienteIdInput.value = String(cliente.id_cliente || '');
         if (clienteNombreInput) {
             if (overrideFields) clienteNombreInput.value = String(cliente.nombre || '');
             clienteNombreInput.dataset.selectedClientName = String(cliente.nombre || '');
+            clienteNombreInput.readOnly = true;
         }
         if (clienteTelefonoInput && overrideFields) clienteTelefonoInput.value = String(cliente.telefono || '');
         if (direccionEntregaInput && overrideFields && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
@@ -490,10 +689,12 @@ include __DIR__ . '/includes/header.php';
         if (mapsLinkEntregaInput && overrideFields && (!mapsLinkEntregaInput.value || mapsLinkEntregaInput.value.trim() === '')) {
             mapsLinkEntregaInput.value = String(cliente.maps_link || '');
         }
+        if (customerSearchInput) customerSearchInput.value = '';
         context.dataset.customerMapsLink = String(cliente.maps_link || '');
         context.dataset.customerAddress = String(cliente.direccion || '');
         context.dataset.selectedCustomerId = String(cliente.id_cliente || '');
         if (statusNode) statusNode.textContent = cliente.id_cliente ? `Cliente existente seleccionado: #${cliente.id_cliente}` : '';
+        renderSelectedCustomerChip(context, cliente);
         renderCustomerAddressOptions(context, cliente);
         updateDeliveryMapLink(context);
     }
@@ -506,21 +707,163 @@ include __DIR__ . '/includes/header.php';
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
         const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
         const statusNode = context.querySelector('.selected-client-status');
+        const customerSearchInput = context.querySelector('.autocomplete_search_sales');
 
         if (clienteIdInput) clienteIdInput.value = '';
         if (clienteNombreInput) {
             clienteNombreInput.dataset.selectedClientName = '';
+            clienteNombreInput.readOnly = false;
             if (wipeFields) clienteNombreInput.value = '';
         }
         if (clienteTelefonoInput && wipeFields) clienteTelefonoInput.value = '';
         if (direccionEntregaInput && wipeFields) direccionEntregaInput.value = '';
         if (mapsLinkEntregaInput && wipeFields) mapsLinkEntregaInput.value = '';
+        if (customerSearchInput && wipeFields) customerSearchInput.value = '';
         context.dataset.customerMapsLink = '';
         context.dataset.customerAddress = '';
         context.dataset.selectedCustomerId = '';
-        if (statusNode) statusNode.innerHTML = 'Busca un cliente existente. Si necesitas darlo de alta, hazlo en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.';
+        if (statusNode) statusNode.textContent = '';
+        renderSelectedCustomerChip(context, null);
         renderCustomerAddressOptions(context, null);
         updateDeliveryMapLink(context);
+    }
+
+    function renderSelectedCustomerChip(context, cliente) {
+        if (!context) return;
+        const wrap = context.querySelector('.selected-customer-chip-wrap');
+        const fieldWrap = context.querySelector('.sales-customer-input-wrap');
+        if (!wrap) return;
+
+        if (!cliente || !cliente.id_cliente) {
+            wrap.innerHTML = '';
+            if (fieldWrap) fieldWrap.classList.remove('has-selection');
+            return;
+        }
+
+        const chipLabel = escapeHtml(`${cliente.nombre || 'Cliente'}${cliente.telefono ? ` (${cliente.telefono})` : ''}`);
+        wrap.innerHTML = `
+            <span class="selected-customer-chip" title="Cliente seleccionado">
+                <span>${chipLabel}</span>
+                <button type="button" class="selected-customer-chip-remove" aria-label="Quitar cliente seleccionado">&times;</button>
+            </span>
+        `;
+
+        const removeBtn = wrap.querySelector('.selected-customer-chip-remove');
+        removeBtn?.addEventListener('click', () => {
+            clearSelectedCustomer(context, true);
+            const clienteInput = context.querySelector('.cliente_nombre');
+            if (clienteInput) {
+                clienteInput.focus();
+            }
+        });
+
+        if (fieldWrap) fieldWrap.classList.add('has-selection');
+    }
+
+    function parseCoordsFromMapsLink(rawLink) {
+        const value = String(rawLink || '').trim();
+        if (value === '') return null;
+
+        const queryMatch = value.match(/[?&]query=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
+        if (queryMatch) {
+            const lat = Number(queryMatch[1]);
+            const lng = Number(queryMatch[2]);
+            if (!Number.isNaN(lat) && !Number.isNaN(lng)) return { lat, lng };
+        }
+
+        const atMatch = value.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
+        if (atMatch) {
+            const lat = Number(atMatch[1]);
+            const lng = Number(atMatch[2]);
+            if (!Number.isNaN(lat) && !Number.isNaN(lng)) return { lat, lng };
+        }
+
+        return null;
+    }
+
+    function updateSalesMapPreviewFromMapsLink(context, mapsLink) {
+        if (!context) return;
+        const mapEl = context.querySelector('.sales-map-preview');
+        if (!mapEl) return;
+
+        const coords = parseCoordsFromMapsLink(mapsLink);
+        if (!coords) {
+            mapEl.style.display = 'none';
+            return;
+        }
+
+        if (typeof google === 'undefined' || !google.maps) return;
+
+        if (!context.__salesMapInstance) {
+            context.__salesMapInstance = new google.maps.Map(mapEl, {
+                center: coords,
+                zoom: 15,
+                disableDefaultUI: true,
+                zoomControl: true,
+            });
+            context.__salesMapMarker = new google.maps.Marker({ map: context.__salesMapInstance, position: coords });
+        } else {
+            context.__salesMapInstance.setCenter(coords);
+            context.__salesMapInstance.setZoom(15);
+            if (context.__salesMapMarker) context.__salesMapMarker.setPosition(coords);
+        }
+
+        mapEl.style.display = 'block';
+        setTimeout(() => {
+            if (context.__salesMapInstance && typeof google !== 'undefined' && google.maps && google.maps.event) {
+                google.maps.event.trigger(context.__salesMapInstance, 'resize');
+            }
+        }, 80);
+    }
+
+    function initGoogleAddressPickerForContext(context) {
+        if (!context || context.dataset.googleAddressReady === '1') return;
+        if (typeof google === 'undefined' || !google.maps || !google.maps.places) return;
+
+        const searchInput = context.querySelector('.autocomplete_search_sales');
+        const direccionInput = context.querySelector('.direccion_entrega');
+        const mapsInput = context.querySelector('.maps_link_entrega');
+        if (!searchInput || !direccionInput || !mapsInput) return;
+
+        const autocomplete = new google.maps.places.Autocomplete(searchInput, {
+            types: ['address'],
+            componentRestrictions: { country: 'mx' },
+        });
+
+        autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (!place || !place.geometry || !place.geometry.location) return;
+
+            const lat = place.geometry.location.lat();
+            const lng = place.geometry.location.lng();
+            const formatted = String(place.formatted_address || '').trim();
+
+            if (formatted !== '') {
+                direccionInput.value = formatted;
+            }
+            mapsInput.value = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+            context.dataset.customerAddress = String(direccionInput.value || '').trim();
+            context.dataset.customerMapsLink = String(mapsInput.value || '').trim();
+            updateDeliveryMapLink(context);
+            updateSalesMapPreviewFromMapsLink(context, mapsInput.value);
+            M.updateTextFields();
+        });
+
+        context.dataset.googleAddressReady = '1';
+        context.__salesAddressAutocomplete = autocomplete;
+        updateSalesMapPreviewFromMapsLink(context, mapsInput.value);
+    }
+
+    function initAutocompleteSales() {
+        googlePlacesReadySales = typeof google !== 'undefined' && !!(google.maps && google.maps.places);
+        if (!googlePlacesReadySales) {
+            console.error('Google Maps no pudo cargarse para ventas. Revisa la API key.');
+            return;
+        }
+
+        document.querySelectorAll('.venta-context').forEach((context) => {
+            initGoogleAddressPickerForContext(context);
+        });
     }
 
     function escapeHtml(value) {
@@ -557,12 +900,12 @@ include __DIR__ . '/includes/header.php';
             select.innerHTML = '<option value="">-- Sin direcciones guardadas --</option>';
             const direccionInput = context.querySelector('.direccion_entrega');
             const mapsInput = context.querySelector('.maps_link_entrega');
-            if (direccionInput) direccionInput.value = '';
-            if (mapsInput) mapsInput.value = '';
+            if (direccionInput && (!cliente || !cliente.id_cliente)) direccionInput.value = '';
+            if (mapsInput && (!cliente || !cliente.id_cliente)) mapsInput.value = '';
             context.dataset.addressMode = 'none';
             const statusNode = context.querySelector('.selected-client-status');
             if (statusNode && cliente && cliente.id_cliente) {
-                statusNode.innerHTML = `Cliente existente seleccionado: #${cliente.id_cliente}. Este cliente no tiene direcciones guardadas. Agregalas en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.`;
+                statusNode.innerHTML = CUSTOMER_NO_ADDRESS_HTML(cliente.id_cliente);
             }
             updateDeliveryMapLink(context);
             return;
@@ -571,9 +914,15 @@ include __DIR__ . '/includes/header.php';
         const options = ['<option value="">-- Selecciona un domicilio --</option>'];
         addresses.forEach((direccion) => {
             const suffix = direccion.es_default ? ' (Predeterminada)' : '';
-            options.push(
-                `<option value="${direccion.id_direccion}">${escapeHtml(direccion.alias || `Direccion ${direccion.id_direccion}`)}${suffix}: ${escapeHtml(direccion.direccion)}</option>`
-            );
+            const esPlaceholder = isPlaceholderAddressText(direccion.direccion);
+            // Sin alias, usamos la direccion real como etiqueta en vez de un ID generico sin sentido.
+            let label = direccion.alias
+                ? `${direccion.alias}${suffix}: ${direccion.direccion}`
+                : `${direccion.direccion}${suffix}`;
+            if (esPlaceholder) {
+                label = `⚠ Sin direccion capturada (${label})`;
+            }
+            options.push(`<option value="${direccion.id_direccion}">${escapeHtml(label)}</option>`);
         });
         select.innerHTML = options.join('');
         block.style.display = 'block';
@@ -593,7 +942,6 @@ include __DIR__ . '/includes/header.php';
             const mapsInput = context.querySelector('.maps_link_entrega');
             if (direccionInput) {
                 direccionInput.value = selectedAddress.direccion || '';
-                M.textareaAutoResize(direccionInput);
             }
             if (mapsInput) mapsInput.value = selectedAddress.maps_link || '';
             context.dataset.customerMapsLink = String(selectedAddress.maps_link || '');
@@ -601,6 +949,35 @@ include __DIR__ . '/includes/header.php';
         }
         updateDeliveryMapLink(context);
         M.updateTextFields();
+    }
+
+    function updateDeliveryAddressPreview(context, direccionActual) {
+        const preview = context.querySelector('.delivery-address-preview');
+        const previewText = context.querySelector('.delivery-address-preview-text');
+        if (!preview || !previewText) return;
+
+        if (direccionActual === '') {
+            const selectedCustomerId = String(context.dataset.selectedCustomerId || '').trim();
+            if (selectedCustomerId !== '') {
+                preview.style.display = 'flex';
+                preview.classList.add('delivery-address-preview-missing');
+                previewText.textContent = 'Este cliente no tiene una direccion valida. Busca una con Google o agregala en Administrar Clientes.';
+                return;
+            }
+            preview.style.display = 'none';
+            previewText.textContent = '';
+            preview.classList.remove('delivery-address-preview-missing');
+            return;
+        }
+
+        preview.style.display = 'flex';
+        if (isPlaceholderAddressText(direccionActual)) {
+            preview.classList.add('delivery-address-preview-missing');
+            previewText.textContent = `El domicilio guardado dice "${direccionActual}": no es una direccion real. Pidele la direccion al cliente y captúrala antes de agendar.`;
+            return;
+        }
+        preview.classList.remove('delivery-address-preview-missing');
+        previewText.textContent = direccionActual;
     }
 
     function updateDeliveryMapLink(context) {
@@ -613,6 +990,8 @@ include __DIR__ . '/includes/header.php';
         const manualMapsLink = String(context.querySelector('.maps_link_entrega')?.value || '').trim();
         const savedMapsLink = String(context.dataset.customerMapsLink || '').trim();
         const savedAddress = String(context.dataset.customerAddress || '').trim();
+
+        updateDeliveryAddressPreview(context, direccionActual);
 
         if (!wrapper || !anchor || !text) return;
 
@@ -640,6 +1019,9 @@ include __DIR__ . '/includes/header.php';
         anchor.setAttribute('href', href);
         text.textContent = label;
         wrapper.style.display = 'block';
+
+        const mapsLinkActual = String(context.querySelector('.maps_link_entrega')?.value || '').trim();
+        updateSalesMapPreviewFromMapsLink(context, mapsLinkActual || href);
     }
 
     const prevenirCierre = (e) => {
@@ -673,8 +1055,25 @@ include __DIR__ . '/includes/header.php';
             const direcciones = Array.isArray(c.direcciones) ? c.direcciones : [];
             if (nombre === '') return;
             const label = telefono !== '' ? `${nombre} (${telefono})` : nombre;
-            customerAutocompleteData[label] = null;
-            customerMap[label.toLowerCase()] = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, direcciones, label };
+            const customerRecord = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, direcciones, label };
+            registerCustomerOption(label, customerRecord);
+            registerCustomerLookupAlias(nombre, customerRecord);
+            if (telefono !== '') {
+                registerCustomerLookupAlias(`${telefono} ${nombre}`, customerRecord);
+                registerCustomerLookupAlias(`${nombre} ${telefono}`, customerRecord);
+                const phoneDigits = normalizePhoneDigits(telefono);
+                if (phoneDigits !== '') {
+                    registerCustomerLookupAlias(`${phoneDigits} ${nombre}`, customerRecord);
+                    registerCustomerLookupAlias(`${nombre} ${phoneDigits}`, customerRecord);
+                }
+            }
+
+            customerSearchIndex.push({
+                normalizedLabel: normalizeSearchTerm(label),
+                normalizedName: normalizeSearchTerm(nombre),
+                phoneDigits: normalizePhoneDigits(telefono),
+                customer: customerRecord,
+            });
         });
 
         M.FormSelect.init(document.querySelectorAll('select'));
@@ -725,9 +1124,14 @@ include __DIR__ . '/includes/header.php';
         containers.insertAdjacentHTML('beforeend', template.replace(/{{id}}/g, id));
 
         const context = document.getElementById(`venta-${id}`);
-        let tabsInstance = M.Tabs.getInstance(tabsUl);
-        if (tabsInstance) tabsInstance.destroy();
-        tabsInstance = M.Tabs.init(tabsUl);
+        let tabsInstance = null;
+        try {
+            tabsInstance = M.Tabs.getInstance(tabsUl);
+            if (tabsInstance) tabsInstance.destroy();
+            tabsInstance = M.Tabs.init(tabsUl);
+        } catch (err) {
+            console.warn('No se pudo inicializar Tabs en ventas:', err);
+        }
 
         M.FormSelect.init(context.querySelectorAll('select'));
         M.updateTextFields();
@@ -742,7 +1146,10 @@ include __DIR__ . '/includes/header.php';
         const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
 
         direccionEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
-        mapsLinkEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
+        mapsLinkEntregaInput?.addEventListener('input', () => {
+            updateDeliveryMapLink(context);
+            updateSalesMapPreviewFromMapsLink(context, mapsLinkEntregaInput.value || '');
+        });
         customerAddressSelect?.addEventListener('change', () => {
             const addresses = Array.isArray(context.__customerAddresses) ? context.__customerAddresses : [];
             const selectedAddress = addresses.find((direccion) => String(direccion.id_direccion) === String(customerAddressSelect.value));
@@ -753,22 +1160,52 @@ include __DIR__ . '/includes/header.php';
         });
 
         if (clienteNombreInput) {
-            M.Autocomplete.init(clienteNombreInput, {
-                data: customerAutocompleteData,
-                limit: 8,
-                minLength: 1,
-                onAutocomplete: function(val) {
-                    const cliente = customerMap[String(val || '').toLowerCase()];
-                    if (!cliente) return;
-                    setSelectedCustomer(context, cliente);
-                    if (clienteTelefonoInput) clienteTelefonoInput.value = cliente.telefono || clienteTelefonoInput.value || '';
-                    if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
-                        direccionEntregaInput.value = cliente.direccion || '';
+            try {
+                M.Autocomplete.init(clienteNombreInput, {
+                    data: customerAutocompleteData,
+                    limit: 8,
+                    minLength: 1,
+                    dropdownOptions: {
+                        container: document.body
+                    },
+                    onAutocomplete: function(val) {
+                        const cliente = customerMap[String(val || '').toLowerCase()] || findCustomerByInput(val);
+                        if (!cliente) return;
+                        setSelectedCustomer(context, cliente);
+                        if (clienteTelefonoInput) clienteTelefonoInput.value = cliente.telefono || clienteTelefonoInput.value || '';
+                        if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
+                            direccionEntregaInput.value = cliente.direccion || '';
+                        }
+                        renderCustomerAddressOptions(context, cliente);
+                        actualizarTituloTab(id, cliente.nombre);
+                        M.updateTextFields();
                     }
-                    renderCustomerAddressOptions(context, cliente);
-                    actualizarTituloTab(id, cliente.nombre);
-                    M.updateTextFields();
+                });
+            } catch (err) {
+                console.warn('No se pudo inicializar autocomplete de cliente:', err);
+            }
+
+            const resolveTypedCustomer = () => {
+                const resolved = findCustomerByInput(clienteNombreInput.value);
+                if (!resolved) return;
+                setSelectedCustomer(context, resolved);
+                if (clienteTelefonoInput) clienteTelefonoInput.value = resolved.telefono || clienteTelefonoInput.value || '';
+                if (direccionEntregaInput && (!direccionEntregaInput.value || direccionEntregaInput.value.trim() === '')) {
+                    direccionEntregaInput.value = resolved.direccion || '';
                 }
+                renderCustomerAddressOptions(context, resolved);
+                actualizarTituloTab(id, resolved.nombre);
+                M.updateTextFields();
+            };
+
+            clienteNombreInput.addEventListener('change', resolveTypedCustomer);
+            clienteNombreInput.addEventListener('blur', resolveTypedCustomer);
+            clienteNombreInput.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== 'Tab') return;
+                const resolved = findCustomerByInput(clienteNombreInput.value);
+                if (!resolved) return;
+                e.preventDefault();
+                resolveTypedCustomer();
             });
 
             clienteNombreInput.addEventListener('input', () => {
@@ -780,18 +1217,23 @@ include __DIR__ . '/includes/header.php';
             });
         }
 
-        const instance = M.Autocomplete.init(buscador, {
-            data: autocompleteData,
-            limit: 10,
-            minLength: 1,
-            onAutocomplete: function(val) {
-                const prod = productMap[val.toLowerCase()];
-                if (!prod) return;
-                agregarProductoALista(id, prod);
-                buscador.value = '';
-                setTimeout(() => buscador.focus(), 100);
-            }
-        });
+        let instance = null;
+        try {
+            instance = M.Autocomplete.init(buscador, {
+                data: autocompleteData,
+                limit: 10,
+                minLength: 1,
+                onAutocomplete: function(val) {
+                    const prod = productMap[val.toLowerCase()];
+                    if (!prod) return;
+                    agregarProductoALista(id, prod);
+                    buscador.value = '';
+                    setTimeout(() => buscador.focus(), 100);
+                }
+            });
+        } catch (err) {
+            console.warn('No se pudo inicializar autocomplete de producto:', err);
+        }
 
         buscador.addEventListener('keydown', function(e) {
             if (e.key !== 'Enter' && e.key !== 'Tab') return;
@@ -876,6 +1318,9 @@ include __DIR__ . '/includes/header.php';
         }
 
         updateDeliveryMapLink(context);
+        if (googlePlacesReadySales) {
+            initGoogleAddressPickerForContext(context);
+        }
 
         if (tabsInstance) tabsInstance.select(`venta-${id}`);
         setTimeout(() => buscador.focus(), 200);
@@ -996,7 +1441,11 @@ include __DIR__ . '/includes/header.php';
             </div>
         `;
         context.querySelector('.carrito-items').insertAdjacentHTML('afterbegin', html);
-        M.Materialbox.init(context.querySelectorAll('.materialboxed'));
+        try {
+            M.Materialbox.init(context.querySelectorAll('.materialboxed'));
+        } catch (err) {
+            console.warn('No se pudo inicializar materialbox:', err);
+        }
 
         productoIndex++;
         actualizarTotal(tabId);
@@ -1109,15 +1558,15 @@ include __DIR__ . '/includes/header.php';
             return;
         }
         if (telefonoCliente === '') {
-            M.toast({ html: 'El cliente seleccionado no tiene telefono. Actualizalo en Administrar Clientes.', classes: 'red darken-2' });
+            M.toast({ html: 'Captura el telefono del cliente para continuar.', classes: 'red darken-2' });
             return;
         }
-        if (!/^\d+$/.test(customerAddressId)) {
-            M.toast({ html: 'Selecciona una direccion guardada del cliente.', classes: 'red darken-2' });
+        if (!/^\d+$/.test(customerAddressId) && direccionEntrega === '') {
+            M.toast({ html: 'Selecciona una direccion guardada o busca una direccion en Google.', classes: 'red darken-2' });
             return;
         }
-        if (direccionEntrega === '') {
-            M.toast({ html: 'La direccion seleccionada no es valida. Revisa el cliente en Administrar Clientes.', classes: 'red darken-2' });
+        if (isPlaceholderAddressText(direccionEntrega)) {
+            M.toast({ html: 'El domicilio guardado no tiene una direccion real ("Por confirmar"). Busca la direccion con Google o actualizala en Administrar Clientes antes de agendar.', classes: 'red darken-2' });
             return;
         }
 
@@ -1133,7 +1582,7 @@ include __DIR__ . '/includes/header.php';
                     M.toast({ html: data.message || 'Pedido agendado con éxito', classes: 'green darken-2' });
                     document.getElementById(`tab-li-${tabId}`).remove();
                     context.remove();
-                    scheduleSalesDraftSave();
+                    saveSalesDraftNow();
                     if (document.querySelectorAll('.tab').length === 0) location.reload();
                 } else {
                     M.toast({ html: data.message || 'Error al procesar el pedido', classes: 'red darken-2' });
@@ -1148,5 +1597,9 @@ include __DIR__ . '/includes/header.php';
             });
     }
 </script>
+
+<?php if (defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== ''): ?>
+<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=places&callback=initAutocompleteSales" async defer></script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

@@ -188,6 +188,94 @@ try {
         $stmt->execute([$idAlmacen]);
         $stats['por_entregar'] = $stmt->fetch();
 
+        // Listado de pedidos agendados en la sucursal, con filtros de fecha/estado/tipo de entrega,
+        // para que el encargado pueda auditar que tipo de ventas se estan agendando.
+        $fechaInicioVentas = trim((string)($_GET['ventas_fecha_inicio'] ?? ''));
+        $fechaFinVentas = trim((string)($_GET['ventas_fecha_fin'] ?? ''));
+        $estadoVentas = trim((string)($_GET['ventas_estado'] ?? ''));
+        $tipoVentas = trim((string)($_GET['ventas_tipo'] ?? ''));
+        $allowedEstados = ['pendiente_pago', 'pagado', 'en_reparto', 'entregado', 'apartado', 'cancelado'];
+        $allowedTipos = ['domicilio', 'sucursal'];
+
+        $fechaValida = static function (string $value): bool {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return false;
+            }
+            $dt = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+            return $dt !== false && $dt->format('Y-m-d') === $value;
+        };
+
+        if ($fechaInicioVentas !== '' && !$fechaValida($fechaInicioVentas)) {
+            $fechaInicioVentas = '';
+        }
+        if ($fechaFinVentas !== '' && !$fechaValida($fechaFinVentas)) {
+            $fechaFinVentas = '';
+        }
+        if ($fechaInicioVentas !== '' && $fechaFinVentas !== '' && $fechaInicioVentas > $fechaFinVentas) {
+            [$fechaInicioVentas, $fechaFinVentas] = [$fechaFinVentas, $fechaInicioVentas];
+        }
+        if ($estadoVentas !== '' && !in_array($estadoVentas, $allowedEstados, true)) {
+            $estadoVentas = '';
+        }
+        if ($tipoVentas !== '' && !in_array($tipoVentas, $allowedTipos, true)) {
+            $tipoVentas = '';
+        }
+
+        $ventasWhere = 'pe.id_almacen = ?';
+        $ventasParams = [$idAlmacen];
+        if ($fechaInicioVentas !== '') {
+            $ventasWhere .= ' AND DATE(pe.fecha_creacion) >= ?';
+            $ventasParams[] = $fechaInicioVentas;
+        }
+        if ($fechaFinVentas !== '') {
+            $ventasWhere .= ' AND DATE(pe.fecha_creacion) <= ?';
+            $ventasParams[] = $fechaFinVentas;
+        }
+        if ($estadoVentas !== '') {
+            $ventasWhere .= ' AND pe.estado = ?';
+            $ventasParams[] = $estadoVentas;
+        }
+        if ($tipoVentas === 'domicilio') {
+            $ventasWhere .= " AND pe.observaciones LIKE '%ENTREGA: Domicilio%'";
+        } elseif ($tipoVentas === 'sucursal') {
+            $ventasWhere .= " AND pe.observaciones LIKE '%ENTREGA: Sucursal%'";
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT pe.numero_pedido, pe.total, pe.fecha_creacion, pe.estado, pe.observaciones, u.nombre AS vendedor
+             FROM pedidos pe
+             LEFT JOIN usuarios u ON u.id_usuario = pe.id_usuario
+             WHERE {$ventasWhere}
+             ORDER BY pe.fecha_creacion DESC
+             LIMIT 100"
+        );
+        $stmt->execute($ventasParams);
+        $ventasSucursal = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($ventasSucursal as &$venta) {
+            $obs = (string)($venta['observaciones'] ?? '');
+            $clienteReferencia = 'Sin referencia';
+            if (preg_match('/Cliente:\s*([^|\.]+)/u', $obs, $matches)) {
+                $clienteReferencia = trim((string)($matches[1] ?? ''));
+                if ($clienteReferencia === '') {
+                    $clienteReferencia = 'Sin referencia';
+                }
+            }
+
+            $tipoEntrega = 'N/A';
+            if (preg_match('/ENTREGA:\s*(Domicilio|Sucursal)/u', $obs, $matchesTipo)) {
+                $tipoEntrega = trim((string)($matchesTipo[1] ?? 'N/A'));
+            }
+
+            $venta['cliente_referencia'] = $clienteReferencia;
+            $venta['tipo_entrega'] = $tipoEntrega;
+            $venta['vendedor'] = $venta['vendedor'] ?? 'N/A';
+            unset($venta['observaciones']);
+        }
+        unset($venta);
+
+        $stats['ventas_recientes_sucursal'] = $ventasSucursal;
+
     } elseif ($rol === 'repartidor') {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM pedidos WHERE id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
         $stmt->execute([$idUsuario]);

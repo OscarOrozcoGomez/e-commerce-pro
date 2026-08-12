@@ -141,6 +141,33 @@ function isAdmin(): bool
 }
 
 /**
+ * Determina si el usuario autenticado puede eliminar una cuenta de usuario.
+ *
+ * @param array<string, mixed> $usuarioObjetivo
+ * @param int|null $idUsuarioActual
+ * @return bool
+ */
+function canDeleteUserAccount(array $usuarioObjetivo, ?int $idUsuarioActual = null): bool
+{
+    if (!isAuthenticated() || !isAdmin()) {
+        return false;
+    }
+
+    $idUsuarioObjetivo = (int)($usuarioObjetivo['id_usuario'] ?? 0);
+    if ($idUsuarioActual !== null && $idUsuarioActual > 0 && $idUsuarioObjetivo === $idUsuarioActual) {
+        return false;
+    }
+
+    $rolObjetivo = (string)($usuarioObjetivo['rol'] ?? '');
+    $esAdminObjetivo = $rolObjetivo === 'admin' || !empty($usuarioObjetivo['es_superadmin']);
+    if ($esAdminObjetivo && !isSuperAdmin()) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
  * Verifica si el usuario autenticado es super admin.
  *
  * @return bool
@@ -159,6 +186,21 @@ function isSuperAdmin(): bool
 function isAdminAccount(array $usuario): bool
 {
     return (($usuario['rol'] ?? '') === 'admin') || !empty($usuario['es_superadmin']);
+}
+
+/**
+ * Determina si una cuenta existente con el mismo correo puede reutilizarse.
+ *
+ * @param array<string, mixed>|null $usuario
+ * @return bool
+ */
+function shouldReactivateExistingUser(?array $usuario): bool
+{
+    if ($usuario === null) {
+        return false;
+    }
+
+    return (string)($usuario['estado'] ?? '') === 'inactivo';
 }
 
 /**

@@ -84,18 +84,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     throw new Exception("Los vendedores y encargados deben tener una sucursal asignada obligatoriamente.");
                 }
 
-                $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
-                        VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, 'activo')";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([
-                    ':nombre' => $nombre,
-                    ':email' => $email,
-                    ':contrasena' => $password,
-                    ':id_rol' => $id_rol,
-                    ':id_almacen' => $id_almacen,
-                ]);
-                logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
-                $success = 'Usuario creado correctamente.';
+                $stmtExistingUser = $pdo->prepare("SELECT u.id_usuario, u.estado, u.id_rol, u.id_almacen, COALESCE(u.es_superadmin, 0) AS es_superadmin, r.nombre AS rol
+                                                  FROM usuarios u
+                                                  JOIN roles r ON u.id_rol = r.id_rol
+                                                  WHERE LOWER(u.email) = LOWER(?)
+                                                  LIMIT 1");
+                $stmtExistingUser->execute([$email]);
+                $existingUser = $stmtExistingUser->fetch(PDO::FETCH_ASSOC);
+
+                if ($existingUser && !shouldReactivateExistingUser($existingUser)) {
+                    throw new Exception('El correo ya está asociado a otra cuenta activa. Usa otro correo o reactiva la cuenta existente.');
+                }
+
+                if ($existingUser && shouldReactivateExistingUser($existingUser)) {
+                    $targetUserId = (int)$existingUser['id_usuario'];
+                    $pdo->beginTransaction();
+                    try {
+                        $pdo->prepare("UPDATE usuarios SET nombre = ?, email = ?, contrasena = ?, id_rol = ?, id_almacen = ?, estado = 'activo', intentos_fallidos = 0, bloqueado_hasta = NULL, es_superadmin = 0 WHERE id_usuario = ?")
+                            ->execute([$nombre, $email, $password, $id_rol, $id_almacen, $targetUserId]);
+                        $pdo->commit();
+                        logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email");
+                        $success = 'Cuenta existente reactivada y actualizada correctamente.';
+                    } catch (Throwable $e) {
+                        $pdo->rollBack();
+                        throw $e;
+                    }
+                } else {
+                    $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
+                            VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, 'activo')";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([
+                        ':nombre' => $nombre,
+                        ':email' => $email,
+                        ':contrasena' => $password,
+                        ':id_rol' => $id_rol,
+                        ':id_almacen' => $id_almacen,
+                    ]);
+                    logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
+                    $success = 'Usuario creado correctamente.';
+                }
             } catch (Throwable $e) {
                 $error = 'Error: ' . $e->getMessage();
             }
@@ -139,6 +166,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")->execute([$id]);
             logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, "Cuenta desbloqueada manualmente por admin");
             $success = 'Usuario desbloqueado correctamente.';
+        } elseif ($accion === 'eliminar_usuario') {
+            $id = intval($_POST['id_usuario'] ?? 0);
+            if ($id <= 0) {
+                throw new Exception('ID de usuario inválido para eliminar.');
+            }
+
+            $targetUser = getStaffUserById($pdo, $id);
+            if (!$targetUser) {
+                throw new Exception('Usuario no encontrado.');
+            }
+
+            $currentUserId = (int)($_SESSION['usuario']['id_usuario'] ?? 0);
+            if (!canDeleteUserAccount($targetUser, $currentUserId)) {
+                throw new Exception('No tienes permisos para eliminar esta cuenta de usuario.');
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("DELETE FROM vendedor_liquidaciones WHERE id_vendedor = ?")->execute([$id]);
+                $pdo->prepare("DELETE FROM usuarios WHERE id_usuario = ?")->execute([$id]);
+                $pdo->commit();
+                logAudit('USUARIO_ELIMINADO', 'usuarios', $id, 'Eliminación manual por admin');
+                $success = 'Usuario eliminado correctamente.';
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         } elseif ($accion === 'reset_password_staff') {
             try {
                 $id = intval($_POST['id_usuario'] ?? 0);
@@ -332,6 +386,17 @@ include __DIR__ . '/includes/header.php';
                                                 <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
                                                 <button type="submit" class="btn-small blue waves-effect waves-light" title="Desbloquear intentos">
                                                     <i class="material-icons">lock_open</i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
+
+                                            <?php if (canDeleteUserAccount($user, (int)($_SESSION['usuario']['id_usuario'] ?? 0))): ?>
+                                            <form method="POST" style="display:inline;" onsubmit="return confirm('¿Eliminar este usuario del sistema? Esta acción no se puede deshacer.');">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="accion" value="eliminar_usuario">
+                                                <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                                <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar usuario">
+                                                    <i class="material-icons">person_remove</i>
                                                 </button>
                                             </form>
                                             <?php endif; ?>

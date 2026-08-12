@@ -1,6 +1,7 @@
 <?php
     $gtmContainerId = trim((string) (getenv('GTM_CONTAINER_ID') ?: 'GTM-TPZG9NDT'));
     $ga4MeasurementId = trim((string) (getenv('GA4_MEASUREMENT_ID') ?: 'G-R2BFK5J1BJ'));
+    $googleAdsId = trim((string) (getenv('GOOGLE_ADS_ID') ?: 'AW-18369681241'));
     $ga4DirectEnabled = filter_var((string) (getenv('GA4_DIRECT_ENABLED') ?: '0'), FILTER_VALIDATE_BOOLEAN);
 
     $hostForTracking = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
@@ -21,6 +22,9 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo isset($pageTitle) ? esc($pageTitle) . ' - Belleza y Bienestar' : 'Belleza y Bienestar'; ?></title>
     <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>assets/img/logo.png">
     <!-- Google Tag Manager -->
     <?php if ($gtmContainerId !== ''): ?>
@@ -35,18 +39,18 @@
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>');
-        </script>
-    <?php endif; ?>
-    <?php if ($gtmContainerId !== ''): ?>
-        <script>
-            (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start': new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','<?php echo htmlspecialchars($gtmContainerId, ENT_QUOTES, 'UTF-8'); ?>');
+            gtag('config', '<?php echo htmlspecialchars($ga4MeasurementId, ENT_QUOTES, 'UTF-8'); ?>'); // GA4
+            gtag('config', '<?php echo htmlspecialchars($googleAdsId, ENT_QUOTES, 'UTF-8'); ?>'); // Google Ads Global Site Tag
         </script>
     <?php endif; ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
+        html {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
         .product-card { margin-bottom: 20px; }
         .search-container { margin-bottom: 30px; }
         .product-image { height: 150px; object-fit: cover; }
@@ -417,13 +421,15 @@
     <!-- Contenedor Principal para empujar el footer hacia abajo -->
     <main style="flex: 1 0 auto;">
 
-    <!-- Scripts para Inicializar Componentes -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
     <script>
-        const USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
-        const USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
-        const CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
-        const CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
+        window.USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
+        window.USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
+        window.CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
+        window.CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
+        var USER_IS_AUTHENTICATED = window.USER_IS_AUTHENTICATED;
+        var USER_IS_INTERNAL_STAFF = window.USER_IS_INTERNAL_STAFF;
+        var CURRENT_USER_ID = window.CURRENT_USER_ID;
+        var CURRENT_USER_WAREHOUSE_ID = window.CURRENT_USER_WAREHOUSE_ID;
         const BASE_URL_HEADER = '<?php echo BASE_URL; ?>';
         const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
         const IS_CHAT_PAGE_VIEW = window.location.pathname.toLowerCase().includes('/views/chat.php');
@@ -804,28 +810,6 @@
             syncLegacyFavoritesToServer().finally(() => {
                 updateFavoritesBadge();
             });
-
-            // Inicializar componentes de Materialize de forma global y segura
-            if (typeof M !== 'undefined') {
-                if (typeof M.AutoInit === 'function') {
-                    M.AutoInit();
-                } else {
-                    const sidenavElems = document.querySelectorAll('.sidenav');
-                    if (typeof M.Sidenav !== 'undefined') {
-                        M.Sidenav.init(sidenavElems);
-                    }
-
-                    const dropdownElems = document.querySelectorAll('.dropdown-trigger');
-                    if (typeof M.Dropdown !== 'undefined') {
-                        M.Dropdown.init(dropdownElems, {
-                            alignment: 'right',
-                            constrainWidth: false,
-                            coverTrigger: false,
-                            closeOnClick: true
-                        });
-                    }
-                }
-            }
 
             // Lógica para el botón "Ir Arriba"
             const scrollBtn = document.getElementById('scroll-to-top');
