@@ -635,6 +635,11 @@ include __DIR__ . '/includes/header.php';
                     <span class="grey-text text-darken-1">Mostrando <strong id="clientes-visibles"><?php echo count($clientes); ?></strong> de <strong id="clientes-total"><?php echo count($clientes); ?></strong> clientes.</span>
                 </div>
             </div>
+            <div class="input-field" style="margin-top:0; margin-bottom:20px;">
+                <i class="material-icons prefix">search</i>
+                <input type="text" id="buscar-cliente" autocomplete="off">
+                <label for="buscar-cliente">Buscar cliente por nombre</label>
+            </div>
             <div class="manage-customers-toolbar">
                 <div class="manage-customers-toolbar-item">
                     <label for="filtro-origen">Origen</label>
@@ -707,7 +712,7 @@ include __DIR__ . '/includes/header.php';
                         $direccionesCliente = $c['direcciones'] ?? [];
                         $resumenDirecciones = count($direccionesCliente);
                     ?>
-                    <tr data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
+                    <tr data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                         <td><strong class="manage-customers-name"><?php echo esc((string)$c['nombre']); ?></strong></td>
                         <td><span class="manage-customers-phone"><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></span></td>
                         <td><?php echo esc((string)($c['email'] ?: 'N/A')); ?></td>
@@ -791,7 +796,7 @@ include __DIR__ . '/includes/header.php';
                     $direccionesCliente = $c['direcciones'] ?? [];
                     $resumenDirecciones = count($direccionesCliente);
                 ?>
-                <div class="manage-customers-card" data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
+                <div class="manage-customers-card" data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                     <div class="manage-customers-card-header">
                         <span class="manage-customers-card-name"><?php echo esc((string)$c['nombre']); ?></span>
                         <span class="badge <?php echo $estadoVisible === 'activo' ? 'green' : 'red'; ?> white-text" style="float:none; flex-shrink:0;">
@@ -1186,6 +1191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.manage-customers-cards .manage-customers-card[data-client-id]').forEach((card) => {
         cardsByClientId.set(card.getAttribute('data-client-id'), card);
     });
+    const buscarInput = document.getElementById('buscar-cliente');
     const origenSelect = document.getElementById('filtro-origen');
     const accesoSelect = document.getElementById('filtro-acceso');
     const estadoSelect = document.getElementById('filtro-estado');
@@ -1348,7 +1354,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return sucursal === sucursalValue;
     }
 
+    function matchesSearch(row, searchValue) {
+        if (!searchValue) return true;
+        const nombre = row.getAttribute('data-nombre') || '';
+        return nombre.includes(searchValue);
+    }
+
     function applyFilters() {
+        const searchValue = (buscarInput?.value || '').trim().toLowerCase();
         const sucursalValue = (sucursalSelect?.value || '__todas__').toLowerCase();
         const origenValue = origenSelect?.value || 'todos';
         const accesoValue = accesoSelect?.value || 'todos';
@@ -1356,7 +1369,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let visibles = 0;
 
         tableRows.forEach((row) => {
-            const ok = matchesOrigen(row, origenValue)
+            const ok = matchesSearch(row, searchValue)
+                && matchesOrigen(row, origenValue)
                 && matchesAcceso(row, accesoValue)
                 && matchesEstado(row, estadoValue)
                 && matchesSucursal(row, sucursalValue);
@@ -1371,6 +1385,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (visibleEl) visibleEl.textContent = String(visibles);
+    }
+
+    if (buscarInput) {
+        buscarInput.addEventListener('input', applyFilters);
     }
 
     [origenSelect, accesoSelect, estadoSelect, sucursalSelect].forEach((select) => {
