@@ -49,7 +49,7 @@ try {
     $productos = $stmt->fetchAll();
 
     foreach ($productos as &$producto) {
-        $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''));
+        $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''), (int)($producto['id_producto'] ?? 0));
     }
     unset($producto);
 } catch (PDOException $e) {
@@ -251,7 +251,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="row" style="background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px dashed #ccc; margin-bottom: 20px;">
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">search</i>
-                                <input type="text" class="buscador-producto autocomplete" placeholder="Escribe el nombre o escanea código de barras..." autocomplete="off">
+                                <input type="text" class="buscador-producto" placeholder="Escribe el nombre o escanea código de barras..." autocomplete="off">
                                 <label class="active">Buscar Producto</label>
                                 <span class="helper-text">Presiona Enter para agregar por código de barras</span>
                             </div>
