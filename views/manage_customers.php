@@ -487,6 +487,106 @@ include __DIR__ . '/includes/header.php';
         display: none;
     }
 
+    /* Tabla clasica: visible en escritorio/tablet, con scroll horizontal solo como respaldo */
+    .manage-customers-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Tarjetas moviles: ocultas por defecto, se muestran solo en pantallas angostas */
+    .manage-customers-cards {
+        display: none;
+    }
+
+    @media (max-width: 992px) {
+        .manage-customers-table-wrap {
+            display: none;
+        }
+
+        .manage-customers-cards {
+            display: block;
+        }
+    }
+
+    .manage-customers-card {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .manage-customers-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+
+    .manage-customers-card-name {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #212121;
+        word-break: break-word;
+    }
+
+    .manage-customers-card-field {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 7px 0;
+        border-top: 1px solid #f0f0f0;
+        font-size: 0.9rem;
+    }
+
+    .manage-customers-card-field-label {
+        color: #78909c;
+        font-weight: 500;
+        flex: 0 0 auto;
+    }
+
+    .manage-customers-card-field-value {
+        text-align: right;
+        color: #37474f;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
+
+    .manage-customers-card-field-value .badge,
+    .manage-customers-card-field-value .new.badge {
+        float: none !important;
+        margin: 0;
+    }
+
+    .manage-customers-card-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #f0f0f0;
+    }
+
+    .manage-customers-card-actions form {
+        display: flex;
+        flex: 1 1 auto;
+    }
+
+    .manage-customers-card-actions .btn-small {
+        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .manage-customers-card-actions a.btn-small {
+        flex: 1 1 auto;
+        min-width: 44px;
+    }
+
     .modal {
         max-width: 960px !important;
         width: 92% !important;
@@ -579,7 +679,8 @@ include __DIR__ . '/includes/header.php';
                     </select>
                 </div>
             </div>
-            <table class="striped responsive-table manage-customers-table">
+            <div class="manage-customers-table-wrap">
+            <table class="striped manage-customers-table">
                 <thead>
                     <tr>
                         <th>Nombre</th>
@@ -606,7 +707,7 @@ include __DIR__ . '/includes/header.php';
                         $direccionesCliente = $c['direcciones'] ?? [];
                         $resumenDirecciones = count($direccionesCliente);
                     ?>
-                    <tr data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
+                    <tr data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                         <td><strong class="manage-customers-name"><?php echo esc((string)$c['nombre']); ?></strong></td>
                         <td><span class="manage-customers-phone"><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></span></td>
                         <td><?php echo esc((string)($c['email'] ?: 'N/A')); ?></td>
@@ -675,6 +776,109 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
+
+            <div class="manage-customers-cards">
+                <?php foreach ($clientes as $c): ?>
+                <?php
+                    $origenRegistro = (string)($c['origen_registro'] ?? 'sucursal');
+                    $sucursalOrigen = trim((string)($c['sucursal_origen'] ?? ''));
+                    $sucursalFiltro = ($origenRegistro === 'sucursal' && $sucursalOrigen !== '')
+                        ? strtolower($sucursalOrigen)
+                        : '__sin_sucursal__';
+                    $accesoWebFiltro = ((int)($c['tiene_acceso_web'] ?? 0) === 1) ? 'si' : 'no';
+                    $estadoVisible = (string)($c['estado_visible'] ?? 'activo');
+                    $direccionesCliente = $c['direcciones'] ?? [];
+                    $resumenDirecciones = count($direccionesCliente);
+                ?>
+                <div class="manage-customers-card" data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
+                    <div class="manage-customers-card-header">
+                        <span class="manage-customers-card-name"><?php echo esc((string)$c['nombre']); ?></span>
+                        <span class="badge <?php echo $estadoVisible === 'activo' ? 'green' : 'red'; ?> white-text" style="float:none; flex-shrink:0;">
+                            <?php echo strtoupper($estadoVisible); ?>
+                        </span>
+                    </div>
+
+                    <div class="manage-customers-card-field">
+                        <span class="manage-customers-card-field-label">Telefono</span>
+                        <span class="manage-customers-card-field-value"><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></span>
+                    </div>
+                    <div class="manage-customers-card-field">
+                        <span class="manage-customers-card-field-label">Email</span>
+                        <span class="manage-customers-card-field-value"><?php echo esc((string)($c['email'] ?: 'N/A')); ?></span>
+                    </div>
+                    <div class="manage-customers-card-field js-col-direcciones">
+                        <span class="manage-customers-card-field-label">Direcciones</span>
+                        <span class="manage-customers-card-field-value">
+                            <?php if ($resumenDirecciones > 0): ?>
+                                <span class="badge blue white-text"><?php echo $resumenDirecciones; ?></span>
+                            <?php else: ?>
+                                <span class="grey-text text-darken-1">Sin direcciones</span>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                    <div class="manage-customers-card-field js-col-origen">
+                        <span class="manage-customers-card-field-label">Origen</span>
+                        <span class="manage-customers-card-field-value">
+                            <?php if ($origenRegistro === 'sitio_web'): ?>
+                                <span class="new badge teal" data-badge-caption="Sitio Web"></span>
+                            <?php else: ?>
+                                <span class="new badge indigo" data-badge-caption="Sucursal"></span>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                    <div class="manage-customers-card-field js-col-sucursal manage-customers-col-hidden">
+                        <span class="manage-customers-card-field-label">Sucursal Origen</span>
+                        <span class="manage-customers-card-field-value">
+                            <?php if ($origenRegistro === 'sitio_web'): ?>
+                                <span class="grey-text text-darken-1">N/A</span>
+                            <?php elseif ($sucursalOrigen !== ''): ?>
+                                <?php echo esc($sucursalOrigen); ?>
+                            <?php else: ?>
+                                <span class="grey-text text-darken-1">Sin sucursal detectada</span>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                    <div class="manage-customers-card-field js-col-acceso">
+                        <span class="manage-customers-card-field-label">Acceso Web</span>
+                        <span class="manage-customers-card-field-value">
+                            <?php if ((int)$c['tiene_acceso_web'] === 1): ?>
+                                <span class="new badge green" data-badge-caption="Si"></span>
+                            <?php else: ?>
+                                <span class="new badge grey" data-badge-caption="No"></span>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+
+                    <div class="manage-customers-card-actions">
+                        <a href="#modal-editar-cliente-<?php echo (int)$c['id_cliente']; ?>" class="btn-small amber darken-2 waves-effect waves-light modal-trigger" title="Editar cliente">
+                            <i class="material-icons left" style="margin-right:4px;">edit</i>Editar
+                        </a>
+                        <a href="#modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="btn-small blue waves-effect waves-light modal-trigger" title="Ver Direcciones">
+                            <i class="material-icons left" style="margin-right:4px;">place</i>Direcciones
+                        </a>
+                        <form method="POST">
+                            <?php echo csrfInput(); ?>
+                            <input type="hidden" name="id_usuario" value="<?php echo (int)($c['id_usuario'] ?? 0); ?>">
+                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                            <input type="hidden" name="accion" value="<?php echo $estadoVisible === 'activo' ? 'desactivar' : 'activar'; ?>">
+                            <button type="submit" class="btn-small <?php echo $estadoVisible === 'activo' ? 'orange' : 'green'; ?> waves-effect waves-light" title="<?php echo $estadoVisible === 'activo' ? 'Bloquear' : 'Activar'; ?>">
+                                <i class="material-icons left" style="margin-right:4px;"><?php echo $estadoVisible === 'activo' ? 'block' : 'check'; ?></i><?php echo $estadoVisible === 'activo' ? 'Bloquear' : 'Activar'; ?>
+                            </button>
+                        </form>
+                        <form method="POST">
+                            <?php echo csrfInput(); ?>
+                            <input type="hidden" name="id_usuario" value="<?php echo (int)($c['id_usuario'] ?? 0); ?>">
+                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                            <input type="hidden" name="accion" value="eliminar_cliente">
+                            <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar cliente" onclick="return confirm('¿Eliminar este cliente? Sus pedidos quedaran sin cliente asignado y sus direcciones se borraran.');">
+                                <i class="material-icons left" style="margin-right:4px;">delete_forever</i>Eliminar
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
 
             <?php foreach ($clientes as $c): ?>
                 <?php
@@ -977,7 +1181,11 @@ document.addEventListener('DOMContentLoaded', () => {
     M.Modal.init(document.querySelectorAll('.modal'));
     M.updateTextFields();
 
-    const tableRows = Array.from(document.querySelectorAll('table tbody tr[data-origen]'));
+    const tableRows = Array.from(document.querySelectorAll('table.manage-customers-table tbody tr[data-origen]'));
+    const cardsByClientId = new Map();
+    document.querySelectorAll('.manage-customers-cards .manage-customers-card[data-client-id]').forEach((card) => {
+        cardsByClientId.set(card.getAttribute('data-client-id'), card);
+    });
     const origenSelect = document.getElementById('filtro-origen');
     const accesoSelect = document.getElementById('filtro-acceso');
     const estadoSelect = document.getElementById('filtro-estado');
@@ -1153,6 +1361,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 && matchesEstado(row, estadoValue)
                 && matchesSucursal(row, sucursalValue);
             row.style.display = ok ? '' : 'none';
+
+            const card = cardsByClientId.get(row.getAttribute('data-client-id'));
+            if (card) {
+                card.style.display = ok ? '' : 'none';
+            }
+
             if (ok) visibles++;
         });
 
