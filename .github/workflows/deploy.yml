@@ -82,7 +82,52 @@ jobs:
             echo "FTP_PROTOCOL_RESOLVED=$RESOLVED_FTP_PROTOCOL"
           } >> "$GITHUB_ENV"
 
-      - name: Deploy files via FTP
+      - name: Deploy files via FTP (attempt 1)
+        id: ftp_attempt_1
+        continue-on-error: true
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
+        with:
+          server: ${{ env.FTP_HOST_RESOLVED }}
+          username: ${{ env.FTP_USERNAME_RESOLVED }}
+          password: ${{ env.FTP_PASSWORD_RESOLVED }}
+          port: ${{ env.FTP_PORT_RESOLVED }}
+          protocol: ${{ env.FTP_PROTOCOL_RESOLVED }}
+          server-dir: /public_html/
+          timeout: 120000
+          exclude: |
+            **/.git*/**
+            **/.github/**
+            .ftp-deploy-sync-state.json
+
+      - name: Wait before FTP retry
+        if: steps.ftp_attempt_1.outcome == 'failure'
+        run: sleep 20
+
+      - name: Deploy files via FTP (attempt 2)
+        id: ftp_attempt_2
+        if: steps.ftp_attempt_1.outcome == 'failure'
+        continue-on-error: true
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
+        with:
+          server: ${{ env.FTP_HOST_RESOLVED }}
+          username: ${{ env.FTP_USERNAME_RESOLVED }}
+          password: ${{ env.FTP_PASSWORD_RESOLVED }}
+          port: ${{ env.FTP_PORT_RESOLVED }}
+          protocol: ${{ env.FTP_PROTOCOL_RESOLVED }}
+          server-dir: /public_html/
+          timeout: 120000
+          exclude: |
+            **/.git*/**
+            **/.github/**
+            .ftp-deploy-sync-state.json
+
+      - name: Wait before FTP retry (final)
+        if: steps.ftp_attempt_1.outcome == 'failure' && steps.ftp_attempt_2.outcome == 'failure'
+        run: sleep 20
+
+      - name: Deploy files via FTP (attempt 3)
+        id: ftp_attempt_3
+        if: steps.ftp_attempt_1.outcome == 'failure' && steps.ftp_attempt_2.outcome == 'failure'
         uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
           server: ${{ env.FTP_HOST_RESOLVED }}
