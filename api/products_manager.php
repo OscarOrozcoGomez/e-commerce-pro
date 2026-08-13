@@ -391,7 +391,6 @@ try {
             echo json_encode(['success' => true, 'message' => 'Producto eliminado']);
         }
         elseif ($action === 'add_category') {
-            if (!isAdmin()) throw new Exception("No permitido");
             $nombre = trim($data['nuevo_nombre_cat'] ?? '');
             if (dbCreateCategory($nombre)) {
                 echo json_encode(['success' => true, 'message' => 'Categoría creada']);

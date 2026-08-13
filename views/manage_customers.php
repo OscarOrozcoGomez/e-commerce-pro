@@ -414,6 +414,39 @@ foreach ($clientes as &$cliente) {
 }
 unset($cliente);
 
+// El ORDER BY del query ordena el texto cifrado (no el nombre real) cuando el
+// cifrado de PII esta activo, asi que el orden alfabetico real se aplica aqui,
+// ya con los nombres descifrados en memoria.
+$normalizeForSort = static function (string $value): string {
+    $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT', $value);
+    if (!is_string($ascii) || trim($ascii) === '') {
+        $ascii = $value;
+    }
+    return mb_strtoupper(trim($ascii), 'UTF-8');
+};
+
+usort($clientes, static function (array $a, array $b) use ($normalizeForSort): int {
+    return strcmp(
+        $normalizeForSort((string)($a['nombre'] ?? '')),
+        $normalizeForSort((string)($b['nombre'] ?? ''))
+    );
+});
+
+// Indice alfabetico: para cada letra, el id_cliente del primer cliente (ya
+// ordenado) cuyo nombre comienza con esa letra; sirve de ancla para el
+// scroll al hacer click en la barra A-Z.
+$alphabetFirstClientId = [];
+foreach ($clientes as $clienteAlpha) {
+    $nombreNormalizado = $normalizeForSort((string)($clienteAlpha['nombre'] ?? ''));
+    $primeraLetra = ($nombreNormalizado !== '' && preg_match('/^[A-Z]/', $nombreNormalizado) === 1)
+        ? $nombreNormalizado[0]
+        : '#';
+    if (!isset($alphabetFirstClientId[$primeraLetra])) {
+        $alphabetFirstClientId[$primeraLetra] = (int)($clienteAlpha['id_cliente'] ?? 0);
+    }
+}
+$alphabetLetterByFirstClientId = array_flip($alphabetFirstClientId);
+
 $sucursalesOrigen = [];
 foreach ($clientes as $cl) {
     $suc = trim((string)($cl['sucursal_origen'] ?? ''));
@@ -597,9 +630,100 @@ include __DIR__ . '/includes/header.php';
         overflow-y: auto;
     }
 
+    /* Modal de direcciones: pantalla completa en moviles para facilitar el uso tactil */
+    @media (max-width: 600px) {
+        .manage-customers-direcciones-modal {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+            top: 0 !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+        }
+
+        .manage-customers-direcciones-modal .modal-content {
+            max-height: calc(100% - 56px);
+        }
+
+        .manage-customers-direcciones-modal .modal-footer {
+            padding: 10px 16px;
+        }
+
+        .manage-customers-direcciones-modal .card-panel {
+            padding: 16px 14px;
+        }
+
+        .manage-customers-direcciones-modal .card-panel .btn,
+        .manage-customers-direcciones-modal .card-panel .btn-small,
+        .manage-customers-direcciones-modal .card-panel .btn-flat {
+            min-height: 42px;
+        }
+    }
+
+    /* Buscador de direccion tipo cart.php dentro del modal */
+    .pac-container {
+        z-index: 3000 !important;
+        border-radius: 4px;
+    }
+
     .manual-time-input {
         font-size: 1.1rem;
         letter-spacing: 0.05em;
+    }
+
+    .alpha-index-nav {
+        position: fixed;
+        top: 50%;
+        right: 6px;
+        transform: translateY(-50%);
+        z-index: 998;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid #e0e0e0;
+        border-radius: 14px;
+        padding: 6px 2px;
+        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.15);
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+
+    .alpha-index-letter {
+        display: block;
+        width: 18px;
+        text-align: center;
+        font-size: 0.66rem;
+        line-height: 1.5;
+        font-weight: 700;
+        color: #1565c0;
+        cursor: pointer;
+        user-select: none;
+        border-radius: 3px;
+    }
+
+    .alpha-index-letter:hover {
+        background: #e3f2fd;
+    }
+
+    .alpha-index-letter-disabled {
+        color: #cfd8dc;
+        cursor: default;
+        pointer-events: none;
+    }
+
+    @media (max-width: 480px) {
+        .alpha-index-nav {
+            right: 2px;
+            padding: 4px 1px;
+        }
+
+        .alpha-index-letter {
+            width: 15px;
+            font-size: 0.58rem;
+        }
     }
 </style>
 <div class="container">
@@ -625,6 +749,13 @@ include __DIR__ . '/includes/header.php';
                 </a>
             </div>
         </div>
+    </div>
+
+    <div class="alpha-index-nav" id="alpha-index-nav">
+        <?php foreach (array_merge(range('A', 'Z'), ['#']) as $letraIndice): ?>
+            <?php $tieneClientes = isset($alphabetFirstClientId[$letraIndice]); ?>
+            <a href="#!" class="alpha-index-letter<?php echo $tieneClientes ? '' : ' alpha-index-letter-disabled'; ?>" data-letter="<?php echo esc($letraIndice); ?>"><?php echo esc($letraIndice); ?></a>
+        <?php endforeach; ?>
     </div>
 
     <div class="card">
@@ -711,8 +842,9 @@ include __DIR__ . '/includes/header.php';
                         $estadoVisible = (string)($c['estado_visible'] ?? 'activo');
                         $direccionesCliente = $c['direcciones'] ?? [];
                         $resumenDirecciones = count($direccionesCliente);
+                        $letraAncla = $alphabetLetterByFirstClientId[(int)$c['id_cliente']] ?? null;
                     ?>
-                    <tr data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
+                    <tr<?php echo $letraAncla !== null ? ' id="cust-letter-row-' . esc($letraAncla) . '"' : ''; ?> data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                         <td><strong class="manage-customers-name"><?php echo esc((string)$c['nombre']); ?></strong></td>
                         <td><span class="manage-customers-phone"><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></span></td>
                         <td><?php echo esc((string)($c['email'] ?: 'N/A')); ?></td>
@@ -795,8 +927,9 @@ include __DIR__ . '/includes/header.php';
                     $estadoVisible = (string)($c['estado_visible'] ?? 'activo');
                     $direccionesCliente = $c['direcciones'] ?? [];
                     $resumenDirecciones = count($direccionesCliente);
+                    $letraAncla = $alphabetLetterByFirstClientId[(int)$c['id_cliente']] ?? null;
                 ?>
-                <div class="manage-customers-card" data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
+                <div<?php echo $letraAncla !== null ? ' id="cust-letter-card-' . esc($letraAncla) . '"' : ''; ?> class="manage-customers-card" data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                     <div class="manage-customers-card-header">
                         <span class="manage-customers-card-name"><?php echo esc((string)$c['nombre']); ?></span>
                         <span class="badge <?php echo $estadoVisible === 'activo' ? 'green' : 'red'; ?> white-text" style="float:none; flex-shrink:0;">
@@ -925,7 +1058,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
 
-                <div id="modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="modal modal-fixed-footer" style="max-width: 760px;">
+                <div id="modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="modal modal-fixed-footer manage-customers-direcciones-modal" data-cliente-id="<?php echo (int)$c['id_cliente']; ?>" style="max-width: 760px;">
                     <div class="modal-content">
                         <h5>Direcciones de <?php echo esc((string)$c['nombre']); ?></h5>
                         <p class="grey-text" style="margin-top:0;">Agrega una o varias direcciones con alias para que ventas y reparto puedan elegir correctamente el domicilio.</p>
@@ -981,7 +1114,13 @@ include __DIR__ . '/includes/header.php';
                             <div class="col s12 m6">
                                 <div class="card-panel blue lighten-5" style="margin-top:0;">
                                     <strong id="dir-form-title-<?php echo (int)$c['id_cliente']; ?>">Agregar direccion</strong>
-                                    <form method="POST" id="dir-form-<?php echo (int)$c['id_cliente']; ?>" style="margin-top:14px;">
+                                    <div class="input-field" style="margin-top:14px;">
+                                        <i class="material-icons prefix blue-text">search</i>
+                                        <input type="text" id="dir-autocomplete-<?php echo (int)$c['id_cliente']; ?>" placeholder="Escribe la calle y numero...">
+                                        <span class="helper-text">Selecciona una opcion sugerida para mayor precision</span>
+                                    </div>
+                                    <div id="dir-map-preview-<?php echo (int)$c['id_cliente']; ?>" class="z-depth-1" style="height:200px; width:100%; margin-bottom:20px; border-radius:4px; display:none; border:1px solid #ddd;"></div>
+                                    <form method="POST" id="dir-form-<?php echo (int)$c['id_cliente']; ?>">
                                         <?php echo csrfInput(); ?>
                                         <input type="hidden" name="accion" value="agregar_direccion" class="dir-accion">
                                         <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
@@ -992,12 +1131,10 @@ include __DIR__ . '/includes/header.php';
                                         </div>
                                         <div class="input-field">
                                             <textarea name="direccion" class="materialize-textarea dir-direccion" required></textarea>
-                                            <label class="active">Direccion</label>
+                                            <label class="active">Direccion exacta (incluye numero de casa)</label>
                                         </div>
-                                        <div class="input-field">
-                                            <input type="url" name="maps_link" class="dir-maps-link">
-                                            <label class="active">Link de Google Maps</label>
-                                        </div>
+                                        <input type="hidden" name="maps_link" class="dir-maps-link">
+                                        <p class="grey-text text-small" id="dir-maps-link-status-<?php echo (int)$c['id_cliente']; ?>" style="margin:-6px 0 14px;">Sin ubicacion en mapa seleccionada aun.</p>
                                         <p>
                                             <label>
                                                 <input type="checkbox" name="es_default" value="1" class="filled-in dir-default">
@@ -1181,9 +1318,122 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=places&callback=initAutocompleteManageCustomers" async defer></script>
+
 <script>
+const dirMapState = {};
+
+function initAutocompleteManageCustomers() {
+    window.googleMapsReadyManageCustomers = true;
+    const openModal = document.querySelector('.manage-customers-direcciones-modal.open');
+    if (openModal) {
+        ensureDireccionMapInit(openModal.dataset.clienteId);
+    }
+}
+
+function tryInitDireccionMap(idCliente, attemptsLeft) {
+    if (typeof google !== 'undefined' && google.maps && google.maps.places) {
+        ensureDireccionMapInit(idCliente);
+        return;
+    }
+    if (attemptsLeft <= 0) {
+        console.warn('Google Maps no cargo a tiempo para el buscador de direcciones del cliente ' + idCliente);
+        return;
+    }
+    setTimeout(() => tryInitDireccionMap(idCliente, attemptsLeft - 1), 250);
+}
+
+document.addEventListener('click', function(event) {
+    const trigger = event.target.closest('a.modal-trigger[href^="#modal-dir-"]');
+    if (!trigger) return;
+    const idCliente = trigger.getAttribute('href').replace('#modal-dir-', '');
+    // Se espera a que termine la animacion de apertura del modal (Materialize la anima)
+    // antes de crear el widget de Google, porque si el campo esta oculto (display:none)
+    // en el momento de crearlo, el listado de sugerencias queda mal posicionado para siempre.
+    setTimeout(() => tryInitDireccionMap(idCliente, 20), 400);
+});
+
+function ensureDireccionMapInit(idCliente) {
+    if (!idCliente || typeof google === 'undefined' || (dirMapState[idCliente] && dirMapState[idCliente].initialized)) return;
+
+    const input = document.getElementById(`dir-autocomplete-${idCliente}`);
+    const mapEl = document.getElementById(`dir-map-preview-${idCliente}`);
+    if (!input || !mapEl) return;
+
+    const autocomplete = new google.maps.places.Autocomplete(input, {
+        types: ['address'],
+        componentRestrictions: { country: 'mx' }
+    });
+
+    const map = new google.maps.Map(mapEl, {
+        center: { lat: 23.6345, lng: -102.5528 },
+        zoom: 5,
+        disableDefaultUI: true,
+        zoomControl: true
+    });
+    const marker = new google.maps.Marker({ map: map });
+
+    autocomplete.addListener('place_changed', function() {
+        const place = autocomplete.getPlace();
+        if (!place.geometry) return;
+
+        mapEl.style.display = 'block';
+        const form = document.getElementById(`dir-form-${idCliente}`);
+        const direccionEl = form ? form.querySelector('.dir-direccion') : null;
+        const mapsLinkEl = form ? form.querySelector('.dir-maps-link') : null;
+        const statusEl = document.getElementById(`dir-maps-link-status-${idCliente}`);
+
+        if (direccionEl) {
+            direccionEl.value = place.formatted_address || direccionEl.value;
+            M.textareaAutoResize(direccionEl);
+        }
+        if (mapsLinkEl) {
+            mapsLinkEl.value = `https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat()},${place.geometry.location.lng()}`;
+        }
+        if (statusEl) {
+            statusEl.textContent = 'Ubicacion en mapa capturada correctamente.';
+            statusEl.classList.add('green-text');
+        }
+
+        map.setCenter(place.geometry.location);
+        map.setZoom(17);
+        marker.setPosition(place.geometry.location);
+        M.updateTextFields();
+    });
+
+    dirMapState[idCliente] = { map: map, marker: marker, autocomplete: autocomplete, initialized: true };
+
+    setTimeout(() => google.maps.event.trigger(map, 'resize'), 150);
+
+    const existingLink = document.getElementById(`dir-form-${idCliente}`)?.querySelector('.dir-maps-link')?.value || '';
+    if (existingLink.includes('query=')) {
+        actualizarMapaDireccionDesdeCoords(idCliente, existingLink.split('query=')[1]);
+    }
+}
+
+function actualizarMapaDireccionDesdeCoords(idCliente, coords) {
+    const state = dirMapState[idCliente];
+    const mapEl = document.getElementById(`dir-map-preview-${idCliente}`);
+    if (!state || !mapEl) return;
+    const [lat, lng] = String(coords || '').split(',').map(Number);
+    if (!isNaN(lat) && !isNaN(lng)) {
+        mapEl.style.display = 'block';
+        const pos = { lat, lng };
+        state.map.setCenter(pos);
+        state.map.setZoom(17);
+        state.marker.setPosition(pos);
+        setTimeout(() => google.maps.event.trigger(state.map, 'resize'), 100);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    M.Modal.init(document.querySelectorAll('.modal'));
+    M.Modal.init(document.querySelectorAll('.modal:not(.manage-customers-direcciones-modal)'));
+    M.Modal.init(document.querySelectorAll('.manage-customers-direcciones-modal'), {
+        onOpenEnd: function(modalEl) {
+            const idCliente = modalEl.dataset.clienteId;
+            tryInitDireccionMap(idCliente, 20);
+        }
+    });
     M.updateTextFields();
 
     const tableRows = Array.from(document.querySelectorAll('table.manage-customers-table tbody tr[data-origen]'));
@@ -1404,6 +1654,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     applyFilters();
+
+    const cardsContainer = document.querySelector('.manage-customers-cards');
+    document.querySelectorAll('.alpha-index-letter[data-letter]').forEach((letterEl) => {
+        letterEl.addEventListener('click', (event) => {
+            event.preventDefault();
+            const letter = letterEl.getAttribute('data-letter');
+            if (!letter) return;
+
+            const usingCards = cardsContainer && window.getComputedStyle(cardsContainer).display !== 'none';
+            const targetId = (usingCards ? 'cust-letter-card-' : 'cust-letter-row-') + letter;
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
 });
 
 function resetHorarioForm(idCliente) {
@@ -1480,6 +1746,17 @@ function resetDireccionForm(idCliente) {
     form.querySelector('.dir-default').checked = false;
     const title = document.getElementById(`dir-form-title-${idCliente}`);
     if (title) title.textContent = 'Agregar direccion';
+
+    const searchEl = document.getElementById(`dir-autocomplete-${idCliente}`);
+    if (searchEl) searchEl.value = '';
+    const mapEl = document.getElementById(`dir-map-preview-${idCliente}`);
+    if (mapEl) mapEl.style.display = 'none';
+    const statusEl = document.getElementById(`dir-maps-link-status-${idCliente}`);
+    if (statusEl) {
+        statusEl.textContent = 'Sin ubicacion en mapa seleccionada aun.';
+        statusEl.classList.remove('green-text');
+    }
+
     M.updateTextFields();
     M.textareaAutoResize(form.querySelector('.dir-direccion'));
 }
@@ -1495,6 +1772,29 @@ function cargarEdicionDireccion(idCliente, data) {
     form.querySelector('.dir-default').checked = !!data.es_default;
     const title = document.getElementById(`dir-form-title-${idCliente}`);
     if (title) title.textContent = 'Editar direccion';
+
+    const searchEl = document.getElementById(`dir-autocomplete-${idCliente}`);
+    if (searchEl) searchEl.value = '';
+    const statusEl = document.getElementById(`dir-maps-link-status-${idCliente}`);
+    const mapsLink = String(data.maps_link || '');
+
+    ensureDireccionMapInit(idCliente);
+
+    if (mapsLink.includes('query=')) {
+        actualizarMapaDireccionDesdeCoords(idCliente, mapsLink.split('query=')[1]);
+        if (statusEl) {
+            statusEl.textContent = 'Ubicacion guardada disponible en el mapa.';
+            statusEl.classList.add('green-text');
+        }
+    } else {
+        const mapEl = document.getElementById(`dir-map-preview-${idCliente}`);
+        if (mapEl) mapEl.style.display = 'none';
+        if (statusEl) {
+            statusEl.textContent = mapsLink !== '' ? 'Link guardado sin coordenadas detectables.' : 'Sin ubicacion en mapa seleccionada aun.';
+            statusEl.classList.remove('green-text');
+        }
+    }
+
     M.updateTextFields();
     M.textareaAutoResize(form.querySelector('.dir-direccion'));
 }
