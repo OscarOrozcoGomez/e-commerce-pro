@@ -78,6 +78,23 @@
             line-height: 18px;
             padding: 0 4px;
         }
+        .mobile-cart-nav {
+            margin: 0 4px 0 0;
+        }
+        .mobile-cart-nav .nav-cart-container {
+            height: 56px;
+            display: flex;
+            align-items: center;
+        }
+        .mobile-cart-nav .cart-count-mobile {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            min-width: 18px;
+            height: 18px;
+            line-height: 18px;
+            padding: 0 4px;
+        }
         .nav-favorites-link {
             position: relative;
             display: flex !important;
@@ -220,6 +237,16 @@
             </a>
             <!-- Botón para menú móvil -->
             <a href="#" data-target="mobile-nav" class="sidenav-trigger"><i class="material-icons">menu</i></a>
+
+            <!-- Carrito visible en móvil: antes solo estaba dentro del menú hamburguesa -->
+            <ul class="right hide-on-large-only mobile-cart-nav">
+                <li class="nav-cart-container">
+                    <a href="<?php echo BASE_URL; ?>views/cart.php" class="nav-cart-link" title="Carrito de compras">
+                        <i class="material-icons">shopping_cart</i>
+                        <span class="new badge red cart-count-mobile" data-badge-caption="" style="display: none;">0</span>
+                    </a>
+                </li>
+            </ul>
 
             <ul id="nav-mobile" class="right hide-on-med-and-down">
                 <li><a href="<?php echo BASE_URL; ?>views/catalogo.php">Catálogo</a></li>

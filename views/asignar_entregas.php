@@ -15,6 +15,25 @@ $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $error = '';
 $success = '';
+$successActionUrl = '';
+$successActionLabel = '';
+
+// Si el descifrado falla (llave distinta, dato corrupto, etc.) NUNCA mostramos el texto
+// cifrado crudo (ENCv1:...); se usa un fallback seguro.
+$safeDecryptValue = static function (?string $value, string $fallback = ''): string {
+    $raw = trim((string)$value);
+    if ($raw === '') {
+        return $fallback;
+    }
+    if (!function_exists('piiIsEncryptedValue') || !function_exists('piiDecryptValue') || !piiIsEncryptedValue($raw)) {
+        return $raw;
+    }
+    $decrypted = trim((string)piiDecryptValue($raw));
+    if ($decrypted === $raw || piiIsEncryptedValue($decrypted)) {
+        return $fallback;
+    }
+    return $decrypted;
+};
 
 // Procesar asignación
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
@@ -81,6 +100,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                     $success = 'Pedido asignado correctamente.';
                 } else {
                     $error = 'No se pudo asignar. Verifica que el pedido no esté ya en reparto o entregado.';
+                }
+            } elseif ($accion === 'convertir_sucursal') {
+                $pdo->beginTransaction();
+                try {
+                    $stmtPedidoConv = $pdo->prepare(
+                        "SELECT p.estado, p.id_almacen, p.id_cliente, p.numero_pedido, p.observaciones,
+                                COALESCE(NULLIF(TRIM(p.telefono_entrega), ''), c.telefono) AS telefono_resuelto,
+                                c.nombre AS cliente_nombre
+                         FROM pedidos p
+                         LEFT JOIN clientes c ON c.id_cliente = p.id_cliente
+                         WHERE p.id_pedido = :id_pedido
+                         FOR UPDATE"
+                    );
+                    $stmtPedidoConv->execute([':id_pedido' => $id_pedido]);
+                    $pedidoConv = $stmtPedidoConv->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                    if (!$pedidoConv) {
+                        throw new RuntimeException('No se encontro el pedido.');
+                    }
+                    if (!in_array((string)($pedidoConv['estado'] ?? ''), ['pendiente_pago', 'pagado'], true)) {
+                        throw new RuntimeException('Este pedido ya no se puede convertir (estado actual: ' . strtoupper((string)($pedidoConv['estado'] ?? '')) . ').');
+                    }
+
+                    $stmtRepCheck = $pdo->prepare('SELECT id_repartidor FROM pedidos WHERE id_pedido = :id_pedido');
+                    $stmtRepCheck->execute([':id_pedido' => $id_pedido]);
+                    if ($stmtRepCheck->fetchColumn() !== null) {
+                        throw new RuntimeException('Este pedido ya tiene un repartidor asignado, no se puede convertir a sucursal.');
+                    }
+
+                    $idAlmacenConv = (int)($pedidoConv['id_almacen'] ?? 0);
+                    if ($idAlmacenConv <= 0) {
+                        throw new RuntimeException('El pedido no tiene una sucursal valida para recoger.');
+                    }
+
+                    $columnExistsConv = static function (PDO $pdo, string $table, string $column): bool {
+                        $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+                        $stmt->execute([$table, $column]);
+                        return ((int)$stmt->fetchColumn()) > 0;
+                    };
+                    $hasTipoEntregaConv = $columnExistsConv($pdo, 'pedidos', 'tipo_entrega');
+
+                    // Reescribe el marcador ENTREGA embebido en observaciones (respaldo para vistas
+                    // que no dependen de la columna tipo_entrega).
+                    $obsActualConv = (string)($pedidoConv['observaciones'] ?? '');
+                    $obsNuevaConv = preg_replace('/ENTREGA:\s*Domicilio/i', 'ENTREGA: Sucursal', $obsActualConv, 1) ?? $obsActualConv;
+                    $obsNuevaConv .= ' | CONVERTIDO_A_SUCURSAL: ' . date('Y-m-d H:i') . ' por ' . (string)($usuario['nombre'] ?? 'usuario');
+
+                    $setPartsConv = ['observaciones = :observaciones'];
+                    $paramsConv = [':observaciones' => $obsNuevaConv, ':id_pedido' => $id_pedido];
+                    if ($hasTipoEntregaConv) {
+                        $setPartsConv[] = 'tipo_entrega = :tipo_entrega';
+                        $paramsConv[':tipo_entrega'] = 'Sucursal';
+                    }
+
+                    $stmtUpdateConv = $pdo->prepare('UPDATE pedidos SET ' . implode(', ', $setPartsConv) . ' WHERE id_pedido = :id_pedido');
+                    $stmtUpdateConv->execute($paramsConv);
+
+                    // Reutiliza el mismo helper que usa el checkout web para crear la notificacion pickup.
+                    dbCreatePickupNotification($pdo, [
+                        'id_pedido' => $id_pedido,
+                        'id_almacen' => $idAlmacenConv,
+                        'id_cliente' => $pedidoConv['id_cliente'] ?? null,
+                        'numero_pedido' => (string)($pedidoConv['numero_pedido'] ?? ''),
+                        'cliente_nombre' => $safeDecryptValue($pedidoConv['cliente_nombre'] ?? '', 'Cliente'),
+                        'cliente_telefono' => $safeDecryptValue($pedidoConv['telefono_resuelto'] ?? '', ''),
+                        'observaciones' => 'CONVERTIDO_DESDE_DOMICILIO: cliente solicito recoger en sucursal.',
+                    ]);
+
+                    $pdo->commit();
+                    $success = 'Pedido convertido a recoger en sucursal. Ya esta disponible en Notificaciones Pickup.';
+                    $successActionUrl = BASE_URL . 'views/pickup_notifications.php';
+                    $successActionLabel = 'Ir a Notificaciones Pickup';
+                    logAudit('PEDIDO_CONVERTIDO_A_SUCURSAL', 'pedidos', $id_pedido, 'Convertido de entrega a domicilio a recoger en sucursal');
+                } catch (Throwable $txe) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $error = $txe->getMessage();
                 }
             }
         } catch (PDOException $e) {
@@ -183,8 +280,13 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <?php if ($success): ?>
-        <div class="card green lighten-4 green-text text-darken-4" style="padding: 10px;">
-            <i class="material-icons left">check_circle</i> <?php echo esc($success); ?>
+        <div class="card green lighten-4 green-text text-darken-4" style="padding: 10px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <span><i class="material-icons left">check_circle</i> <?php echo esc($success); ?></span>
+            <?php if ($successActionUrl !== ''): ?>
+                <a href="<?php echo esc($successActionUrl); ?>" class="btn green darken-2 waves-effect waves-light">
+                    <?php echo esc($successActionLabel); ?> <i class="material-icons right">arrow_forward</i>
+                </a>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
     <?php if ($error): ?>
@@ -245,6 +347,15 @@ include __DIR__ . '/includes/header.php';
                                                     Asignar <i class="material-icons right">local_shipping</i>
                                                 </button>
                                             </form>
+
+                                            <form method="POST" style="margin-top:8px;" onsubmit="return confirm('¿Cambiar este pedido a recoger en sucursal? El cliente dejara de aparecer para asignar a un repartidor.');">
+                                                <?php echo csrfInput(); ?>
+                                                <input type="hidden" name="id_pedido" value="<?php echo $p['id_pedido']; ?>">
+                                                <input type="hidden" name="accion" value="convertir_sucursal">
+                                                <button type="submit" class="btn-flat waves-effect assign-delivery-to-pickup-btn w-100">
+                                                    <i class="material-icons left">store</i>Cambiar a recoger en sucursal
+                                                </button>
+                                            </form>
                                         </div>
                                     </div>
                                 </div>
@@ -259,6 +370,18 @@ include __DIR__ . '/includes/header.php';
 
 <style>
     .assign-deliveries-grid { margin-top: 8px; }
+    .assign-delivery-to-pickup-btn {
+        border: 1px solid #607d8b !important;
+        color: #455a64 !important;
+        background: #eceff1 !important;
+        border-radius: 4px;
+        font-size: 0.82rem;
+        font-weight: 600;
+    }
+    .assign-delivery-to-pickup-btn:hover {
+        background: #cfd8dc !important;
+    }
+    .w-100 { width: 100%; }
     .assign-delivery-card {
         display: flex;
         flex-direction: column;
