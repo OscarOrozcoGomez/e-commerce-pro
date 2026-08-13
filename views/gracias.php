@@ -683,10 +683,6 @@ if ($hasValidOrder) {
                 </div>
             </div>
         </section>
-
-        <p class="small-note">
-            Esta página está pensada para ser pública, segura y compatible con campañas de marketing.
-        </p>
     </main>
 
     <?php if ($shouldTriggerConversion): ?>

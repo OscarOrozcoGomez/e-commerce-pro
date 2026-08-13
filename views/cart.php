@@ -89,17 +89,6 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Confirmar Reserva</span>
-                    <div class="card-panel blue lighten-5">
-                        <p class="blue-text text-darken-4" style="margin-bottom: 10px;">
-                            <i class="material-icons left">account_balance</i> <strong>Datos de Transferencia:</strong><br>
-                            Banco: [Nombre del Banco]<br>
-                            Cuenta: [Tu Cuenta]<br>
-                            CLABE: [Tu CLABE]
-                        </p>
-                        <p class="orange-text text-darken-4" style="font-weight: bold;">
-                            <i class="material-icons left">report_problem</i> Importante: Envía tu comprobante de anticipo de $50 vía WhatsApp para confirmar tu lugar en la entrega.
-                        </p>
-                    </div>
                     <form id="form-checkout">
                         <!-- PASO 1: Tipo de entrega -->
                         <div style="margin-bottom: 20px;">

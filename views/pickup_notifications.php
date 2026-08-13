@@ -17,6 +17,8 @@ $idUsuario = (int)($usuario['id_usuario'] ?? 0);
 $idAlmacenUsuario = (int)($usuario['id_almacen'] ?? 0);
 $error = '';
 $success = '';
+$successActionUrl = '';
+$successActionLabel = '';
 $cancelSupportReady = false;
 $hasFechaApartada = false;
 $cancelReasonOptions = [
@@ -29,6 +31,23 @@ $cancelReasonOptions = [
     'tiempo_espera_excedido' => 'Tiempo de espera excedido',
     'otro' => 'Otro',
 ];
+
+// Si el descifrado falla (llave distinta, dato corrupto, etc.) NUNCA mostramos el texto
+// cifrado crudo (ENCv1:...); se usa un fallback seguro.
+$safeDecryptValue = static function (?string $value, string $fallback = ''): string {
+    $raw = trim((string)$value);
+    if ($raw === '') {
+        return $fallback;
+    }
+    if (!function_exists('piiIsEncryptedValue') || !function_exists('piiDecryptValue') || !piiIsEncryptedValue($raw)) {
+        return $raw;
+    }
+    $decrypted = trim((string)piiDecryptValue($raw));
+    if ($decrypted === $raw || piiIsEncryptedValue($decrypted)) {
+        return $fallback;
+    }
+    return $decrypted;
+};
 
 function normalizePickupProductLabel(string $value): string
 {
@@ -105,10 +124,13 @@ try {
             $estado = trim((string)($_POST['estado'] ?? 'nueva'));
             $motivoCancelacionKey = trim((string)($_POST['motivo_cancelacion'] ?? ''));
             $motivoCancelacionOtro = trim((string)($_POST['motivo_cancelacion_otro'] ?? ''));
+            $nuevaDireccionEntrega = trim((string)($_POST['direccion_entrega'] ?? ''));
+            $nuevoTelefonoEntrega = trim((string)($_POST['telefono_entrega'] ?? ''));
+            $nuevoMapsLinkEntrega = trim((string)($_POST['maps_link_entrega'] ?? ''));
 
             if ($idNotificacion <= 0) {
                 $error = 'Notificacion invalida.';
-            } elseif (!in_array($accion, ['marcar_estado', 'cancelar_pedido'], true)) {
+            } elseif (!in_array($accion, ['marcar_estado', 'cancelar_pedido', 'convertir_domicilio'], true)) {
                 $error = 'Accion no permitida.';
             } elseif ($accion === 'marcar_estado' && !in_array($estado, ['vista', 'apartada', 'atendida'], true)) {
                 $error = 'Estado invalido.';
@@ -118,6 +140,10 @@ try {
                 $error = 'Selecciona un motivo de cancelacion valido.';
             } elseif ($accion === 'cancelar_pedido' && $motivoCancelacionKey === 'otro' && $motivoCancelacionOtro === '') {
                 $error = 'Escribe el motivo cuando selecciones "Otro".';
+            } elseif ($accion === 'convertir_domicilio' && $nuevaDireccionEntrega === '') {
+                $error = 'Captura la direccion de entrega del cliente para convertir a domicilio.';
+            } elseif ($accion === 'convertir_domicilio' && mb_strlen($nuevaDireccionEntrega) < 8) {
+                $error = 'La direccion capturada parece incompleta. Verificala.';
             } else {
                 if ($error === '') {
                     $motivoCancelacionEtiqueta = '';
@@ -291,6 +317,97 @@ try {
                                 }
                             }
                         }
+
+                        if ($accion === 'convertir_domicilio') {
+                            if (in_array($estadoActual, ['cancelada', 'atendida'], true)) {
+                                $error = 'No se puede convertir una notificacion ya ' . strtolower($estadoActual) . '.';
+                            } else {
+                                $idPedido = (int)($current['id_pedido'] ?? 0);
+                                if ($idPedido <= 0) {
+                                    $error = 'Pedido pickup invalido para convertir.';
+                                } else {
+                                    $pdo->beginTransaction();
+                                    try {
+                                        $stmtPedidoConv = $pdo->prepare("SELECT estado, observaciones FROM pedidos WHERE id_pedido = :id_pedido FOR UPDATE");
+                                        $stmtPedidoConv->execute([':id_pedido' => $idPedido]);
+                                        $pedidoConv = $stmtPedidoConv->fetch(PDO::FETCH_ASSOC) ?: null;
+                                        if (!$pedidoConv) {
+                                            throw new RuntimeException('No se encontro el pedido asociado.');
+                                        }
+                                        if ((string)($pedidoConv['estado'] ?? '') === 'cancelado') {
+                                            throw new RuntimeException('Este pedido ya esta cancelado, no se puede convertir.');
+                                        }
+
+                                        $columnExistsConv = static function (PDO $pdo, string $table, string $column): bool {
+                                            $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+                                            $stmt->execute([$table, $column]);
+                                            return ((int)$stmt->fetchColumn()) > 0;
+                                        };
+                                        $hasTipoEntregaConv = $columnExistsConv($pdo, 'pedidos', 'tipo_entrega');
+                                        $hasDireccionEntregaConv = $columnExistsConv($pdo, 'pedidos', 'direccion_entrega');
+                                        $hasTelefonoEntregaConv = $columnExistsConv($pdo, 'pedidos', 'telefono_entrega');
+                                        $hasMapsLinkEntregaConv = $columnExistsConv($pdo, 'pedidos', 'maps_link_entrega');
+
+                                        // Reescribe los marcadores ENTREGA/Dir/Tel embebidos en observaciones,
+                                        // que otras vistas (dashboard, entregas) usan como respaldo cuando
+                                        // las columnas dedicadas no existen en el esquema.
+                                        $obsActual = (string)($pedidoConv['observaciones'] ?? '');
+                                        $obsNueva = preg_replace('/ENTREGA:\s*Sucursal/i', 'ENTREGA: Domicilio', $obsActual, 1) ?? $obsActual;
+                                        if (preg_match('/Dir:\s*[^|]*/i', $obsNueva)) {
+                                            $obsNueva = preg_replace('/Dir:\s*[^|]*/i', 'Dir: ' . $nuevaDireccionEntrega, $obsNueva, 1) ?? $obsNueva;
+                                        } else {
+                                            $obsNueva .= ' | Dir: ' . $nuevaDireccionEntrega;
+                                        }
+                                        if ($nuevoTelefonoEntrega !== '') {
+                                            if (preg_match('/Tel:\s*[^|]*/i', $obsNueva)) {
+                                                $obsNueva = preg_replace('/Tel:\s*[^|]*/i', 'Tel: ' . $nuevoTelefonoEntrega, $obsNueva, 1) ?? $obsNueva;
+                                            } else {
+                                                $obsNueva .= ' | Tel: ' . $nuevoTelefonoEntrega;
+                                            }
+                                        }
+                                        $obsNueva .= ' | CONVERTIDO_A_DOMICILIO: ' . date('Y-m-d H:i') . ' por ' . (string)($usuario['nombre'] ?? 'usuario');
+
+                                        $setPartsConv = ['observaciones = :observaciones'];
+                                        $paramsConv = [':observaciones' => $obsNueva, ':id_pedido' => $idPedido];
+                                        if ($hasTipoEntregaConv) {
+                                            $setPartsConv[] = 'tipo_entrega = :tipo_entrega';
+                                            $paramsConv[':tipo_entrega'] = 'Domicilio';
+                                        }
+                                        if ($hasDireccionEntregaConv) {
+                                            $setPartsConv[] = 'direccion_entrega = :direccion_entrega';
+                                            $paramsConv[':direccion_entrega'] = $nuevaDireccionEntrega;
+                                        }
+                                        if ($hasTelefonoEntregaConv && $nuevoTelefonoEntrega !== '') {
+                                            $setPartsConv[] = 'telefono_entrega = :telefono_entrega';
+                                            $paramsConv[':telefono_entrega'] = $nuevoTelefonoEntrega;
+                                        }
+                                        if ($hasMapsLinkEntregaConv && $nuevoMapsLinkEntrega !== '') {
+                                            $setPartsConv[] = 'maps_link_entrega = :maps_link_entrega';
+                                            $paramsConv[':maps_link_entrega'] = $nuevoMapsLinkEntrega;
+                                        }
+
+                                        $stmtUpdateConv = $pdo->prepare('UPDATE pedidos SET ' . implode(', ', $setPartsConv) . ' WHERE id_pedido = :id_pedido');
+                                        $stmtUpdateConv->execute($paramsConv);
+
+                                        // Ya no es un pickup: se elimina para que asignar_entregas.php lo tome
+                                        // de inmediato (esa vista excluye cualquier pedido con notificacion pickup).
+                                        $stmtDeleteNotif = $pdo->prepare("DELETE FROM pickup_notificaciones WHERE id_notificacion = :id_notificacion{$scopeWhere}");
+                                        $stmtDeleteNotif->execute([':id_notificacion' => $idNotificacion] + $scopeParams);
+
+                                        $pdo->commit();
+                                        $success = 'Pedido convertido a entrega a domicilio. Ya esta disponible para asignar repartidor.';
+                                        $successActionUrl = BASE_URL . 'views/asignar_entregas.php';
+                                        $successActionLabel = 'Ir a Asignar Entregas';
+                                        logAudit('PEDIDO_CONVERTIDO_A_DOMICILIO', 'pedidos', $idPedido, 'Convertido de pickup sucursal a entrega a domicilio');
+                                    } catch (Throwable $txe) {
+                                        if ($pdo->inTransaction()) {
+                                            $pdo->rollBack();
+                                        }
+                                        $error = $txe->getMessage();
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -318,6 +435,7 @@ try {
             p.estado AS estado_pedido,
             p.fecha_creacion AS fecha_pedido,
             c.nombre AS cliente,
+            c.telefono AS cliente_telefono,
             a.nombre AS sucursal,
             TIMESTAMPDIFF(MINUTE, pn.creado_en, NOW()) AS minutos_atraso,
             TIMESTAMPDIFF(HOUR, pn.creado_en, NOW()) AS horas_atraso
@@ -332,6 +450,36 @@ try {
     $stmtList = $pdo->prepare($sqlList);
     $stmtList->execute($params);
     $notificaciones = $stmtList->fetchAll(PDO::FETCH_ASSOC);
+
+    // Direccion guardada por defecto de cada cliente, para prellenar el modal de conversion a domicilio.
+    $direccionDefaultPorCliente = [];
+    $idsClientesConv = array_values(array_unique(array_filter(array_map(
+        static fn(array $n): int => (int)($n['id_cliente'] ?? 0),
+        $notificaciones
+    ), static fn(int $id): bool => $id > 0)));
+    if (!empty($idsClientesConv)) {
+        $stmtMetaDirTable = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones'");
+        $stmtMetaDirTable->execute();
+        if (((int)$stmtMetaDirTable->fetchColumn()) > 0) {
+            $placeholdersConv = implode(', ', array_fill(0, count($idsClientesConv), '?'));
+            $stmtDirConv = $pdo->prepare("SELECT id_cliente, direccion, maps_link FROM cliente_direcciones WHERE id_cliente IN ({$placeholdersConv}) ORDER BY id_cliente ASC, es_default DESC, id_direccion ASC");
+            $stmtDirConv->execute($idsClientesConv);
+            foreach ($stmtDirConv->fetchAll(PDO::FETCH_ASSOC) as $rowDir) {
+                $idClienteDir = (int)($rowDir['id_cliente'] ?? 0);
+                if ($idClienteDir <= 0 || isset($direccionDefaultPorCliente[$idClienteDir])) {
+                    continue;
+                }
+                $direccionDescifrada = $safeDecryptValue($rowDir['direccion'] ?? '', '');
+                if ($direccionDescifrada === '') {
+                    continue;
+                }
+                $direccionDefaultPorCliente[$idClienteDir] = [
+                    'direccion' => $direccionDescifrada,
+                    'maps_link' => $safeDecryptValue($rowDir['maps_link'] ?? '', ''),
+                ];
+            }
+        }
+    }
 
     $detallesPorPedido = [];
     $pedidosIndexados = [];
@@ -439,7 +587,14 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <?php if ($success): ?>
-        <div class="card-panel green lighten-4 green-text text-darken-4"><?php echo esc($success); ?></div>
+        <div class="card-panel green lighten-4 green-text text-darken-4" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <span><?php echo esc($success); ?></span>
+            <?php if ($successActionUrl !== ''): ?>
+                <a href="<?php echo esc($successActionUrl); ?>" class="btn green darken-2 waves-effect waves-light">
+                    <?php echo esc($successActionLabel); ?> <i class="material-icons right">arrow_forward</i>
+                </a>
+            <?php endif; ?>
+        </div>
     <?php endif; ?>
     <?php if ($error): ?>
         <div class="card-panel red lighten-4 red-text text-darken-4"><?php echo esc($error); ?></div>
@@ -518,6 +673,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content" style="overflow-x:auto;">
                     <span class="card-title">Listado de Alertas Pickup</span>
+                    <?php $conversionModalsData = []; ?>
                     <?php if (empty($notificaciones)): ?>
                         <p class="center grey-text">No hay notificaciones pickup registradas.</p>
                     <?php else: ?>
@@ -535,6 +691,18 @@ include __DIR__ . '/includes/header.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($notificaciones as $n): ?>
+                                    <?php
+                                        if (in_array((string)$n['estado'], ['nueva', 'vista', 'apartada'], true)) {
+                                            $idClienteConv = (int)($n['id_cliente'] ?? 0);
+                                            $conversionModalsData[(int)$n['id_notificacion']] = [
+                                                'numero_pedido' => (string)$n['numero_pedido'],
+                                                'cliente' => (string)($n['cliente'] ?? 'N/A'),
+                                                'direccion_prefill' => $direccionDefaultPorCliente[$idClienteConv]['direccion'] ?? '',
+                                                'maps_link_prefill' => $direccionDefaultPorCliente[$idClienteConv]['maps_link'] ?? '',
+                                                'telefono_prefill' => $safeDecryptValue($n['cliente_telefono'] ?? '', ''),
+                                            ];
+                                        }
+                                    ?>
                                     <tr>
                                         <td>
                                             <?php $idPedidoUi = (int)($n['id_pedido'] ?? 0); ?>
@@ -633,6 +801,12 @@ include __DIR__ . '/includes/header.php';
                                                     </form>
                                                 <?php endif; ?>
 
+                                                <?php if (in_array((string)$n['estado'], ['nueva', 'vista', 'apartada'], true)): ?>
+                                                    <a href="#modal-convertir-<?php echo (int)$n['id_notificacion']; ?>" class="btn-small blue-grey darken-1 waves-effect waves-light modal-trigger">
+                                                        <i class="material-icons left" style="margin-right:4px;">local_shipping</i>Cambiar a domicilio
+                                                    </a>
+                                                <?php endif; ?>
+
                                                 <?php if ((string)$n['estado'] === 'atendida'): ?>
                                                     <span class="grey-text text-darken-1">Flujo completado.</span>
                                                 <?php endif; ?>
@@ -652,6 +826,50 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<?php if (!empty($conversionModalsData)): ?>
+    <?php foreach ($conversionModalsData as $idNotifModal => $convMeta): ?>
+        <div id="modal-convertir-<?php echo (int)$idNotifModal; ?>" class="modal">
+            <div class="modal-content">
+                <h5 style="margin-top:0;">Cambiar a entrega a domicilio</h5>
+                <p class="grey-text" style="margin-top:4px;">
+                    Pedido <strong><?php echo esc($convMeta['numero_pedido']); ?></strong> · Cliente: <?php echo esc($convMeta['cliente']); ?>
+                </p>
+                <p class="orange-text text-darken-3" style="font-size:0.88rem;">
+                    <i class="material-icons tiny">info</i> El cliente lo pidio para recoger en sucursal, pero cambio de opinion y quiere que se lo lleven. Captura la direccion real de entrega para continuar; el pedido quedara disponible en "Asignar Entregas" para asignarle un repartidor.
+                </p>
+                <form method="POST" class="convertir-domicilio-form">
+                    <?php echo csrfInput(); ?>
+                    <input type="hidden" name="accion" value="convertir_domicilio">
+                    <input type="hidden" name="id_notificacion" value="<?php echo (int)$idNotifModal; ?>">
+                    <div class="input-field">
+                        <textarea name="direccion_entrega" class="materialize-textarea" required><?php echo esc($convMeta['direccion_prefill']); ?></textarea>
+                        <label class="active">Direccion de entrega</label>
+                        <?php if ($convMeta['direccion_prefill'] !== ''): ?>
+                            <span class="helper-text">Prellenada con su domicilio guardado. Verificala o ajustala antes de continuar.</span>
+                        <?php else: ?>
+                            <span class="helper-text">Este cliente no tiene domicilio guardado. Captura la direccion completa.</span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="input-field">
+                        <input type="tel" name="telefono_entrega" value="<?php echo esc($convMeta['telefono_prefill']); ?>" maxlength="19" inputmode="numeric">
+                        <label class="active">Telefono de contacto</label>
+                    </div>
+                    <div class="input-field">
+                        <input type="url" name="maps_link_entrega" value="<?php echo esc($convMeta['maps_link_prefill']); ?>">
+                        <label class="active">Link de Google Maps (opcional)</label>
+                    </div>
+                    <div class="modal-footer" style="padding:0; background:transparent; text-align:left;">
+                        <a href="#!" class="modal-close waves-effect btn-flat">Cancelar</a>
+                        <button type="submit" class="btn blue-grey darken-1 waves-effect waves-light">
+                            Confirmar cambio a domicilio <i class="material-icons right">local_shipping</i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
 
 <?php if (!empty($pedidosIndexados)): ?>
     <?php foreach ($pedidosIndexados as $idPedidoModal => $pedidoMeta): ?>
