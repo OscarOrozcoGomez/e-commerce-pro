@@ -198,7 +198,7 @@
             <div class="container">
                 <div class="banner-content">
                     <i class="material-icons tiny">info</i>
-                    <span><strong>¡Entregas Programadas!</strong> Solo Miércoles y Sábados. Garantiza tu lugar enviando el anticipo de $50.</span>
+                    <span><strong>¡Entregas Programadas!</strong> Solo Miércoles y Sábados Por la tarde.</span>
                 </div>
             </div>
         </div>

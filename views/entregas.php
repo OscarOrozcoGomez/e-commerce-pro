@@ -15,15 +15,31 @@ $isRepartidorView = isRepartidor();
 $isRouteOptimizationAllowed = $isAdminView || $isRepartidorView;
 $selectedRepartidorId = $isAdminView ? max(0, (int)($_GET['repartidor_id'] ?? 0)) : (int)($usuario['id_usuario'] ?? 0);
 $selectedFechaEntrega = trim((string)($_GET['fecha_entrega'] ?? ''));
-if ($selectedFechaEntrega === '') {
+// Admin usa el filtro de fecha para planear rutas por dia, por eso su default es "hoy".
+// El repartidor necesita ver TODAS sus entregas pendientes por default (incluyendo las
+// que se asignaron sin fecha programada), o de lo contrario pedidos con fecha_entrega_programada
+// NULL desaparecen del listado aunque el dashboard los siga contando en "Mis Entregas Hoy".
+if ($selectedFechaEntrega === '' && $isAdminView) {
     $selectedFechaEntrega = date('Y-m-d');
 }
 if ($selectedFechaEntrega !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedFechaEntrega)) {
-    $selectedFechaEntrega = date('Y-m-d');
+    $selectedFechaEntrega = $isAdminView ? date('Y-m-d') : '';
 }
 $error = '';
 $success = '';
 $repartidores = [];
+
+// Motivos preestablecidos para cuando el repartidor no pudo completar una entrega.
+$deliveryCancelReasonOptions = [
+    'cliente_no_disponible' => 'Cliente no se encontraba disponible',
+    'direccion_incorrecta' => 'Direccion incorrecta o no localizada',
+    'cliente_rechazo_pedido' => 'Cliente rechazo el pedido',
+    'cliente_no_pudo_pagar' => 'Cliente no pudo pagar / sin efectivo',
+    'producto_danado' => 'Producto danado en el trayecto',
+    'zona_insegura' => 'Zona insegura / acceso restringido',
+    'clima_transito' => 'Clima o transito impidieron la entrega',
+    'otro' => 'Otro',
+];
 
 // Procesar cambio de estado de reparto
 if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
@@ -55,6 +71,89 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                 }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
+            }
+        }
+
+        if ($_POST['accion'] === 'cancelar_entrega') {
+            $motivoKey = trim((string)($_POST['motivo_cancelacion'] ?? ''));
+            $motivoOtro = trim((string)($_POST['motivo_cancelacion_otro'] ?? ''));
+
+            if (!isset($deliveryCancelReasonOptions[$motivoKey])) {
+                $error = 'Selecciona un motivo valido para cancelar la entrega.';
+            } elseif ($motivoKey === 'otro' && $motivoOtro === '') {
+                $error = 'Escribe el motivo cuando selecciones "Otro".';
+            } else {
+                $motivoEtiqueta = $motivoKey === 'otro' ? mb_substr($motivoOtro, 0, 180) : $deliveryCancelReasonOptions[$motivoKey];
+
+                $pdo->beginTransaction();
+                try {
+                    $stmtPedido = $pdo->prepare("SELECT estado, id_almacen FROM pedidos WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor FOR UPDATE");
+                    $stmtPedido->execute([':id_pedido' => $id_pedido, ':id_repartidor' => $usuario['id_usuario']]);
+                    $pedido = $stmtPedido->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                    if (!$pedido) {
+                        throw new RuntimeException('No se encontro el pedido o no esta asignado a ti.');
+                    }
+
+                    $estadoPedido = (string)($pedido['estado'] ?? '');
+                    if (!in_array($estadoPedido, ['pendiente_pago', 'pagado', 'en_reparto'], true)) {
+                        throw new RuntimeException('Este pedido ya no se puede cancelar (estado actual: ' . strtoupper($estadoPedido) . ').');
+                    }
+
+                    $idAlmacenPedido = (int)($pedido['id_almacen'] ?? 0);
+
+                    $stmtDetalle = $pdo->prepare("SELECT id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = :id_pedido AND cantidad > 0 FOR UPDATE");
+                    $stmtDetalle->execute([':id_pedido' => $id_pedido]);
+                    $items = $stmtDetalle->fetchAll(PDO::FETCH_ASSOC);
+
+                    $stmtResurtir = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
+                                                   VALUES (:id_producto, :id_almacen, :cantidad, 2, 5)
+                                                   ON DUPLICATE KEY UPDATE cantidad_actual = cantidad_actual + VALUES(cantidad_actual)");
+                    // Deja rastro de auditoria del movimiento, igual que 'salida' se registra al vender (api/ventas.php).
+                    $stmtMovEntrada = $pdo->prepare(
+                        "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
+                         VALUES (:producto, 'entrada', :almacen, :cantidad, :usuario, :observacion)"
+                    );
+                    foreach ($items as $it) {
+                        $idProducto = (int)($it['id_producto'] ?? 0);
+                        $cantidad = max(0, (int)($it['cantidad'] ?? 0));
+                        if ($idProducto <= 0 || $cantidad <= 0 || $idAlmacenPedido <= 0) {
+                            continue;
+                        }
+                        $stmtResurtir->execute([
+                            ':id_producto' => $idProducto,
+                            ':id_almacen' => $idAlmacenPedido,
+                            ':cantidad' => $cantidad,
+                        ]);
+                        $stmtMovEntrada->execute([
+                            ':producto' => $idProducto,
+                            ':almacen' => $idAlmacenPedido,
+                            ':cantidad' => $cantidad,
+                            ':usuario' => $usuario['id_usuario'],
+                            ':observacion' => 'Entrega no realizada, pedido #' . $id_pedido . ' cancelado por repartidor',
+                        ]);
+                    }
+
+                    $stmtCancelar = $pdo->prepare("UPDATE pedidos
+                                                    SET estado = 'cancelado',
+                                                        observaciones = CONCAT(COALESCE(observaciones, ''),
+                                                            ' | ENTREGA_NO_REALIZADA: ', :motivo)
+                                                    WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor");
+                    $stmtCancelar->execute([
+                        ':motivo' => $motivoEtiqueta,
+                        ':id_pedido' => $id_pedido,
+                        ':id_repartidor' => $usuario['id_usuario'],
+                    ]);
+
+                    $pdo->commit();
+                    $success = 'Entrega cancelada. El stock fue devuelto al inventario de la sucursal.';
+                    logAudit('PEDIDO_ENTREGA_CANCELADA_REPARTIDOR', 'pedidos', $id_pedido, 'Repartidor no pudo entregar. Motivo: ' . $motivoEtiqueta);
+                } catch (Throwable $txe) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $error = $txe->getMessage();
+                }
             }
         }
     }
@@ -148,6 +247,15 @@ try {
     $fechaLimiteExpr = $hasFechaLimiteEntrega ? 'p.fecha_limite_entrega AS fecha_limite_entrega' : 'NULL AS fecha_limite_entrega';
     $prioridadExpr = $hasPrioridadEntrega ? 'p.prioridad_entrega AS prioridad_entrega' : '0 AS prioridad_entrega';
 
+    $stmtMetaPickup = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+    $stmtMetaPickup->execute();
+    $hasPickupNotificacionesTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
+    // Defensa adicional: un pedido con notificacion pickup nunca deberia mostrarse como
+    // entrega a domicilio, sin importar si quedo mal asignado por datos historicos.
+    $notPickupFilter = $hasPickupNotificacionesTable
+        ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = p.id_pedido)"
+        : '';
+
         $sql = "SELECT p.*, p.observaciones,
                    c.nombre as cliente, {$direccionExpr}, {$telefonoExpr}, {$mapExpr},
                    {$fechaLimiteExpr}, {$prioridadExpr},
@@ -157,7 +265,7 @@ try {
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN usuarios ur ON p.id_repartidor = ur.id_usuario
             WHERE p.estado IN ('pendiente_pago','pagado','en_reparto')
-              AND p.id_repartidor IS NOT NULL";
+              AND p.id_repartidor IS NOT NULL{$notPickupFilter}";
 
     $params = [];
     if ($isAdminView) {
@@ -264,13 +372,17 @@ include __DIR__ . '/includes/header.php';
                 <div class="card" style="margin-top: 12px;">
                     <div class="card-content" style="padding-bottom: 10px;">
                         <span class="card-title" style="font-size: 1.1rem;">Filtrar por dia</span>
+                        <p class="grey-text" style="margin:4px 0 12px; font-size:0.85rem;">
+                            Sin fecha seleccionada se muestran <strong>todas</strong> tus entregas pendientes, incluyendo las que se asignaron sin dia programado.
+                        </p>
                         <form method="GET" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
                             <div style="min-width:220px; flex:1;">
-                                <label for="fecha_entrega" class="active">Dia de entrega</label>
-                                <input id="fecha_entrega" name="fecha_entrega" type="date" value="<?php echo esc($selectedFechaEntrega); ?>" required>
+                                <label for="fecha_entrega" class="active">Dia de entrega (opcional)</label>
+                                <input id="fecha_entrega" name="fecha_entrega" type="date" value="<?php echo esc($selectedFechaEntrega); ?>">
                             </div>
                             <button type="submit" class="btn indigo waves-effect waves-light">Aplicar filtro</button>
                             <a href="?fecha_entrega=<?php echo esc(urlencode(date('Y-m-d'))); ?>" class="btn-flat waves-effect">Hoy</a>
+                            <a href="?fecha_entrega=" class="btn-flat waves-effect">Ver todas</a>
                         </form>
                     </div>
                 </div>
@@ -319,7 +431,7 @@ include __DIR__ . '/includes/header.php';
                                 <label for="route-start-meridiem" class="active">AM/PM</label>
                             </div>
                             <div class="col s12 m4" style="display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap;">
-                                <button type="button" class="btn-flat waves-effect" id="route-use-location">
+                                <button type="button" class="btn-flat waves-effect route-location-btn" id="route-use-location">
                                     <i class="material-icons left">my_location</i> Usar mi ubicacion
                                 </button>
                                 <button type="button" class="btn blue-grey darken-1 waves-effect waves-light" id="route-toggle-all">Seleccionar todo</button>
@@ -555,6 +667,10 @@ include __DIR__ . '/includes/header.php';
                                 <p class="orange-text" style="margin-top: 10px;">
                                     <i class="material-icons tiny">event</i> Programado para: <?php echo date('d/m/Y H:i', strtotime($ent['fecha_entrega_programada'])); ?>
                                 </p>
+                            <?php else: ?>
+                                <p class="grey-text" style="margin-top: 10px;">
+                                    <i class="material-icons tiny">event_busy</i> Sin dia programado
+                                </p>
                             <?php endif; ?>
                         </div>
                         <div class="card-action center-align">
@@ -582,6 +698,26 @@ include __DIR__ . '/includes/header.php';
                                         </button>
                                     <?php endif; ?>
                                 </form>
+
+                                <button type="button" class="btn-flat red-text waves-effect toggle-cancel-entrega w-100" data-target="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px;">
+                                    <i class="material-icons left">cancel</i> No pude entregar
+                                </button>
+                                <form method="POST" id="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" class="cancel-entrega-form" data-cancel-form="1" style="display:none; margin-top:10px; text-align:left;">
+                                    <?php echo csrfInput(); ?>
+                                    <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
+                                    <input type="hidden" name="accion" value="cancelar_entrega">
+                                    <label class="active" style="font-size:0.78rem; color:#546e7a;">Motivo por el que no se pudo entregar</label>
+                                    <select name="motivo_cancelacion" data-cancel-reason="1" class="browser-default" required style="margin-bottom:8px; height:40px;">
+                                        <option value="" selected disabled>-- Selecciona un motivo --</option>
+                                        <?php foreach ($deliveryCancelReasonOptions as $reasonKey => $reasonLabel): ?>
+                                            <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
+                                    <button type="submit" class="btn red darken-2 waves-effect waves-light w-100" onclick="return confirm('Confirmar que no se pudo entregar este pedido? Se cancelara la venta y se devolvera el stock al inventario.')">
+                                        CONFIRMAR CANCELACION <i class="material-icons right">cancel</i>
+                                    </button>
+                                </form>
                             <?php else: ?>
                                 <p class="grey-text" style="margin: 0; font-size: 0.9rem;">Vista administrativa: solo planeacion de ruta.</p>
                             <?php endif; ?>
@@ -592,6 +728,43 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($isRepartidorView): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.toggle-cancel-entrega').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (!target) return;
+            const isHidden = target.style.display === 'none' || target.style.display === '';
+            target.style.display = isHidden ? 'block' : 'none';
+            btn.innerHTML = isHidden
+                ? '<i class="material-icons left">expand_less</i> Cancelar'
+                : '<i class="material-icons left">cancel</i> No pude entregar';
+        });
+    });
+
+    document.querySelectorAll('form.cancel-entrega-form[data-cancel-form="1"]').forEach((formEl) => {
+        const reasonSelect = formEl.querySelector('select[data-cancel-reason="1"]');
+        const otherInput = formEl.querySelector('input[data-cancel-other="1"]');
+        if (!reasonSelect || !otherInput) return;
+
+        const syncOtherFieldVisibility = () => {
+            const mustShow = reasonSelect.value === 'otro';
+            otherInput.style.display = mustShow ? 'block' : 'none';
+            otherInput.required = mustShow;
+            if (!mustShow) {
+                otherInput.value = '';
+            }
+        };
+
+        reasonSelect.addEventListener('change', syncOtherFieldVisibility);
+        syncOtherFieldVisibility();
+    });
+});
+</script>
+<?php endif; ?>
 
 <?php if ($isRouteOptimizationAllowed): ?>
 <script>
@@ -1155,6 +1328,21 @@ document.addEventListener('DOMContentLoaded', () => {
         align-items: center;
         justify-content: flex-end;
         margin-bottom: 10px;
+    }
+    .route-location-btn {
+        border: 2px solid #1565c0 !important;
+        color: #1565c0 !important;
+        background: #e3f2fd !important;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+    .route-location-btn:hover {
+        background: #bbdefb !important;
+    }
+    .route-location-btn:disabled {
+        border-color: #b0bec5 !important;
+        color: #90a4ae !important;
+        background: #eceff1 !important;
     }
     .route-stops-list {
         margin: 0;
