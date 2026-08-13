@@ -24,8 +24,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 
-    <?php if (isAdmin()): ?>
-    <!-- Gestión de Categorías (Solo Admin) -->
+    <!-- Gestión de Categorías -->
     <div class="row">
         <div class="col s12">
             <div class="card-panel blue lighten-5">
@@ -42,7 +41,6 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
-    <?php endif; ?>
 
     <div class="row">
         <div class="col s12 m4">

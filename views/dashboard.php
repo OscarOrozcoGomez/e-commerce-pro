@@ -36,6 +36,9 @@ include __DIR__ . '/includes/header.php';
                         <p class="display-metric" id="stat-ventas-hoy-total">0</p>
                         <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="white-text">Agendar Pedido</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -43,6 +46,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Clientes</span>
                         <p class="display-metric" id="stat-clientes">0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/manage_customers.php" class="white-text">Ver Clientes</a>
                     </div>
                 </div>
             </div>
@@ -52,6 +58,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Productos</span>
                         <p class="display-metric" id="stat-productos">0</p>
                     </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/products.php" class="white-text">Ver Productos</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -59,6 +68,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Usuarios</span>
                         <p class="display-metric" id="stat-usuarios">0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/users.php" class="white-text">Ver Usuarios</a>
                     </div>
                 </div>
             </div>
@@ -68,6 +80,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Retiros Sucursal</span>
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
                         <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="white-text">Ver Retiros</a>
                     </div>
                 </div>
             </div>
@@ -225,28 +240,6 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Gestionar Productos</span>
-                        <p>Agregar, editar y eliminar productos del sistema</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/products.php" class="btn waves-effect waves-light teal">Ir</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Gestionar Clientes</span>
-                        <p>Administrar base de datos de clientes y sus direcciones guardadas.</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/manage_customers.php" class="btn waves-effect waves-light blue darken-2">Clientes</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
                         <span class="card-title">Gestionar Blogs</span>
                         <p>Publicar, editar o eliminar artículos informativos en el catálogo</p>
                     </div>
@@ -374,33 +367,11 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Notificaciones Pickup</span>
-                        <p>Ver y dar seguimiento a pedidos para recoger en sucursal</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Gestionar</a>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
         <div class="row"><div class="col s12"><h5><i class="material-icons left">settings</i> Administración y Usuarios</h5></div></div>
         <div class="row dashboard-actions">
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Gestionar Usuarios</span>
-                        <p>Crear, editar y administrar usuarios del sistema</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/users.php" class="btn waves-effect waves-light blue">Ir</a>
-                    </div>
-                </div>
-            </div>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -446,6 +417,9 @@ include __DIR__ . '/includes/header.php';
                         <p class="display-metric" id="stat-ventas-hoy-total">0</p>
                         <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="white-text">Agendar Pedido</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -453,6 +427,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Productos</span>
                         <p class="display-metric" id="stat-productos">0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/products.php" class="white-text">Ver Productos</a>
                     </div>
                 </div>
             </div>
@@ -462,6 +439,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Stock Bajo</span>
                         <p class="display-metric" id="stat-stock-bajo">0</p>
                     </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/products.php" class="white-text">Revisar Inventario</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -469,6 +449,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Por Entregar</span>
                         <p class="display-metric" id="stat-por-entregar">0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/asignar_entregas.php" class="white-text">Asignar Entregas</a>
                     </div>
                 </div>
             </div>
@@ -478,6 +461,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Retiros Sucursal</span>
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
                         <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="white-text">Ver Retiros</a>
                     </div>
                 </div>
             </div>
@@ -515,17 +501,6 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/reportes.php" class="btn waves-effect waves-light purple">Exportar</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
-                        <span class="card-title">Notificaciones Pickup</span>
-                        <p>Seguimiento de pedidos por recoger y reabasto de sucursal</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="btn waves-effect waves-light deep-orange darken-2">Atender</a>
                     </div>
                 </div>
             </div>
@@ -610,17 +585,6 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Gestionar Productos</span>
-                        <p>Dar de alta productos, actualizar precios e inventario</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/products.php" class="btn waves-effect waves-light teal">Ir</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col s12 m6 l4">
-                <div class="card">
-                    <div class="card-content">
                         <span class="card-title">Resurtido y Compras</span>
                         <p>Generar lista de pedido y recibir mercancía</p>
                     </div>
@@ -696,6 +660,9 @@ include __DIR__ . '/includes/header.php';
                         <p class="display-metric" id="stat-ventas-hoy-total">0</p>
                         <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
+                    <div class="card-action">
+                        <a href="#seller-sales-section" class="white-text">Ver Mis Ventas</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l4">
@@ -705,6 +672,9 @@ include __DIR__ . '/includes/header.php';
                         <p class="display-metric" id="stat-ventas-mes-total">0</p>
                         <p class="text-small" id="stat-ventas-mes-monto">$ 0.00</p>
                     </div>
+                    <div class="card-action">
+                        <a href="#seller-sales-section" class="white-text">Ver Mis Ventas</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l4">
@@ -713,6 +683,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Clientes Este Mes</span>
                         <p class="display-metric" id="stat-clientes">0</p>
                     </div>
+                    <div class="card-action">
+                        <a href="#seller-sales-section" class="white-text">Ver Mis Ventas</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l4">
@@ -720,6 +693,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Ingresos Mes</span>
                         <p class="display-metric" id="stat-ingresos-mes">$ 0.00</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="#seller-liquidacion-section" class="white-text">Ver Liquidación</a>
                     </div>
                 </div>
             </div>
@@ -732,6 +708,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Piezas Hoy</span>
                         <p class="display-metric" id="stat-piezas-hoy">0</p>
                     </div>
+                    <div class="card-action">
+                        <a href="#seller-liquidacion-section" class="white-text">Ver Liquidación</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -739,6 +718,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Comision Hoy</span>
                         <p class="display-metric" id="stat-comision-hoy">$ 0.00</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="#seller-liquidacion-section" class="white-text">Ver Liquidación</a>
                     </div>
                 </div>
             </div>
@@ -748,6 +730,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Comision Mes</span>
                         <p class="display-metric" id="stat-comision-mes">$ 0.00</p>
                     </div>
+                    <div class="card-action">
+                        <a href="#seller-liquidacion-section" class="white-text">Ver Liquidación</a>
+                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -756,11 +741,14 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Por Entregar Hoy</span>
                         <p class="display-metric" id="stat-entrega-hoy">$ 0.00</p>
                     </div>
+                    <div class="card-action">
+                        <a href="#seller-liquidacion-section" class="white-text">Ver Liquidación</a>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="row dashboard-actions">
+        <div class="row dashboard-actions" id="seller-liquidacion-section">
             <div class="col s12">
                 <div class="card">
                     <div class="card-content">
@@ -811,7 +799,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Catálogo</h5></div></div>
+        <div class="row" id="seller-sales-section"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Catálogo</h5></div></div>
         <div class="row dashboard-actions">
             <div class="col s12">
                 <div class="card">
