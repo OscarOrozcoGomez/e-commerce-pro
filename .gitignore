@@ -4,6 +4,7 @@
 
 # Ignorar archivos de registro y temporales
 mail_log.txt
+mail_preview_last_order.html
 
 # SQL de mantenimiento de presentaciones
 PRESENTATIONS_SQL.md

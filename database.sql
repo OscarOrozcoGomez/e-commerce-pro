@@ -304,6 +304,16 @@ CREATE TABLE IF NOT EXISTS `movimientos_inventario` (
   CONSTRAINT `fk_movimientos_destino` FOREIGN KEY (`id_almacen_destino`) REFERENCES `almacenes` (`id_almacen`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+-- Lista editable de correos que reciben aviso al entrar un pedido web nuevo
+CREATE TABLE IF NOT EXISTS `pedido_notificacion_correos` (
+  `id_correo` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `correo` VARCHAR(190) NOT NULL,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `creado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_correo`),
+  UNIQUE KEY `uq_pedido_notificacion_correo` (`correo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Chat de Soporte Interno
 CREATE TABLE IF NOT EXISTS `mensajes_soporte` (
   `id_mensaje` INT UNSIGNED NOT NULL AUTO_INCREMENT,

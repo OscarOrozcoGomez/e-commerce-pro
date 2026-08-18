@@ -606,6 +606,16 @@ function sendPasswordResetEmail(string $email, string $token): bool
                "Ingrésalo en la página para restablecer tu contraseña.\n" .
                "Si no solicitaste esto, ignora este mensaje.\n";
 
+    return appSendPlainTextEmail($email, $subject, $message);
+}
+
+/**
+ * Envía un correo de texto plano reutilizando la misma lógica para todo el sistema:
+ * en localhost queda registrado en mail_log.txt (para pruebas en XAMPP) y en el
+ * host real se envía con mail() usando un remitente del propio dominio.
+ */
+function appSendPlainTextEmail(string $email, string $subject, string $message): bool
+{
     // Detectar si estamos en localhost o en el host real
     $host = $_SERVER['HTTP_HOST'] ?? '';
     $isLocal = (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false);
@@ -628,7 +638,7 @@ function sendPasswordResetEmail(string $email, string $token): bool
     $domain = str_replace('www.', '', $host);
     $fromEmail = "no-reply@" . $domain;
     $fromName = "Belleza y Bienestar";
-    
+
     $headers = [
         "From: $fromName <$fromEmail>",
         "Reply-To: $fromEmail",
@@ -642,6 +652,316 @@ function sendPasswordResetEmail(string $email, string $token): bool
     $extraParams = "-f" . $fromEmail;
 
     return mail($email, '=?UTF-8?B?'.base64_encode($subject).'?=', $message, implode("\r\n", $headers), $extraParams);
+}
+
+/**
+ * Envía un correo en HTML. Misma lógica de entorno que appSendPlainTextEmail:
+ * en localhost queda en mail_log.txt y además se vuelca a mail_preview_last_order.html
+ * para poder abrirlo en el navegador y revisar cómo se ve.
+ */
+function appSendHtmlEmail(string $email, string $subject, string $htmlBody): bool
+{
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    $isLocal = (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false);
+
+    if ($isLocal) {
+        $logPath = __DIR__ . '/../mail_log.txt';
+        $logContent = "========================================\n" .
+                      "FECHA: " . date('Y-m-d H:i:s') . "\n" .
+                      "PARA: $email\n" .
+                      "ASUNTO: $subject\n" .
+                      "MENSAJE: (HTML, ver mail_preview_last_order.html para vista previa)\n" .
+                      "========================================\n\n";
+        file_put_contents($logPath, $logContent, FILE_APPEND);
+        file_put_contents(__DIR__ . '/../mail_preview_last_order.html', $htmlBody);
+        return true;
+    }
+
+    $domain = str_replace('www.', '', $host);
+    $fromEmail = "no-reply@" . $domain;
+    $fromName = "Belleza y Bienestar";
+
+    $headers = [
+        "From: $fromName <$fromEmail>",
+        "Reply-To: $fromEmail",
+        "Return-Path: $fromEmail",
+        "X-Mailer: PHP/" . phpversion(),
+        "MIME-Version: 1.0",
+        "Content-Type: text/html; charset=UTF-8"
+    ];
+
+    $extraParams = "-f" . $fromEmail;
+
+    return mail($email, '=?UTF-8?B?'.base64_encode($subject).'?=', $htmlBody, implode("\r\n", $headers), $extraParams);
+}
+
+/**
+ * Convierte una ruta relativa del sitio (ej. assets/img/logo.png) en una URL absoluta
+ * con esquema y host, necesaria para que las imágenes se vean dentro del correo.
+ */
+function appAbsoluteAssetUrl(string $relativePath): string
+{
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    $base = defined('BASE_URL') ? BASE_URL : '/';
+    if ($host === '') {
+        return $base . ltrim($relativePath, '/');
+    }
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    return $scheme . '://' . $host . $base . ltrim($relativePath, '/');
+}
+
+/**
+ * Resuelve la imagen de un producto (columna producto_imagenes/productos.imagen) a una
+ * URL absoluta usable en un correo. Si no hay imagen real, cae al logo de la tienda.
+ */
+function appResolveProductImageUrlForEmail(?string $imagen): string
+{
+    $imagen = trim((string) $imagen);
+    if ($imagen === '' || stripos($imagen, 'default-product') !== false) {
+        return appAbsoluteAssetUrl('assets/img/logo.png');
+    }
+    if (preg_match('#^https?://#i', $imagen)) {
+        return $imagen;
+    }
+    return appAbsoluteAssetUrl('assets/img/products/' . ltrim($imagen, '/'));
+}
+
+/**
+ * Obtiene nombre, cantidad, precio e imagen de cada producto de un pedido ya creado,
+ * para armar el resumen visual del correo de aviso de pedido nuevo.
+ */
+function dbGetOrderItemsForEmail(PDO $pdo, int $idPedido): array
+{
+    if ($idPedido <= 0) {
+        return [];
+    }
+
+    $sql = "SELECT dp.cantidad, dp.precio_unitario, dp.subtotal,
+                   p.nombre, p.nombre_variante,
+                   COALESCE(
+                       NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi WHERE pi.id_producto = p.id_producto ORDER BY pi.orden ASC LIMIT 1), ''),
+                       NULLIF(TRIM(p.imagen), ''),
+                       NULLIF(TRIM(p.imagen_url), '')
+                   ) AS imagen
+            FROM detalle_pedidos dp
+            INNER JOIN productos p ON p.id_producto = dp.id_producto
+            WHERE dp.id_pedido = :id_pedido
+            ORDER BY dp.id_detalle ASC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':id_pedido' => $idPedido]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Arma el HTML del correo de aviso de pedido nuevo: encabezado, datos del cliente
+ * y una tabla con imagen, nombre y cantidad de cada producto comprado.
+ */
+function buildNewOrderNotificationHtml(array $order, array $items): string
+{
+    $numeroPedido = esc((string) ($order['numero_pedido'] ?? ''));
+    $clienteNombre = esc((string) ($order['cliente_nombre'] ?? 'Cliente sin nombre'));
+    $entrega = esc((string) ($order['tipo_entrega'] ?? 'No especificado'));
+    $telefono = esc((string) ($order['telefono'] ?? ''));
+    $direccion = esc((string) ($order['direccion'] ?? ''));
+    $total = (float) ($order['total'] ?? 0.0);
+
+    $filas = '';
+    foreach ($items as $item) {
+        $nombre = trim((string) ($item['nombre'] ?? 'Producto'));
+        $variante = trim((string) ($item['nombre_variante'] ?? ''));
+        $nombreCompleto = esc($variante !== '' ? "{$nombre} - {$variante}" : $nombre);
+        $cantidad = (int) ($item['cantidad'] ?? 0);
+        $precioUnitario = (float) ($item['precio_unitario'] ?? 0.0);
+        $subtotalLinea = (float) ($item['subtotal'] ?? 0.0);
+        $imagenUrl = esc(appResolveProductImageUrlForEmail($item['imagen'] ?? null));
+
+        $filas .= '
+            <tr>
+                <td style="padding:10px 8px;border-bottom:1px solid #eee;width:64px;">
+                    <img src="' . $imagenUrl . '" alt="' . $nombreCompleto . '" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #eee;display:block;">
+                </td>
+                <td style="padding:10px 8px;border-bottom:1px solid #eee;">
+                    <div style="font-weight:600;color:#263238;font-size:14px;">' . $nombreCompleto . '</div>
+                    <div style="color:#78909c;font-size:12px;margin-top:2px;">$' . number_format($precioUnitario, 2) . ' c/u</div>
+                </td>
+                <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:center;color:#263238;font-size:14px;white-space:nowrap;">
+                    x' . $cantidad . '
+                </td>
+                <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:right;color:#263238;font-size:14px;white-space:nowrap;">
+                    $' . number_format($subtotalLinea, 2) . '
+                </td>
+            </tr>';
+    }
+
+    if ($filas === '') {
+        $filas = '<tr><td colspan="4" style="padding:14px 8px;color:#78909c;">Sin productos.</td></tr>';
+    }
+
+    $direccionHtml = $direccion !== ''
+        ? '<div style="margin-top:4px;"><strong>Dirección:</strong> ' . $direccion . '</div>'
+        : '';
+
+    return '
+    <div style="background:#f4f6f7;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+        <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+            <div style="background:#1a237e;padding:20px 24px;">
+                <div style="color:#ffffff;font-size:18px;font-weight:700;">Belleza y Bienestar</div>
+                <div style="color:#c5cae9;font-size:13px;margin-top:2px;">¡Nuevo pedido en la tienda en línea!</div>
+            </div>
+            <div style="padding:20px 24px;">
+                <div style="background:#e8eaf6;border-radius:8px;padding:14px 16px;font-size:14px;color:#283593;margin-bottom:18px;">
+                    <div style="font-size:16px;font-weight:700;margin-bottom:6px;">Pedido ' . $numeroPedido . '</div>
+                    <div><strong>Cliente:</strong> ' . $clienteNombre . '</div>
+                    <div><strong>Teléfono:</strong> ' . $telefono . '</div>
+                    <div><strong>Entrega:</strong> ' . $entrega . '</div>
+                    ' . $direccionHtml . '
+                </div>
+
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                    <thead>
+                        <tr>
+                            <th colspan="2" style="text-align:left;padding:0 8px 8px;font-size:12px;color:#90a4ae;text-transform:uppercase;letter-spacing:.03em;">Producto</th>
+                            <th style="text-align:center;padding:0 8px 8px;font-size:12px;color:#90a4ae;text-transform:uppercase;letter-spacing:.03em;">Cant.</th>
+                            <th style="text-align:right;padding:0 8px 8px;font-size:12px;color:#90a4ae;text-transform:uppercase;letter-spacing:.03em;">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>' . $filas . '</tbody>
+                </table>
+
+                <div style="text-align:right;margin-top:16px;padding-top:12px;border-top:2px solid #1a237e;">
+                    <span style="font-size:13px;color:#78909c;">Total del pedido</span><br>
+                    <span style="font-size:22px;font-weight:800;color:#1a237e;">$' . number_format($total, 2) . '</span>
+                </div>
+
+                <div style="margin-top:24px;text-align:center;">
+                    <a href="' . esc(appAbsoluteAssetUrl('views/dashboard.php')) . '" style="display:inline-block;background:#1a237e;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">Ver en el panel de administración</a>
+                </div>
+            </div>
+        </div>
+    </div>';
+}
+
+/**
+ * Notifica por correo a la lista de destinatarios administrada en
+ * views/notificaciones_pedidos.php cuando se crea un nuevo pedido web,
+ * con un resumen visual (imagen, nombre y cantidad de cada producto) para que no pase desapercibido.
+ * No lanza excepción si falla: un error de correo nunca debe tumbar la creación del pedido.
+ */
+function sendNewOrderNotificationEmails(array $order): void
+{
+    try {
+        $recipients = dbGetOrderNotificationEmails(true);
+        if (empty($recipients)) {
+            return;
+        }
+
+        $numeroPedido = (string) ($order['numero_pedido'] ?? '');
+        $items = is_array($order['items'] ?? null) ? $order['items'] : [];
+
+        $subject = "Nuevo pedido web #{$numeroPedido}";
+        $htmlBody = buildNewOrderNotificationHtml($order, $items);
+
+        foreach ($recipients as $recipient) {
+            if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+            appSendHtmlEmail($recipient, $subject, $htmlBody);
+        }
+    } catch (Throwable $e) {
+        error_log('WARNING: No fue posible enviar notificaciones de nuevo pedido por correo: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Lista los correos configurados para recibir aviso de pedidos nuevos.
+ * $soloActivos = true regresa solo los correos activos (usado al enviar el aviso real).
+ */
+function dbGetOrderNotificationEmails(bool $soloActivos = false): array
+{
+    $pdo = getPDO();
+    $sql = 'SELECT id_correo, correo, activo, creado_en FROM pedido_notificacion_correos';
+    if ($soloActivos) {
+        $sql .= ' WHERE activo = 1';
+    }
+    $sql .= ' ORDER BY creado_en ASC';
+
+    $stmt = $pdo->query($sql);
+    $rows = $stmt ? $stmt->fetchAll() : [];
+
+    if ($soloActivos) {
+        return array_values(array_map(static fn($row) => (string) $row['correo'], $rows));
+    }
+
+    return $rows;
+}
+
+/**
+ * Agrega un correo a la lista de notificación de pedidos nuevos (solo admin).
+ */
+function dbAddOrderNotificationEmail(string $correo): array
+{
+    if (!isAdmin()) {
+        return ['success' => false, 'message' => 'No autorizado.'];
+    }
+
+    $correo = trim($correo);
+    if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'El correo no es válido.'];
+    }
+
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare('INSERT INTO pedido_notificacion_correos (correo) VALUES (:correo)');
+        $stmt->execute([':correo' => $correo]);
+        return ['success' => true, 'message' => 'Correo agregado correctamente.'];
+    } catch (PDOException $e) {
+        if ((int) $e->getCode() === 23000) {
+            return ['success' => false, 'message' => 'Ese correo ya está en la lista.'];
+        }
+        error_log('Error en dbAddOrderNotificationEmail: ' . $e->getMessage());
+        return ['success' => false, 'message' => 'No fue posible agregar el correo.'];
+    }
+}
+
+/**
+ * Activa/desactiva un correo de la lista de notificación sin borrar su historial (solo admin).
+ */
+function dbSetOrderNotificationEmailActive(int $idCorreo, bool $activo): bool
+{
+    if (!isAdmin() || $idCorreo <= 0) {
+        return false;
+    }
+
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare('UPDATE pedido_notificacion_correos SET activo = :activo WHERE id_correo = :id');
+        $stmt->execute([':activo' => $activo ? 1 : 0, ':id' => $idCorreo]);
+        return true;
+    } catch (PDOException $e) {
+        error_log('Error en dbSetOrderNotificationEmailActive: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Elimina un correo de la lista de notificación de pedidos nuevos (solo admin).
+ */
+function dbDeleteOrderNotificationEmail(int $idCorreo): bool
+{
+    if (!isAdmin() || $idCorreo <= 0) {
+        return false;
+    }
+
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare('DELETE FROM pedido_notificacion_correos WHERE id_correo = :id');
+        $stmt->execute([':id' => $idCorreo]);
+        return true;
+    } catch (PDOException $e) {
+        error_log('Error en dbDeleteOrderNotificationEmail: ' . $e->getMessage());
+        return false;
+    }
 }
 
 /**
@@ -972,6 +1292,17 @@ function dbCreatePublicOrder(array $data): array {
         }
 
         $pdo->commit();
+
+        sendNewOrderNotificationEmails([
+            'numero_pedido' => $numero_pedido,
+            'cliente_nombre' => $data['cliente']['nombre'] ?? 'Cliente sin nombre',
+            'tipo_entrega' => $entrega,
+            'telefono' => $telefonoEntrega,
+            'direccion' => $direccionEntrega,
+            'total' => $totalPedido,
+            'items' => dbGetOrderItemsForEmail($pdo, (int)$id_pedido),
+        ]);
+
         return [
             'success' => true,
             'pedido' => $numero_pedido,
