@@ -1904,21 +1904,29 @@ function getDefaultProductImageUrl(): string {
  * filesystems (NTFS en particular) borrar una subcarpeta no siempre actualiza
  * el mtime del padre, asi que el TTL evita que el indice quede obsoleto para
  * siempre.
+ *
+ * $cacheFile es opcional (por defecto core/cache/product_image_folder_index.json)
+ * unicamente para permitir pruebas unitarias con un directorio y archivo de
+ * cache temporales; el codigo de la app nunca lo pasa explicitamente.
  */
-function productImageFolderIndex(string $baseDir): array {
-    static $cached = null;
-    if ($cached !== null) {
-        return $cached;
+function productImageFolderIndex(string $baseDir, ?string $cacheFile = null): array {
+    static $cached = [];
+
+    $cacheFile = $cacheFile ?? (__DIR__ . '/cache/product_image_folder_index.json');
+    // Se indexa por $baseDir+$cacheFile (no solo un valor unico) para que la
+    // memoria de una llamada nunca se filtre a otra con un directorio distinto.
+    $cacheKey = $baseDir . '|' . $cacheFile;
+    if (isset($cached[$cacheKey])) {
+        return $cached[$cacheKey];
     }
 
     $ttlSeconds = 900;
 
     $dirMtime = @filemtime($baseDir);
     if ($dirMtime === false) {
-        return $cached = [];
+        return $cached[$cacheKey] = [];
     }
 
-    $cacheFile = __DIR__ . '/cache/product_image_folder_index.json';
     $cacheRaw = @file_get_contents($cacheFile);
     if ($cacheRaw !== false) {
         $decoded = json_decode($cacheRaw, true);
@@ -1927,7 +1935,7 @@ function productImageFolderIndex(string $baseDir): array {
             && is_array($decoded['map'] ?? null)
             && (time() - (int)($decoded['built_at'] ?? 0)) < $ttlSeconds;
         if ($isFresh) {
-            return $cached = $decoded['map'];
+            return $cached[$cacheKey] = $decoded['map'];
         }
     }
 
@@ -1958,7 +1966,7 @@ function productImageFolderIndex(string $baseDir): array {
     }
     @file_put_contents($cacheFile, json_encode(['dir_mtime' => $dirMtime, 'built_at' => time(), 'map' => $map]), LOCK_EX);
 
-    return $cached = $map;
+    return $cached[$cacheKey] = $map;
 }
 
 /**

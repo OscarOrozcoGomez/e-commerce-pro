@@ -34,25 +34,33 @@ function dbCancelOrderByCustomer(PDO $pdo, int $idPedido, int $idUsuario, int $i
     }
 
     $motivoDetalle = trim($motivoDetalle);
+    $isMysql = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql';
 
     try {
         $pdo->beginTransaction();
 
-        $stmtMetaPickup = $pdo->prepare(
-            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'"
-        );
-        $stmtMetaPickup->execute();
-        $hasPickupTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
+        // Chequeo de existencia agnostico de motor (funciona igual en MySQL/SQLite):
+        // intenta un SELECT y, si la tabla no existe, cae al catch en vez de depender
+        // de information_schema, que es sintaxis exclusiva de MySQL.
+        $hasPickupTable = false;
+        try {
+            $pdo->query('SELECT 1 FROM pickup_notificaciones LIMIT 1');
+            $hasPickupTable = true;
+        } catch (Throwable $e) {
+            $hasPickupTable = false;
+        }
 
         $pickupSelect = $hasPickupTable ? ', pn.estado AS pickup_estado' : ', NULL AS pickup_estado';
         $pickupJoin = $hasPickupTable ? ' LEFT JOIN pickup_notificaciones pn ON pn.id_pedido = p.id_pedido' : '';
+        // FOR UPDATE serializa cancelaciones concurrentes del mismo pedido en MySQL;
+        // SQLite no soporta esta clausula (solo se usa en tests con PDO sqlite).
+        $lockClause = $isMysql ? ' FOR UPDATE' : '';
 
-        $sql = "SELECT p.id_pedido, p.estado, p.id_almacen, p.numero_pedido {$pickupSelect}
+        $sql = "SELECT p.id_pedido, p.estado, p.id_almacen, p.numero_pedido, p.observaciones {$pickupSelect}
                 FROM pedidos p
                 JOIN clientes c ON p.id_cliente = c.id_cliente
                 {$pickupJoin}
-                WHERE p.id_pedido = :id_pedido AND c.id_usuario = :id_usuario
-                FOR UPDATE";
+                WHERE p.id_pedido = :id_pedido AND c.id_usuario = :id_usuario{$lockClause}";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([':id_pedido' => $idPedido, ':id_usuario' => $idUsuario]);
         $pedido = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -83,21 +91,18 @@ function dbCancelOrderByCustomer(PDO $pdo, int $idPedido, int $idUsuario, int $i
             $stmtRestock->execute([(int)$item['cantidad'], (int)$item['id_producto'], (int)$pedido['id_almacen']]);
         }
 
-        $stmtCancel = $pdo->prepare(
-            "UPDATE pedidos
-             SET estado = 'cancelado', observaciones = CONCAT(COALESCE(observaciones,''), ' | Cancelado por el cliente.')
-             WHERE id_pedido = ?"
-        );
-        $stmtCancel->execute([$idPedido]);
+        // Se arma el texto en PHP (en vez de CONCAT en SQL) para no depender de una
+        // funcion de concatenacion especifica de motor.
+        $nuevasObservaciones = trim((string)($pedido['observaciones'] ?? '')) . ' | Cancelado por el cliente.';
+        $stmtCancel = $pdo->prepare('UPDATE pedidos SET estado = ?, observaciones = ? WHERE id_pedido = ?');
+        $stmtCancel->execute(['cancelado', $nuevasObservaciones, $idPedido]);
 
+        // Insert simple: el FOR UPDATE de arriba ya serializa cancelaciones concurrentes
+        // del mismo pedido, asi que en operacion normal nunca deberia chocar con la
+        // llave unica de id_pedido (evita depender de ON DUPLICATE KEY, exclusivo MySQL).
         $stmtLog = $pdo->prepare(
-            "INSERT INTO pedido_cancelaciones (id_pedido, id_motivo, motivo_detalle, cancelado_por)
-             VALUES (:id_pedido, :id_motivo, :motivo_detalle, :cancelado_por)
-             ON DUPLICATE KEY UPDATE
-                id_motivo = VALUES(id_motivo),
-                motivo_detalle = VALUES(motivo_detalle),
-                cancelado_por = VALUES(cancelado_por),
-                fecha_cancelacion = CURRENT_TIMESTAMP"
+            'INSERT INTO pedido_cancelaciones (id_pedido, id_motivo, motivo_detalle, cancelado_por)
+             VALUES (:id_pedido, :id_motivo, :motivo_detalle, :cancelado_por)'
         );
         $stmtLog->execute([
             ':id_pedido' => $idPedido,
