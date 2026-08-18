@@ -106,7 +106,11 @@ try {
     $hasPedidosDireccionEntrega = $columnExists($pdo, 'pedidos', 'direccion_entrega');
     $hasPedidosTelefonoEntrega = $columnExists($pdo, 'pedidos', 'telefono_entrega');
     $hasPedidosMapsLinkEntrega = $columnExists($pdo, 'pedidos', 'maps_link_entrega');
+    $hasPedidosLatitud = $columnExists($pdo, 'pedidos', 'latitud');
+    $hasPedidosLongitud = $columnExists($pdo, 'pedidos', 'longitud');
     $hasClienteDireccionesTable = $tableExists($pdo, 'cliente_direcciones');
+    $hasClienteDireccionesLatitud = $hasClienteDireccionesTable && $columnExists($pdo, 'cliente_direcciones', 'latitud');
+    $hasClienteDireccionesLongitud = $hasClienteDireccionesTable && $columnExists($pdo, 'cliente_direcciones', 'longitud');
 
     if ($customerAddressSelection !== '' && !ctype_digit($customerAddressSelection)) {
         throw new Exception('Debes seleccionar una direccion guardada del cliente.');
@@ -197,9 +201,21 @@ try {
             throw new Exception('El cliente seleccionado no tiene telefono. Capturalo para continuar.');
         }
 
+        $latitudEntrega = null;
+        $longitudEntrega = null;
+
         if ($hasClienteDireccionesTable) {
             if ($selectedAddressId > 0) {
-                $stmtDirValidacion = $pdo->prepare('SELECT direccion, maps_link FROM cliente_direcciones WHERE id_direccion = ? AND id_cliente = ? LIMIT 1');
+                $columnasDir = ['direccion', 'maps_link'];
+                if ($hasClienteDireccionesLatitud) {
+                    $columnasDir[] = 'latitud';
+                }
+                if ($hasClienteDireccionesLongitud) {
+                    $columnasDir[] = 'longitud';
+                }
+                $stmtDirValidacion = $pdo->prepare(
+                    'SELECT ' . implode(', ', $columnasDir) . ' FROM cliente_direcciones WHERE id_direccion = ? AND id_cliente = ? LIMIT 1'
+                );
                 $stmtDirValidacion->execute([$selectedAddressId, $idCliente]);
                 $direccionSeleccionada = $stmtDirValidacion->fetch(PDO::FETCH_ASSOC) ?: null;
                 if (!$direccionSeleccionada) {
@@ -208,15 +224,48 @@ try {
 
                 $direccionEntrega = $decryptValue((string)($direccionSeleccionada['direccion'] ?? ''));
                 $mapsLinkEntrega = $decryptValue((string)($direccionSeleccionada['maps_link'] ?? ''));
+                // Las coordenadas ya se resolvieron y guardaron al capturar la direccion
+                // del cliente (manage_customers.php); se heredan aqui sin volver a
+                // geocodificar para que el pedido nazca listo para asignar a ruta.
+                if ($hasClienteDireccionesLatitud && $direccionSeleccionada['latitud'] !== null) {
+                    $latitudEntrega = (float)$direccionSeleccionada['latitud'];
+                }
+                if ($hasClienteDireccionesLongitud && $direccionSeleccionada['longitud'] !== null) {
+                    $longitudEntrega = (float)$direccionSeleccionada['longitud'];
+                }
             } elseif ($direccionEntrega !== '') {
-                $stmtInsertDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default) VALUES (?, ?, ?, ?, ?)');
-                $stmtInsertDir->execute([
+                if ($mapsLinkEntrega !== '' || $direccionEntrega !== '') {
+                    $coordsEntrega = deliveryResolveCoordinates($mapsLinkEntrega, $direccionEntrega, getMapsApiKey(false));
+                    if (is_array($coordsEntrega)) {
+                        $latitudEntrega = (float)($coordsEntrega['lat'] ?? null);
+                        $longitudEntrega = (float)($coordsEntrega['lng'] ?? null);
+                    }
+                }
+
+                $columnasInsertDir = ['id_cliente', 'alias', 'direccion', 'maps_link', 'es_default'];
+                $placeholdersInsertDir = ['?', '?', '?', '?', '?'];
+                $paramsInsertDir = [
                     $idCliente,
                     $storeValue('Capturada en ventas'),
                     $storeValue($direccionEntrega),
                     $storeValue($mapsLinkEntrega !== '' ? $mapsLinkEntrega : null),
                     0,
-                ]);
+                ];
+                if ($hasClienteDireccionesLatitud) {
+                    $columnasInsertDir[] = 'latitud';
+                    $placeholdersInsertDir[] = '?';
+                    $paramsInsertDir[] = $latitudEntrega;
+                }
+                if ($hasClienteDireccionesLongitud) {
+                    $columnasInsertDir[] = 'longitud';
+                    $placeholdersInsertDir[] = '?';
+                    $paramsInsertDir[] = $longitudEntrega;
+                }
+
+                $stmtInsertDir = $pdo->prepare(
+                    'INSERT INTO cliente_direcciones (' . implode(', ', $columnasInsertDir) . ') VALUES (' . implode(', ', $placeholdersInsertDir) . ')'
+                );
+                $stmtInsertDir->execute($paramsInsertDir);
             }
         }
 
@@ -294,6 +343,16 @@ try {
             $pedidoColumns[] = 'maps_link_entrega';
             $pedidoPlaceholders[] = ':maps_link_entrega';
             $pedidoParams[':maps_link_entrega'] = $mapsLinkEntrega !== '' ? $mapsLinkEntrega : null;
+        }
+        if ($hasPedidosLatitud && $latitudEntrega !== null) {
+            $pedidoColumns[] = 'latitud';
+            $pedidoPlaceholders[] = ':latitud';
+            $pedidoParams[':latitud'] = $latitudEntrega;
+        }
+        if ($hasPedidosLongitud && $longitudEntrega !== null) {
+            $pedidoColumns[] = 'longitud';
+            $pedidoPlaceholders[] = ':longitud';
+            $pedidoParams[':longitud'] = $longitudEntrega;
         }
 
         $sqlPedido = sprintf(

@@ -182,6 +182,18 @@ try {
     $stmtMeta->execute();
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
 
+    $hasClienteDireccionesLatitud = false;
+    $hasClienteDireccionesLongitud = false;
+    if ($hasClienteDireccionesTable) {
+        $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones' AND COLUMN_NAME = 'latitud'");
+        $stmtMeta->execute();
+        $hasClienteDireccionesLatitud = ((int)$stmtMeta->fetchColumn()) > 0;
+
+        $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cliente_direcciones' AND COLUMN_NAME = 'longitud'");
+        $stmtMeta->execute();
+        $hasClienteDireccionesLongitud = ((int)$stmtMeta->fetchColumn()) > 0;
+    }
+
     $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'direccion_entrega'");
     $stmtMeta->execute();
     $hasPedidosDireccionEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
@@ -247,6 +259,16 @@ try {
     $fechaLimiteExpr = $hasFechaLimiteEntrega ? 'p.fecha_limite_entrega AS fecha_limite_entrega' : 'NULL AS fecha_limite_entrega';
     $prioridadExpr = $hasPrioridadEntrega ? 'p.prioridad_entrega AS prioridad_entrega' : '0 AS prioridad_entrega';
 
+    // Igual que direccion/mapa: si el pedido no trae coordenadas propias (ventas agendadas
+    // antes de que api/ventas.php empezara a copiarlas), se heredan de la direccion guardada
+    // del cliente en vez de bloquear la casilla "Agregar a ruta" por siempre.
+    $latitudExpr = $hasClienteDireccionesLatitud
+        ? "COALESCE(p.latitud, (SELECT cd.latitud FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS latitud"
+        : 'p.latitud AS latitud';
+    $longitudExpr = $hasClienteDireccionesLongitud
+        ? "COALESCE(p.longitud, (SELECT cd.longitud FROM cliente_direcciones cd WHERE cd.id_cliente = c.id_cliente ORDER BY cd.es_default DESC, cd.id_direccion ASC LIMIT 1)) AS longitud"
+        : 'p.longitud AS longitud';
+
     $stmtMetaPickup = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
     $stmtMetaPickup->execute();
     $hasPickupNotificacionesTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
@@ -260,7 +282,7 @@ try {
                    c.nombre as cliente, {$direccionExpr}, {$telefonoExpr}, {$mapExpr},
                    {$fechaLimiteExpr}, {$prioridadExpr},
                    ur.nombre AS repartidor_nombre,
-                   p.latitud, p.longitud
+                   {$latitudExpr}, {$longitudExpr}
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN usuarios ur ON p.id_repartidor = ur.id_usuario
