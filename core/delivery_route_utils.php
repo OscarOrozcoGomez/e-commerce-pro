@@ -52,6 +52,7 @@ function deliveryExpandUrlWithCurl(string $url): ?string
     curl_setopt($ch, CURLOPT_TIMEOUT, 12);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
 
     $ok = curl_exec($ch);
     $finalUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
@@ -70,6 +71,7 @@ function deliveryExpandUrlWithCurl(string $url): ?string
  * Soporta principalmente:
  * - .../@lat,lng,...
  * - ...!3dLAT!4dLNG
+ * - .../maps?q=lat,lng...
  *
  * @return array{lat: float, lng: float}|null
  */
@@ -88,22 +90,88 @@ function deliveryExtractCoordinatesFromMapsUrl(string $url): ?array
         return deliveryNormalizeCoordinates($m[1], $m[2]);
     }
 
+    if (preg_match('/[?&]q=(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/', $url, $m) === 1) {
+        return deliveryNormalizeCoordinates($m[1], $m[2]);
+    }
+
+    if (preg_match('/[?&]query=(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/', $url, $m) === 1) {
+        return deliveryNormalizeCoordinates($m[1], $m[2]);
+    }
+
+    return null;
+}
+
+/**
+ * Intenta extraer una direccion legible desde una URL de Google Maps cuando no
+ * trae coordenadas crudas sino un identificador de lugar/CID de Google. Soporta:
+ * - .../maps/place/<direccion url-encoded>/data=...
+ * - .../maps?q=<texto de direccion o negocio, no numerico>
+ */
+function deliveryExtractAddressFromMapsUrl(string $url): ?string
+{
+    $url = trim($url);
+    if ($url === '') {
+        return null;
+    }
+
+    if (preg_match('#/maps/place/([^/?]+)#', $url, $m) === 1) {
+        $decoded = trim(rawurldecode(str_replace('+', ' ', $m[1])));
+        if ($decoded !== '' && strpos($decoded, ' ') !== false) {
+            return $decoded;
+        }
+    }
+
+    // El parametro q=/query= solo es confiable como direccion dentro de un path
+    // de Google Maps; en otros dominios (p.ej. resultados de busqueda) puede
+    // traer IDs internos sin relacion con una direccion real.
+    if (strpos($url, '/maps') === false) {
+        return null;
+    }
+
+    if (preg_match('/[?&]q(?:uery)?=([^&]+)/', $url, $m) === 1) {
+        $decoded = trim(rawurldecode(str_replace('+', ' ', $m[1])));
+        // Si es solo coordenadas ya se habria resuelto por regex; aqui solo interesa
+        // texto con forma de direccion/negocio (requiere al menos un espacio para
+        // descartar slugs/IDs sin sentido).
+        if ($decoded !== ''
+            && strpos($decoded, ' ') !== false
+            && preg_match('/^-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?$/', $decoded) !== 1
+        ) {
+            return $decoded;
+        }
+    }
+
     return null;
 }
 
 /**
  * Funcion requerida: expande URL corta y extrae coordenadas.
  *
+ * Si la URL expandida no trae coordenadas crudas (algunos links de Google usan
+ * un identificador de lugar/CID en vez de @lat,lng), intenta leer la direccion
+ * legible que Google incluye en la ruta (.../maps/place/<direccion>/...) y
+ * geocodificarla como respaldo.
+ *
  * @return array{lat: float, lng: float}|null
  */
-function obtenerCoordenadasDesdeUrl(string $urlCorta): ?array
+function obtenerCoordenadasDesdeUrl(string $urlCorta, string $apiKey = ''): ?array
 {
     $urlExpandida = deliveryExpandUrlWithCurl($urlCorta);
     if ($urlExpandida === null) {
         return null;
     }
 
-    return deliveryExtractCoordinatesFromMapsUrl($urlExpandida);
+    $coords = deliveryExtractCoordinatesFromMapsUrl($urlExpandida);
+    if ($coords !== null) {
+        return $coords;
+    }
+
+    $address = deliveryExtractAddressFromMapsUrl($urlExpandida);
+    if ($address === null) {
+        return null;
+    }
+
+    return deliveryGeocodeAddress($address, $apiKey);
 }
 
 /**
@@ -254,7 +322,7 @@ function deliveryResolveCoordinates(string $mapsLink, string $address, string $a
 {
     $mapsLink = trim($mapsLink);
     if ($mapsLink !== '') {
-        $coords = obtenerCoordenadasDesdeUrl($mapsLink);
+        $coords = obtenerCoordenadasDesdeUrl($mapsLink, $apiKey);
         if (is_array($coords)) {
             return $coords;
         }

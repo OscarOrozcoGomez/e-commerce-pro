@@ -513,7 +513,7 @@ try {
                 $mapsLink = trim((string)piiDecryptValue($mapsLink));
             }
             if ($mapsLink !== '') {
-                $coords = obtenerCoordenadasDesdeUrl($mapsLink);
+                $coords = obtenerCoordenadasDesdeUrl($mapsLink, $routesKey);
             }
         }
 

@@ -216,6 +216,25 @@ include __DIR__ . '/includes/header.php';
         <a href="#!" id="btn-guardar-nuevo-cliente" class="waves-effect waves-light btn blue darken-2">Crear cliente</a>
     </div>
 </div>
+
+<div id="modal-agregar-telefono" class="modal" style="max-width: 420px;">
+    <div class="modal-content">
+        <h5 style="margin-top: 0;">Agregar telefono</h5>
+        <p class="grey-text" id="agregar-telefono-cliente-nombre" style="margin-top:-10px;"></p>
+        <form id="form-agregar-telefono">
+            <?php echo csrfInput(); ?>
+            <div class="input-field">
+                <input type="tel" id="agregar-telefono-input" maxlength="19" inputmode="numeric" autocomplete="tel-national" placeholder="Ej: (331) - 863 - 5185">
+                <label for="agregar-telefono-input">Telefono</label>
+            </div>
+            <div id="agregar-telefono-error" class="red-text" style="display:none; margin-top:-8px; margin-bottom:12px;"></div>
+        </form>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" id="btn-cancelar-agregar-telefono" class="modal-close waves-effect waves-grey btn-flat">Cancelar</a>
+        <a href="#!" id="btn-guardar-agregar-telefono" class="waves-effect waves-light btn blue darken-2">Guardar</a>
+    </div>
+</div>
 <?php endif; ?>
 
 <template id="venta-template">
@@ -250,6 +269,10 @@ include __DIR__ . '/includes/header.php';
                                 <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Telefono del cliente seleccionado" maxlength="19" inputmode="numeric" autocomplete="tel-national" required>
                                 <label class="active">Telefono</label>
                                 <span class="helper-text">Obligatorio para la entrega a domicilio.</span>
+                                <div class="cliente-sin-telefono-alert" style="display:none; margin-top:6px; font-size:0.85rem;">
+                                    <span class="orange-text text-darken-3">Este cliente no tiene telefono registrado.</span>
+                                    <a href="#!" class="cliente-editar-telefono-link blue-text" style="margin-left:4px;">Agregarlo ahora</a>
+                                </div>
                             </div>
                         </div>
 
@@ -489,6 +512,9 @@ include __DIR__ . '/includes/header.php';
     let googlePlacesReadySales = false;
     let pendingNewClienteContext = null;
     let nuevoClienteModalInstance = null;
+    let pendingPhoneContext = null;
+    let pendingPhoneClienteId = null;
+    let agregarTelefonoModalInstance = null;
 
     function resolveProductImageSrc(rawImage) {
         if (!rawImage) return '../assets/img/no-product.png';
@@ -818,6 +844,92 @@ include __DIR__ . '/includes/header.php';
         }
     }
 
+    function openAgregarTelefonoModal(context, clienteId, clienteNombre) {
+        if (!agregarTelefonoModalInstance || !clienteId) return;
+        pendingPhoneContext = context;
+        pendingPhoneClienteId = clienteId;
+
+        const nombreEl = document.getElementById('agregar-telefono-cliente-nombre');
+        if (nombreEl) nombreEl.textContent = clienteNombre ? `Cliente: ${clienteNombre}` : '';
+        const input = document.getElementById('agregar-telefono-input');
+        if (input) input.value = '';
+        const errorBox = document.getElementById('agregar-telefono-error');
+        if (errorBox) {
+            errorBox.style.display = 'none';
+            errorBox.textContent = '';
+        }
+
+        agregarTelefonoModalInstance.open();
+        M.updateTextFields();
+        setTimeout(() => document.getElementById('agregar-telefono-input')?.focus(), 200);
+    }
+
+    async function guardarTelefonoCliente() {
+        const btn = document.getElementById('btn-guardar-agregar-telefono');
+        const errorBox = document.getElementById('agregar-telefono-error');
+        const input = document.getElementById('agregar-telefono-input');
+        const csrfTokenInput = document.querySelector('#form-agregar-telefono input[name="csrf_token"]');
+
+        if (!pendingPhoneClienteId) return;
+
+        const telefono = (input?.value || '').trim();
+        if (telefono === '') {
+            if (errorBox) {
+                errorBox.textContent = 'Captura el telefono.';
+                errorBox.style.display = 'block';
+            }
+            input?.focus();
+            return;
+        }
+
+        if (errorBox) errorBox.style.display = 'none';
+        if (btn) {
+            btn.classList.add('disabled');
+            btn.textContent = 'Guardando...';
+        }
+
+        const formData = new FormData();
+        formData.append('csrf_token', csrfTokenInput?.value || '');
+        formData.append('id_cliente', pendingPhoneClienteId);
+        formData.append('telefono', telefono);
+
+        try {
+            const response = await fetch('<?php echo BASE_URL; ?>api/update_customer_phone.php', { method: 'POST', body: formData });
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.message || 'No se pudo guardar el telefono.');
+            }
+
+            const idx = clientesActivos.findIndex((c) => String(c.id_cliente) === String(data.cliente.id_cliente));
+            if (idx >= 0) {
+                clientesActivos[idx].telefono = data.cliente.telefono;
+            }
+            const customerRecord = registerCustomerRecord(idx >= 0 ? clientesActivos[idx] : data.cliente);
+
+            const context = pendingPhoneContext;
+            pendingPhoneContext = null;
+            pendingPhoneClienteId = null;
+            if (agregarTelefonoModalInstance) agregarTelefonoModalInstance.close();
+
+            if (context && customerRecord) {
+                setSelectedCustomer(context, customerRecord);
+                M.updateTextFields();
+            }
+
+            M.toast({ html: 'Telefono guardado.', classes: 'green darken-1' });
+        } catch (err) {
+            if (errorBox) {
+                errorBox.textContent = err.message || 'No se pudo guardar el telefono.';
+                errorBox.style.display = 'block';
+            }
+        } finally {
+            if (btn) {
+                btn.classList.remove('disabled');
+                btn.textContent = 'Guardar';
+            }
+        }
+    }
+
     function setSelectedCustomer(context, cliente, overrideFields = true) {
         if (!context || !cliente) return;
         const clienteIdInput = context.querySelector('.cliente_id');
@@ -847,6 +959,27 @@ include __DIR__ . '/includes/header.php';
         renderSelectedCustomerChip(context, cliente);
         renderCustomerAddressOptions(context, cliente);
         updateDeliveryMapLink(context);
+        updateMissingPhoneAlert(context, cliente);
+    }
+
+    function updateMissingPhoneAlert(context, cliente) {
+        if (!context) return;
+        const alertBox = context.querySelector('.cliente-sin-telefono-alert');
+        if (!alertBox) return;
+        const clienteTelefonoInput = context.querySelector('.cliente_telefono');
+        const clienteId = cliente && cliente.id_cliente ? String(cliente.id_cliente) : '';
+        const hasPhone = !!(clienteTelefonoInput && clienteTelefonoInput.value.trim() !== '');
+
+        if (hasPhone || clienteId === '') {
+            alertBox.style.display = 'none';
+            return;
+        }
+
+        const link = alertBox.querySelector('.cliente-editar-telefono-link');
+        if (link) {
+            link.style.display = CAN_MANAGE_CUSTOMERS ? '' : 'none';
+        }
+        alertBox.style.display = 'block';
     }
 
     function clearSelectedCustomer(context, wipeFields = false) {
@@ -874,6 +1007,7 @@ include __DIR__ . '/includes/header.php';
         renderSelectedCustomerChip(context, null);
         renderCustomerAddressOptions(context, null);
         updateDeliveryMapLink(context);
+        updateMissingPhoneAlert(context, null);
     }
 
     function renderSelectedCustomerChip(context, cliente) {
@@ -1181,6 +1315,16 @@ include __DIR__ . '/includes/header.php';
         nuevoClienteModalInstance = nuevoClienteModalNode ? M.Modal.init(nuevoClienteModalNode, { dismissible: true }) : null;
         document.getElementById('btn-guardar-nuevo-cliente')?.addEventListener('click', guardarNuevoCliente);
 
+        const agregarTelefonoModalNode = document.getElementById('modal-agregar-telefono');
+        agregarTelefonoModalInstance = agregarTelefonoModalNode ? M.Modal.init(agregarTelefonoModalNode, { dismissible: true }) : null;
+        document.getElementById('btn-guardar-agregar-telefono')?.addEventListener('click', guardarTelefonoCliente);
+        document.getElementById('btn-cancelar-agregar-telefono')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            pendingPhoneContext = null;
+            pendingPhoneClienteId = null;
+            if (agregarTelefonoModalInstance) agregarTelefonoModalInstance.close();
+        });
+
         window.addEventListener('beforeunload', prevenirCierre);
         const ventaContainers = document.getElementById('ventas-containers');
         ventaContainers.addEventListener('input', scheduleSalesDraftSave);
@@ -1241,6 +1385,18 @@ include __DIR__ . '/includes/header.php';
         context.querySelector('.btn-nuevo-cliente-trigger')?.addEventListener('click', (e) => {
             e.preventDefault();
             openNuevoClienteModal(context);
+        });
+
+        context.querySelector('.cliente-editar-telefono-link')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const clienteId = String(clienteIdInput?.value || '').trim();
+            if (clienteId === '') return;
+            openAgregarTelefonoModal(context, clienteId, clienteNombreInput?.value || '');
+        });
+
+        clienteTelefonoInput?.addEventListener('input', () => {
+            const clienteId = String(clienteIdInput?.value || '').trim();
+            updateMissingPhoneAlert(context, clienteId !== '' ? { id_cliente: clienteId } : null);
         });
 
         direccionEntregaInput?.addEventListener('input', () => updateDeliveryMapLink(context));
