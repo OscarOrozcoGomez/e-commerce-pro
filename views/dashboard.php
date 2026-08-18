@@ -416,6 +416,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Cancelaciones de Pedidos</span>
+                        <p>Consulta los motivos por los que tus clientes cancelan sus pedidos</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/cancelaciones_pedidos.php" class="btn waves-effect waves-light red darken-2">Ver Reporte</a>
+                    </div>
+                </div>
+            </div>
         </div>
 
     <?php elseif (isEncargado()): ?>
@@ -523,6 +534,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/manage_customers.php" class="btn waves-effect waves-light blue darken-2">Clientes</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Cancelaciones de Pedidos</span>
+                        <p>Consulta los motivos por los que los clientes cancelan sus pedidos</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/cancelaciones_pedidos.php" class="btn waves-effect waves-light red darken-2">Ver Reporte</a>
                     </div>
                 </div>
             </div>

@@ -68,6 +68,13 @@ function getStatusBadge(string $status): string {
     }
 }
 
+$motivosCancelacion = $canViewPurchases ? dbGetActiveCancellationReasons() : [];
+
+function esPedidoCancelablePorCliente(array $pedido): bool {
+    return in_array((string)($pedido['estado'] ?? ''), PEDIDO_CANCELABLE_ESTADOS, true)
+        && (string)($pedido['pickup_estado'] ?? '') !== 'atendida';
+}
+
 function getPickupStatusBadge(?string $status): string {
     $normalized = trim((string)$status);
     switch ($normalized) {
@@ -169,6 +176,11 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                             </div>
                             <div class="card-action right-align" style="border-top: 1px solid rgba(160,160,160,0.2);">
+                                <?php if (esPedidoCancelablePorCliente($c)): ?>
+                                    <button type="button" onclick="cancelarPedido(<?php echo (int)$c['id_pedido']; ?>)" class="btn-flat red-text text-darken-2 font-weight-bold waves-effect" style="margin-right: 6px;">
+                                        <i class="material-icons left">cancel</i> CANCELAR
+                                    </button>
+                                <?php endif; ?>
                                 <a href="detalle_compra.php?id=<?php echo $c['id_pedido']; ?>" class="indigo-text text-darken-4 font-weight-bold">VER DETALLE COMPLETO <i class="material-icons right">chevron_right</i></a>
                             </div>
                             <?php if ($c['estado'] === 'en_reparto'): ?>
@@ -196,5 +208,102 @@ include __DIR__ . '/includes/header.php';
     .released-line { background: #fff8e1; border-radius: 4px; padding: 6px 8px !important; margin-bottom: 4px; }
     .released-chip { display: inline-block; margin-left: 8px; font-size: 0.75rem; color: #bf360c; background: #ffe0b2; border-radius: 10px; padding: 2px 8px; }
 </style>
+
+<?php if ($canViewPurchases): ?>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+const MOTIVOS_CANCELACION = <?php echo json_encode($motivosCancelacion, JSON_UNESCAPED_UNICODE); ?>;
+const CSRF_TOKEN_CANCELACION = <?php echo json_encode(getCsrfToken()); ?>;
+
+function cancelarPedido(idPedido) {
+    const opciones = MOTIVOS_CANCELACION.map(m => `<option value="${m.id_motivo}" data-requiere-detalle="${m.requiere_detalle}">${m.motivo}</option>`).join('');
+
+    Swal.fire({
+        title: 'Cancelar pedido',
+        width: 'min(94vw, 420px)',
+        html: `
+            <div style="width:100%; max-width:100%; box-sizing:border-box; text-align:left;">
+                <p style="margin:0 0 10px;">Cuéntanos por qué deseas cancelar este pedido:</p>
+                <select id="swal-motivo-cancelacion" class="browser-default" style="display:block; box-sizing:border-box; width:100%; max-width:100%; padding:10px; border:1px solid #9e9e9e; border-radius:4px; margin:0 0 10px; font-size:1rem;">
+                    <option value="">Selecciona un motivo</option>
+                    ${opciones}
+                </select>
+                <textarea id="swal-detalle-cancelacion" style="display:none; box-sizing:border-box; width:100%; max-width:100%; min-height:80px; padding:8px; border:1px solid #9e9e9e; border-radius:4px; font-size:1rem; resize:vertical; margin:0;" placeholder="Cuéntanos más detalles..."></textarea>
+            </div>
+        `,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#b71c1c',
+        confirmButtonText: 'Sí, cancelar pedido',
+        cancelButtonText: 'Ya no',
+        didOpen: () => {
+            const select = document.getElementById('swal-motivo-cancelacion');
+            const textarea = document.getElementById('swal-detalle-cancelacion');
+            select.addEventListener('change', () => {
+                const opt = select.options[select.selectedIndex];
+                const requiereDetalle = opt && opt.dataset.requiereDetalle === '1';
+                textarea.style.display = (requiereDetalle || select.value !== '') ? 'block' : 'none';
+            });
+        },
+        preConfirm: () => {
+            const select = document.getElementById('swal-motivo-cancelacion');
+            const textarea = document.getElementById('swal-detalle-cancelacion');
+            const idMotivo = parseInt(select.value, 10);
+            const opt = select.options[select.selectedIndex];
+            const requiereDetalle = opt && opt.dataset.requiereDetalle === '1';
+
+            if (!idMotivo) {
+                Swal.showValidationMessage('Selecciona un motivo de cancelación.');
+                return false;
+            }
+            if (requiereDetalle && textarea.value.trim() === '') {
+                Swal.showValidationMessage('Cuéntanos brevemente el motivo de tu cancelación.');
+                return false;
+            }
+            return { id_motivo: idMotivo, motivo_detalle: textarea.value.trim() };
+        }
+    }).then((result) => {
+        if (!result.isConfirmed) return;
+
+        fetch('<?php echo BASE_URL; ?>api/cancel_order.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_pedido: idPedido,
+                id_motivo: result.value.id_motivo,
+                motivo_detalle: result.value.motivo_detalle,
+                csrf_token: CSRF_TOKEN_CANCELACION
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                Swal.fire({
+                    title: 'Pedido cancelado',
+                    text: data.message || 'Tu pedido fue cancelado correctamente.',
+                    icon: 'success',
+                    confirmButtonColor: '#1a237e'
+                }).then(() => window.location.reload());
+            } else {
+                Swal.fire({
+                    title: 'No se pudo cancelar',
+                    text: data.message || 'Ocurrió un error al cancelar el pedido.',
+                    icon: 'error',
+                    confirmButtonColor: '#b71c1c'
+                });
+            }
+        })
+        .catch(() => {
+            Swal.fire({
+                title: 'Error de conexión',
+                text: 'No fue posible cancelar el pedido. Intenta de nuevo.',
+                icon: 'error',
+                confirmButtonColor: '#b71c1c'
+            });
+        });
+    });
+}
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

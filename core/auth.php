@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/pickup_offer_utils.php';
 require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/delivery_route_utils.php';
+require_once __DIR__ . '/order_cancel_utils.php';
 
 /**
  * Verifica si el usuario está autenticado.
