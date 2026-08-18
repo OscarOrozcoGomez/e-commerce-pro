@@ -2,6 +2,9 @@
 /assets/img/products/
 /core/uploads/
 
+# Cache generado en runtime (indices de resolucion de imagenes, etc.)
+/core/cache/
+
 # Ignorar archivos de registro y temporales
 mail_log.txt
 mail_preview_last_order.html

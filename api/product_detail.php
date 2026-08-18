@@ -45,10 +45,17 @@ try {
             return [];
         }
 
-        $folderMatches = glob($baseDir . DIRECTORY_SEPARATOR . '*-' . $productId, GLOB_ONLYDIR);
-        if (!is_array($folderMatches) || empty($folderMatches)) {
+        // Usa el indice id_producto => carpetas cacheado en core/auth.php en vez de
+        // re-escanear todo assets/img/products/ con glob(GLOB_ONLYDIR) en cada llamada
+        // (aqui se invoca una vez por producto y una vez mas por cada variante).
+        $folderNames = productImageFolderIndex($baseDir)[$productId] ?? [];
+        if (empty($folderNames)) {
             return [];
         }
+        $folderMatches = array_map(
+            static fn(string $name): string => $baseDir . DIRECTORY_SEPARATOR . $name,
+            $folderNames
+        );
 
         $preferredFolderName = strtolower(trim($preferredFolderName));
         if ($preferredFolderName !== '') {

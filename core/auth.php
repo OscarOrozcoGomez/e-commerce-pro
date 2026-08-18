@@ -1896,6 +1896,72 @@ function getDefaultProductImageUrl(): string {
 }
 
 /**
+ * Devuelve el mapa id_producto => [nombres de carpeta] de assets/img/products,
+ * respaldado en disco para no repetir un scandir de todas las carpetas de
+ * producto en cada request. Se invalida comparando el filemtime del directorio
+ * base (crear una carpeta nueva, p. ej. al subir una imagen, lo actualiza de
+ * forma confiable) y ademas por antiguedad maxima (15 min): en algunos
+ * filesystems (NTFS en particular) borrar una subcarpeta no siempre actualiza
+ * el mtime del padre, asi que el TTL evita que el indice quede obsoleto para
+ * siempre.
+ */
+function productImageFolderIndex(string $baseDir): array {
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $ttlSeconds = 900;
+
+    $dirMtime = @filemtime($baseDir);
+    if ($dirMtime === false) {
+        return $cached = [];
+    }
+
+    $cacheFile = __DIR__ . '/cache/product_image_folder_index.json';
+    $cacheRaw = @file_get_contents($cacheFile);
+    if ($cacheRaw !== false) {
+        $decoded = json_decode($cacheRaw, true);
+        $isFresh = is_array($decoded)
+            && ($decoded['dir_mtime'] ?? null) === $dirMtime
+            && is_array($decoded['map'] ?? null)
+            && (time() - (int)($decoded['built_at'] ?? 0)) < $ttlSeconds;
+        if ($isFresh) {
+            return $cached = $decoded['map'];
+        }
+    }
+
+    $map = [];
+    $entries = @scandir($baseDir);
+    if (is_array($entries)) {
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $fullPath = $baseDir . DIRECTORY_SEPARATOR . $entry;
+            if (!is_dir($fullPath)) {
+                continue;
+            }
+            if (preg_match('/-(\d+)$/', $entry, $m)) {
+                $id = (int)$m[1];
+                if (!isset($map[$id])) {
+                    $map[$id] = [];
+                }
+                $map[$id][] = $entry;
+            }
+        }
+    }
+
+    $cacheDir = dirname($cacheFile);
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0755, true);
+    }
+    @file_put_contents($cacheFile, json_encode(['dir_mtime' => $dirMtime, 'built_at' => time(), 'map' => $map]), LOCK_EX);
+
+    return $cached = $map;
+}
+
+/**
  * Resuelve la URL de la imagen de un producto de forma robusta.
  */
 function findProductImageById(int $productId, string $preferredFileName = ''): ?string {
@@ -1908,29 +1974,7 @@ function findProductImageById(int $productId, string $preferredFileName = ''): ?
         return null;
     }
 
-    static $foldersById = null;
-    if ($foldersById === null) {
-        $foldersById = [];
-        $entries = @scandir($baseDir);
-        if (is_array($entries)) {
-            foreach ($entries as $entry) {
-                if ($entry === '.' || $entry === '..') {
-                    continue;
-                }
-                $fullPath = $baseDir . DIRECTORY_SEPARATOR . $entry;
-                if (!is_dir($fullPath)) {
-                    continue;
-                }
-                if (preg_match('/-(\d+)$/', $entry, $m)) {
-                    $id = (int)$m[1];
-                    if (!isset($foldersById[$id])) {
-                        $foldersById[$id] = [];
-                    }
-                    $foldersById[$id][] = $entry;
-                }
-            }
-        }
-    }
+    $foldersById = productImageFolderIndex($baseDir);
 
     $candidateFolders = $foldersById[$productId] ?? [];
     if (empty($candidateFolders)) {
