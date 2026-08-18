@@ -1310,10 +1310,10 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div id="modal-crear-cliente" class="modal" style="max-width: 720px;">
+<div id="modal-crear-cliente" class="modal manage-customers-direcciones-modal" data-cliente-id="crear" style="max-width: 720px;">
     <div class="modal-content">
         <h5>Nuevo cliente</h5>
-        <form method="POST">
+        <form method="POST" id="dir-form-crear">
             <?php echo csrfInput(); ?>
             <input type="hidden" name="accion" value="crear_cliente">
             <div class="row">
@@ -1331,26 +1331,29 @@ include __DIR__ . '/includes/header.php';
                     <input type="tel" name="telefono" maxlength="19" inputmode="numeric" autocomplete="tel-national">
                     <label>Telefono</label>
                 </div>
-                <div class="col s12 m6" style="display:flex; align-items:center; min-height:72px; color:#546e7a;">
-                    Si ya conoces su domicilio principal, tambien puedes capturarlo desde aqui.
-                </div>
-            </div>
-            <div class="row">
-                <div class="input-field col s12 m4">
+                <div class="input-field col s12 m6">
                     <input type="text" name="direccion_alias" maxlength="50" placeholder="Ej: Casa, Oficina">
-                    <label class="active">Alias de direccion</label>
-                </div>
-                <div class="input-field col s12 m8">
-                    <textarea name="direccion" class="materialize-textarea"></textarea>
-                    <label>Direccion principal</label>
+                    <label class="active">Alias de direccion (opcional)</label>
                 </div>
             </div>
-            <div class="row">
-                <div class="input-field col s12">
-                    <input type="url" name="maps_link">
-                    <label>Link de Google Maps</label>
+
+            <div class="card-panel blue lighten-5" style="margin-top:8px;">
+                <strong>Domicilio principal (opcional)</strong>
+                <p class="grey-text text-small" style="margin:4px 0 0;">Busca la direccion en Google para capturar el punto exacto en el mapa.</p>
+                <div class="input-field" style="margin-top:14px;">
+                    <i class="material-icons prefix blue-text">search</i>
+                    <input type="text" id="dir-autocomplete-crear" placeholder="Escribe la calle y numero...">
+                    <span class="helper-text">Selecciona una opcion sugerida para mayor precision</span>
                 </div>
+                <div id="dir-map-preview-crear" class="z-depth-1" style="height:200px; width:100%; margin-bottom:20px; border-radius:4px; display:none; border:1px solid #ddd;"></div>
+                <div class="input-field">
+                    <textarea name="direccion" class="materialize-textarea dir-direccion"></textarea>
+                    <label>Direccion exacta (incluye numero de casa)</label>
+                </div>
+                <input type="hidden" name="maps_link" class="dir-maps-link">
+                <p class="grey-text text-small" id="dir-maps-link-status-crear" style="margin:-6px 0 0;">Sin ubicacion en mapa seleccionada aun.</p>
             </div>
+
             <div class="modal-footer" style="padding:0; background:transparent;">
                 <a href="#!" class="modal-close waves-effect btn-flat">Cancelar</a>
                 <button type="submit" class="btn blue darken-2 waves-effect waves-light">Crear cliente</button>
@@ -1385,12 +1388,16 @@ function tryInitDireccionMap(idCliente, attemptsLeft) {
 }
 
 document.addEventListener('click', function(event) {
-    const trigger = event.target.closest('a.modal-trigger[href^="#modal-dir-"]');
+    const trigger = event.target.closest('a.modal-trigger[href^="#modal-dir-"], a.modal-trigger[href="#modal-crear-cliente"]');
     if (!trigger) return;
-    const idCliente = trigger.getAttribute('href').replace('#modal-dir-', '');
+    const href = trigger.getAttribute('href');
+    const idCliente = href === '#modal-crear-cliente' ? 'crear' : href.replace('#modal-dir-', '');
     // Se espera a que termine la animacion de apertura del modal (Materialize la anima)
     // antes de crear el widget de Google, porque si el campo esta oculto (display:none)
     // en el momento de crearlo, el listado de sugerencias queda mal posicionado para siempre.
+    // Nota: no basta con onOpenEnd del M.Modal.init de esta pagina, porque M.AutoInit()
+    // en footer.php corre despues y reemplaza esa instancia sin el callback; este listener
+    // de click es independiente de esa instancia y por eso es el que realmente dispara la carga.
     setTimeout(() => tryInitDireccionMap(idCliente, 20), 400);
 });
 

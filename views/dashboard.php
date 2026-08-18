@@ -405,6 +405,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones de Pedidos</span>
+                        <p>Configura la lista de correos que avisan cuando entra un pedido web nuevo</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/notificaciones_pedidos.php" class="btn waves-effect waves-light teal darken-3">Configurar</a>
+                    </div>
+                </div>
+            </div>
         </div>
 
     <?php elseif (isEncargado()): ?>
