@@ -601,7 +601,7 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <div class="row">
-        <div class="col s12 m3">
+        <div class="col s6 m3">
             <div class="card deep-orange lighten-1 white-text">
                 <div class="card-content">
                     <span class="card-title">Nuevas</span>
@@ -609,7 +609,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col s12 m3">
+        <div class="col s6 m3">
             <div class="card amber darken-2 white-text">
                 <div class="card-content">
                     <span class="card-title">Vistas</span>
@@ -617,7 +617,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col s12 m3">
+        <div class="col s6 m3">
             <div class="card blue darken-2 white-text">
                 <div class="card-content">
                     <span class="card-title">Apartadas</span>
@@ -625,7 +625,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col s12 m3">
+        <div class="col s6 m3">
             <div class="card green darken-2 white-text">
                 <div class="card-content">
                     <span class="card-title">Atendidas</span>
@@ -633,7 +633,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col s12 m3">
+        <div class="col s6 m3">
             <div class="card grey darken-2 white-text">
                 <div class="card-content">
                     <span class="card-title">Canceladas</span>
@@ -671,12 +671,13 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <div class="col s12">
             <div class="card">
-                <div class="card-content" style="overflow-x:auto;">
+                <div class="card-content">
                     <span class="card-title">Listado de Alertas Pickup</span>
                     <?php $conversionModalsData = []; ?>
                     <?php if (empty($notificaciones)): ?>
                         <p class="center grey-text">No hay notificaciones pickup registradas.</p>
                     <?php else: ?>
+                    <div style="overflow-x:auto; -webkit-overflow-scrolling: touch;">
                         <table class="striped highlight responsive-table">
                             <thead>
                                 <tr>
@@ -820,6 +821,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
                     <?php endif; ?>
                 </div>
             </div>
