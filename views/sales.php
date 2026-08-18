@@ -255,9 +255,9 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                                 <label class="active">Nombre de cliente</label>
                                 <?php if ($canManageCustomers): ?>
-                                    <span class="helper-text">Selecciona un cliente existente, <a href="#!" class="btn-nuevo-cliente-trigger blue-text">crea uno nuevo aqui</a> o administralos en <a href="<?php echo BASE_URL; ?>views/manage_customers.php" target="_blank" rel="noopener noreferrer">Administrar Clientes</a>.</span>
+                                    <span class="helper-text"><a href="#!" class="btn-nuevo-cliente-trigger blue-text">+ Crear cliente nuevo</a></span>
                                 <?php else: ?>
-                                    <span class="helper-text">Selecciona un cliente existente. Si no aparece, solicita al administrador darlo de alta en Administrar Clientes.</span>
+                                    <span class="helper-text">Si no aparece, contacta al administrador.</span>
                                 <?php endif; ?>
                                 <div class="selected-client-status grey-text text-darken-1" style="font-size:0.85rem; margin-top:4px;"></div>
                             </div>
@@ -438,11 +438,13 @@ include __DIR__ . '/includes/header.php';
     .sales-customer-input-wrap {
         position: relative;
         min-height: 3rem;
+        margin-left: 3rem;
+        width: calc(100% - 3rem);
     }
     .sales-customer-input-wrap .selected-customer-chip-wrap {
         position: absolute;
-        left: 52px;
-        right: 8px;
+        left: 4px;
+        right: 4px;
         top: 50%;
         transform: translateY(-50%);
         z-index: 2;
@@ -937,7 +939,6 @@ include __DIR__ . '/includes/header.php';
         const clienteTelefonoInput = context.querySelector('.cliente_telefono');
         const direccionEntregaInput = context.querySelector('.direccion_entrega');
         const mapsLinkEntregaInput = context.querySelector('.maps_link_entrega');
-        const statusNode = context.querySelector('.selected-client-status');
 
         if (clienteIdInput) clienteIdInput.value = String(cliente.id_cliente || '');
         if (clienteNombreInput) {
@@ -955,7 +956,6 @@ include __DIR__ . '/includes/header.php';
         context.dataset.customerMapsLink = String(cliente.maps_link || '');
         context.dataset.customerAddress = String(cliente.direccion || '');
         context.dataset.selectedCustomerId = String(cliente.id_cliente || '');
-        if (statusNode) statusNode.textContent = cliente.id_cliente ? `Cliente existente seleccionado: #${cliente.id_cliente}` : '';
         renderSelectedCustomerChip(context, cliente);
         renderCustomerAddressOptions(context, cliente);
         updateDeliveryMapLink(context);

@@ -52,23 +52,25 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-content">
                     <span class="card-title"><i class="material-icons left indigo-text">precision_manufacturing</i> Predicción de Abastecimiento</span>
                     <p class="grey-text" style="margin-bottom: 20px;" id="prediccion-desc">Cargando estimaciones...</p>
-                    
-                    <table class="striped highlight">
-                        <thead>
-                            <tr>
-                                <th>Producto</th>
-                                <th>Stock Actual</th>
-                                <th>Ventas Totales</th>
-                                <th>Promedio Diario</th>
-                                <th>Días Restantes (Est.)</th>
-                                <th>Estado</th>
-                                <th>Acción</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-predicciones">
-                            <!-- Llenado dinámico vía API -->
-                        </tbody>
-                    </table>
+
+                    <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                        <table class="striped highlight">
+                            <thead>
+                                <tr>
+                                    <th>Producto</th>
+                                    <th>Stock Actual</th>
+                                    <th>Ventas Totales</th>
+                                    <th>Promedio Diario</th>
+                                    <th>Días Restantes (Est.)</th>
+                                    <th>Estado</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-predicciones">
+                                <!-- Llenado dinámico vía API -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

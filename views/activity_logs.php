@@ -141,8 +141,8 @@ include __DIR__ . '/includes/header.php';
                                 </span>
                                 <span class="new badge blue darken-1" data-badge-caption="acciones"><?php echo count($dayLogs); ?></span>
                             </div>
-                            <div class="collapsible-body white" style="padding: 0;">
-                                <table class="striped highlight responsive-table">
+                            <div class="collapsible-body white" style="padding: 0; overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                                <table class="striped highlight responsive-table" style="min-width: 560px;">
                                     <thead>
                                         <tr>
                                             <th>Hora</th>

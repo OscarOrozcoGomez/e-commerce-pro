@@ -83,7 +83,7 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
                 <h4 style="margin:0;">Liberar Stock Apartado</h4>
-                <a href="dashboard.php" class="btn-flat waves-effect"><i class="material-icons left">arrow_back</i>Volver</a>
+                <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
             </div>
             <p class="grey-text">
                 <?php if ($applyThreshold): ?>

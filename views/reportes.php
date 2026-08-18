@@ -43,14 +43,17 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4 style="display: inline-block;">Reportes del Sistema</h4>
-            <div class="right-align no-print" style="display: inline-block; float: right; margin-top: 20px;">
-                <a href="<?php echo BASE_URL; ?>views/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>" 
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
+                <h4 style="margin:0;">Reportes del Sistema</h4>
+                <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light no-print"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+            </div>
+            <div class="no-print" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+                <a href="<?php echo BASE_URL; ?>views/export_reports.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>"
                    class="btn green waves-effect waves-light">
                     Excel <i class="material-icons right">description</i>
                 </a>
-                     <a href="<?php echo BASE_URL; ?>views/export_reports_pdf.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>"
-                         target="_blank" rel="noopener noreferrer"
+                <a href="<?php echo BASE_URL; ?>views/export_reports_pdf.php?fecha_inicio=<?php echo urlencode($fecha_inicio); ?>&fecha_fin=<?php echo urlencode($fecha_fin); ?>"
+                   target="_blank" rel="noopener noreferrer"
                    class="btn red waves-effect waves-light">
                     PDF <i class="material-icons right">picture_as_pdf</i>
                 </a>

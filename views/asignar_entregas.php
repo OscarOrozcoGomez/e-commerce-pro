@@ -274,7 +274,10 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4>Asignar Entregas a Domicilio</h4>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
+                <h4 style="margin:0;">Asignar Entregas a Domicilio</h4>
+                <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+            </div>
             <p class="grey-text">Selecciona un pedido agendado a domicilio y asígnalo a un repartidor disponible.</p>
         </div>
     </div>

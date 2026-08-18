@@ -47,21 +47,23 @@ include __DIR__ . '/includes/header.php';
                     <div id="po-form-wrapper" style="display: none;">
                         <form id="form-entrada-masiva">
                             <?php echo csrfInput(); ?>
-                            <table class="striped highlight responsive-table" style="margin-top: 20px;">
-                                <thead>
-                                    <tr>
-                                        <th>Producto</th>
-                                        <th>Sucursal</th>
-                                        <th>P. Venta</th>
-                                        <th class="center-align">Stock Actual</th>
-                                        <th class="center-align" style="width: 180px;">Ajustar Mín/Máx</th>
-                                        <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad Recibida</th>
-                                        <th class="right-align">Subtotal Est.</th>
-                                        <th class="center-align" style="width: 120px;">Acción</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="table-po-body"></tbody>
-                            </table>
+                            <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                                <table class="striped highlight responsive-table" style="margin-top: 20px; min-width: 720px;">
+                                    <thead>
+                                        <tr>
+                                            <th>Producto</th>
+                                            <th>Sucursal</th>
+                                            <th>P. Venta</th>
+                                            <th class="center-align">Stock Actual</th>
+                                            <th class="center-align" style="width: 180px;">Ajustar Mín/Máx</th>
+                                            <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad Recibida</th>
+                                            <th class="right-align">Subtotal Est.</th>
+                                            <th class="center-align" style="width: 120px;">Acción</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-po-body"></tbody>
+                                </table>
+                            </div>
 
                             <div class="row" style="margin-top: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; flex-wrap: wrap;">
                                 <div class="grey-text text-darken-2">

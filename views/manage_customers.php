@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/delivery_route_utils.php';
 requireAuth();
 if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
@@ -76,6 +77,37 @@ $normalizePhone = static function (string $phone): ?string {
         return null;
     }
     return sprintf('(%s) - %s - %s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+};
+
+/**
+ * Resuelve lat/lng para un domicilio a partir de su link de Google Maps o,
+ * si eso falla, geocodificando el texto de la direccion. El buscador de
+ * direcciones (Google Places Autocomplete) ya arma un maps_link con las
+ * coordenadas crudas (.../maps/search/?api=1&query=lat,lng), asi que en ese
+ * caso se resuelve al instante sin llamadas de red adicionales.
+ *
+ * @return array{lat: float, lng: float}|null
+ */
+$resolveDireccionCoords = static function (string $mapsLink, string $direccion): ?array {
+    static $apiKey = null;
+    if ($apiKey === null) {
+        $apiKey = getMapsApiKey(false);
+    }
+
+    $mapsLink = trim($mapsLink);
+    if ($mapsLink !== '') {
+        $coords = deliveryExtractCoordinatesFromMapsUrl($mapsLink);
+        if ($coords !== null) {
+            return $coords;
+        }
+        $coords = obtenerCoordenadasDesdeUrl($mapsLink, $apiKey);
+        if ($coords !== null) {
+            return $coords;
+        }
+    }
+
+    $direccion = trim($direccion);
+    return $direccion !== '' ? deliveryGeocodeAddress($direccion, $apiKey) : null;
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
@@ -164,12 +196,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $nuevoClienteId = (int)$pdo->lastInsertId();
 
                 if ($hasClienteDireccionesTable && $direccion !== '') {
-                    $stmtDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default) VALUES (?, ?, ?, ?, 1)');
+                    $coords = $resolveDireccionCoords($mapsLink, $direccion);
+                    $stmtDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default, latitud, longitud) VALUES (?, ?, ?, ?, 1, ?, ?)');
                     $stmtDir->execute([
                         $nuevoClienteId,
                         $storeValue($aliasDireccion !== '' ? $aliasDireccion : 'Direccion 1'),
                         $storeValue($direccion),
                         $storeValue($mapsLink),
+                        $coords['lat'] ?? null,
+                        $coords['lng'] ?? null,
                     ]);
                 }
 
@@ -227,6 +262,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     $pdo->prepare('UPDATE cliente_direcciones SET es_default = 0 WHERE id_cliente = ?')->execute([$idCliente]);
                 }
 
+                $coords = $resolveDireccionCoords($mapsLink, $direccion);
+
                 if ($accion === 'agregar_direccion') {
                     $stmtCount = $pdo->prepare('SELECT COUNT(*) FROM cliente_direcciones WHERE id_cliente = ?');
                     $stmtCount->execute([$idCliente]);
@@ -234,24 +271,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         throw new Exception('Limite de 5 direcciones alcanzado para este cliente.');
                     }
 
-                    $stmtInsertDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default) VALUES (?, ?, ?, ?, ?)');
+                    $stmtInsertDir = $pdo->prepare('INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link, es_default, latitud, longitud) VALUES (?, ?, ?, ?, ?, ?, ?)');
                     $stmtInsertDir->execute([
                         $idCliente,
                         $storeValue($alias),
                         $storeValue($direccion),
                         $storeValue($mapsLink),
                         $setDefault ? 1 : 0,
+                        $coords['lat'] ?? null,
+                        $coords['lng'] ?? null,
                     ]);
                 } else {
                     if ($idDireccion <= 0) {
                         throw new Exception('Direccion invalida para editar.');
                     }
-                    $stmtUpdateDir = $pdo->prepare('UPDATE cliente_direcciones SET alias = ?, direccion = ?, maps_link = ?, es_default = ? WHERE id_direccion = ? AND id_cliente = ?');
+                    $stmtUpdateDir = $pdo->prepare('UPDATE cliente_direcciones SET alias = ?, direccion = ?, maps_link = ?, es_default = ?, latitud = ?, longitud = ? WHERE id_direccion = ? AND id_cliente = ?');
                     $stmtUpdateDir->execute([
                         $storeValue($alias),
                         $storeValue($direccion),
                         $storeValue($mapsLink),
                         $setDefault ? 1 : 0,
+                        $coords['lat'] ?? null,
+                        $coords['lng'] ?? null,
                         $idDireccion,
                         $idCliente,
                     ]);

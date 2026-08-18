@@ -258,11 +258,112 @@ try {
 
 include __DIR__ . '/includes/header.php';
 ?>
+<style>
+    .users-page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 20px;
+    }
+
+    /* Tabla clasica: visible en escritorio/tablet, con scroll horizontal solo como respaldo */
+    .users-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Tarjetas moviles: ocultas por defecto, se muestran solo en pantallas angostas */
+    .users-cards {
+        display: none;
+    }
+
+    @media (max-width: 992px) {
+        .users-table-wrap {
+            display: none;
+        }
+
+        .users-cards {
+            display: block;
+        }
+    }
+
+    .users-card {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .users-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+
+    .users-card-name {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #212121;
+        word-break: break-word;
+    }
+
+    .users-card-field {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 7px 0;
+        border-top: 1px solid #f0f0f0;
+        font-size: 0.9rem;
+    }
+
+    .users-card-field-label {
+        color: #78909c;
+        font-weight: 500;
+        flex: 0 0 auto;
+    }
+
+    .users-card-field-value {
+        text-align: right;
+        color: #37474f;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
+
+    .users-card-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #f0f0f0;
+    }
+
+    .users-card-actions form {
+        display: flex;
+        flex: 1 1 auto;
+    }
+
+    .users-card-actions .btn-small {
+        width: 100%;
+        min-width: 44px;
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
 
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap;">
+            <div class="users-page-header">
                 <h4 style="margin: 0;">Gestionar Usuarios</h4>
                 <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
             </div>
@@ -350,7 +451,8 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Usuarios del Sistema</span>
-                    <div style="overflow-x: auto;">
+
+                    <div class="users-table-wrap">
                         <table class="striped">
                             <thead>
                                 <tr>
@@ -415,6 +517,75 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+
+                    <div class="users-cards">
+                        <?php foreach ($usuarios as $user): ?>
+                            <div class="users-card">
+                                <div class="users-card-header">
+                                    <span class="users-card-name"><?php echo esc($user['nombre']); ?></span>
+                                    <span class="badge <?php echo $user['estado'] === 'activo' ? 'green' : 'red'; ?> white-text" style="float:none; flex-shrink:0;">
+                                        <?php echo strtoupper($user['estado']); ?>
+                                    </span>
+                                </div>
+                                <div class="users-card-field">
+                                    <span class="users-card-field-label">Email</span>
+                                    <span class="users-card-field-value"><?php echo esc($user['email']); ?></span>
+                                </div>
+                                <div class="users-card-field">
+                                    <span class="users-card-field-label">Rol</span>
+                                    <span class="users-card-field-value"><?php echo esc($user['rol']); ?></span>
+                                </div>
+                                <div class="users-card-field">
+                                    <span class="users-card-field-label">Almacén</span>
+                                    <span class="users-card-field-value"><?php echo esc($user['almacen'] ?? 'N/A'); ?></span>
+                                </div>
+
+                                <div class="users-card-actions">
+                                    <form method="POST">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="accion" value="cambiar_estado">
+                                        <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                        <input type="hidden" name="estado" value="<?php echo $user['estado']; ?>">
+                                        <button type="submit" class="btn-small <?php echo $user['estado'] === 'activo' ? 'orange' : 'green'; ?>" title="<?php echo $user['estado'] === 'activo' ? 'Desactivar' : 'Activar'; ?>">
+                                            <i class="material-icons"><?php echo $user['estado'] === 'activo' ? 'block' : 'check'; ?></i>
+                                        </button>
+                                    </form>
+
+                                    <?php if ((int)$user['intentos_fallidos'] >= 5 || ($user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time())): ?>
+                                    <form method="POST">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="accion" value="desbloquear">
+                                        <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                        <button type="submit" class="btn-small blue waves-effect waves-light" title="Desbloquear intentos">
+                                            <i class="material-icons">lock_open</i>
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
+
+                                    <?php if (canDeleteUserAccount($user, (int)($_SESSION['usuario']['id_usuario'] ?? 0))): ?>
+                                    <form method="POST" onsubmit="return confirm('¿Eliminar este usuario del sistema? Esta acción no se puede deshacer.');">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="accion" value="eliminar_usuario">
+                                        <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                        <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar usuario">
+                                            <i class="material-icons">person_remove</i>
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
+
+                                    <form method="POST" onsubmit="return confirm('¿Resetear contraseña de este usuario staff?');">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="accion" value="reset_password_staff">
+                                        <input type="hidden" name="id_usuario" value="<?php echo $user['id_usuario']; ?>">
+                                        <input type="hidden" name="email_usuario" value="<?php echo esc($user['email']); ?>">
+                                        <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Resetear contraseña">
+                                            <i class="material-icons">vpn_key</i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
                 </div>
             </div>
