@@ -26,6 +26,40 @@ function deliveryNormalizeCoordinates($lat, $lng): ?array
 }
 
 /**
+ * Valida la fecha de entrega requerida al asignar un pedido a un repartidor. Ningun pedido
+ * puede quedar con fecha_entrega_programada vacia: sin fecha, el armador de rutas lo rechaza
+ * como "fuera del dia seleccionado" (ver api/optimize_delivery_route.php).
+ *
+ * @return array{valid: bool, fecha: ?string, error: ?string} fecha normalizada a 'Y-m-d 00:00:00'
+ */
+function deliveryValidateFechaEntregaAsignacion(string $fechaRaw): array
+{
+    $fechaRaw = trim($fechaRaw);
+    if ($fechaRaw === '') {
+        return [
+            'valid' => false,
+            'fecha' => null,
+            'error' => 'Debes seleccionar una fecha de entrega antes de asignar el pedido a un repartidor.',
+        ];
+    }
+
+    $fechaParsed = DateTimeImmutable::createFromFormat('Y-m-d', $fechaRaw);
+    if (!($fechaParsed instanceof DateTimeImmutable) || $fechaParsed->format('Y-m-d') !== $fechaRaw) {
+        return [
+            'valid' => false,
+            'fecha' => null,
+            'error' => 'La fecha de entrega no es valida.',
+        ];
+    }
+
+    return [
+        'valid' => true,
+        'fecha' => $fechaParsed->format('Y-m-d 00:00:00'),
+        'error' => null,
+    ];
+}
+
+/**
  * Obtiene la URL final siguiendo redirecciones HTTP.
  */
 function deliveryExpandUrlWithCurl(string $url): ?string

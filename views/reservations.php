@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 
 requireAuth();
 requirePermission('apartar_productos', BASE_URL . 'views/dashboard.php');
@@ -70,7 +71,8 @@ include __DIR__ . '/includes/header.php';
                                             <td>
                                                 <?php echo esc($apt['telefono'] ?? 'N/A'); ?>
                                                 <?php if(!empty($apt['telefono'])): ?>
-                                                    <a href="https://wa.me/52<?php echo preg_replace('/\D/', '', $apt['telefono']); ?>" target="_blank" class="green-text">
+                                                    <?php $waPhoneApartado = waBuildBusinessLinkPhone($apt['telefono']); ?>
+                                                    <a href="https://wa.me/<?php echo esc($waPhoneApartado); ?>" target="_blank" class="green-text whatsapp-business-link" data-wa-phone="<?php echo esc($waPhoneApartado); ?>">
                                                         <i class="material-icons tiny">chat</i>
                                                     </a>
                                                 <?php endif; ?>

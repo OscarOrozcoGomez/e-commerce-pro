@@ -47,16 +47,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
             if ($accion === 'asignar' && isset($_POST['id_repartidor'])) {
                 $id_repartidor = intval($_POST['id_repartidor']);
                 $fechaRaw = trim((string)($_POST['fecha_entrega'] ?? ''));
-                $fecha = null;
-                if ($fechaRaw !== '') {
-                    $fechaParsed = DateTimeImmutable::createFromFormat('Y-m-d', $fechaRaw);
-                    if ($fechaParsed instanceof DateTimeImmutable) {
-                        $fecha = $fechaParsed->format('Y-m-d 00:00:00');
-                    } else {
-                        throw new Exception('La fecha de entrega no es valida.');
-                    }
+                $fechaValidation = deliveryValidateFechaEntregaAsignacion($fechaRaw);
+                $fecha = $fechaValidation['fecha'];
+                if (!$fechaValidation['valid']) {
+                    $error = (string)$fechaValidation['error'];
                 }
                 // El repartidor cobra al momento de entregar, no se requiere pago previo
+                if ($error === '') {
                 $hasPedidosTipoEntrega = false;
                 $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
                 $stmtMeta->execute();
@@ -100,6 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                     $success = 'Pedido asignado correctamente.';
                 } else {
                     $error = 'No se pudo asignar. Verifica que el pedido no esté ya en reparto o entregado.';
+                }
                 }
             } elseif ($accion === 'convertir_sucursal') {
                 $pdo->beginTransaction();
@@ -293,9 +291,23 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
     <?php if ($error): ?>
-        <div class="card red lighten-4 red-text text-darken-4" style="padding: 10px;">
-            <i class="material-icons left">error</i> <?php echo esc($error); ?>
+        <div id="modal-error-asignacion" class="modal">
+            <div class="modal-content">
+                <h5><i class="material-icons left red-text text-darken-2">error</i>No se pudo asignar el pedido</h5>
+                <p><?php echo esc($error); ?></p>
+            </div>
+            <div class="modal-footer">
+                <a href="#!" class="modal-close waves-effect waves-light btn red darken-2">Entendido</a>
+            </div>
         </div>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                var elem = document.getElementById('modal-error-asignacion');
+                if (elem && typeof M !== 'undefined' && M.Modal) {
+                    M.Modal.init(elem, { dismissible: true }).open();
+                }
+            });
+        </script>
     <?php endif; ?>
 
     <div class="row">
@@ -344,7 +356,7 @@ include __DIR__ . '/includes/header.php';
                                                 </select>
 
                                                 <label class="assign-delivery-label" for="fecha-<?php echo (int)$p['id_pedido']; ?>">Día de entrega</label>
-                                                <input type="date" id="fecha-<?php echo (int)$p['id_pedido']; ?>" name="fecha_entrega" class="assign-delivery-date">
+                                                <input type="date" id="fecha-<?php echo (int)$p['id_pedido']; ?>" name="fecha_entrega" class="assign-delivery-date" required>
 
                                                 <button type="submit" class="btn indigo waves-effect waves-light assign-delivery-submit">
                                                     Asignar <i class="material-icons right">local_shipping</i>

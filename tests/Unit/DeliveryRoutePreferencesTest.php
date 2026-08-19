@@ -152,4 +152,52 @@ final class DeliveryRoutePreferencesTest extends TestCase
 
         $this->assertSame([10, 20], $ids);
     }
+
+    public function testDeliveryValidateFechaEntregaAsignacionRejectsEmptyFecha(): void
+    {
+        $result = deliveryValidateFechaEntregaAsignacion('');
+
+        $this->assertFalse($result['valid']);
+        $this->assertNull($result['fecha']);
+        $this->assertSame(
+            'Debes seleccionar una fecha de entrega antes de asignar el pedido a un repartidor.',
+            $result['error']
+        );
+    }
+
+    public function testDeliveryValidateFechaEntregaAsignacionRejectsWhitespaceOnlyFecha(): void
+    {
+        $result = deliveryValidateFechaEntregaAsignacion('   ');
+
+        $this->assertFalse($result['valid']);
+        $this->assertNull($result['fecha']);
+    }
+
+    public function testDeliveryValidateFechaEntregaAsignacionRejectsInvalidFecha(): void
+    {
+        $result = deliveryValidateFechaEntregaAsignacion('31/12/2026');
+
+        $this->assertFalse($result['valid']);
+        $this->assertNull($result['fecha']);
+        $this->assertSame('La fecha de entrega no es valida.', $result['error']);
+    }
+
+    public function testDeliveryValidateFechaEntregaAsignacionRejectsOutOfRangeDate(): void
+    {
+        // createFromFormat es laxo y "rollea" fechas invalidas (13/45) a otro mes/dia valido;
+        // esta prueba confirma que la validacion detecta ese caso en vez de aceptarlo en silencio.
+        $result = deliveryValidateFechaEntregaAsignacion('2026-13-45');
+
+        $this->assertFalse($result['valid']);
+        $this->assertNull($result['fecha']);
+    }
+
+    public function testDeliveryValidateFechaEntregaAsignacionAcceptsValidFecha(): void
+    {
+        $result = deliveryValidateFechaEntregaAsignacion('2026-08-19');
+
+        $this->assertTrue($result['valid']);
+        $this->assertSame('2026-08-19 00:00:00', $result['fecha']);
+        $this->assertNull($result['error']);
+    }
 }
