@@ -76,7 +76,23 @@
 <!-- Scripts JS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script>
+    // Los links con clase "whatsapp-business-link" (data-wa-phone = numero con lada, solo digitos)
+    // se reescriben en Android para forzar la apertura de WhatsApp Business (com.whatsapp.w4b) en
+    // lugar de WhatsApp personal, cuando ambas apps estan instaladas. En iOS/escritorio no hay forma
+    // confiable de elegir la app, asi que se deja el link normal de wa.me como esta.
     document.addEventListener('DOMContentLoaded', () => {
+        const isAndroid = /Android/i.test(navigator.userAgent || '');
+        if (isAndroid) {
+            document.querySelectorAll('a.whatsapp-business-link[data-wa-phone]').forEach((link) => {
+                const phone = (link.getAttribute('data-wa-phone') || '').replace(/\D/g, '');
+                if (!phone) {
+                    return;
+                }
+                const fallback = encodeURIComponent('https://wa.me/' + phone);
+                link.setAttribute('href', 'intent://send/?phone=' + encodeURIComponent(phone) + '#Intent;scheme=smsto;package=com.whatsapp.w4b;S.browser_fallback_url=' + fallback + ';end');
+            });
+        }
+
         // Inicializar componentes de Materialize de forma global y segura
         if (typeof M !== 'undefined') {
             try {

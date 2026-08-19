@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
@@ -475,6 +476,16 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
 
+                <div id="modal-route-error" class="modal">
+                    <div class="modal-content">
+                        <h5><i class="material-icons left red-text text-darken-2">event_busy</i>No se puede generar la ruta</h5>
+                        <p id="modal-route-error-text"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="#!" class="modal-close waves-effect waves-light btn red darken-2">Entendido</a>
+                    </div>
+                </div>
+
                 <div class="card" id="route-result-card" style="display:none;">
                     <div class="card-content" id="route-result-content"></div>
                 </div>
@@ -635,7 +646,8 @@ include __DIR__ . '/includes/header.php';
                                 <?php if ($clienteTel && $clienteTel !== 'N/A'): ?>
                                     <a href="tel:<?php echo esc($telLimpio); ?>" class="indigo-text"><?php echo esc($clienteTel); ?></a>
                                     &nbsp;
-                                    <a href="https://wa.me/52<?php echo esc($telLimpio); ?>" target="_blank" class="green-text" style="font-size:0.85rem;">
+                                    <?php $waPhoneEntrega = waBuildBusinessLinkPhone($clienteTel); ?>
+                                    <a href="https://wa.me/<?php echo esc($waPhoneEntrega); ?>" target="_blank" class="green-text whatsapp-business-link" data-wa-phone="<?php echo esc($waPhoneEntrega); ?>" style="font-size:0.85rem;">
                                         <i class="material-icons tiny">chat</i> WhatsApp
                                     </a>
                                 <?php else: ?>
@@ -1215,6 +1227,13 @@ async function routeGenerateOptimized() {
     if (!horaSalida) {
         return;
     }
+
+    const sinFechaEntrega = selected.filter((el) => String(el.dataset.fechaEntrega || '').trim() === '');
+    if (sinFechaEntrega.length > 0) {
+        routeShowErrorModal('No se puede generar la ruta: hay ' + sinFechaEntrega.length + ' pedido(s) sin fecha de entrega programada. Todo pedido debe tener una fecha de entrega asignada (ve a "Asignar Entregas") antes de poder agregarlo a una ruta.');
+        return;
+    }
+
     const pedidoIds = selected.map((el) => parseInt(el.value, 10)).filter((v) => Number.isFinite(v) && v > 0);
     const fechasSeleccionadas = Array.from(new Set(selected.map((el) => String(el.dataset.fechaEntrega || '').trim()).filter((v) => v !== '')));
     if (!routeSelectedDate && fechasSeleccionadas.length > 1) {
@@ -1282,6 +1301,20 @@ async function routeGenerateOptimized() {
             btn.innerHTML = '<i class="material-icons left">alt_route</i>Generar ruta';
         }
     }
+}
+
+function routeShowErrorModal(mensaje) {
+    const elem = document.getElementById('modal-route-error');
+    const textElem = document.getElementById('modal-route-error-text');
+    if (!elem || typeof M === 'undefined' || !M.Modal) {
+        M.toast({html: mensaje, classes: 'red darken-2'});
+        return;
+    }
+    if (textElem) {
+        textElem.textContent = mensaje;
+    }
+    const instance = M.Modal.getInstance(elem) || M.Modal.init(elem, { dismissible: true });
+    instance.open();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
