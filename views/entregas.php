@@ -1079,6 +1079,27 @@ function routeSafeText(value) {
     return raw;
 }
 
+function routeBuildWaPhone(telefono) {
+    const digits = routeSafeText(telefono).replace(/\D/g, '');
+    return digits ? ('52' + digits) : '';
+}
+
+function routeFormatEtaHora(eta) {
+    const match = /^\d{4}-\d{2}-\d{2}[ T](\d{2}):(\d{2})/.exec(String(eta || ''));
+    return match ? `${match[1]}:${match[2]} hrs` : '';
+}
+
+function routeBuildWaMessage(stop) {
+    const numero = routeSafeText(stop.numero_pedido) || String(stop.id_pedido || '');
+    const hora = routeFormatEtaHora(stop.eta_estimada);
+    let msg = `Hola! Tu pedido ${numero} va en camino.`;
+    if (hora) {
+        msg += ` Hora estimada de entrega: ${hora}.`;
+    }
+    msg += ' Este horario es aproximado: podria cambiar segun el trafico o el clima. Te mantendremos informado por este mismo medio (WhatsApp). Gracias por tu paciencia.';
+    return msg;
+}
+
 function routeParseNumber(raw) {
     if (raw === null || raw === undefined) {
         return null;
@@ -1346,6 +1367,11 @@ function routeRenderResult(data) {
         const warningClass = stop.en_riesgo ? 'route-stop-risk' : '';
         const limitText = stop.fecha_limite_entrega ? `<div><strong>Limite:</strong> ${routeEscapeHtml(stop.fecha_limite_entrega)}</div>` : '';
         const etaText = stop.eta_estimada ? `<div><strong>ETA:</strong> ${routeEscapeHtml(stop.eta_estimada)}</div>` : '';
+        const waPhone = routeBuildWaPhone(stop.telefono);
+        const waMessage = routeBuildWaMessage(stop);
+        const waLink = waPhone
+            ? `<div style="margin-top:4px;"><a href="https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}" target="_blank" class="green-text whatsapp-business-link" data-wa-phone="${waPhone}" data-wa-text="${routeEscapeHtml(waMessage)}"><i class="material-icons tiny">chat</i> Avisar hora estimada por WhatsApp</a></div>`
+            : '';
 
         return `
             <li class="route-stop-item ${warningClass}">
@@ -1355,6 +1381,7 @@ function routeRenderResult(data) {
                 <div>${routeEscapeHtml(routeSafeText(stop.direccion) || 'Sin direccion')}</div>
                 ${limitText}
                 ${etaText}
+                ${waLink}
             </li>
         `;
     }).join('');
@@ -1388,6 +1415,10 @@ function routeRenderResult(data) {
             </a>
         </div>
     `;
+
+    if (typeof window.waApplyBusinessLinks === 'function') {
+        window.waApplyBusinessLinks(content);
+    }
 
     card.style.display = 'block';
 }

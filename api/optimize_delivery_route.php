@@ -656,6 +656,7 @@ try {
         }, $validStops),
         'optimizeWaypointOrder' => false,
         'travelMode' => 'DRIVE',
+        'routingPreference' => 'TRAFFIC_AWARE',
     ];
 
     $requestBody = json_encode($body);
