@@ -15,6 +15,25 @@ if (isCliente()) {
 $usuario = $_SESSION['usuario'];
 $pageTitle = 'Dashboard - Sistema POS';
 
+$aiPendientesCount = 0;
+$aiErroresPendientesCount = 0;
+if (isAdmin()) {
+    try {
+        $aiPendientesCount = (int) getPDO()
+            ->query("SELECT COUNT(*) FROM whatsapp_conversaciones WHERE estado_bot <> 'activo'")
+            ->fetchColumn();
+    } catch (Throwable $e) {
+        // La tabla puede no existir todavia si la migracion no se ha aplicado en este entorno.
+    }
+    try {
+        $aiErroresPendientesCount = (int) getPDO()
+            ->query('SELECT COUNT(*) FROM ai_errores_diagnostico WHERE resuelto = 0')
+            ->fetchColumn();
+    } catch (Throwable $e) {
+        // La tabla puede no existir todavia si la migracion no se ha aplicado en este entorno.
+    }
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -424,6 +443,26 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/cancelaciones_pedidos.php" class="btn waves-effect waves-light red darken-2">Ver Reporte</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">
+                            Asistente de IA (WhatsApp)
+                            <?php if ($aiPendientesCount > 0): ?>
+                                <span class="new badge red" data-badge-caption="esperando atencion"><?php echo (int) $aiPendientesCount; ?></span>
+                            <?php endif; ?>
+                            <?php if ($aiErroresPendientesCount > 0): ?>
+                                <span class="new badge orange darken-1" data-badge-caption="incidentes"><?php echo (int) $aiErroresPendientesCount; ?></span>
+                            <?php endif; ?>
+                        </span>
+                        <p>Configura el tono, promociones y politicas de Alex, y revisa conversaciones transferidas a un asesor.</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/ai_assistant_settings.php" class="btn waves-effect waves-light green darken-2">Configurar</a>
+                        <a href="<?php echo BASE_URL; ?>views/ai_diagnostics.php" class="btn-flat waves-effect">Diagnostico</a>
                     </div>
                 </div>
             </div>

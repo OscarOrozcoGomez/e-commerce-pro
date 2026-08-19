@@ -230,6 +230,18 @@ function preloadSecretSources(): void
             'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
             'TELEGRAM_CHAT_ID' => ['TELEGRAM_CHAT_ID'],
             'TELEGRAM_NOTIFICATIONS_ENABLED' => ['TELEGRAM_NOTIFICATIONS_ENABLED'],
+            // DEEPSEEK_AI_ASSISTANT es el nombre por defecto (configurable por fila desde
+            // ai_asistente_config.api_key_variable); DEEPSEEK_API_KEY se deja como alias legacy.
+            'DEEPSEEK_AI_ASSISTANT' => ['DEEPSEEK_AI_ASSISTANT'],
+            'DEEPSEEK_API_KEY' => ['DEEPSEEK_API_KEY'],
+            'WA_WEBHOOK_TOKEN' => ['WA_WEBHOOK_TOKEN'],
+            // Nombre oficial del secreto en Google Secret Manager; se mapea a WA_WEBHOOK_TOKEN
+            // al final de esta funcion para que el resto del codigo no cambie.
+            'WA_WEBHOOK_SECRET' => ['WA_WEBHOOK_SECRET'],
+            // Endpoint que expone el puente Node.js para mensajes proactivos (cron de seguimiento).
+            'WA_BRIDGE_SEND_URL' => ['WA_BRIDGE_SEND_URL'],
+            // Endpoint que expone el puente Node.js para aplicar/quitar etiquetas nativas de WhatsApp.
+            'WA_BRIDGE_LABEL_URL' => ['WA_BRIDGE_LABEL_URL'],
             'GTM_CONTAINER_ID' => ['GTM_CONTAINER_ID'],
             'GA4_MEASUREMENT_ID' => ['GA4_MEASUREMENT_ID'],
             'GA4_DIRECT_ENABLED' => ['GA4_DIRECT_ENABLED'],
@@ -350,6 +362,18 @@ function preloadSecretSources(): void
         } else {
             error_log('WARNING: No se encontró archivo de secretos local.');
         }
+    }
+
+    // WA_WEBHOOK_TOKEN se resuelve desde WA_WEBHOOK_SECRET (via Secret Manager en produccion,
+    // o desde core/app_secrets.qa.php en local/QA -- ambos casos ya dejaron el valor
+    // disponible arriba). Se hace al final, independientemente de la fuente, para que
+    // api/whatsapp_webhook.php y el resto del codigo sigan leyendo WA_WEBHOOK_TOKEN sin cambios.
+    $waWebhookSecretValue = getenv('WA_WEBHOOK_SECRET');
+    if ($waWebhookSecretValue === false) {
+        $waWebhookSecretValue = $_SERVER['WA_WEBHOOK_SECRET'] ?? $_ENV['WA_WEBHOOK_SECRET'] ?? false;
+    }
+    if ($waWebhookSecretValue !== false && trim((string) $waWebhookSecretValue) !== '') {
+        applySecretValue('WA_WEBHOOK_TOKEN', (string) $waWebhookSecretValue);
     }
 }
 
