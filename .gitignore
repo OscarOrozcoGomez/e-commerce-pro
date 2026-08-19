@@ -55,6 +55,7 @@ scripts/_tmp_*.php
 /LOCAL_TEST_DATA.md
 /scripts/seed_phone_test_data.php
 /scripts/output/
+/test_payloads/
 
 # Runbooks privados locales (no subir al repo)
 /private/

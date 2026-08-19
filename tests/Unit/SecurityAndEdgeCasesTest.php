@@ -557,7 +557,10 @@ final class SecurityAndEdgeCasesTest extends TestCase
                 codigo_barras TEXT NOT NULL DEFAULT "",
                 nombre_variante TEXT NULL,
                 precio_venta REAL NOT NULL DEFAULT 0,
-                estado TEXT NOT NULL DEFAULT "activo"
+                estado TEXT NOT NULL DEFAULT "activo",
+                descripcion TEXT NULL,
+                ingredientes TEXT NULL,
+                beneficios TEXT NULL
             )'
         );
         $this->pdo->exec(

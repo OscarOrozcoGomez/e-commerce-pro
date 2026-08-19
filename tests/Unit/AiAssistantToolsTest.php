@@ -51,6 +51,20 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('Frasco 500ml', $resultados[0]['nombre']);
     }
 
+    public function testAiSearchInventoryMatchesByIngredientesOrBeneficios(): void
+    {
+        $this->seedProducto(13, 'Colageno Hidrolizado', 'COLG', null, 349.00, 'activo', null, 'colageno hidrolizado, acido hialuronico, vitamina C');
+        $this->seedProducto(14, 'Multivitaminico Diario', 'MULTI', null, 199.00, 'activo', null, null, 'salud articular, firmeza en piel, fortalecimiento de unas y cabello');
+
+        $porIngrediente = aiSearchInventory($this->pdo, 'acido hialuronico');
+        $this->assertCount(1, $porIngrediente);
+        $this->assertSame(13, $porIngrediente[0]['id_producto']);
+
+        $porBeneficio = aiSearchInventory($this->pdo, 'firmeza en piel');
+        $this->assertCount(1, $porBeneficio);
+        $this->assertSame(14, $porBeneficio[0]['id_producto']);
+    }
+
     public function testAiToolConsultarInventarioRejectsEmptySearch(): void
     {
         $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => '  ']);
@@ -708,7 +722,10 @@ final class AiAssistantToolsTest extends TestCase
                 codigo_barras TEXT NOT NULL DEFAULT "",
                 nombre_variante TEXT NULL,
                 precio_venta REAL NOT NULL DEFAULT 0,
-                estado TEXT NOT NULL DEFAULT "activo"
+                estado TEXT NOT NULL DEFAULT "activo",
+                descripcion TEXT NULL,
+                ingredientes TEXT NULL,
+                beneficios TEXT NULL
             )'
         );
         $this->pdo->exec(
@@ -824,10 +841,21 @@ final class AiAssistantToolsTest extends TestCase
             ->execute([$codigo, $tipo, $texto, $urlArchivo, $nombreArchivo, $activo]);
     }
 
-    private function seedProducto(int $id, string $nombre, string $codigoBarras, ?string $variante, float $precio, string $estado = 'activo'): void
-    {
-        $this->pdo->prepare('INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado) VALUES (?, ?, ?, ?, ?, ?)')
-            ->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado]);
+    private function seedProducto(
+        int $id,
+        string $nombre,
+        string $codigoBarras,
+        ?string $variante,
+        float $precio,
+        string $estado = 'activo',
+        ?string $descripcion = null,
+        ?string $ingredientes = null,
+        ?string $beneficios = null
+    ): void {
+        $this->pdo->prepare(
+            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void
