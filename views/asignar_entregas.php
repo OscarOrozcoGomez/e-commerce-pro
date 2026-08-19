@@ -13,6 +13,8 @@ if (!canManageDeliveryOrders()) {
 $pageTitle = 'Asignar Entregas';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
+// El encargado solo debe ver y asignar pedidos de su propia sucursal; el admin ve todas.
+$scopeAlmacenId = (!isAdmin() && isEncargado()) ? getCurrentAlmacenId() : null;
 $error = '';
 $success = '';
 $successActionUrl = '';
@@ -248,14 +250,17 @@ try {
         ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = p.id_pedido)"
         : '';
 
+    $almacenFilter = $scopeAlmacenId !== null ? ' AND p.id_almacen = :id_almacen' : '';
     $sql = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             WHERE p.estado IN ('pendiente_pago','pagado')
               AND p.id_repartidor IS NULL
-              AND {$deliveryFilter}{$notPickupFilter}
+              AND {$deliveryFilter}{$notPickupFilter}{$almacenFilter}
             ORDER BY p.fecha_creacion DESC";
-    $pedidos = $pdo->query($sql)->fetchAll();
+    $stmtPedidos = $pdo->prepare($sql);
+    $stmtPedidos->execute($scopeAlmacenId !== null ? [':id_almacen' => $scopeAlmacenId] : []);
+    $pedidos = $stmtPedidos->fetchAll();
 
     // Obtener lista de repartidores
     $sql_rep = "SELECT id_usuario, nombre FROM usuarios WHERE id_rol = (SELECT id_rol FROM roles WHERE nombre = 'repartidor') AND estado = 'activo'";

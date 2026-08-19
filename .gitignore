@@ -1,5 +1,6 @@
 # Ignorar carpetas de imágenes de productos (migradas y subidas)
 /assets/img/products/
+/assets/img/entregas/
 /core/uploads/
 
 # Cache generado en runtime (indices de resolucion de imagenes, etc.)
@@ -58,3 +59,9 @@ scripts/_tmp_*.php
 
 # Runbooks privados locales (no subir al repo)
 /private/
+
+# Payloads de prueba locales (JSON) - no subir al repo
+/test_payloads/
+
+# Catalogo local (solo uso interno, no subir al repo)
+/assets/Cat*logo Beneficios Digital Blife.pdf
