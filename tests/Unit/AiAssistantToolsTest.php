@@ -354,6 +354,41 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNull(aiHoursSinceFirstMessage($this->pdo, (int) $conversacion['id_conversacion']));
     }
 
+    public function testHoursSinceLastMessageComputesElapsedTime(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020008', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        $this->seedUserMessage($idConversacion, 'Hola', '-50 hours');
+        $this->seedUserMessage($idConversacion, 'Sigo aqui', '-30 hours');
+
+        $horas = aiHoursSinceLastMessage($this->pdo, $idConversacion);
+
+        $this->assertNotNull($horas);
+        $this->assertEqualsWithDelta(30.0, $horas, 0.1);
+    }
+
+    public function testHoursSinceLastMessageIsNullWhenNoMessages(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020009', null);
+
+        $this->assertNull(aiHoursSinceLastMessage($this->pdo, (int) $conversacion['id_conversacion']));
+    }
+
+    public function testAiPhoneHasLocalLadaMatchesLada33(): void
+    {
+        $this->assertTrue(aiPhoneHasLocalLada('5213312345678'));
+    }
+
+    public function testAiPhoneHasLocalLadaRejectsOtherLada(): void
+    {
+        $this->assertFalse(aiPhoneHasLocalLada('5215512345678'));
+    }
+
+    public function testAiPhoneHasLocalLadaIsNullWhenPhoneUnknown(): void
+    {
+        $this->assertNull(aiPhoneHasLocalLada('123'));
+    }
+
     public function testCloseUnresponsiveConversationTagsAndClosesBot(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020007', null);
@@ -739,7 +774,21 @@ final class AiAssistantToolsTest extends TestCase
             'CREATE TABLE clientes (
                 id_cliente INTEGER PRIMARY KEY,
                 id_usuario INTEGER NULL,
-                telefono TEXT NULL
+                nombre TEXT NULL,
+                telefono TEXT NULL,
+                estado TEXT NOT NULL DEFAULT "activo"
+            )'
+        );
+        $this->pdo->exec(
+            'CREATE TABLE cliente_direcciones (
+                id_direccion INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_cliente INTEGER NOT NULL,
+                alias TEXT NULL,
+                direccion TEXT NOT NULL,
+                maps_link TEXT NULL,
+                es_default INTEGER NOT NULL DEFAULT 0,
+                latitud REAL NULL,
+                longitud REAL NULL
             )'
         );
         $this->pdo->exec(
@@ -867,5 +916,109 @@ final class AiAssistantToolsTest extends TestCase
     private function seedCliente(int $idCliente, string $telefono): void
     {
         $this->pdo->prepare('INSERT INTO clientes (id_cliente, telefono) VALUES (?, ?)')->execute([$idCliente, $telefono]);
+    }
+
+    /**
+     * piiEncryptValue() lanza excepcion si PII_ENCRYPTION_KEY no esta configurada
+     * (no ocurre en el entorno normal de pruebas). Se configura temporalmente solo
+     * para las pruebas que necesitan de verdad cifrar/descifrar, igual que hace
+     * PhoneDuplicateDetectionTest.
+     */
+    private function withPiiEncryptionKey(string $key, callable $fn): void
+    {
+        $original = (string) (getenv('PII_ENCRYPTION_KEY') ?: '');
+        putenv('PII_ENCRYPTION_KEY=' . $key);
+        $_SERVER['PII_ENCRYPTION_KEY'] = $key;
+        $_ENV['PII_ENCRYPTION_KEY'] = $key;
+        try {
+            $fn();
+        } finally {
+            putenv('PII_ENCRYPTION_KEY=' . $original);
+            if ($original !== '') {
+                $_SERVER['PII_ENCRYPTION_KEY'] = $original;
+                $_ENV['PII_ENCRYPTION_KEY'] = $original;
+            } else {
+                unset($_SERVER['PII_ENCRYPTION_KEY'], $_ENV['PII_ENCRYPTION_KEY']);
+            }
+        }
+    }
+
+    public function testAiFindOrCreateClienteReusesExistingMatchByPhone(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->pdo->prepare('INSERT INTO clientes (id_cliente, nombre, telefono) VALUES (?, ?, ?)')
+                ->execute([42, piiEncryptValue('Cliente Existente'), piiEncryptValue('(331) - 555 - 0100')]);
+
+            $idCliente = aiFindOrCreateCliente($this->pdo, '5213315550100', 'Nombre Distinto En WhatsApp');
+
+            $this->assertSame(42, $idCliente);
+            $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn());
+        });
+    }
+
+    public function testAiFindOrCreateClienteCreatesNewClienteWhenNoMatch(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $idCliente = aiFindOrCreateCliente($this->pdo, '5213319998888', 'Cliente Nuevo WhatsApp');
+
+            $this->assertGreaterThan(0, $idCliente);
+            $row = $this->pdo->query('SELECT nombre, telefono FROM clientes WHERE id_cliente = ' . $idCliente)->fetch();
+            $this->assertSame('Cliente Nuevo WhatsApp', piiDecryptValue($row['nombre']));
+            $this->assertSame('(331) - 999 - 8888', piiDecryptValue($row['telefono']));
+        });
+    }
+
+    public function testAiSaveClienteDireccionMarksFirstAddressAsDefault(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedCliente(9, '3310000000');
+
+            aiSaveClienteDireccion($this->pdo, 9, 'Calle Falsa 123, Colonia Centro, CP 44100, Guadalajara');
+
+            $row = $this->pdo->query('SELECT direccion, es_default FROM cliente_direcciones WHERE id_cliente = 9')->fetch();
+            $this->assertSame(1, (int) $row['es_default']);
+            $this->assertSame('Calle Falsa 123, Colonia Centro, CP 44100, Guadalajara', piiDecryptValue($row['direccion']));
+        });
+    }
+
+    public function testAiSaveClienteDireccionSecondAddressIsNotDefault(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedCliente(10, '3310000001');
+
+            aiSaveClienteDireccion($this->pdo, 10, 'Primera direccion 1');
+            aiSaveClienteDireccion($this->pdo, 10, 'Segunda direccion 2');
+
+            $this->assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM cliente_direcciones WHERE id_cliente = 10')->fetchColumn());
+            $segunda = $this->pdo->query("SELECT es_default FROM cliente_direcciones WHERE id_cliente = 10 ORDER BY id_direccion DESC LIMIT 1")->fetch();
+            $this->assertSame(0, (int) $segunda['es_default']);
+        });
+    }
+
+    public function testAiToolAgendarVentaCreatesClienteAndTransfersWhenDireccionMissing(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProducto(600, 'Producto Envio', 'PE600', null, 199.00);
+            $this->seedInventario(600, 1, 5);
+            $conversacion = aiGetOrCreateConversation($this->pdo, '5213317778888', null);
+            $idConversacion = (int) $conversacion['id_conversacion'];
+
+            $args = [
+                'nombre_cliente' => 'Cliente Sin Direccion',
+                'telefono' => '3317778888',
+                'direccion_envio' => '',
+                'metodo_pago_preferido' => 'Efectivo',
+                'lista_productos' => [['id_producto' => 600, 'cantidad' => 1]],
+            ];
+            $context = ['wa_id' => '5213317778888', 'id_conversacion' => $idConversacion];
+
+            $result = aiToolAgendarVenta($this->pdo, $args, $context);
+
+            $this->assertFalse($result['ok']);
+            $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn());
+
+            $estado = $this->pdo->query('SELECT estado_bot FROM whatsapp_conversaciones WHERE id_conversacion = ' . $idConversacion)->fetchColumn();
+            $this->assertSame('pausado', $estado);
+        });
     }
 }

@@ -69,8 +69,22 @@ try {
 } catch (Throwable $e) {
     // Nunca se exponen detalles internos en la respuesta; solo se registran en el log del servidor.
     error_log('ERROR en whatsapp_webhook: ' . $e->getMessage());
+
+    // El texto que se le muestra al cliente promete que un companero lo va a contactar,
+    // asi que aqui se deja el chat realmente pausado y marcado para el equipo (best-effort:
+    // si hasta esto falla -p.ej. la BD esta caida- no debe tumbar la respuesta al cliente).
+    try {
+        $pdoFallback = getPDO();
+        $conversacionFallback = aiGetOrCreateConversation($pdoFallback, $inbound['wa_id'], null);
+        $idConversacionFallback = (int)$conversacionFallback['id_conversacion'];
+        aiLogDiagnosticError($pdoFallback, $idConversacionFallback, 'webhook_excepcion', $inbound['texto'], ['excepcion' => $e->getMessage()]);
+        aiSetConversationState($pdoFallback, $idConversacionFallback, 'pausado', 'Fallo tecnico en el webhook: ' . $e->getMessage());
+    } catch (Throwable $eFallback) {
+        error_log('ERROR adicional al intentar pausar/notificar tras fallo de webhook: ' . $eFallback->getMessage());
+    }
+
     echo json_encode([
         'success' => false,
-        'reply' => [['type' => 'text', 'text' => 'Tuvimos un problema tecnico, en un momento te contactamos.']],
+        'reply' => [['type' => 'text', 'text' => 'Dame un segundo, te transfiero con un companero del equipo para que te de el detalle exacto de inmediato.']],
     ], JSON_UNESCAPED_UNICODE);
 }

@@ -68,6 +68,59 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('_cursivas_', $prompt);
     }
 
+    public function testSystemPromptNeverInventsTechnicalFailureWords(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('nunca uses las palabras "error", "falla" ni "sistema"', $prompt);
+    }
+
+    public function testSystemPromptIncludesContinuityRule(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('no repetir preguntas cuya respuesta el cliente ya te dio', $prompt);
+    }
+
+    public function testSystemPromptOmitsReactivationNoteWhenRecentOrUnknown(): void
+    {
+        $sinDato = aiBuildSystemPrompt($this->baseConfig(), null);
+        $this->assertStringNotContainsString('no escribia desde hace', $sinDato);
+
+        $reciente = aiBuildSystemPrompt($this->baseConfig(), null, [], [], 2.0);
+        $this->assertStringNotContainsString('no escribia desde hace', $reciente);
+    }
+
+    public function testSystemPromptIncludesReactivationNoteAfterADayOfInactivity(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null, [], [], 30.0);
+
+        $this->assertStringContainsString('no escribia desde hace aproximadamente 1 dia(s)', $prompt);
+        $this->assertStringContainsString('No lo saludes como si fuera la primera vez', $prompt);
+    }
+
+    public function testSystemPromptWarnsWhenPhoneIsNotLocalLada(): void
+    {
+        $sinDato = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null);
+        $this->assertStringNotContainsString('lada 33', $sinDato);
+
+        $esLocal = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, true);
+        $this->assertStringNotContainsString('lada 33', $esLocal);
+
+        $noLocal = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, false);
+        $this->assertStringContainsString('lada 33', $noLocal);
+        $this->assertStringContainsString('Zona Metropolitana de Guadalajara', $noLocal);
+    }
+
+    public function testSystemPromptNeverAppliesDiscountsOrModifiesPlacedOrdersItself(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('nunca lo apliques tu mismo', $prompt);
+        $this->assertStringContainsString('no lo modifiques ni canceles tu directamente', $prompt);
+        $this->assertStringContainsString('dejamos la orden pausada por ahora', $prompt);
+    }
+
     public function testSystemPromptIncludesPrivacyGuardrails(): void
     {
         $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
@@ -156,7 +209,7 @@ final class AiAssistantPromptTest extends TestCase
 
         $agendar = $tools[1]['function']['parameters'];
         $this->assertSame(
-            ['nombre_cliente', 'telefono', 'direccion_envio', 'lista_productos', 'metodo_pago_preferido'],
+            ['nombre_cliente', 'lista_productos'],
             $agendar['required']
         );
 

@@ -36,6 +36,10 @@ const AI_ASSISTANT_MAX_HISTORY_MESSAGES = 24;
 const AI_ASSISTANT_RATE_LIMIT_MAX_MESSAGES = 8;
 const AI_ASSISTANT_RATE_LIMIT_WINDOW_SECONDS = 60;
 
+// A partir de cuantas horas de silencio se le avisa a Alex en el prompt que esta
+// retomando una conversacion inactiva, para que no salude como si fuera la primera vez.
+const AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS = 24;
+
 // Bandera de texto que Alex puede incluir en su respuesta cuando detecta baja confianza
 // o que la consulta necesita atencion personalizada, como respaldo del tool transferir_a_humano
 // para los casos en que el LLM contesta en texto libre sin invocar la funcion.
@@ -85,8 +89,14 @@ function aiGetConfig(PDO $pdo): array
  * Prompt del sistema y definicion de herramientas (function calling)
  * ------------------------------------------------------------------- */
 
-function aiBuildSystemPrompt(array $config, ?string $nombrePerfil, array $etiquetasDisponibles = [], array $reglasAprendizaje = []): string
-{
+function aiBuildSystemPrompt(
+    array $config,
+    ?string $nombrePerfil,
+    array $etiquetasDisponibles = [],
+    array $reglasAprendizaje = [],
+    ?float $horasInactividad = null,
+    ?bool $esLadaLocal = null
+): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
     $perfil = trim((string)($nombrePerfil ?? ''));
@@ -148,6 +158,13 @@ function aiBuildSystemPrompt(array $config, ?string $nombrePerfil, array $etique
     if ($perfil !== '') {
         $lines[] = "El nombre de perfil de WhatsApp del cliente es: {$perfil}. Puedes usarlo para personalizar el saludo si tiene sentido.";
     }
+    if ($horasInactividad !== null && $horasInactividad >= AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS) {
+        $diasInactivo = max(1, (int)round($horasInactividad / 24));
+        $lines[] = "El cliente no escribia desde hace aproximadamente {$diasInactivo} dia(s). No lo saludes como si fuera la primera vez: retoma el hilo de forma natural usando el historial de esta conversacion (por ejemplo, menciona brevemente en que habian quedado) antes de seguir.";
+    }
+    if ($esLadaLocal === false) {
+        $lines[] = 'El telefono de este cliente no tiene lada 33 (Guadalajara). Las entregas fisicas contra entrega solo aplican dentro de la Zona Metropolitana de Guadalajara. Si todavia no lo has confirmado en esta conversacion, pregunta con transparencia y amabilidad si se encuentra actualmente en la zona o si necesita el envio a un domicilio ahi, antes de avanzar con precios o pedidos. Ejemplo de tono: "Notamos que tu numero no es de la zona local de Guadalajara (lada 33). Te comento que en Be Life realizamos entregas contra entrega unicamente dentro de la Zona Metropolitana de Guadalajara. Te encuentras por aqui o necesitas el envio a un domicilio local?"';
+    }
 
     if (!empty($etiquetasDisponibles)) {
         $nombresEtiquetas = array_values(array_filter(array_map(
@@ -176,6 +193,17 @@ function aiBuildSystemPrompt(array $config, ?string $nombrePerfil, array $etique
     $lines[] = '- Los campos de ingredientes y beneficios del inventario son solo orientativos para recomendar productos; nunca los uses para prometer curas, diagnosticar condiciones medicas ni garantizar resultados de salud. Si la duda del cliente es medica o seria, sugierele consultar a un profesional de la salud.';
     $lines[] = '';
     $lines[] = 'Manejo de incertidumbre: si no tienes informacion suficiente para responder con confianza, o detectas que la consulta necesita atencion personalizada de un asesor (quejas, casos fuera de lo normal, algo que tus funciones no resuelven), agrega literalmente la bandera ' . AI_HANDOFF_TEXT_FLAG . ' en tu respuesta ademas de (o en vez de) llamar a transferir_a_humano. El sistema la detecta, pausa el bot y avisa al equipo automaticamente.';
+    $lines[] = 'Si algo tecnico falla o una de tus funciones no responde, nunca uses las palabras "error", "falla" ni "sistema", ni des a entender que algo salio mal. En vez de eso responde con naturalidad, por ejemplo: "Dame un segundo, te transfiero con un companero del equipo para que te de el detalle exacto de inmediato", y llama a transferir_a_humano.';
+    $lines[] = '';
+    $lines[] = 'Continuidad: usa el historial de esta conversacion para no repetir preguntas cuya respuesta el cliente ya te dio (nombre, direccion, que producto le interesa, etc.) ni repetir informacion que ya le compartiste. Avanza la conversacion con naturalidad a partir de lo que ya sabes de el.';
+    $lines[] = '';
+    $lines[] = 'Gestion de pedidos:';
+    $lines[] = '- Mientras el pedido AUN NO se agenda (todavia no llamas a agendar_venta): agrega, quita o cambia productos del carrito con toda flexibilidad segun pida el cliente, y presenta el resumen actualizado antes de confirmar.';
+    $lines[] = '- Si ya tienes el nombre del cliente y al menos un producto, pero todavia no tiene lista su direccion completa, llama a agendar_venta de todos modos (direccion_envio vacio) en vez de solo decirle que ya quedo registrado -- esa funcion es la que en verdad guarda al cliente en el sistema; nunca le digas que quedo registrado sin haberla llamado.';
+    $lines[] = '- Un pedido YA agendado (con numero de pedido) no lo modifiques ni canceles tu directamente -- no hay forma de verificar que el pedido es de esa persona. Si el cliente quiere agregar, quitar o cambiar productos de un pedido ya agendado, llama a transferir_a_humano para que el equipo lo ajuste.';
+    $lines[] = '- Si el cliente pide un descuento (por ser frecuente, por mayoreo, etc.), nunca lo apliques tu mismo -- no tienes esa facultad. Respondele con calidez y llama a transferir_a_humano para que un companero lo valide.';
+    $lines[] = '- Si el cliente quiere cancelar un pedido, nunca muestres resistencia. Respondele con empatia, algo como: "Entiendo perfectamente. Sin problema, dejamos la orden pausada por ahora. Avisame cuando gustes retomarlo y con gusto te atendemos." y llama a transferir_a_humano para formalizar la cancelacion.';
+    $lines[] = '- Cada vez que confirmes, modifiques o cierres un pedido, usa iconos (🎉 📦 🚚 💰 ✨) y enlista claramente productos, cantidades, precio de cada uno, estatus del envio y el total final.';
     $lines[] = '';
     $lines[] = 'Formato de salida: WhatsApp permite *negritas*, _cursivas_ y listas con emojis; usalos con moderacion para que se lea claro. No uses Markdown web (##, dobles asteriscos, backticks) ni HTML. Parrafos cortos.';
 
@@ -206,13 +234,13 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'agendar_venta',
-                'description' => 'Registra un pedido nuevo con los productos, datos de envio y metodo de pago confirmados por el cliente. Los precios se toman siempre del inventario real, no de esta llamada.',
+                'description' => 'Registra un pedido nuevo con los productos, datos de envio y metodo de pago confirmados por el cliente. Los precios se toman siempre del inventario real, no de esta llamada. Llama a esta funcion aunque el cliente todavia no tenga su direccion lista (manda direccion_envio vacio): el sistema deja registrado al cliente de todos modos y te indica que falta la direccion para completar el pedido.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
                         'nombre_cliente' => ['type' => 'string', 'description' => 'Nombre completo del cliente.'],
                         'telefono' => ['type' => 'string', 'description' => 'Telefono de contacto a 10 digitos.'],
-                        'direccion_envio' => ['type' => 'string', 'description' => 'Direccion completa: calle, numero, colonia, codigo postal y ciudad.'],
+                        'direccion_envio' => ['type' => 'string', 'description' => 'Direccion completa: calle, numero, colonia, codigo postal y ciudad. Si el cliente todavia no la tiene lista, manda cadena vacia -- no dejes de llamar a la funcion por esto.'],
                         'lista_productos' => [
                             'type' => 'array',
                             'description' => 'Productos a comprar, usando el id_producto que devolvio consultar_inventario.',
@@ -226,8 +254,9 @@ function aiGetToolDefinitions(): array
                             ],
                         ],
                         'metodo_pago_preferido' => ['type' => 'string', 'description' => 'Efectivo, transferencia, tarjeta u otro metodo mencionado por el cliente.'],
+                        'maps_link_cliente' => ['type' => 'string', 'description' => 'Opcional: link de Google Maps si el cliente comparte su ubicacion o un link de mapa.'],
                     ],
-                    'required' => ['nombre_cliente', 'telefono', 'direccion_envio', 'lista_productos', 'metodo_pago_preferido'],
+                    'required' => ['nombre_cliente', 'lista_productos'],
                 ],
             ],
         ],
@@ -346,6 +375,21 @@ function aiWaIdToMxDigits(string $waId): ?string
     }
 
     return substr($digits, -10);
+}
+
+/**
+ * Las entregas fisicas contra entrega solo aplican en la Zona Metropolitana de
+ * Guadalajara (lada 33). Regresa null si no se pudo determinar el telefono (para no
+ * asumir fuera de cobertura por falta de dato), true/false si si se pudo.
+ */
+function aiPhoneHasLocalLada(string $waId, string $lada = '33'): ?bool
+{
+    $digits = aiWaIdToMxDigits($waId);
+    if ($digits === null || strlen($digits) !== 10) {
+        return null;
+    }
+
+    return substr($digits, 0, strlen($lada)) === $lada;
 }
 
 function aiGetOrCreateConversation(PDO $pdo, string $waId, ?string $perfilNombre): array
@@ -675,6 +719,31 @@ function aiCustomerRepliedAfterFollowup(PDO $pdo, int $idConversacion): bool
     // >= (no solo >) para no perder al cliente que contesta en el mismo segundo en que
     // el cron marco el seguimiento como enviado -- deben tratarse como respuesta valida.
     return $tsSeguimiento !== false && $tsCliente !== false && $tsCliente >= $tsSeguimiento;
+}
+
+/**
+ * Horas desde el mensaje mas reciente (de cualquier rol) antes del turno actual. Se usa
+ * para avisarle a aiBuildSystemPrompt() cuando el cliente esta retomando una conversacion
+ * inactiva, y no debe saludarlo como si fuera la primera vez. Null si es la primera vez
+ * que escribe (todavia no hay mensajes previos que comparar).
+ */
+function aiHoursSinceLastMessage(PDO $pdo, int $idConversacion): ?float
+{
+    $stmt = $pdo->prepare(
+        'SELECT MAX(creado_en) FROM whatsapp_mensajes WHERE id_conversacion = ?'
+    );
+    $stmt->execute([$idConversacion]);
+    $ultimoMensaje = $stmt->fetchColumn();
+    if (empty($ultimoMensaje)) {
+        return null;
+    }
+
+    $ts = strtotime((string)$ultimoMensaje);
+    if ($ts === false) {
+        return null;
+    }
+
+    return (time() - $ts) / 3600;
 }
 
 function aiHoursSinceFirstMessage(PDO $pdo, int $idConversacion): ?float
@@ -1039,16 +1108,114 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
     return ['items' => $items, 'errores' => $errores];
 }
 
+/**
+ * Resuelve el id_cliente para un pedido creado por Alex desde WhatsApp: reutiliza el
+ * cliente si el telefono ya coincide con uno existente (findClienteByPhone, misma
+ * funcion que usa el checkout web), o crea uno nuevo -- solo nombre + telefono, igual
+ * que api/create_customer.php -- si no hay match. Nunca pisa el nombre de un cliente
+ * ya existente con lo que el cliente escribio en WhatsApp esta vez.
+ */
+function aiFindOrCreateCliente(PDO $pdo, string $waId, string $nombre): int
+{
+    $telefonoDigits = aiWaIdToMxDigits($waId);
+    if ($telefonoDigits !== null && $telefonoDigits !== '') {
+        $match = findClienteByPhone($pdo, $telefonoDigits);
+        if (is_array($match) && isset($match['id_cliente']) && (int)$match['id_cliente'] > 0) {
+            return (int)$match['id_cliente'];
+        }
+    }
+
+    $telefonoFormateado = ($telefonoDigits !== null && strlen($telefonoDigits) === 10)
+        ? sprintf('(%s) - %s - %s', substr($telefonoDigits, 0, 3), substr($telefonoDigits, 3, 3), substr($telefonoDigits, 6, 4))
+        : null;
+
+    $storeValue = static function (?string $value): ?string {
+        $value = $value !== null ? trim($value) : null;
+        if ($value === null || $value === '') {
+            return $value;
+        }
+        return function_exists('piiEncryptValue') ? piiEncryptValue($value) : $value;
+    };
+
+    $stmt = $pdo->prepare("INSERT INTO clientes (nombre, telefono, estado) VALUES (?, ?, 'activo')");
+    $stmt->execute([$storeValue($nombre), $storeValue($telefonoFormateado)]);
+
+    return (int)$pdo->lastInsertId();
+}
+
+/**
+ * Guarda la direccion de entrega de un pedido de WhatsApp como direccion reutilizable
+ * del cliente, igual que hace api/ventas.php (INSERT INTO cliente_direcciones con
+ * alias/direccion/maps_link cifrados). Geocodifica solo si hay MAPS_KEY configurada;
+ * si no hay llave o la geocodificacion falla, guarda la direccion de todos modos sin
+ * lat/lng. Nunca lanza excepcion: guardar la direccion es un extra, no debe tumbar
+ * un pedido que ya se registro correctamente.
+ */
+function aiSaveClienteDireccion(PDO $pdo, int $idCliente, string $direccion, string $mapsLink = ''): void
+{
+    $direccion = trim($direccion);
+    $mapsLink = trim($mapsLink);
+    if ($idCliente <= 0 || $direccion === '') {
+        return;
+    }
+
+    try {
+        $stmtExiste = $pdo->prepare('SELECT COUNT(*) FROM cliente_direcciones WHERE id_cliente = ?');
+        $stmtExiste->execute([$idCliente]);
+        $esPrimera = ((int)$stmtExiste->fetchColumn()) === 0;
+
+        $latitud = null;
+        $longitud = null;
+        $apiKey = function_exists('getMapsApiKey') ? getMapsApiKey(false) : '';
+        if ($apiKey !== '' && function_exists('deliveryResolveCoordinates')) {
+            $coords = deliveryResolveCoordinates($mapsLink, $direccion, $apiKey);
+            if (is_array($coords)) {
+                $latitud = $coords['lat'] ?? null;
+                $longitud = $coords['lng'] ?? null;
+            }
+        }
+
+        $storeValue = static function (?string $value): ?string {
+            $value = $value !== null ? trim($value) : null;
+            if ($value === null || $value === '') {
+                return $value;
+            }
+            return function_exists('piiEncryptValue') ? piiEncryptValue($value) : $value;
+        };
+
+        $columnas = ['id_cliente', 'alias', 'direccion', 'maps_link', 'es_default'];
+        $placeholders = ['?', '?', '?', '?', '?'];
+        $params = [$idCliente, $storeValue('WhatsApp'), $storeValue($direccion), $storeValue($mapsLink !== '' ? $mapsLink : null), $esPrimera ? 1 : 0];
+
+        if ($latitud !== null) {
+            $columnas[] = 'latitud';
+            $placeholders[] = '?';
+            $params[] = $latitud;
+        }
+        if ($longitud !== null) {
+            $columnas[] = 'longitud';
+            $placeholders[] = '?';
+            $params[] = $longitud;
+        }
+
+        $sql = 'INSERT INTO cliente_direcciones (' . implode(', ', $columnas) . ') VALUES (' . implode(', ', $placeholders) . ')';
+        $pdo->prepare($sql)->execute($params);
+    } catch (Throwable $e) {
+        error_log('WARNING: no se pudo guardar direccion de WhatsApp para cliente #' . $idCliente . ': ' . $e->getMessage());
+    }
+}
+
 function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
 {
     $nombre = trim((string)($args['nombre_cliente'] ?? ''));
     $telefonoBruto = trim((string)($args['telefono'] ?? ''));
     $direccion = trim((string)($args['direccion_envio'] ?? ''));
+    $mapsLink = trim((string)($args['maps_link_cliente'] ?? ''));
     $metodoPago = trim((string)($args['metodo_pago_preferido'] ?? ''));
     $listaProductos = is_array($args['lista_productos'] ?? null) ? $args['lista_productos'] : [];
 
-    if ($nombre === '' || $direccion === '' || empty($listaProductos)) {
-        return ['ok' => false, 'message' => 'Faltan datos para registrar el pedido (nombre, direccion o productos).'];
+    if ($nombre === '' || empty($listaProductos)) {
+        return ['ok' => false, 'message' => 'Faltan datos para registrar el pedido (nombre o productos).'];
     }
 
     $telefonoDigits = normalizePhoneDigitsMx($telefonoBruto) ?? aiWaIdToMxDigits((string)($context['wa_id'] ?? ''));
@@ -1062,6 +1229,25 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         return ['ok' => false, 'message' => 'No se pudo validar ningun producto del pedido.'];
     }
 
+    // Se resuelve/crea el cliente ANTES de validar la direccion: aunque falte la
+    // direccion, ya queda registrado el contacto (nombre + telefono) para que un
+    // asesor humano solo tenga que completar la direccion, no capturar todo de cero.
+    $idClienteExistente = (isset($context['id_cliente']) && (int)$context['id_cliente'] > 0) ? (int)$context['id_cliente'] : null;
+    try {
+        $idCliente = $idClienteExistente ?? aiFindOrCreateCliente($pdo, (string)($context['wa_id'] ?? ''), $nombre);
+    } catch (Throwable $e) {
+        error_log('ERROR en aiToolAgendarVenta al crear/resolver cliente: ' . $e->getMessage());
+        $idCliente = $idClienteExistente;
+    }
+
+    if ($direccion === '') {
+        aiLogDiagnosticError($pdo, (int)($context['id_conversacion'] ?? 0) ?: null, 'venta_sin_direccion', $nombre, ['id_cliente' => $idCliente]);
+        if (!empty($context['id_conversacion'])) {
+            aiToolTransferirHumano($pdo, ['motivo' => 'Cliente quiere comprar pero falta su direccion completa de entrega.'], $context);
+        }
+        return ['ok' => false, 'message' => 'Ya quedo registrado el cliente, pero falta la direccion completa de entrega (calle, numero, colonia, codigo postal y ciudad) para poder agendar el pedido.'];
+    }
+
     $data = [
         'items' => array_map(static function (array $item): array {
             return ['id_producto' => $item['id_producto'], 'quantity' => $item['quantity'], 'precio' => $item['precio']];
@@ -1073,7 +1259,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         ],
         'tipo_entrega' => 'Domicilio',
         'id_usuario' => 1,
-        'id_cliente' => (isset($context['id_cliente']) && (int)$context['id_cliente'] > 0) ? (int)$context['id_cliente'] : null,
+        'id_cliente' => (!empty($idCliente) && $idCliente > 0) ? $idCliente : null,
     ];
 
     try {
@@ -1085,6 +1271,21 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
 
     if (empty($result['success'])) {
         return ['ok' => false, 'message' => (string)($result['message'] ?? 'No fue posible registrar el pedido.')];
+    }
+
+    if (!empty($idCliente) && $idCliente > 0) {
+        aiSaveClienteDireccion($pdo, $idCliente, $direccion, $mapsLink);
+    }
+
+    // Distintivo de que este pedido lo agendo Alex y no el checkout web ni un vendedor
+    // desde el panel. dbCreatePublicOrder es compartido con esos otros flujos, asi que
+    // se marca aqui despues, en vez de agregarle un parametro que solo aplica a este caller.
+    if (!empty($result['id_pedido'])) {
+        try {
+            $pdo->prepare('UPDATE pedidos SET creado_por_ia = 1 WHERE id_pedido = ?')->execute([(int)$result['id_pedido']]);
+        } catch (Throwable $e) {
+            error_log('WARNING: no se pudo marcar creado_por_ia en el pedido: ' . $e->getMessage());
+        }
     }
 
     // dbCreatePublicOrder no tiene parametro para el metodo de pago preferido (siempre usa el default);
@@ -1455,6 +1656,11 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         return [];
     }
 
+    // Se mide ANTES de guardar el mensaje entrante actual, para que refleje el silencio
+    // previo a este turno y no siempre de ~0 horas.
+    $horasInactividad = aiHoursSinceLastMessage($pdo, $idConversacion);
+    $esLadaLocal = aiPhoneHasLocalLada($waId);
+
     aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
 
     $etiquetasDisponibles = aiGetAllTags($pdo);
@@ -1463,7 +1669,9 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         $config,
         (string)($conversacion['nombre_perfil'] ?? $perfilNombre ?? ''),
         $etiquetasDisponibles,
-        $reglasAprendizaje
+        $reglasAprendizaje,
+        $horasInactividad,
+        $esLadaLocal
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],
@@ -1492,7 +1700,7 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
             error_log('ERROR llamando a DeepSeek en aiRunAssistantTurn: ' . $e->getMessage());
             aiLogDiagnosticError($pdo, $idConversacion, 'deepseek_conexion', $textoUsuario, ['excepcion' => $e->getMessage()]);
             aiToolTransferirHumano($pdo, ['motivo' => 'Fallo tecnico del asistente de IA: ' . $e->getMessage()], $context);
-            $finalText = 'En este momento tenemos un problema tecnico. En unos minutos un asesor te va a contactar.';
+            $finalText = 'Dame un segundo, te transfiero con un companero del equipo para que te de el detalle exacto de inmediato.';
             break;
         }
 
