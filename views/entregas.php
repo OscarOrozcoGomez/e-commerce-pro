@@ -29,6 +29,7 @@ if ($selectedFechaEntrega !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $select
 $error = '';
 $success = '';
 $repartidores = [];
+$justDeliveredPedidoId = null;
 
 // Motivos preestablecidos para cuando el repartidor no pudo completar una entrega.
 $deliveryCancelReasonOptions = [
@@ -69,6 +70,7 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                 if ($stmt->rowCount() > 0) {
                     logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
                     $success = 'Pedido entregado y cobrado correctamente.';
+                    $justDeliveredPedidoId = $id_pedido;
                 }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
@@ -416,6 +418,11 @@ include __DIR__ . '/includes/header.php';
     <?php if ($success): ?>
         <div class="card green lighten-4 green-text text-darken-4" style="padding: 10px;">
             <i class="material-icons left">check_circle</i> <?php echo esc($success); ?>
+            <?php if ($justDeliveredPedidoId): ?>
+                <a href="#modal-entrega-publicacion" id="ep-btn-abrir-modal" class="btn green darken-3 waves-effect waves-light modal-trigger" style="margin-left: 10px;">
+                    <i class="material-icons left">campaign</i> Publicar esta entrega
+                </a>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
     <?php if ($error): ?>
@@ -764,6 +771,40 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($isRepartidorView): ?>
+<div id="modal-entrega-publicacion" class="modal">
+    <div class="modal-content">
+        <h5><i class="material-icons left">campaign</i> Publicar esta entrega</h5>
+        <p class="grey-text" id="ep-colonia-info" style="min-height: 1.2em;"></p>
+        <div class="row" style="margin-bottom: 0;">
+            <div class="col s12">
+                <textarea id="ep-texto" class="materialize-textarea" maxlength="500" style="min-height: 90px;"></textarea>
+                <label for="ep-texto" class="active">Texto de la publicacion (editable)</label>
+            </div>
+        </div>
+        <div class="file-field input-field">
+            <div class="btn blue darken-2">
+                <span>Foto</span>
+                <input type="file" id="ep-foto-input" accept="image/*" capture="environment">
+            </div>
+            <div class="file-path-wrapper">
+                <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
+            </div>
+        </div>
+        <div class="center-align" style="margin: 10px 0;">
+            <img id="ep-foto-preview" src="" alt="Vista previa" style="display:none; max-width: 100%; max-height: 260px; border-radius: 6px;">
+        </div>
+        <p id="ep-status" class="center-align" style="min-height: 1.2em;"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" id="ep-btn-omitir" class="modal-close waves-effect btn-flat">Omitir</a>
+        <a href="#!" id="ep-btn-compartir" class="waves-effect waves-light btn green">
+            <i class="material-icons left">share</i> Compartir
+        </a>
+        <a href="#!" id="ep-btn-facebook" class="waves-effect waves-light btn blue darken-3">
+            <i class="material-icons left">facebook</i> Publicar en Facebook
+        </a>
+    </div>
+</div>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.toggle-cancel-entrega').forEach((btn) => {
@@ -795,6 +836,185 @@ document.addEventListener('DOMContentLoaded', function() {
 
         reasonSelect.addEventListener('change', syncOtherFieldVisibility);
         syncOtherFieldVisibility();
+    });
+});
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const epJustDeliveredId = <?php echo json_encode($justDeliveredPedidoId, JSON_UNESCAPED_UNICODE); ?>;
+    const epCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
+    const epEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+
+    if (!epJustDeliveredId) {
+        return;
+    }
+
+    const modalEl = document.getElementById('modal-entrega-publicacion');
+    const textoEl = document.getElementById('ep-texto');
+    const coloniaInfoEl = document.getElementById('ep-colonia-info');
+    const fotoInputEl = document.getElementById('ep-foto-input');
+    const previewEl = document.getElementById('ep-foto-preview');
+    const statusEl = document.getElementById('ep-status');
+    const btnFacebook = document.getElementById('ep-btn-facebook');
+    const btnCompartir = document.getElementById('ep-btn-compartir');
+    const btnOmitir = document.getElementById('ep-btn-omitir');
+    if (!modalEl || typeof M === 'undefined' || !M.Modal) {
+        return;
+    }
+
+    // No cachear la instancia: footer.php corre M.AutoInit() en su propio DOMContentLoaded y
+    // puede re-inicializar este mismo modal despues, dejando una instancia vieja/inerte si la
+    // guardamos una sola vez aqui. Pedimos la instancia vigente cada vez que se necesita.
+    function epGetModalInstance() {
+        return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true });
+    }
+
+    let epUploadedId = null;
+    let epUploadedForFile = null;
+
+    function epSetStatus(msg, isError) {
+        statusEl.textContent = msg || '';
+        statusEl.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
+    }
+
+    function epSetButtonsDisabled(disabled) {
+        [btnFacebook, btnCompartir].forEach((btn) => {
+            btn.classList.toggle('disabled', disabled);
+        });
+    }
+
+    fetch(epEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, csrf_token: epCsrfToken }),
+    })
+        .then((r) => r.json())
+        .then((data) => {
+            if (data && data.success) {
+                textoEl.value = data.texto || '';
+                M.textareaAutoResize(textoEl);
+                M.updateTextFields();
+                coloniaInfoEl.textContent = data.colonia_detectada
+                    ? 'Colonia detectada: ' + data.colonia_detectada + ' (puedes editar el texto arriba)'
+                    : 'No se pudo detectar la colonia automaticamente, ajusta el texto si quieres.';
+            }
+        })
+        .catch(() => {});
+
+    // Un pequeno retraso deja que M.AutoInit() del footer termine de correr primero,
+    // asi epGetModalInstance() ya opera sobre la instancia final (no una que luego se pisa).
+    setTimeout(function () {
+        epGetModalInstance().open();
+    }, 0);
+
+    fotoInputEl.addEventListener('change', function () {
+        epUploadedId = null;
+        epUploadedForFile = null;
+        epSetStatus('', false);
+        const file = fotoInputEl.files && fotoInputEl.files[0];
+        if (!file) {
+            previewEl.style.display = 'none';
+            previewEl.src = '';
+            return;
+        }
+        previewEl.src = URL.createObjectURL(file);
+        previewEl.style.display = 'block';
+    });
+
+    function epEnsureUploaded() {
+        const file = fotoInputEl.files && fotoInputEl.files[0];
+        if (!file) {
+            return Promise.reject(new Error('Selecciona una foto de la entrega primero.'));
+        }
+        if (epUploadedId && epUploadedForFile === file) {
+            return Promise.resolve(epUploadedId);
+        }
+        const formData = new FormData();
+        formData.append('foto', file);
+        formData.append('id_pedido', epJustDeliveredId);
+        formData.append('texto', textoEl.value || '');
+        formData.append('csrf_token', epCsrfToken);
+
+        return fetch(epEndpoint, { method: 'POST', body: formData })
+            .then((r) => r.json())
+            .then((data) => {
+                if (!data || !data.success) {
+                    throw new Error((data && data.error) || 'No se pudo subir la foto.');
+                }
+                epUploadedId = data.id_publicacion;
+                epUploadedForFile = file;
+                return epUploadedId;
+            });
+    }
+
+    btnFacebook.addEventListener('click', function (e) {
+        e.preventDefault();
+        epSetButtonsDisabled(true);
+        epSetStatus('Publicando en Facebook...', false);
+        epEnsureUploaded()
+            .then((idPublicacion) => fetch(epEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'publicar_facebook',
+                    id_pedido: epJustDeliveredId,
+                    id_publicacion: idPublicacion,
+                    texto: textoEl.value,
+                    csrf_token: epCsrfToken,
+                }),
+            }))
+            .then((r) => r.json())
+            .then((data) => {
+                if (!data || !data.success) {
+                    throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
+                }
+                epSetStatus('Publicado en Facebook correctamente.', false);
+            })
+            .catch((err) => epSetStatus(err.message, true))
+            .finally(() => epSetButtonsDisabled(false));
+    });
+
+    btnCompartir.addEventListener('click', function (e) {
+        e.preventDefault();
+        const file = fotoInputEl.files && fotoInputEl.files[0];
+        if (!file) {
+            epSetStatus('Selecciona una foto de la entrega primero.', true);
+            return;
+        }
+        epSetButtonsDisabled(true);
+        epSetStatus('Preparando para compartir...', false);
+        epEnsureUploaded()
+            .then((idPublicacion) => {
+                const canNativeShare = navigator.canShare && navigator.canShare({ files: [file] });
+                if (navigator.share && canNativeShare) {
+                    return navigator.share({ text: textoEl.value, files: [file] })
+                        .then(() => fetch(epEndpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'marcar_compartido', id_pedido: epJustDeliveredId, id_publicacion: idPublicacion, csrf_token: epCsrfToken }),
+                        }))
+                        .then(() => epSetStatus('Listo, elige WhatsApp (Estado) o Facebook en el menu para publicar.', false))
+                        .catch((err) => {
+                            if (err && err.name === 'AbortError') {
+                                epSetStatus('', false);
+                                return;
+                            }
+                            throw err;
+                        });
+                }
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textoEl.value).catch(() => {});
+                }
+                epSetStatus('Tu navegador no soporta compartir directo. Se copio el texto; descarga la foto desde la vista previa y compartela manualmente.', true);
+            })
+            .catch((err) => epSetStatus(err.message, true))
+            .finally(() => epSetButtonsDisabled(false));
+    });
+
+    btnOmitir.addEventListener('click', function () {
+        epGetModalInstance().close();
     });
 });
 </script>
