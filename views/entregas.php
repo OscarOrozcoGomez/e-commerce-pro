@@ -488,11 +488,11 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <?php if ($success): ?>
-        <div class="card green lighten-4 green-text text-darken-4" style="padding: 10px;">
-            <i class="material-icons left">check_circle</i> <?php echo esc($success); ?>
+        <div class="card green lighten-4 green-text text-darken-4" style="padding: 14px;">
+            <div><i class="material-icons left">check_circle</i> <?php echo esc($success); ?></div>
             <?php if ($justDeliveredPedidoId): ?>
-                <a href="#modal-entrega-publicacion" id="ep-btn-abrir-modal" class="btn green darken-3 waves-effect waves-light modal-trigger" style="margin-left: 10px;">
-                    <i class="material-icons left">campaign</i> Publicar esta entrega
+                <a href="#modal-entrega-publicacion" id="ep-btn-abrir-modal" class="btn purple darken-1 waves-effect waves-light modal-trigger" style="margin-top:10px; width:100%; max-width:340px;">
+                    <i class="material-icons left">campaign</i> Publicar en Redes
                 </a>
             <?php endif; ?>
         </div>
@@ -823,7 +823,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
                                 <?php $esAccionEntregar = !in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado']); ?>
-                                <form method="POST" data-entrega-pedido-form="1"<?php echo $esAccionEntregar ? ' data-accion-entregar="1"' : ''; ?>>
+                                <form method="POST">
                                     <?php echo csrfInput(); ?>
                                     <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
                                     <?php if (!$esAccionEntregar): ?>
@@ -833,7 +833,7 @@ include __DIR__ . '/includes/header.php';
                                                 <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                             </p>
                                         <?php endif; ?>
-                                        <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="return confirm('Salir a entregar este pedido?')">
+                                        <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Vas a salir a entregar este pedido?', 'orange darken-3', 'Sí, salir'); return false;">
                                             SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
                                         </button>
                                     <?php else: ?>
@@ -841,7 +841,7 @@ include __DIR__ . '/includes/header.php';
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro de este pedido? Despues podras subir la foto y publicarlo en redes.', 'green', 'Sí, confirmar'); return false;">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
                                     <?php endif; ?>
@@ -878,32 +878,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($isRepartidorView): ?>
-<div id="modal-tomar-foto-entrega" class="modal">
-    <div class="modal-content">
-        <h5><i class="material-icons left">photo_camera</i> Foto de la entrega</h5>
-        <p class="grey-text">Toma o elige una foto de la entrega antes de confirmar el cobro. Con la foto lista, se marca como entregado y se abre la publicacion.</p>
-        <div class="file-field input-field">
-            <div class="btn blue darken-2">
-                <span>Foto</span>
-                <input type="file" id="tf-foto-input" accept="image/*">
-            </div>
-            <div class="file-path-wrapper">
-                <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
-            </div>
-        </div>
-        <div class="center-align" style="margin: 10px 0;">
-            <img id="tf-foto-preview" src="" alt="Vista previa" style="display:none; max-width: 100%; max-height: 260px; border-radius: 6px;">
-        </div>
-        <p id="tf-status" class="center-align" style="min-height: 1.2em;"></p>
-    </div>
-    <div class="modal-footer">
-        <a href="#!" id="tf-btn-omitir" class="modal-close waves-effect btn-flat red-text">Omitir foto</a>
-        <a href="#!" id="tf-btn-confirmar" class="waves-effect waves-light btn green disabled">
-            <i class="material-icons left">done_all</i> Confirmar entrega y cobro
-        </a>
-    </div>
-</div>
-
 <div id="modal-entrega-publicacion" class="modal">
     <div class="modal-content">
         <h5><i class="material-icons left">campaign</i> Publicar esta entrega</h5>
@@ -956,6 +930,48 @@ include __DIR__ . '/includes/header.php';
     <input type="hidden" name="accion" value="en_camino">
     <input type="hidden" name="id_pedido" id="sec-form-id-pedido" value="">
 </form>
+
+<div id="modal-confirmar-entrega" class="modal">
+    <div class="modal-content">
+        <h5 id="mce-titulo"><i class="material-icons left">help_outline</i>Confirmar</h5>
+        <p id="mce-mensaje" style="font-size:1rem;"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect btn-flat">Cancelar</a>
+        <a href="#!" id="mce-btn-confirmar" class="waves-effect waves-light btn">Confirmar</a>
+    </div>
+</div>
+<script>
+// Modal de confirmacion generico para acciones de entrega, en vez del confirm() nativo del
+// navegador (feo e inconsistente con el resto de la UI). Reemplaza el boton de confirmar
+// cada vez para no acumular listeners de usos anteriores.
+function mceConfirmarFormulario(formEl, mensaje, colorClase, textoBoton) {
+    const modalEl = document.getElementById('modal-confirmar-entrega');
+    const mensajeEl = document.getElementById('mce-mensaje');
+    const btnConfirmar = document.getElementById('mce-btn-confirmar');
+    if (!formEl || !modalEl || !mensajeEl || !btnConfirmar || typeof M === 'undefined' || !M.Modal) {
+        if (formEl && window.confirm(mensaje)) {
+            formEl.requestSubmit ? formEl.requestSubmit() : formEl.submit();
+        }
+        return;
+    }
+
+    mensajeEl.textContent = mensaje;
+    btnConfirmar.className = 'waves-effect waves-light btn ' + (colorClase || 'green');
+    btnConfirmar.textContent = textoBoton || 'Confirmar';
+
+    const btnNuevo = btnConfirmar.cloneNode(true);
+    btnConfirmar.parentNode.replaceChild(btnNuevo, btnConfirmar);
+    btnNuevo.addEventListener('click', function () {
+        (M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true })).close();
+        formEl.requestSubmit ? formEl.requestSubmit() : formEl.submit();
+    });
+
+    (M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true })).open();
+}
+window.mceConfirmarFormulario = mceConfirmarFormulario;
+</script>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.toggle-cancel-entrega').forEach((btn) => {
@@ -1020,129 +1036,6 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const tfCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
-    const tfEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
-    const tfModalEl = document.getElementById('modal-tomar-foto-entrega');
-    const tfFotoInput = document.getElementById('tf-foto-input');
-    const tfPreview = document.getElementById('tf-foto-preview');
-    const tfStatus = document.getElementById('tf-status');
-    const tfBtnConfirmar = document.getElementById('tf-btn-confirmar');
-    const tfBtnOmitir = document.getElementById('tf-btn-omitir');
-    const tfForms = document.querySelectorAll('form[data-entrega-pedido-form="1"][data-accion-entregar="1"]');
-
-    // Sin modal/Materialize disponibles, los formularios se dejan tal cual (se envian de forma
-    // normal al hacer submit) para no bloquear la entrega si algo del JS fallo.
-    if (!tfModalEl || typeof M === 'undefined' || !M.Modal || tfForms.length === 0) {
-        return;
-    }
-
-    function tfGetModalInstance() {
-        return M.Modal.getInstance(tfModalEl) || M.Modal.init(tfModalEl, { dismissible: true });
-    }
-
-    let tfCurrentForm = null;
-    let tfUploadedId = null;
-
-    function tfSetStatus(msg, isError) {
-        tfStatus.textContent = msg || '';
-        tfStatus.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
-    }
-
-    function tfSubmitCurrentForm() {
-        if (!tfCurrentForm) {
-            return;
-        }
-        const formToSubmit = tfCurrentForm;
-        formToSubmit.dataset.tfConfirmado = '1';
-        if (formToSubmit.requestSubmit) {
-            formToSubmit.requestSubmit();
-        } else {
-            formToSubmit.submit();
-        }
-    }
-
-    tfForms.forEach((form) => {
-        form.addEventListener('submit', function (e) {
-            if (form.dataset.tfConfirmado === '1') {
-                return; // ya se subio la foto (o se omitio) y se confirmo desde el modal
-            }
-            e.preventDefault();
-            tfCurrentForm = form;
-            tfUploadedId = null;
-            tfFotoInput.value = '';
-            tfPreview.src = '';
-            tfPreview.style.display = 'none';
-            tfSetStatus('', false);
-            tfBtnConfirmar.classList.add('disabled');
-            tfGetModalInstance().open();
-        });
-    });
-
-    tfFotoInput.addEventListener('change', function () {
-        tfUploadedId = null;
-        tfBtnConfirmar.classList.add('disabled');
-        const file = tfFotoInput.files && tfFotoInput.files[0];
-        if (!file) {
-            tfPreview.style.display = 'none';
-            tfPreview.src = '';
-            tfSetStatus('', false);
-            return;
-        }
-        tfPreview.src = URL.createObjectURL(file);
-        tfPreview.style.display = 'block';
-
-        const idPedidoInput = tfCurrentForm ? tfCurrentForm.querySelector('[name="id_pedido"]') : null;
-        const idPedido = idPedidoInput ? idPedidoInput.value : '';
-        if (!idPedido) {
-            return;
-        }
-
-        tfSetStatus('Subiendo foto...', false);
-        const formData = new FormData();
-        formData.append('foto', file);
-        formData.append('id_pedido', idPedido);
-        formData.append('csrf_token', tfCsrfToken);
-
-        fetch(tfEndpoint, { method: 'POST', body: formData })
-            .then((r) => r.text())
-            .then((text) => {
-                let data;
-                try {
-                    data = text ? JSON.parse(text) : null;
-                } catch (err) {
-                    throw new Error('El servidor no respondio correctamente. Intenta de nuevo.');
-                }
-                if (!data || !data.success) {
-                    throw new Error((data && data.error) || 'No se pudo subir la foto.');
-                }
-                tfUploadedId = data.id_publicacion;
-                tfSetStatus('Foto lista.', false);
-                tfBtnConfirmar.classList.remove('disabled');
-            })
-            .catch((err) => {
-                tfSetStatus(err.message, true);
-            });
-    });
-
-    tfBtnConfirmar.addEventListener('click', function (e) {
-        e.preventDefault();
-        if (tfBtnConfirmar.classList.contains('disabled') || !tfUploadedId) {
-            return;
-        }
-        tfGetModalInstance().close();
-        tfSubmitCurrentForm();
-    });
-
-    tfBtnOmitir.addEventListener('click', function () {
-        // El modal ya se cierra solo (btn-flat trae la clase modal-close); solo falta enviar
-        // el formulario de todos modos, sin foto.
-        setTimeout(tfSubmitCurrentForm, 0);
-    });
-});
-</script>
-
-<script>
 document.addEventListener('DOMContentLoaded', function() {
     const epJustDeliveredId = <?php echo json_encode($justDeliveredPedidoId, JSON_UNESCAPED_UNICODE); ?>;
     const epCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
@@ -1193,9 +1086,10 @@ document.addEventListener('DOMContentLoaded', function() {
         return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true });
     }
 
-    // Al cerrar el modal de publicacion (Omitir, Compartir/Facebook o clic afuera), sugiere
-    // marcar como "en camino" el siguiente pedido de la ruta guardada, para no tener que
-    // volver a buscarlo manualmente en la lista despues de cada entrega.
+    // Sugiere marcar como "en camino" el siguiente pedido de la ruta guardada apenas se
+    // confirma la entrega, para no tener que volver a buscarlo manualmente en la lista. Ya
+    // no depende de abrir/cerrar el modal de publicar (que ahora es manual, ver boton
+    // "Publicar en Redes" en el aviso de exito), asi que se muestra directo.
     (function setupSiguienteEnCaminoPrompt() {
         const stops = (function () {
             try {
@@ -1248,17 +1142,15 @@ document.addEventListener('DOMContentLoaded', function() {
             secFormEl.submit();
         });
 
-        const publishInstance = epGetModalInstance();
-        publishInstance.options.onCloseEnd = function () {
-            setTimeout(function () {
-                (M.Modal.getInstance(secModalEl) || M.Modal.init(secModalEl, { dismissible: true })).open();
-            }, 250);
-        };
+        // Pequeno retraso para dejar que M.AutoInit() del footer termine de correr primero.
+        setTimeout(function () {
+            (M.Modal.getInstance(secModalEl) || M.Modal.init(secModalEl, { dismissible: true })).open();
+        }, 250);
     })();
 
     let epUploadedId = null;
     let epUploadedForFile = null;
-    let epServerPhotoFile = null; // foto ya subida antes de cobrar, reconstruida como File para poder compartirla
+    let epServerPhotoFile = null; // foto ya subida en un intento anterior, reconstruida como File para poder compartirla
 
     // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
     // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
@@ -1303,8 +1195,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 coloniaInfoEl.textContent = infoPartes.join(' | ') + ' (puedes editar el texto arriba)';
 
-                // La foto ya se subio antes de cobrar (modal-tomar-foto-entrega); se muestra
-                // de una vez sin pedirle al repartidor que la vuelva a seleccionar.
+                // Si ya se habia subido una foto antes para este pedido (p.ej. abrio el modal,
+                // eligio foto, y cerro sin compartir), se muestra de una vez en vez de pedirle
+                // al repartidor que la vuelva a seleccionar.
                 if (data.id_publicacion && data.foto_url) {
                     epUploadedId = data.id_publicacion;
                     previewEl.src = data.foto_url;
@@ -1320,11 +1213,9 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(() => {});
 
-    // Un pequeno retraso deja que M.AutoInit() del footer termine de correr primero,
-    // asi epGetModalInstance() ya opera sobre la instancia final (no una que luego se pisa).
-    setTimeout(function () {
-        epGetModalInstance().open();
-    }, 0);
+    // Ya no se abre solo: el repartidor decide cuando publicar con el boton "Publicar en
+    // Redes" del aviso de exito (id="ep-btn-abrir-modal", modal-trigger de Materialize).
+    // Antes se forzaba a abrir de inmediato despues de cobrar, lo cual interrumpia el flujo.
 
     fotoInputEl.addEventListener('change', function () {
         epUploadedId = null;
@@ -2231,6 +2122,46 @@ document.addEventListener('DOMContentLoaded', () => {
     .route-stop-risk {
         border-left: 4px solid #c62828;
         background: #ffebee;
+    }
+
+    /* Modal de publicar entrega / confirmar accion: legible y usable en pantallas de celular. */
+    #modal-entrega-publicacion,
+    #modal-confirmar-entrega {
+        width: 90%;
+        max-width: 560px;
+    }
+    #modal-entrega-publicacion .modal-footer,
+    #modal-confirmar-entrega .modal-footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+    }
+    #modal-entrega-publicacion .file-field.input-field {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+    }
+    @media only screen and (max-width: 600px) {
+        #modal-entrega-publicacion,
+        #modal-confirmar-entrega {
+            width: 96%;
+            max-height: 90%;
+        }
+        #modal-entrega-publicacion .modal-footer > a,
+        #modal-confirmar-entrega .modal-footer > a {
+            width: 100%;
+            margin: 4px 0 !important;
+            text-align: center;
+        }
+        #modal-entrega-publicacion .file-field.input-field .btn {
+            width: 100%;
+        }
+        #modal-entrega-publicacion .file-path-wrapper {
+            width: 100%;
+        }
     }
 </style>
 
