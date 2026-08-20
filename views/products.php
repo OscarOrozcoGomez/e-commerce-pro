@@ -17,9 +17,14 @@ include __DIR__ . '/includes/header.php';
     <div class="row" id="alerts-container"></div>
     <div class="row">
         <div class="col s12">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0;">Gestionar Productos</h4>
-                <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <?php if (canBulkAssignCategories()): ?>
+                        <a href="bulk_assign_category.php" class="btn purple darken-1 waves-effect waves-light"><i class="material-icons left">label</i> Asignar Categoría a Varios</a>
+                    <?php endif; ?>
+                    <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
+                </div>
             </div>
         </div>
     </div>
