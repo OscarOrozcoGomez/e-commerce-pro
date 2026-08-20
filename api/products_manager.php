@@ -398,6 +398,92 @@ try {
                 throw new Exception("Error al crear categoría");
             }
         }
+        elseif ($action === 'bulk_assign_category') {
+            // Aunque toda la API ya exige 'gestionar_productos' arriba, esta accion en
+            // particular queda reservada solo a admin/encargado (a peticion expresa).
+            if (!canBulkAssignCategories()) {
+                throw new Exception("No tienes permiso para asignar categorías de forma masiva.");
+            }
+
+            // Asigna una categoria a muchos productos a la vez, SIN tocar las categorias que
+            // cada producto ya tenia (a diferencia de dbSetProductCategories, que reemplaza
+            // todo el set de categorias de un producto individual).
+            $idCategoria = (int)($data['id_categoria'] ?? 0);
+            $nuevaCategoria = trim((string)($data['nueva_categoria'] ?? ''));
+
+            $productosIdsRaw = $data['productos_ids'] ?? [];
+            $productosIds = [];
+            if (is_array($productosIdsRaw)) {
+                foreach ($productosIdsRaw as $pid) {
+                    $pidInt = (int)$pid;
+                    if ($pidInt > 0) {
+                        $productosIds[] = $pidInt;
+                    }
+                }
+            }
+            $productosIds = array_values(array_unique($productosIds));
+
+            if (empty($productosIds)) {
+                throw new Exception("Selecciona al menos un producto.");
+            }
+
+            if ($nuevaCategoria !== '') {
+                if (!isAdmin()) {
+                    throw new Exception("Solo un administrador puede crear categorías nuevas. Selecciona una existente o pide que la creen primero.");
+                }
+                if (!dbCreateCategory($nuevaCategoria)) {
+                    throw new Exception("No se pudo crear la categoría.");
+                }
+                $stmtCat = $pdo->prepare("SELECT id_categoria FROM categorias WHERE nombre = ? LIMIT 1");
+                $stmtCat->execute([$nuevaCategoria]);
+                $idCategoria = (int)($stmtCat->fetchColumn() ?: 0);
+            }
+
+            if ($idCategoria <= 0) {
+                throw new Exception("Selecciona una categoría existente o escribe el nombre de una nueva.");
+            }
+
+            $pdo->beginTransaction();
+            try {
+                // SELECT + INSERT (en vez de INSERT IGNORE / ON DUPLICATE KEY) porque no se
+                // depende de que producto_categorias tenga una llave unica compuesta.
+                $stmtCheck = $pdo->prepare("SELECT 1 FROM producto_categorias WHERE id_producto = ? AND id_categoria = ?");
+                $stmtInsert = $pdo->prepare("INSERT INTO producto_categorias (id_producto, id_categoria) VALUES (?, ?)");
+                $agregados = 0;
+                foreach ($productosIds as $pid) {
+                    $stmtCheck->execute([$pid, $idCategoria]);
+                    if ($stmtCheck->fetchColumn()) {
+                        continue; // ya tenia esta categoria, no se duplica
+                    }
+                    $stmtInsert->execute([$pid, $idCategoria]);
+                    $agregados++;
+                }
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            if (function_exists('logAudit')) {
+                logAudit(
+                    'CATEGORIA_ASIGNADA_MASIVA',
+                    'producto_categorias',
+                    $idCategoria,
+                    'Categoria #' . $idCategoria . ' asignada a ' . $agregados . ' de ' . count($productosIds) . ' productos seleccionados por ' . (string)($usuario['nombre'] ?? 'usuario')
+                );
+            }
+
+            $yaTenian = count($productosIds) - $agregados;
+            $mensaje = 'Categoría asignada a ' . $agregados . ' producto(s).' . ($yaTenian > 0 ? ' ' . $yaTenian . ' ya la tenían.' : '');
+            echo json_encode([
+                'success' => true,
+                'message' => $mensaje,
+                'agregados' => $agregados,
+                'ya_tenian' => $yaTenian,
+            ]);
+        }
     }
 } catch (Throwable $e) {
     http_response_code(400);

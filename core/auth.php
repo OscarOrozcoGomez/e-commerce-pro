@@ -261,6 +261,14 @@ function canScheduleSalesOrders(): bool
 }
 
 /**
+ * Verifica si el usuario puede asignar una categoria a muchos productos a la vez.
+ */
+function canBulkAssignCategories(): bool
+{
+    return isAuthenticated() && (isAdmin() || isEncargado());
+}
+
+/**
  * Obtiene el ID del almacén del usuario actual.
  *
  * @return int|null
