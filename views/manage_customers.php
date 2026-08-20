@@ -4,6 +4,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/delivery_route_utils.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
+require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 requireAuth();
 if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
@@ -336,16 +337,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $success = 'Direccion eliminada.';
             } elseif ($accion === 'marcar_direccion_confirmada') {
                 $idDireccion = (int)($_POST['id_direccion'] ?? 0);
-                if (!$hasClienteDireccionesTable || $idCliente <= 0 || $idDireccion <= 0) {
+                if (!$hasClienteDireccionesTable) {
                     throw new Exception('No se pudo confirmar la direccion.');
                 }
                 $idUsuarioActual = (int)($_SESSION['usuario']['id_usuario'] ?? 0);
-                $stmtConfirmar = $pdo->prepare('UPDATE cliente_direcciones SET confirmada_cliente = 1, confirmada_en = NOW(), confirmada_por = ? WHERE id_direccion = ? AND id_cliente = ?');
-                $stmtConfirmar->execute([$idUsuarioActual > 0 ? $idUsuarioActual : null, $idDireccion, $idCliente]);
-                if ($stmtConfirmar->rowCount() === 0) {
-                    throw new Exception('No se encontro la direccion para confirmar.');
+                $resultadoConfirmar = dbConfirmarDireccionCliente($pdo, $idCliente, $idDireccion, $idUsuarioActual);
+                if (!$resultadoConfirmar['success']) {
+                    throw new Exception($resultadoConfirmar['message']);
                 }
-                $success = 'Direccion marcada como confirmada por el cliente.';
+                $success = $resultadoConfirmar['message'];
             } elseif ($accion === 'guardar_horario_direccion') {
                 if (!$hasClienteDireccionesTable) {
                     throw new Exception('La tabla de direcciones no esta disponible para horarios.');

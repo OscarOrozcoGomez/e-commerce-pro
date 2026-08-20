@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
+require_once __DIR__ . '/../core/entrega_item_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
@@ -69,8 +70,9 @@ $productRejectReasonOptions = [
     'otro' => 'Otro',
 ];
 
-// Estados de pedido en los que el repartidor todavia puede editar la lista de productos.
-$pedidoEntregaEditableEstados = ['pendiente_pago', 'pagado', 'en_reparto'];
+// Estados de pedido en los que el repartidor todavia puede editar la lista de productos
+// (definidos junto a dbMarkProductoNoEntregado en core/entrega_item_utils.php).
+$pedidoEntregaEditableEstados = PEDIDO_ENTREGA_EDITABLE_ESTADOS;
 
 // Procesar cambio de estado de reparto
 if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
@@ -203,99 +205,11 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
             } else {
                 $motivoEtiqueta = $motivoKey === 'otro' ? mb_substr($motivoOtro, 0, 180) : $productRejectReasonOptions[$motivoKey];
 
-                $pdo->beginTransaction();
-                try {
-                    $stmtPedido = $pdo->prepare("SELECT estado, id_almacen FROM pedidos WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor FOR UPDATE");
-                    $stmtPedido->execute([':id_pedido' => $id_pedido, ':id_repartidor' => $usuario['id_usuario']]);
-                    $pedido = $stmtPedido->fetch(PDO::FETCH_ASSOC) ?: null;
-
-                    if (!$pedido) {
-                        throw new RuntimeException('No se encontro el pedido o no esta asignado a ti.');
-                    }
-
-                    $estadoPedido = (string)($pedido['estado'] ?? '');
-                    if (!in_array($estadoPedido, $pedidoEntregaEditableEstados, true)) {
-                        throw new RuntimeException('Este pedido ya no permite editar productos (estado actual: ' . strtoupper($estadoPedido) . ').');
-                    }
-
-                    $idAlmacenPedido = (int)($pedido['id_almacen'] ?? 0);
-
-                    $stmtItem = $pdo->prepare("SELECT id_producto, cantidad, subtotal, monto_descuento, estado_entrega
-                                                FROM detalle_pedidos
-                                                WHERE id_detalle = :id_detalle AND id_pedido = :id_pedido FOR UPDATE");
-                    $stmtItem->execute([':id_detalle' => $idDetalle, ':id_pedido' => $id_pedido]);
-                    $item = $stmtItem->fetch(PDO::FETCH_ASSOC) ?: null;
-
-                    if (!$item) {
-                        throw new RuntimeException('El producto no pertenece a este pedido.');
-                    }
-                    if ((string)$item['estado_entrega'] === 'rechazado') {
-                        throw new RuntimeException('Este producto ya estaba marcado como no entregado.');
-                    }
-
-                    // No permite dejar el pedido sin ningun producto entregado: para eso ya
-                    // existe "No pude entregar" (cancelar_entrega), que cancela todo el pedido.
-                    $stmtRestantes = $pdo->prepare("SELECT COUNT(*) FROM detalle_pedidos
-                                                     WHERE id_pedido = :id_pedido AND id_detalle != :id_detalle AND estado_entrega = 'entregado'");
-                    $stmtRestantes->execute([':id_pedido' => $id_pedido, ':id_detalle' => $idDetalle]);
-                    if ((int)$stmtRestantes->fetchColumn() <= 0) {
-                        throw new RuntimeException('No puedes marcar el ultimo producto como no entregado; usa "No pude entregar" para cancelar todo el pedido.');
-                    }
-
-                    $idProducto = (int)($item['id_producto'] ?? 0);
-                    $cantidad = max(0, (int)($item['cantidad'] ?? 0));
-                    $subtotalItem = (float)($item['subtotal'] ?? 0);
-                    $descuentoItem = (float)($item['monto_descuento'] ?? 0);
-                    $subtotalBaseItem = round($subtotalItem + $descuentoItem, 2);
-
-                    if ($idProducto > 0 && $cantidad > 0 && $idAlmacenPedido > 0) {
-                        // Mismo patron de resurtido y bitacora que 'cancelar_entrega' arriba.
-                        $stmtResurtir = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
-                                                       VALUES (:id_producto, :id_almacen, :cantidad, 2, 5)
-                                                       ON DUPLICATE KEY UPDATE cantidad_actual = cantidad_actual + VALUES(cantidad_actual)");
-                        $stmtResurtir->execute([
-                            ':id_producto' => $idProducto,
-                            ':id_almacen' => $idAlmacenPedido,
-                            ':cantidad' => $cantidad,
-                        ]);
-
-                        $stmtMovEntrada = $pdo->prepare(
-                            "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
-                             VALUES (:producto, 'entrada', :almacen, :cantidad, :usuario, :observacion)"
-                        );
-                        $stmtMovEntrada->execute([
-                            ':producto' => $idProducto,
-                            ':almacen' => $idAlmacenPedido,
-                            ':cantidad' => $cantidad,
-                            ':usuario' => $usuario['id_usuario'],
-                            ':observacion' => 'Producto no entregado, pedido #' . $id_pedido . ': ' . $motivoEtiqueta,
-                        ]);
-                    }
-
-                    $stmtRechazar = $pdo->prepare("UPDATE detalle_pedidos SET estado_entrega = 'rechazado', motivo_rechazo = :motivo WHERE id_detalle = :id_detalle");
-                    $stmtRechazar->execute([':motivo' => $motivoEtiqueta, ':id_detalle' => $idDetalle]);
-
-                    // Ajusta lo que se debe cobrar al entregar: ya no incluye este producto.
-                    $stmtAjustarTotales = $pdo->prepare("UPDATE pedidos
-                                                          SET subtotal = GREATEST(0, subtotal - :subtotal_base),
-                                                              descuento_total = GREATEST(0, descuento_total - :descuento),
-                                                              total = GREATEST(0, total - :subtotal_item)
-                                                          WHERE id_pedido = :id_pedido");
-                    $stmtAjustarTotales->execute([
-                        ':subtotal_base' => $subtotalBaseItem,
-                        ':descuento' => $descuentoItem,
-                        ':subtotal_item' => $subtotalItem,
-                        ':id_pedido' => $id_pedido,
-                    ]);
-
-                    $pdo->commit();
-                    $success = 'Producto marcado como no entregado. El stock fue devuelto al inventario.';
-                    logAudit('PRODUCTO_NO_ENTREGADO', 'detalle_pedidos', $idDetalle, 'Repartidor marco producto como no entregado en pedido #' . $id_pedido . '. Motivo: ' . $motivoEtiqueta);
-                } catch (Throwable $txe) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    $error = $txe->getMessage();
+                $resultadoNoEntregado = dbMarkProductoNoEntregado($pdo, $id_pedido, $idDetalle, (int)$usuario['id_usuario'], $motivoEtiqueta, (int)$usuario['id_usuario']);
+                if ($resultadoNoEntregado['success']) {
+                    $success = $resultadoNoEntregado['message'];
+                } else {
+                    $error = $resultadoNoEntregado['message'];
                 }
             }
         }
@@ -1672,12 +1586,39 @@ function routeFormatEtaHora(eta) {
     return match ? `${match[1]}:${match[2]} hrs` : '';
 }
 
+function routeFormatMoney(value) {
+    // Number(null) es 0 en JS, no NaN: hay que descartar null/undefined/'' explicitamente
+    // para no imprimir "Total: $0.00" cuando en realidad no hay total disponible.
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(2) : null;
+}
+
 function routeBuildWaMessage(stop) {
-    const numero = routeSafeText(stop.numero_pedido) || String(stop.id_pedido || '');
     const hora = routeFormatEtaHora(stop.eta_estimada);
-    let msg = `Hola! Tu pedido ${numero} va en camino.`;
+    const productos = Array.isArray(stop.productos) ? stop.productos : [];
+    const totalTexto = routeFormatMoney(stop.total);
+
+    let msg = 'Hola! Tu pedido va en camino';
+    if (productos.length > 0) {
+        const lista = productos
+            .map((p) => `• ${routeSafeText(p.cantidad) || '1'}x ${routeSafeText(p.nombre) || 'Producto'}`)
+            .join('\n');
+        msg += ':\n' + lista;
+    } else {
+        // Respaldo si el pedido no trae detalle de productos por alguna razon.
+        const numero = routeSafeText(stop.numero_pedido) || String(stop.id_pedido || '');
+        msg += ` ${numero}.`;
+    }
+
+    if (totalTexto !== null) {
+        msg += `\nTotal: $${totalTexto}`;
+    }
+
     if (hora) {
-        msg += ` Hora estimada de entrega: ${hora}.`;
+        msg += `\n\nHora estimada de entrega: ${hora}.`;
     }
     msg += ' Este horario es aproximado: podria cambiar segun el trafico o el clima. Te mantendremos informado por este mismo medio (WhatsApp). Gracias por tu paciencia.';
     return msg;
