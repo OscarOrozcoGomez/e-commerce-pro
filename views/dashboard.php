@@ -15,6 +15,32 @@ if (isCliente()) {
 $usuario = $_SESSION['usuario'];
 $pageTitle = 'Dashboard - Sistema POS';
 
+$aiPendientesCount = 0;
+$aiErroresPendientesCount = 0;
+$aiAsistenteActivo = true;
+if (isAdmin()) {
+    try {
+        $aiPendientesCount = (int) getPDO()
+            ->query("SELECT COUNT(*) FROM whatsapp_conversaciones WHERE estado_bot <> 'activo'")
+            ->fetchColumn();
+    } catch (Throwable $e) {
+        // La tabla puede no existir todavia si la migracion no se ha aplicado en este entorno.
+    }
+    try {
+        $aiErroresPendientesCount = (int) getPDO()
+            ->query('SELECT COUNT(*) FROM ai_errores_diagnostico WHERE resuelto = 0')
+            ->fetchColumn();
+    } catch (Throwable $e) {
+        // La tabla puede no existir todavia si la migracion no se ha aplicado en este entorno.
+    }
+    try {
+        $activoRaw = getPDO()->query('SELECT activo FROM ai_asistente_config WHERE id_config = 1')->fetchColumn();
+        $aiAsistenteActivo = $activoRaw === false ? true : ((int) $activoRaw === 1);
+    } catch (Throwable $e) {
+        // La tabla puede no existir todavia si la migracion no se ha aplicado en este entorno.
+    }
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -424,6 +450,37 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/cancelaciones_pedidos.php" class="btn waves-effect waves-light red darken-2">Ver Reporte</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">
+                            Asistente de IA (WhatsApp)
+                            <?php if ($aiPendientesCount > 0): ?>
+                                <span class="new badge red" data-badge-caption="esperando atencion"><?php echo (int) $aiPendientesCount; ?></span>
+                            <?php endif; ?>
+                            <?php if ($aiErroresPendientesCount > 0): ?>
+                                <span class="new badge orange darken-1" data-badge-caption="incidentes"><?php echo (int) $aiErroresPendientesCount; ?></span>
+                            <?php endif; ?>
+                        </span>
+                        <p>Configura el tono, promociones y politicas de Alex, y revisa conversaciones transferidas a un asesor.</p>
+                        <div class="switch" style="margin-top: 8px;">
+                            <label>
+                                Apagado
+                                <input type="checkbox" id="chk-alex-global-toggle" <?php echo $aiAsistenteActivo ? 'checked' : ''; ?>>
+                                <span class="lever"></span>
+                                Encendido
+                            </label>
+                            <span id="alex-toggle-status" class="grey-text" style="margin-left: 10px; font-size: 12px;">
+                                <?php echo $aiAsistenteActivo ? 'Alex esta respondiendo por WhatsApp.' : 'Alex esta apagado: no contesta ni manda seguimientos.'; ?>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/ai_assistant_settings.php" class="btn waves-effect waves-light green darken-2">Configurar</a>
+                        <a href="<?php echo BASE_URL; ?>views/ai_diagnostics.php" class="btn-flat waves-effect">Diagnostico</a>
                     </div>
                 </div>
             </div>
@@ -1083,6 +1140,40 @@ include __DIR__ . '/includes/header.php';
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const csrfToken = '<?php echo esc(getCsrfToken()); ?>';
+
+        const alexToggle = document.getElementById('chk-alex-global-toggle');
+        if (alexToggle) {
+            alexToggle.addEventListener('change', function () {
+                const activo = alexToggle.checked;
+                const statusEl = document.getElementById('alex-toggle-status');
+                alexToggle.disabled = true;
+
+                fetch('<?php echo BASE_URL; ?>api/ai_assistant_admin.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'toggle_bot_global', activo: activo, csrf_token: csrfToken })
+                })
+                    .then(function (res) { return res.json(); })
+                    .then(function (data) {
+                        if (data.success) {
+                            if (statusEl) {
+                                statusEl.textContent = data.activo
+                                    ? 'Alex esta respondiendo por WhatsApp.'
+                                    : 'Alex esta apagado: no contesta ni manda seguimientos.';
+                            }
+                        } else {
+                            alert(data.message || 'No se pudo cambiar el estado de Alex.');
+                            alexToggle.checked = !activo;
+                        }
+                        alexToggle.disabled = false;
+                    })
+                    .catch(function () {
+                        alert('Error de conexion al cambiar el estado de Alex.');
+                        alexToggle.checked = !activo;
+                        alexToggle.disabled = false;
+                    });
+            });
+        }
         const settlementSuggested = { dia: 0 };
         const sellerSalesFilters = { fechaInicio: '', fechaFin: '', estado: '', tipo: '' };
         const financeDailyState = { expanded: false, rows: [] };
