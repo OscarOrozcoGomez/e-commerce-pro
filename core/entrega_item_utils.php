@@ -9,16 +9,26 @@ const PEDIDO_ENTREGA_EDITABLE_ESTADOS = ['pendiente_pago', 'pagado', 'en_reparto
 
 /**
  * Marca un producto de un pedido como rechazado/no entregado por el cliente (p.ej. ya no
- * lo quiso al momento de la entrega): regresa la cantidad al inventario del almacen del
- * pedido, registra el movimiento y descuenta el producto del total a cobrar. No permite
- * dejar el pedido sin ningun producto entregado; para eso existe la cancelacion completa
- * del pedido (dbCancelOrderByCustomer / accion=cancelar_entrega).
+ * lo quiso al momento de la entrega, o el staff corrige el pedido): regresa la cantidad al
+ * inventario del almacen del pedido, registra el movimiento y descuenta el producto del
+ * total a cobrar. No permite dejar el pedido sin ningun producto entregado; para eso existe
+ * la cancelacion completa del pedido (dbCancelOrderByCustomer / accion=cancelar_entrega).
  *
+ * Usada tanto por el repartidor (views/entregas.php, con $idRepartidorFiltro = su propio
+ * id_usuario y los estados por defecto) como por admin/encargado (views/asignar_entregas.php,
+ * con $idRepartidorFiltro = null para poder editar el pedido de cualquier repartidor, y
+ * $estadosPermitidos ampliado para incluir pedidos ya entregados).
+ *
+ * @param ?int $idRepartidorFiltro Si se da, solo permite editar pedidos asignados a ese
+ *                                 repartidor (uso del propio repartidor). Null = sin filtro
+ *                                 (uso de admin/encargado).
+ * @param ?array $estadosPermitidos Estados de pedido desde los que se puede editar. Null usa
+ *                                  PEDIDO_ENTREGA_EDITABLE_ESTADOS (el flujo del repartidor).
  * @return array{success: bool, message: string}
  */
-function dbMarkProductoNoEntregado(PDO $pdo, int $idPedido, int $idDetalle, int $idRepartidor, string $motivoEtiqueta, ?int $idUsuarioAccion = null): array
+function dbMarkProductoNoEntregado(PDO $pdo, int $idPedido, int $idDetalle, ?int $idRepartidorFiltro, string $motivoEtiqueta, ?int $idUsuarioAccion = null, ?array $estadosPermitidos = null): array
 {
-    if ($idPedido <= 0 || $idDetalle <= 0 || $idRepartidor <= 0) {
+    if ($idPedido <= 0 || $idDetalle <= 0 || ($idRepartidorFiltro !== null && $idRepartidorFiltro <= 0)) {
         return ['success' => false, 'message' => 'Datos invalidos.'];
     }
 
@@ -27,25 +37,33 @@ function dbMarkProductoNoEntregado(PDO $pdo, int $idPedido, int $idDetalle, int 
         return ['success' => false, 'message' => 'Debes indicar un motivo.'];
     }
 
+    $estadosPermitidos = $estadosPermitidos ?? PEDIDO_ENTREGA_EDITABLE_ESTADOS;
+
     // FOR UPDATE serializa acciones concurrentes sobre el mismo pedido en MySQL; SQLite
     // (usado en pruebas) no soporta esta clausula.
     $isMysql = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql';
     $lockClause = $isMysql ? ' FOR UPDATE' : '';
+    $repartidorFilterClause = $idRepartidorFiltro !== null ? ' AND id_repartidor = :id_repartidor' : '';
 
     try {
         $pdo->beginTransaction();
 
-        $stmtPedido = $pdo->prepare("SELECT estado, id_almacen, subtotal, descuento_total, total FROM pedidos WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor{$lockClause}");
-        $stmtPedido->execute([':id_pedido' => $idPedido, ':id_repartidor' => $idRepartidor]);
+        $stmtPedido = $pdo->prepare("SELECT estado, id_almacen, subtotal, descuento_total, total FROM pedidos WHERE id_pedido = :id_pedido{$repartidorFilterClause}{$lockClause}");
+        $paramsPedido = [':id_pedido' => $idPedido];
+        if ($idRepartidorFiltro !== null) {
+            $paramsPedido[':id_repartidor'] = $idRepartidorFiltro;
+        }
+        $stmtPedido->execute($paramsPedido);
         $pedido = $stmtPedido->fetch(PDO::FETCH_ASSOC) ?: null;
 
         if (!$pedido) {
             $pdo->rollBack();
-            return ['success' => false, 'message' => 'No se encontro el pedido o no esta asignado a ti.'];
+            $mensajeNoEncontrado = $idRepartidorFiltro !== null ? 'No se encontro el pedido o no esta asignado a ti.' : 'No se encontro el pedido.';
+            return ['success' => false, 'message' => $mensajeNoEncontrado];
         }
 
         $estadoPedido = (string)($pedido['estado'] ?? '');
-        if (!in_array($estadoPedido, PEDIDO_ENTREGA_EDITABLE_ESTADOS, true)) {
+        if (!in_array($estadoPedido, $estadosPermitidos, true)) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Este pedido ya no permite editar productos (estado actual: ' . strtoupper($estadoPedido) . ').'];
         }

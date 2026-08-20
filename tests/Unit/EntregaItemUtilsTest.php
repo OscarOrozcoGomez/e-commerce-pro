@@ -177,6 +177,38 @@ final class EntregaItemUtilsTest extends TestCase
         $this->assertFalse($result['success']);
     }
 
+    public function testAdminCanRemoveProductFromAlreadyDeliveredOrderWithoutRepartidorFilter(): void
+    {
+        // Uso de admin/encargado (views/asignar_entregas.php): sin filtro de repartidor y
+        // con 'entregado' en la lista de estados permitidos.
+        $this->seedPedido(111, 5, 1, 'entregado', 900.00, 0.00, 900.00);
+        $this->seedDetalle(20, 111, 10, 2, 300.00, 0.00, 'entregado');
+        $this->seedDetalle(21, 111, 20, 1, 600.00, 0.00, 'entregado');
+        $this->seedInventario(10, 1, 0);
+
+        $result = dbMarkProductoNoEntregado($this->pdo, 111, 20, null, 'Ajuste de staff', 9, ['pendiente_pago', 'pagado', 'en_reparto', 'entregado']);
+
+        $this->assertTrue($result['success']);
+        $detalle = $this->pdo->query('SELECT estado_entrega FROM detalle_pedidos WHERE id_detalle = 20')->fetch();
+        $this->assertSame('rechazado', $detalle['estado_entrega']);
+        $stock = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 10 AND id_almacen = 1')->fetchColumn();
+        $this->assertSame(2, $stock);
+    }
+
+    public function testAdminFilterStillRejectsEntregadoWithDefaultStates(): void
+    {
+        // Sin pasar $estadosPermitidos, 'entregado' sigue sin ser editable (comportamiento
+        // del repartidor no cambia por default).
+        $this->seedPedido(112, 5, 1, 'entregado', 900.00, 0.00, 900.00);
+        $this->seedDetalle(22, 112, 10, 1, 300.00, 0.00, 'entregado');
+        $this->seedDetalle(23, 112, 20, 1, 600.00, 0.00, 'entregado');
+
+        $result = dbMarkProductoNoEntregado($this->pdo, 112, 22, null, 'Ajuste de staff', 9);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('estado actual', $result['message']);
+    }
+
     public function testReturnsFailureForEmptyMotivo(): void
     {
         $this->seedPedido(110, 5, 1, 'en_reparto', 900.00, 0.00, 900.00);
