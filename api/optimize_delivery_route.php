@@ -403,7 +403,7 @@ try {
     $placeholders = implode(',', array_fill(0, count($pedidoIds), '?'));
 
     $sql = "SELECT p.id_pedido, p.numero_pedido, p.id_repartidor, p.id_cliente, p.estado,
-                   p.fecha_entrega_programada,
+                   p.fecha_entrega_programada, p.total,
                    {$pedidoLatExpr} AS latitud,
                    {$pedidoLngExpr} AS longitud,
                    {$mapsExpr} AS maps_link,
@@ -429,6 +429,32 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $pedidos = $stmt->fetchAll();
+
+    // Productos por pedido: se usan para armar el mensaje de WhatsApp con la lista de lo
+    // que va en camino (en vez de solo el numero de pedido), ver routeBuildWaMessage en el JS.
+    $productosPorPedido = [];
+    if (!empty($pedidoIds)) {
+        $placeholdersProductos = implode(',', array_fill(0, count($pedidoIds), '?'));
+        $stmtProductos = $pdo->prepare(
+            "SELECT dp.id_pedido, dp.cantidad, pr.nombre, pr.nombre_variante
+             FROM detalle_pedidos dp
+             JOIN productos pr ON dp.id_producto = pr.id_producto
+             WHERE dp.id_pedido IN ({$placeholdersProductos})
+             ORDER BY dp.id_pedido ASC, dp.id_detalle ASC"
+        );
+        $stmtProductos->execute($pedidoIds);
+        foreach ($stmtProductos->fetchAll(PDO::FETCH_ASSOC) as $rowProducto) {
+            $pedidoIdProducto = (int)($rowProducto['id_pedido'] ?? 0);
+            $nombreProducto = (string)($rowProducto['nombre'] ?? '');
+            if (!empty($rowProducto['nombre_variante'])) {
+                $nombreProducto .= ' - ' . (string)$rowProducto['nombre_variante'];
+            }
+            $productosPorPedido[$pedidoIdProducto][] = [
+                'nombre' => $nombreProducto,
+                'cantidad' => (int)($rowProducto['cantidad'] ?? 0),
+            ];
+        }
+    }
 
     $preferenciasPorCliente = [];
     if ($hasClienteHorariosEntrega && !empty($pedidos)) {
@@ -602,6 +628,8 @@ try {
             'prioridad_entrega' => (int)($pedido['prioridad_entrega'] ?? 0),
             'tiempo_servicio_min' => max(0, (int)($pedido['tiempo_servicio_min'] ?? 5)),
             'delivery_preferences' => $deliveryPreferences,
+            'productos' => $productosPorPedido[$pedidoId] ?? [],
+            'total' => isset($pedido['total']) ? (float)$pedido['total'] : null,
         ];
     }
 
@@ -656,6 +684,7 @@ try {
         }, $validStops),
         'optimizeWaypointOrder' => false,
         'travelMode' => 'DRIVE',
+        'routingPreference' => 'TRAFFIC_AWARE',
     ];
 
     $requestBody = json_encode($body);

@@ -31,6 +31,22 @@ try {
     $stmtMeta->execute();
     $hasPickupNotificaciones = ((int)$stmtMeta->fetchColumn()) > 0;
 
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosTipoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    // Mismo criterio que views/asignar_entregas.php para identificar pedidos a domicilio
+    // (evita contar aqui los que son para recoger en sucursal).
+    $deliveryFilter = $hasPedidosTipoEntrega
+        ? "(
+            p.tipo_entrega = 'Domicilio'
+            OR ((p.tipo_entrega IS NULL OR TRIM(p.tipo_entrega) = '') AND p.observaciones LIKE '%ENTREGA: Domicilio%')
+        )"
+        : "p.observaciones LIKE '%ENTREGA: Domicilio%'";
+    $notPickupFilter = $hasPickupNotificaciones
+        ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = p.id_pedido)"
+        : '';
+
     $scopeSql = '';
     $scopeParams = [];
     if ($rol === 'encargado') {
@@ -156,6 +172,15 @@ try {
         // Blogs
         $stats['blogs'] = $pdo->query("SELECT COUNT(*) as total FROM blogs")->fetch();
 
+        // Por Entregar: pedidos a domicilio aun no entregados, asignados o no a un repartidor.
+        $stmt = $pdo->query(
+            "SELECT COUNT(*) as total
+             FROM pedidos p
+             WHERE p.estado IN ('pendiente_pago','pagado','en_reparto')
+               AND {$deliveryFilter}{$notPickupFilter}"
+        );
+        $stats['por_entregar'] = $stmt->fetch();
+
     } elseif ($rol === 'encargado') {
         $stmt = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(total), 0) as monto FROM pedidos WHERE id_almacen = ? AND DATE(fecha_creacion) = CURDATE() AND estado != 'cancelado'");
         $stmt->execute([$idAlmacen]);
@@ -184,7 +209,16 @@ try {
         $stmt->execute([$idAlmacen]);
         $stats['stock_bajo'] = $stmt->fetch();
 
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM pedidos WHERE id_repartidor IS NOT NULL AND estado IN ('pendiente_pago','pagado','en_reparto') AND id_almacen = ?");
+        // Por Entregar: pedidos a domicilio aun no entregados de la sucursal, asignados o no
+        // a un repartidor (la tarjeta enlaza a "Asignar Entregas", que es justo para los que
+        // aun no tienen repartidor).
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) as total
+             FROM pedidos p
+             WHERE p.estado IN ('pendiente_pago','pagado','en_reparto')
+               AND p.id_almacen = ?
+               AND {$deliveryFilter}{$notPickupFilter}"
+        );
         $stmt->execute([$idAlmacen]);
         $stats['por_entregar'] = $stmt->fetch();
 

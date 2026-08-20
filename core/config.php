@@ -246,6 +246,8 @@ function preloadSecretSources(): void
             'GA4_MEASUREMENT_ID' => ['GA4_MEASUREMENT_ID'],
             'GA4_DIRECT_ENABLED' => ['GA4_DIRECT_ENABLED'],
             'GOOGLE_ADS_SEND_TO' => ['GOOGLE_ADS_SEND_TO'],
+            'FB_PAGE_ID' => ['FB_PAGE_ID', 'FACEBOOK_PAGE_ID'],
+            'FB_PAGE_ACCESS_TOKEN' => ['FB_PAGE_ACCESS_TOKEN', 'TOKEN_FACEBOOK_PAGE_APP'],
         ];
 
         if (function_exists('gsmLoadSecretsCached')) {

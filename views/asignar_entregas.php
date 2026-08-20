@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/entrega_item_utils.php';
+require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
 
 requireAuth();
 if (!canManageDeliveryOrders()) {
@@ -13,6 +15,8 @@ if (!canManageDeliveryOrders()) {
 $pageTitle = 'Asignar Entregas';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
+// El encargado solo debe ver y asignar pedidos de su propia sucursal; el admin ve todas.
+$scopeAlmacenId = (!isAdmin() && isEncargado()) ? getCurrentAlmacenId() : null;
 $error = '';
 $success = '';
 $successActionUrl = '';
@@ -47,16 +51,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
             if ($accion === 'asignar' && isset($_POST['id_repartidor'])) {
                 $id_repartidor = intval($_POST['id_repartidor']);
                 $fechaRaw = trim((string)($_POST['fecha_entrega'] ?? ''));
-                $fecha = null;
-                if ($fechaRaw !== '') {
-                    $fechaParsed = DateTimeImmutable::createFromFormat('Y-m-d', $fechaRaw);
-                    if ($fechaParsed instanceof DateTimeImmutable) {
-                        $fecha = $fechaParsed->format('Y-m-d 00:00:00');
-                    } else {
-                        throw new Exception('La fecha de entrega no es valida.');
-                    }
+                $fechaValidation = deliveryValidateFechaEntregaAsignacion($fechaRaw);
+                $fecha = $fechaValidation['fecha'];
+                if (!$fechaValidation['valid']) {
+                    $error = (string)$fechaValidation['error'];
                 }
                 // El repartidor cobra al momento de entregar, no se requiere pago previo
+                if ($error === '') {
                 $hasPedidosTipoEntrega = false;
                 $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
                 $stmtMeta->execute();
@@ -100,6 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                     $success = 'Pedido asignado correctamente.';
                 } else {
                     $error = 'No se pudo asignar. Verifica que el pedido no esté ya en reparto o entregado.';
+                }
                 }
             } elseif ($accion === 'convertir_sucursal') {
                 $pdo->beginTransaction();
@@ -179,12 +181,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                     }
                     $error = $txe->getMessage();
                 }
+            } elseif ($accion === 'agregar_producto_pedido') {
+                $idProductoAgregar = (int)($_POST['id_producto'] ?? 0);
+                $cantidadAgregar = (int)($_POST['cantidad'] ?? 0);
+                $resultadoAgregar = dbAdminAgregarProductoPedido($pdo, $id_pedido, $idProductoAgregar, $cantidadAgregar, (int)($usuario['id_usuario'] ?? 0));
+                if ($resultadoAgregar['success']) {
+                    $success = $resultadoAgregar['message'];
+                } else {
+                    $error = $resultadoAgregar['message'];
+                }
+            } elseif ($accion === 'quitar_producto_pedido') {
+                $idDetalleQuitar = (int)($_POST['id_detalle'] ?? 0);
+                $motivoQuitar = trim((string)($_POST['motivo'] ?? ''));
+                if ($motivoQuitar === '') {
+                    $motivoQuitar = 'Ajuste de pedido por ' . (string)($usuario['nombre'] ?? 'administracion');
+                }
+                // Admin/encargado puede editar productos aunque el pedido ya se haya entregado
+                // (para agregar/quitar como parte de la misma venta), a diferencia del
+                // repartidor que solo puede hacerlo mientras aun no se entrega.
+                $estadosPermitidosAdmin = ['pendiente_pago', 'pagado', 'en_reparto', 'entregado'];
+                $resultadoQuitar = dbMarkProductoNoEntregado($pdo, $id_pedido, $idDetalleQuitar, null, $motivoQuitar, (int)($usuario['id_usuario'] ?? 0), $estadosPermitidosAdmin);
+                if ($resultadoQuitar['success']) {
+                    $success = $resultadoQuitar['message'];
+                } else {
+                    $error = $resultadoQuitar['message'];
+                }
             }
         } catch (PDOException $e) {
             $error = 'Error al asignar: ' . $e->getMessage();
         }
+
+        // Post/Redirect/Get: evita que recargar la pagina (o que el navegador la recargue
+        // solo porque estuvo en segundo plano) reenvie el mismo POST y dispare el aviso
+        // "Confirm Form Resubmission". El resultado viaja por sesion (flash) y se conserva
+        // la pestana activa (Por Asignar / Asignadas) segun que accion se acaba de hacer.
+        $tabsDeAsignadas = ['agregar_producto_pedido', 'quitar_producto_pedido'];
+        $_SESSION['asignar_entregas_flash'] = [
+            'error' => $error,
+            'success' => $success,
+            'successActionUrl' => $successActionUrl,
+            'successActionLabel' => $successActionLabel,
+        ];
+        $redirectTab = in_array($accion, $tabsDeAsignadas, true) ? 'asignadas' : '';
+        $redirectUrl = basename($_SERVER['PHP_SELF']) . ($redirectTab !== '' ? ('?tab=' . $redirectTab) : '');
+        header('Location: ' . $redirectUrl);
+        exit;
     }
 }
+
+if (isset($_SESSION['asignar_entregas_flash']) && is_array($_SESSION['asignar_entregas_flash'])) {
+    $flash = $_SESSION['asignar_entregas_flash'];
+    unset($_SESSION['asignar_entregas_flash']);
+    $error = (string)($flash['error'] ?? '');
+    $success = (string)($flash['success'] ?? '');
+    $successActionUrl = (string)($flash['successActionUrl'] ?? '');
+    $successActionLabel = (string)($flash['successActionLabel'] ?? '');
+}
+
+$activeTab = trim((string)($_GET['tab'] ?? '')) === 'asignadas' ? 'asignadas' : 'por-asignar';
 
 // Obtener pedidos pendientes de asignación (sin repartidor aún, estados pre-entrega)
 try {
@@ -250,22 +304,60 @@ try {
         ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = p.id_pedido)"
         : '';
 
+    $almacenFilter = $scopeAlmacenId !== null ? ' AND p.id_almacen = :id_almacen' : '';
     $sql = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             WHERE p.estado IN ('pendiente_pago','pagado')
               AND p.id_repartidor IS NULL
-              AND {$deliveryFilter}{$notPickupFilter}
+              AND {$deliveryFilter}{$notPickupFilter}{$almacenFilter}
             ORDER BY p.fecha_creacion DESC";
-    $pedidos = $pdo->query($sql)->fetchAll();
+    $stmtPedidos = $pdo->prepare($sql);
+    $stmtPedidos->execute($scopeAlmacenId !== null ? [':id_almacen' => $scopeAlmacenId] : []);
+    $pedidos = $stmtPedidos->fetchAll();
 
     // Obtener lista de repartidores
     $sql_rep = "SELECT id_usuario, nombre FROM usuarios WHERE id_rol = (SELECT id_rol FROM roles WHERE nombre = 'repartidor') AND estado = 'activo'";
     $repartidores = $pdo->query($sql_rep)->fetchAll();
+
+    // Pestaña "Asignadas": todo pedido a domicilio que ya tiene repartidor, en cualquier
+    // estado (incluye entregados y cancelados), para que admin/encargado vean el estado
+    // real y puedan seguir editando productos aunque ya se haya entregado.
+    $sqlAsignados = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono, r.nombre AS repartidor_nombre
+            FROM pedidos p
+            LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
+            LEFT JOIN usuarios r ON p.id_repartidor = r.id_usuario
+            WHERE p.id_repartidor IS NOT NULL{$notPickupFilter}{$almacenFilter}
+            ORDER BY (p.estado = 'cancelado') ASC, p.fecha_entrega_programada DESC, p.fecha_creacion DESC";
+    $stmtAsignados = $pdo->prepare($sqlAsignados);
+    $stmtAsignados->execute($scopeAlmacenId !== null ? [':id_almacen' => $scopeAlmacenId] : []);
+    $pedidosAsignados = $stmtAsignados->fetchAll();
+
+    $detallesPorPedidoAsignado = [];
+    if (!empty($pedidosAsignados)) {
+        $idsPedidosAsignados = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $pedidosAsignados)));
+        $placeholdersAsignados = implode(',', array_fill(0, count($idsPedidosAsignados), '?'));
+        $sqlDetallesAsignados = "SELECT dp.id_pedido, dp.id_detalle, dp.cantidad, dp.estado_entrega, dp.motivo_rechazo, pr.nombre, pr.nombre_variante
+                                  FROM detalle_pedidos dp
+                                  JOIN productos pr ON dp.id_producto = pr.id_producto
+                                  WHERE dp.id_pedido IN ({$placeholdersAsignados})
+                                  ORDER BY dp.id_pedido ASC, dp.id_detalle ASC";
+        $stmtDetallesAsignados = $pdo->prepare($sqlDetallesAsignados);
+        $stmtDetallesAsignados->execute($idsPedidosAsignados);
+        foreach ($stmtDetallesAsignados->fetchAll() as $detalleAsignado) {
+            $detallesPorPedidoAsignado[(int)$detalleAsignado['id_pedido']][] = $detalleAsignado;
+        }
+    }
+
+    // Catalogo simple para el selector de "Agregar producto" en la pestaña Asignadas.
+    $productosActivos = $pdo->query("SELECT id_producto, nombre, nombre_variante, precio_venta FROM productos WHERE estado = 'activo' ORDER BY nombre ASC, nombre_variante ASC")->fetchAll();
 } catch (PDOException $e) {
     $error = 'Error de base de datos: ' . $e->getMessage();
     $pedidos = [];
     $repartidores = [];
+    $pedidosAsignados = [];
+    $detallesPorPedidoAsignado = [];
+    $productosActivos = [];
 }
 
 include __DIR__ . '/includes/header.php';
@@ -293,11 +385,35 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
     <?php if ($error): ?>
-        <div class="card red lighten-4 red-text text-darken-4" style="padding: 10px;">
-            <i class="material-icons left">error</i> <?php echo esc($error); ?>
+        <div id="modal-error-asignacion" class="modal">
+            <div class="modal-content">
+                <h5><i class="material-icons left red-text text-darken-2">error</i>No se pudo asignar el pedido</h5>
+                <p><?php echo esc($error); ?></p>
+            </div>
+            <div class="modal-footer">
+                <a href="#!" class="modal-close waves-effect waves-light btn red darken-2">Entendido</a>
+            </div>
         </div>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                var elem = document.getElementById('modal-error-asignacion');
+                if (elem && typeof M !== 'undefined' && M.Modal) {
+                    M.Modal.init(elem, { dismissible: true }).open();
+                }
+            });
+        </script>
     <?php endif; ?>
 
+    <div class="row" style="margin-bottom:0;">
+        <div class="col s12">
+            <ul class="tabs">
+                <li class="tab col s6"><a href="#tab-por-asignar" <?php echo $activeTab === 'por-asignar' ? 'class="active"' : ''; ?>>Por Asignar (<?php echo count($pedidos); ?>)</a></li>
+                <li class="tab col s6"><a href="#tab-asignadas" <?php echo $activeTab === 'asignadas' ? 'class="active"' : ''; ?>>Asignadas (<?php echo count($pedidosAsignados); ?>)</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="tab-por-asignar">
     <div class="row">
         <div class="col s12">
             <div class="card">
@@ -344,7 +460,7 @@ include __DIR__ . '/includes/header.php';
                                                 </select>
 
                                                 <label class="assign-delivery-label" for="fecha-<?php echo (int)$p['id_pedido']; ?>">Día de entrega</label>
-                                                <input type="date" id="fecha-<?php echo (int)$p['id_pedido']; ?>" name="fecha_entrega" class="assign-delivery-date">
+                                                <input type="date" id="fecha-<?php echo (int)$p['id_pedido']; ?>" name="fecha_entrega" class="assign-delivery-date" required>
 
                                                 <button type="submit" class="btn indigo waves-effect waves-light assign-delivery-submit">
                                                     Asignar <i class="material-icons right">local_shipping</i>
@@ -368,6 +484,125 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
+    </div>
+    </div>
+
+    <div id="tab-asignadas">
+    <div class="row">
+        <div class="col s12">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title">Entregas Ya Asignadas</span>
+                    <p class="grey-text" style="font-size:0.9rem; margin-top:0;">Consulta el estado real de cada pedido asignado. Puedes agregar o quitar productos aunque el pedido ya se haya entregado (queda como parte de la misma venta).</p>
+
+                    <?php if (empty($pedidosAsignados)): ?>
+                        <p class="center-align grey-text">No hay pedidos asignados por ahora.</p>
+                    <?php else: ?>
+                        <?php
+                            $estadoAsignadoLabels = [
+                                'pendiente_pago' => ['Pendiente de pago', '#f57c00'],
+                                'pagado' => ['Pagado, por salir', '#1976d2'],
+                                'en_reparto' => ['En camino', '#5e35b1'],
+                                'entregado' => ['Entregado', '#388e3c'],
+                                'cancelado' => ['Cancelado', '#757575'],
+                            ];
+                        ?>
+                        <div class="row assign-deliveries-grid">
+                            <?php foreach ($pedidosAsignados as $pa): ?>
+                                <?php
+                                    $estadoPa = (string)($pa['estado'] ?? '');
+                                    [$estadoPaLabel, $estadoPaColor] = $estadoAsignadoLabels[$estadoPa] ?? [strtoupper($estadoPa), '#455a64'];
+                                    $puedeEditarAsignado = $estadoPa !== 'cancelado';
+                                    $itemsPa = $detallesPorPedidoAsignado[(int)$pa['id_pedido']] ?? [];
+                                    $entregadosRestantesPa = count(array_filter($itemsPa, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
+                                ?>
+                                <div class="col s12 m6 l4">
+                                    <div class="card assign-delivery-card">
+                                        <div class="card-content">
+                                            <div class="assign-delivery-header">
+                                                <span class="assign-delivery-numero"><?php echo esc((string)$pa['numero_pedido']); ?></span>
+                                                <span class="assign-delivery-badge" style="background:<?php echo esc($estadoPaColor); ?>;"><?php echo esc($estadoPaLabel); ?></span>
+                                            </div>
+
+                                            <div class="assign-delivery-row">
+                                                <i class="material-icons tiny">person</i>
+                                                <span><?php echo esc((string)($pa['cliente'] ?? 'N/A')); ?></span>
+                                            </div>
+                                            <div class="assign-delivery-row">
+                                                <i class="material-icons tiny">place</i>
+                                                <span class="grey-text text-darken-1"><?php echo esc((string)($pa['direccion'] ?? 'S/D')); ?></span>
+                                            </div>
+                                            <div class="assign-delivery-row">
+                                                <i class="material-icons tiny">person_pin</i>
+                                                <span class="grey-text text-darken-1">Repartidor: <?php echo esc((string)($pa['repartidor_nombre'] ?? 'N/A')); ?></span>
+                                            </div>
+                                            <div class="assign-delivery-total">$<?php echo number_format((float)$pa['total'], 2); ?></div>
+
+                                            <div class="assign-products-list">
+                                                <?php if (empty($itemsPa)): ?>
+                                                    <p class="grey-text" style="font-size:0.85rem;">Sin productos.</p>
+                                                <?php else: ?>
+                                                    <ul style="margin:0; padding-left:18px;">
+                                                        <?php foreach ($itemsPa as $itemPa): ?>
+                                                            <?php
+                                                                $itemRechazadoPa = (string)($itemPa['estado_entrega'] ?? 'entregado') === 'rechazado';
+                                                                $nombrePa = (string)$itemPa['nombre'] . (!empty($itemPa['nombre_variante']) ? ' - ' . (string)$itemPa['nombre_variante'] : '');
+                                                            ?>
+                                                            <li style="font-size:0.88rem; margin-bottom:6px;<?php echo $itemRechazadoPa ? ' text-decoration:line-through; color:#9e9e9e;' : ''; ?>">
+                                                                <?php echo (int)$itemPa['cantidad']; ?>x <?php echo esc($nombrePa); ?>
+                                                                <?php if ($itemRechazadoPa): ?>
+                                                                    <span class="new badge red" data-badge-caption="" style="margin-left:4px;">Quitado</span>
+                                                                <?php elseif ($puedeEditarAsignado): ?>
+                                                                    <form method="POST" style="display:inline;" onsubmit="return confirm('¿Quitar este producto del pedido? Se regresara al inventario.');">
+                                                                        <?php echo csrfInput(); ?>
+                                                                        <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
+                                                                        <input type="hidden" name="id_detalle" value="<?php echo (int)$itemPa['id_detalle']; ?>">
+                                                                        <input type="hidden" name="accion" value="quitar_producto_pedido">
+                                                                        <button type="submit" class="btn-flat red-text waves-effect" style="padding:0 4px; height:20px; line-height:20px; font-size:0.7rem; text-decoration:none;" <?php echo $entregadosRestantesPa <= 1 ? 'disabled title="No puedes quitar el ultimo producto; cancela el pedido completo si aplica."' : ''; ?>>
+                                                                        <i class="material-icons tiny" style="font-size:14px; vertical-align:middle;">close</i>Quitar
+                                                                        </button>
+                                                                    </form>
+                                                                <?php endif; ?>
+                                                            </li>
+                                                        <?php endforeach; ?>
+                                                    </ul>
+                                                <?php endif; ?>
+                                            </div>
+
+                                            <?php if ($puedeEditarAsignado): ?>
+                                                <form method="POST" class="assign-add-product-form" style="margin-top:10px; border-top:1px solid #eceff1; padding-top:10px;">
+                                                    <?php echo csrfInput(); ?>
+                                                    <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
+                                                    <input type="hidden" name="accion" value="agregar_producto_pedido">
+                                                    <label class="assign-delivery-label">Agregar producto</label>
+                                                    <select name="id_producto" required class="browser-default assign-delivery-select">
+                                                        <option value="">-- Seleccionar producto --</option>
+                                                        <?php foreach ($productosActivos as $prodOpt): ?>
+                                                            <?php $nombreProdOpt = (string)$prodOpt['nombre'] . (!empty($prodOpt['nombre_variante']) ? ' - ' . (string)$prodOpt['nombre_variante'] : ''); ?>
+                                                            <option value="<?php echo (int)$prodOpt['id_producto']; ?>"><?php echo esc($nombreProdOpt); ?> ($<?php echo number_format((float)$prodOpt['precio_venta'], 2); ?>)</option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                    <div style="display:flex; gap:8px; align-items:flex-end; margin-top:8px;">
+                                                        <div style="flex:1;">
+                                                            <label class="assign-delivery-label" style="margin-top:0;">Cantidad</label>
+                                                            <input type="number" name="cantidad" min="1" value="1" required style="width:100%; height:38px; border:1px solid #cfd8dc; border-radius:4px; padding:0 10px; box-sizing:border-box;">
+                                                        </div>
+                                                        <button type="submit" class="btn-small green darken-1 waves-effect waves-light" style="height:38px;">
+                                                            <i class="material-icons left" style="margin-right:2px;">add</i>Agregar
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
     </div>
 </div>
 

@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $step = 2;
             } else {
                 $resetError = null;
-                if (resetPasswordWithToken($code, $new_pass, $resetError)) {
+                if (resetPasswordWithToken($email_input, $code, $new_pass, $resetError)) {
                     $success = 'Tu contraseña ha sido actualizada con éxito.';
                     $step = 3; // Éxito total
                 } else {

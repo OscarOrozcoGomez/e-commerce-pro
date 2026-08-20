@@ -76,7 +76,38 @@
 <!-- Scripts JS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 <script>
+    // Los links con clase "whatsapp-business-link" (data-wa-phone = numero con lada, solo digitos;
+    // data-wa-text opcional = mensaje prellenado) se reescriben en Android para forzar la apertura
+    // de WhatsApp Business (com.whatsapp.w4b) en lugar de WhatsApp personal, cuando ambas apps estan
+    // instaladas. En iOS/escritorio no hay forma confiable de elegir la app, asi que se deja el link
+    // normal de wa.me (que ya soporta ?text= para el mensaje prellenado) como esta.
+    // Expuesta como window.waApplyBusinessLinks(root) para poder reaplicarse sobre contenido
+    // inyectado dinamicamente despues de DOMContentLoaded (p.ej. resultado de rutas en entregas.php).
+    function waApplyBusinessLinks(root) {
+        const isAndroid = /Android/i.test(navigator.userAgent || '');
+        if (!isAndroid) {
+            return;
+        }
+        (root || document).querySelectorAll('a.whatsapp-business-link[data-wa-phone]').forEach((link) => {
+            const phone = (link.getAttribute('data-wa-phone') || '').replace(/\D/g, '');
+            if (!phone) {
+                return;
+            }
+            const text = link.getAttribute('data-wa-text') || '';
+            if (text) {
+                const fallback = encodeURIComponent('https://wa.me/' + phone + '?text=' + encodeURIComponent(text));
+                link.setAttribute('href', 'intent://send?phone=' + encodeURIComponent(phone) + '&text=' + encodeURIComponent(text) + '#Intent;scheme=whatsapp;package=com.whatsapp.w4b;S.browser_fallback_url=' + fallback + ';end');
+            } else {
+                const fallback = encodeURIComponent('https://wa.me/' + phone);
+                link.setAttribute('href', 'intent://send/?phone=' + encodeURIComponent(phone) + '#Intent;scheme=smsto;package=com.whatsapp.w4b;S.browser_fallback_url=' + fallback + ';end');
+            }
+        });
+    }
+    window.waApplyBusinessLinks = waApplyBusinessLinks;
+
     document.addEventListener('DOMContentLoaded', () => {
+        waApplyBusinessLinks(document);
+
         // Inicializar componentes de Materialize de forma global y segura
         if (typeof M !== 'undefined') {
             try {
