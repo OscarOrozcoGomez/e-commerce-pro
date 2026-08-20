@@ -770,25 +770,34 @@ include __DIR__ . '/includes/header.php';
                             <?php $puedeEditarProductos = $isRepartidorView && in_array($ent['estado'] ?? '', $pedidoEntregaEditableEstados, true); ?>
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
-                                <ul style="margin: 0; padding-left: 20px; list-style: none;">
-                                    <?php foreach (($detallesPorPedido[(int)$ent['id_pedido']] ?? []) as $d): ?>
+                                <ul style="margin: 0; padding-left: 0; list-style: none;">
+                                    <?php $itemsPedidoTarjeta = $detallesPorPedido[(int)$ent['id_pedido']] ?? []; ?>
+                                    <?php foreach ($itemsPedidoTarjeta as $indexItemTarjeta => $d): ?>
                                         <?php
                                             $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
                                             $estadoEntregaItem = (string)($d['estado_entrega'] ?? 'entregado');
                                             $idDetalleItem = (int)($d['id_detalle'] ?? 0);
+                                            $esUltimoItemTarjeta = $indexItemTarjeta === array_key_last($itemsPedidoTarjeta);
                                         ?>
-                                        <li style="margin-bottom:8px;<?php echo $estadoEntregaItem === 'rechazado' ? ' text-decoration: line-through; color:#9e9e9e;' : ''; ?>">
-                                            <?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?>
+                                        <li style="padding:8px 0;<?php echo $esUltimoItemTarjeta ? '' : ' border-bottom:1px solid #e0e0e0;'; ?>">
+                                            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 10px;">
+                                                <span style="flex:1 1 160px; min-width:0;<?php echo $estadoEntregaItem === 'rechazado' ? ' text-decoration: line-through; color:#9e9e9e;' : ''; ?>">
+                                                    <?php echo (int)$d['cantidad']; ?>x <?php echo esc($pName); ?>
+                                                </span>
+                                                <?php if ($estadoEntregaItem === 'rechazado'): ?>
+                                                    <span class="new badge red" data-badge-caption="" style="margin:0; flex-shrink:0;">No entregado</span>
+                                                <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
+                                                    <button type="button" class="btn-small waves-effect waves-light red lighten-1 toggle-reject-item" data-target="reject-item-<?php echo $idDetalleItem; ?>" style="text-decoration:none; box-shadow:none; flex-shrink:0;">
+                                                        <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
+                                                    </button>
+                                                <?php endif; ?>
+                                            </div>
                                             <?php if ($estadoEntregaItem === 'rechazado'): ?>
-                                                <span class="new badge red" data-badge-caption="" style="margin-left:6px;">No entregado</span>
                                                 <?php if (!empty($d['motivo_rechazo'])): ?>
-                                                    <br><span class="grey-text" style="font-size:0.78rem; text-decoration:none;">Motivo: <?php echo esc((string)$d['motivo_rechazo']); ?></span>
+                                                    <div class="grey-text" style="font-size:0.78rem; text-decoration:none; margin-top:4px;">Motivo: <?php echo esc((string)$d['motivo_rechazo']); ?></div>
                                                 <?php endif; ?>
                                             <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
-                                                <button type="button" class="btn-small waves-effect waves-light red lighten-1 toggle-reject-item" data-target="reject-item-<?php echo $idDetalleItem; ?>" style="margin-left:6px; text-decoration:none; box-shadow:none;">
-                                                    <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
-                                                </button>
-                                                <form method="POST" id="reject-item-<?php echo $idDetalleItem; ?>" class="reject-item-form" data-reject-form="1" style="display:none; margin-top:6px; text-decoration:none;">
+                                                <form method="POST" id="reject-item-<?php echo $idDetalleItem; ?>" class="reject-item-form" data-reject-form="1" style="display:none; margin-top:8px; text-decoration:none;">
                                                     <?php echo csrfInput(); ?>
                                                     <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
                                                     <input type="hidden" name="id_detalle" value="<?php echo $idDetalleItem; ?>">
@@ -800,7 +809,7 @@ include __DIR__ . '/includes/header.php';
                                                         <?php endforeach; ?>
                                                     </select>
                                                     <input type="text" name="motivo_producto_otro" data-reject-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:34px; margin-bottom:6px; padding:0 8px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box; font-size:0.85rem;">
-                                                    <button type="submit" class="btn-small red darken-2 waves-effect waves-light" onclick="return confirm('Confirmar que el cliente no quiere este producto? Se devolvera al inventario y se descontara del cobro.')">
+                                                    <button type="submit" class="btn-small red darken-2 waves-effect waves-light" style="width:100%;" onclick="return confirm('Confirmar que el cliente no quiere este producto? Se devolvera al inventario y se descontara del cobro.')">
                                                         Confirmar
                                                     </button>
                                                 </form>
@@ -1664,6 +1673,23 @@ function routeGetNow12hParts() {
     };
 }
 
+// Al usar la ubicacion actual se asume que el repartidor esta por salir ya mismo, asi que
+// se rellena la hora de salida con la hora actual (solo si el campo esta vacio, para no
+// pisar una hora que el repartidor ya haya escrito a mano).
+function routeAutoFillDepartureTimeIfEmpty() {
+    const timeInput = document.getElementById('route-start-time');
+    const meridiemInput = document.getElementById('route-start-meridiem');
+    if (!timeInput || !meridiemInput) {
+        return;
+    }
+    if (String(timeInput.value || '').trim() !== '') {
+        return;
+    }
+    const nowParts = routeGetNow12hParts();
+    timeInput.value = nowParts.time;
+    meridiemInput.value = nowParts.meridiem;
+}
+
 function routeComposeDepartureDateTime() {
     const timeInput = document.getElementById('route-start-time');
     const meridiemInput = document.getElementById('route-start-meridiem');
@@ -1727,6 +1753,7 @@ function routeUseCurrentLocation(button) {
         (position) => {
             routeSetOriginInputs(position.coords.latitude, position.coords.longitude, 'geo');
             routeGeoPermissionState = 'granted';
+            routeAutoFillDepartureTimeIfEmpty();
             routeUpdateLocationStatus('Ubicacion actual capturada correctamente.', 'ok');
             routeShowLocationGuide(false);
             M.toast({html: 'Ubicacion actual cargada.', classes: 'green darken-2'});
