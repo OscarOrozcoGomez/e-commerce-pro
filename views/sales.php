@@ -316,11 +316,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="row" style="background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px dashed #ccc; margin-bottom: 20px;">
-                            <div class="input-field col s12">
+                            <div class="input-field col s12 producto-dropdown-wrap">
                                 <i class="material-icons prefix">search</i>
                                 <input type="text" class="buscador-producto" placeholder="Escribe el nombre o escanea código de barras..." autocomplete="off">
                                 <label class="active">Buscar Producto</label>
                                 <span class="helper-text">Presiona Enter para agregar por código de barras</span>
+                                <div class="producto-dropdown"></div>
                             </div>
                         </div>
 
@@ -411,7 +412,76 @@ include __DIR__ . '/includes/header.php';
     .producto-item { background: #fff; transition: all 0.3s; border-left: 4px solid #4caf50; }
     .producto-item:hover { background: #f5f5f5; }
     .w-100 { width: 100%; }
-    .autocomplete-content img { width: 40px; height: 40px; margin: 5px; }
+    /* Buscador de productos: dropdown propio (reemplaza M.Autocomplete de Materialize) para
+       poder ocultar el codigo de barras del texto visible y agrandar la miniatura, que es lo
+       que el equipo de sucursal pidio para identificar productos mas por la vista. */
+    .producto-dropdown-wrap { position: relative; }
+    .producto-dropdown {
+        display: none;
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100%;
+        z-index: 1200;
+        background: #fff;
+        border: 1px solid #dde3e8;
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+        max-height: 420px;
+        overflow-y: auto;
+    }
+    .producto-dropdown.abierto {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+        gap: 10px;
+        padding: 12px;
+    }
+    .producto-dropdown .item {
+        cursor: pointer;
+        border: 1px solid #eceff1;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fafbfc;
+        text-align: center;
+        transition: border-color 0.15s, background 0.15s;
+    }
+    .producto-dropdown .item:hover,
+    .producto-dropdown .item.resaltado { border-color: #3949ab; background: #e8eaf9; }
+    .producto-dropdown .item.sin-stock { opacity: 0.55; }
+    .producto-dropdown .thumb {
+        width: 100%;
+        height: 88px;
+        object-fit: cover;
+        display: block;
+        background: #f5f5f5;
+    }
+    .producto-dropdown .info { padding: 6px 8px 9px; }
+    .producto-dropdown .nombre {
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #263238;
+        line-height: 1.25;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .producto-dropdown .sub {
+        font-size: 0.7rem;
+        color: #78909c;
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .producto-dropdown .vacio {
+        grid-column: 1 / -1;
+        padding: 14px;
+        color: #90a4ae;
+        font-size: 0.88rem;
+        text-align: center;
+    }
     .style-large { font-size: 4rem; opacity: 0.2; margin-top: 20px; }
     .animated { animation-duration: 0.5s; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -494,8 +564,6 @@ include __DIR__ . '/includes/header.php';
     const SALES_TABS_STORAGE_KEY = 'sales_tabs_draft_v4';
     let tabCount = 0;
     let productoIndex = 0;
-    const productMap = {};
-    const autocompleteData = {};
     const customerMap = {};
     const customerAutocompleteData = {};
     const customerSearchIndex = [];
@@ -550,6 +618,151 @@ include __DIR__ . '/includes/header.php';
         }
 
         return '../assets/img/no-product.png';
+    }
+
+    // Buscador de productos: dropdown propio en cuadricula (reemplaza M.Autocomplete de
+    // Materialize). El codigo de barras ya no se muestra en el texto -solo vive adentro para
+    // el escaneo/busqueda- y la imagen es el elemento mas grande de cada tarjeta, que es lo
+    // que pidio el equipo de sucursal para identificar productos mas por la vista.
+    function initProductoDropdown(context, tabId, buscador) {
+        const dropdownEl = context.querySelector('.producto-dropdown');
+        if (!dropdownEl) return;
+
+        let items = []; // [{ el, producto }] actualmente renderizados
+        let highlightIndex = -1;
+
+        function cerrar() {
+            dropdownEl.classList.remove('abierto');
+            dropdownEl.innerHTML = '';
+            items = [];
+            highlightIndex = -1;
+        }
+
+        function resaltar(index) {
+            items.forEach((it) => it.el.classList.remove('resaltado'));
+            if (index >= 0 && index < items.length) {
+                items[index].el.classList.add('resaltado');
+                items[index].el.scrollIntoView({ block: 'nearest' });
+            }
+            highlightIndex = index;
+        }
+
+        function seleccionar(producto) {
+            agregarProductoALista(tabId, producto);
+            buscador.value = '';
+            cerrar();
+            setTimeout(() => buscador.focus(), 100);
+        }
+
+        function render(query) {
+            const normalizado = normalizeSearchTerm(query);
+            if (normalizado === '') {
+                cerrar();
+                return;
+            }
+
+            const coincidencias = productosDisponibles.filter((p) => {
+                const texto = normalizeSearchTerm(`${p.nombre} ${p.nombre_variante || ''} ${p.codigo_barras || ''}`);
+                return texto.includes(normalizado);
+            }).slice(0, 12);
+
+            dropdownEl.innerHTML = '';
+            highlightIndex = -1;
+
+            if (coincidencias.length === 0) {
+                dropdownEl.innerHTML = '<div class="vacio">Sin resultados</div>';
+                dropdownEl.classList.add('abierto');
+                items = [];
+                return;
+            }
+
+            items = coincidencias.map((p) => {
+                const imgSrc = resolveProductImageSrc(p.imagen_resuelta || p.imagen_fuente || p.imagen || p.imagen_url);
+                const stockDisponible = parseInt(p.cantidad_actual || 0, 10) || 0;
+                const el = document.createElement('div');
+                el.className = 'item' + (stockDisponible <= 0 ? ' sin-stock' : '');
+                el.title = p.nombre_variante ? `${p.nombre} - ${p.nombre_variante}` : p.nombre;
+                el.innerHTML = `
+                    <img class="thumb" src="${imgSrc}" alt="" loading="lazy">
+                    <div class="info">
+                        <div class="nombre">${escapeHtml(p.nombre)}</div>
+                        ${p.nombre_variante ? `<div class="sub">${escapeHtml(p.nombre_variante)}</div>` : ''}
+                    </div>
+                `;
+                // mousedown (no click) para que dispare antes que el blur del input y la
+                // seleccion se registre aunque el dropdown se este por cerrar.
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    seleccionar(p);
+                });
+                dropdownEl.appendChild(el);
+                return { el, producto: p };
+            });
+
+            dropdownEl.classList.add('abierto');
+        }
+
+        buscador.addEventListener('input', () => render(buscador.value));
+        buscador.addEventListener('focus', () => {
+            if (buscador.value.trim() !== '') render(buscador.value);
+        });
+        buscador.addEventListener('blur', () => {
+            // Retraso corto: si el blur vino de un click en una tarjeta, el mousedown de arriba
+            // ya disparo primero y la seleccion ya se registro antes de cerrar el dropdown.
+            setTimeout(cerrar, 150);
+        });
+
+        buscador.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') {
+                if (items.length === 0) return;
+                e.preventDefault();
+                resaltar(Math.min(highlightIndex + 1, items.length - 1));
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                if (items.length === 0) return;
+                e.preventDefault();
+                resaltar(Math.max(highlightIndex - 1, 0));
+                return;
+            }
+            if (e.key === 'Escape') {
+                cerrar();
+                return;
+            }
+            if (e.key !== 'Enter' && e.key !== 'Tab') return;
+
+            if (highlightIndex >= 0 && items[highlightIndex]) {
+                e.preventDefault();
+                seleccionar(items[highlightIndex].producto);
+                return;
+            }
+
+            const value = this.value.trim();
+            if (value === '') return;
+            const valueLower = value.toLowerCase();
+
+            // Coincidencia exacta por codigo de barras (lectura de escaner) o por nombre
+            // completo tal cual se muestra hoy en la tarjeta.
+            let prod = productosDisponibles.find((p) => p.codigo_barras && p.codigo_barras.toLowerCase() === valueLower);
+            if (!prod) {
+                prod = productosDisponibles.find((p) => {
+                    const nombreCompleto = p.nombre_variante ? `${p.nombre} ${p.nombre_variante}` : p.nombre;
+                    return nombreCompleto.toLowerCase() === valueLower;
+                });
+            }
+
+            if (prod) {
+                e.preventDefault();
+                seleccionar(prod);
+            } else if (e.key === 'Enter') {
+                if (items.length > 0) {
+                    e.preventDefault();
+                    seleccionar(items[0].producto);
+                } else {
+                    M.toast({ html: 'Producto no encontrado', classes: 'orange' });
+                }
+            }
+        });
     }
 
     function normalizeSearchTerm(value) {
@@ -1284,18 +1497,6 @@ include __DIR__ . '/includes/header.php';
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        productosDisponibles.forEach((p) => {
-            const imgSrc = resolveProductImageSrc(p.imagen_resuelta || p.imagen_fuente || p.imagen || p.imagen_url);
-            let label = p.nombre;
-            if (p.codigo_barras && !p.nombre.includes(`[${p.codigo_barras}]`)) {
-                label = `[${p.codigo_barras}] ${p.nombre}`;
-            }
-            if (p.nombre_variante) {
-                label += ` ${p.nombre_variante}`;
-            }
-            autocompleteData[label] = imgSrc;
-            productMap[label.toLowerCase()] = p;
-        });
 
         clientesActivos.forEach((c) => registerCustomerRecord(c));
 
@@ -1471,46 +1672,7 @@ include __DIR__ . '/includes/header.php';
             });
         }
 
-        let instance = null;
-        try {
-            instance = M.Autocomplete.init(buscador, {
-                data: autocompleteData,
-                limit: 10,
-                minLength: 1,
-                onAutocomplete: function(val) {
-                    const prod = productMap[val.toLowerCase()];
-                    if (!prod) return;
-                    agregarProductoALista(id, prod);
-                    buscador.value = '';
-                    setTimeout(() => buscador.focus(), 100);
-                }
-            });
-        } catch (err) {
-            console.warn('No se pudo inicializar autocomplete de producto:', err);
-        }
-
-        buscador.addEventListener('keydown', function(e) {
-            if (e.key !== 'Enter' && e.key !== 'Tab') return;
-            const value = this.value.trim();
-            if (value === '') return;
-            const valueLower = value.toLowerCase();
-            let prod = productosDisponibles.find((p) => p.codigo_barras && p.codigo_barras.toLowerCase() === valueLower);
-            if (!prod) prod = productMap[valueLower];
-            if (prod) {
-                e.preventDefault();
-                agregarProductoALista(id, prod);
-                this.value = '';
-                if (instance) instance.close();
-            } else if (e.key === 'Enter') {
-                const firstSuggestion = document.querySelector('.autocomplete-content li');
-                if (firstSuggestion) {
-                    firstSuggestion.click();
-                    e.preventDefault();
-                } else {
-                    M.toast({ html: 'Producto no encontrado', classes: 'orange' });
-                }
-            }
-        });
+        initProductoDropdown(context, id, buscador);
 
         context.querySelector('.formulario-venta').addEventListener('submit', (e) => procesarVenta(e, id));
 
@@ -1613,8 +1775,8 @@ include __DIR__ . '/includes/header.php';
         if (!context) return;
         const tabLi = document.getElementById(`tab-li-${id}`);
         if (tabLi) tabLi.remove();
-        const autoProducto = M.Autocomplete.getInstance(context.querySelector('.buscador-producto'));
-        if (autoProducto) autoProducto.destroy();
+        // El buscador de productos ya no usa M.Autocomplete (ver initProductoDropdown); su
+        // dropdown es un div propio que se va con context.remove() de abajo, sin limpieza aparte.
         const autoCustomer = M.Autocomplete.getInstance(context.querySelector('.cliente_nombre'));
         if (autoCustomer) autoCustomer.destroy();
         context.remove();
