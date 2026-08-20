@@ -31,6 +31,23 @@ $success = '';
 $repartidores = [];
 $justDeliveredPedidoId = null;
 
+// Mensajes de una accion POST anterior que ya se redirigio (ver Post/Redirect/Get abajo):
+// sin esto, recargar la pagina despues de marcar un pedido reenviaria el mismo formulario
+// (aviso "Confirm Form Resubmission" del navegador, mas notorio en movil cuando Chrome
+// descarta la pestana en segundo plano y debe recargarla desde cero).
+if (isset($_SESSION['entregas_flash_error'])) {
+    $error = (string)$_SESSION['entregas_flash_error'];
+    unset($_SESSION['entregas_flash_error']);
+}
+if (isset($_SESSION['entregas_flash_success'])) {
+    $success = (string)$_SESSION['entregas_flash_success'];
+    unset($_SESSION['entregas_flash_success']);
+}
+if (isset($_SESSION['entregas_flash_entregado_id'])) {
+    $justDeliveredPedidoId = (int)$_SESSION['entregas_flash_entregado_id'];
+    unset($_SESSION['entregas_flash_entregado_id']);
+}
+
 // Motivos preestablecidos para cuando el repartidor no pudo completar una entrega.
 $deliveryCancelReasonOptions = [
     'cliente_no_disponible' => 'Cliente no se encontraba disponible',
@@ -42,6 +59,18 @@ $deliveryCancelReasonOptions = [
     'clima_transito' => 'Clima o transito impidieron la entrega',
     'otro' => 'Otro',
 ];
+
+// Motivos preestablecidos para cuando el cliente rechaza UN producto especifico del pedido
+// (el resto del pedido si se entrega y se cobra normalmente).
+$productRejectReasonOptions = [
+    'cliente_no_lo_quiere' => 'El cliente ya no quiere este producto',
+    'producto_danado' => 'Producto danado en el trayecto',
+    'producto_incorrecto' => 'Producto no corresponde al pedido',
+    'otro' => 'Otro',
+];
+
+// Estados de pedido en los que el repartidor todavia puede editar la lista de productos.
+$pedidoEntregaEditableEstados = ['pendiente_pago', 'pagado', 'en_reparto'];
 
 // Procesar cambio de estado de reparto
 if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
@@ -159,7 +188,136 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                 }
             }
         }
+
+        if ($_POST['accion'] === 'producto_no_entregado') {
+            $idDetalle = intval($_POST['id_detalle'] ?? 0);
+            $motivoKey = trim((string)($_POST['motivo_producto'] ?? ''));
+            $motivoOtro = trim((string)($_POST['motivo_producto_otro'] ?? ''));
+
+            if ($idDetalle <= 0) {
+                $error = 'Producto invalido.';
+            } elseif (!isset($productRejectReasonOptions[$motivoKey])) {
+                $error = 'Selecciona un motivo valido para el producto no entregado.';
+            } elseif ($motivoKey === 'otro' && $motivoOtro === '') {
+                $error = 'Escribe el motivo cuando selecciones "Otro".';
+            } else {
+                $motivoEtiqueta = $motivoKey === 'otro' ? mb_substr($motivoOtro, 0, 180) : $productRejectReasonOptions[$motivoKey];
+
+                $pdo->beginTransaction();
+                try {
+                    $stmtPedido = $pdo->prepare("SELECT estado, id_almacen FROM pedidos WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor FOR UPDATE");
+                    $stmtPedido->execute([':id_pedido' => $id_pedido, ':id_repartidor' => $usuario['id_usuario']]);
+                    $pedido = $stmtPedido->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                    if (!$pedido) {
+                        throw new RuntimeException('No se encontro el pedido o no esta asignado a ti.');
+                    }
+
+                    $estadoPedido = (string)($pedido['estado'] ?? '');
+                    if (!in_array($estadoPedido, $pedidoEntregaEditableEstados, true)) {
+                        throw new RuntimeException('Este pedido ya no permite editar productos (estado actual: ' . strtoupper($estadoPedido) . ').');
+                    }
+
+                    $idAlmacenPedido = (int)($pedido['id_almacen'] ?? 0);
+
+                    $stmtItem = $pdo->prepare("SELECT id_producto, cantidad, subtotal, monto_descuento, estado_entrega
+                                                FROM detalle_pedidos
+                                                WHERE id_detalle = :id_detalle AND id_pedido = :id_pedido FOR UPDATE");
+                    $stmtItem->execute([':id_detalle' => $idDetalle, ':id_pedido' => $id_pedido]);
+                    $item = $stmtItem->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                    if (!$item) {
+                        throw new RuntimeException('El producto no pertenece a este pedido.');
+                    }
+                    if ((string)$item['estado_entrega'] === 'rechazado') {
+                        throw new RuntimeException('Este producto ya estaba marcado como no entregado.');
+                    }
+
+                    // No permite dejar el pedido sin ningun producto entregado: para eso ya
+                    // existe "No pude entregar" (cancelar_entrega), que cancela todo el pedido.
+                    $stmtRestantes = $pdo->prepare("SELECT COUNT(*) FROM detalle_pedidos
+                                                     WHERE id_pedido = :id_pedido AND id_detalle != :id_detalle AND estado_entrega = 'entregado'");
+                    $stmtRestantes->execute([':id_pedido' => $id_pedido, ':id_detalle' => $idDetalle]);
+                    if ((int)$stmtRestantes->fetchColumn() <= 0) {
+                        throw new RuntimeException('No puedes marcar el ultimo producto como no entregado; usa "No pude entregar" para cancelar todo el pedido.');
+                    }
+
+                    $idProducto = (int)($item['id_producto'] ?? 0);
+                    $cantidad = max(0, (int)($item['cantidad'] ?? 0));
+                    $subtotalItem = (float)($item['subtotal'] ?? 0);
+                    $descuentoItem = (float)($item['monto_descuento'] ?? 0);
+                    $subtotalBaseItem = round($subtotalItem + $descuentoItem, 2);
+
+                    if ($idProducto > 0 && $cantidad > 0 && $idAlmacenPedido > 0) {
+                        // Mismo patron de resurtido y bitacora que 'cancelar_entrega' arriba.
+                        $stmtResurtir = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
+                                                       VALUES (:id_producto, :id_almacen, :cantidad, 2, 5)
+                                                       ON DUPLICATE KEY UPDATE cantidad_actual = cantidad_actual + VALUES(cantidad_actual)");
+                        $stmtResurtir->execute([
+                            ':id_producto' => $idProducto,
+                            ':id_almacen' => $idAlmacenPedido,
+                            ':cantidad' => $cantidad,
+                        ]);
+
+                        $stmtMovEntrada = $pdo->prepare(
+                            "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
+                             VALUES (:producto, 'entrada', :almacen, :cantidad, :usuario, :observacion)"
+                        );
+                        $stmtMovEntrada->execute([
+                            ':producto' => $idProducto,
+                            ':almacen' => $idAlmacenPedido,
+                            ':cantidad' => $cantidad,
+                            ':usuario' => $usuario['id_usuario'],
+                            ':observacion' => 'Producto no entregado, pedido #' . $id_pedido . ': ' . $motivoEtiqueta,
+                        ]);
+                    }
+
+                    $stmtRechazar = $pdo->prepare("UPDATE detalle_pedidos SET estado_entrega = 'rechazado', motivo_rechazo = :motivo WHERE id_detalle = :id_detalle");
+                    $stmtRechazar->execute([':motivo' => $motivoEtiqueta, ':id_detalle' => $idDetalle]);
+
+                    // Ajusta lo que se debe cobrar al entregar: ya no incluye este producto.
+                    $stmtAjustarTotales = $pdo->prepare("UPDATE pedidos
+                                                          SET subtotal = GREATEST(0, subtotal - :subtotal_base),
+                                                              descuento_total = GREATEST(0, descuento_total - :descuento),
+                                                              total = GREATEST(0, total - :subtotal_item)
+                                                          WHERE id_pedido = :id_pedido");
+                    $stmtAjustarTotales->execute([
+                        ':subtotal_base' => $subtotalBaseItem,
+                        ':descuento' => $descuentoItem,
+                        ':subtotal_item' => $subtotalItem,
+                        ':id_pedido' => $id_pedido,
+                    ]);
+
+                    $pdo->commit();
+                    $success = 'Producto marcado como no entregado. El stock fue devuelto al inventario.';
+                    logAudit('PRODUCTO_NO_ENTREGADO', 'detalle_pedidos', $idDetalle, 'Repartidor marco producto como no entregado en pedido #' . $id_pedido . '. Motivo: ' . $motivoEtiqueta);
+                } catch (Throwable $txe) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $error = $txe->getMessage();
+                }
+            }
+        }
     }
+
+    // Patron Post/Redirect/Get: sin este redirect, recargar la pagina (o que el navegador
+    // la recargue solo porque la pestana estuvo en segundo plano) reenviaria el POST
+    // original y dispara el aviso "Confirm Form Resubmission" (ERR_CACHE_MISS en movil).
+    // El resultado de la accion se pasa por sesion (flash) para mostrarse en el GET siguiente.
+    $_SESSION['entregas_flash_error'] = $error;
+    $_SESSION['entregas_flash_success'] = $success;
+    if ($justDeliveredPedidoId !== null) {
+        $_SESSION['entregas_flash_entregado_id'] = $justDeliveredPedidoId;
+    }
+
+    $redirectParams = [];
+    if ($selectedFechaEntrega !== '') {
+        $redirectParams['fecha_entrega'] = $selectedFechaEntrega;
+    }
+    $redirectUrl = BASE_URL . 'views/entregas.php' . ($redirectParams !== [] ? ('?' . http_build_query($redirectParams)) : '');
+    header('Location: ' . $redirectUrl);
+    exit;
 }
 
 // Obtener entregas pendientes para vista de reparto
@@ -330,7 +488,7 @@ try {
     if (!empty($entregas)) {
         $idsPedidos = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $entregas)));
         $placeholders = implode(',', array_fill(0, count($idsPedidos), '?'));
-        $sqlDetalles = "SELECT dp.id_pedido, dp.cantidad, p.nombre, p.nombre_variante
+        $sqlDetalles = "SELECT dp.id_pedido, dp.id_detalle, dp.cantidad, dp.estado_entrega, dp.motivo_rechazo, p.nombre, p.nombre_variante
                         FROM detalle_pedidos dp
                         JOIN productos p ON dp.id_producto = p.id_producto
                         WHERE dp.id_pedido IN ($placeholders)
@@ -694,12 +852,45 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                         </div>
 
+                            <?php $puedeEditarProductos = $isRepartidorView && in_array($ent['estado'] ?? '', $pedidoEntregaEditableEstados, true); ?>
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
-                                <ul style="margin: 0; padding-left: 20px;">
+                                <ul style="margin: 0; padding-left: 20px; list-style: none;">
                                     <?php foreach (($detallesPorPedido[(int)$ent['id_pedido']] ?? []) as $d): ?>
-                                        <?php $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : ""); ?>
-                                        <li><?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?></li>
+                                        <?php
+                                            $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
+                                            $estadoEntregaItem = (string)($d['estado_entrega'] ?? 'entregado');
+                                            $idDetalleItem = (int)($d['id_detalle'] ?? 0);
+                                        ?>
+                                        <li style="margin-bottom:8px;<?php echo $estadoEntregaItem === 'rechazado' ? ' text-decoration: line-through; color:#9e9e9e;' : ''; ?>">
+                                            <?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?>
+                                            <?php if ($estadoEntregaItem === 'rechazado'): ?>
+                                                <span class="new badge red" data-badge-caption="" style="margin-left:6px;">No entregado</span>
+                                                <?php if (!empty($d['motivo_rechazo'])): ?>
+                                                    <br><span class="grey-text" style="font-size:0.78rem; text-decoration:none;">Motivo: <?php echo esc((string)$d['motivo_rechazo']); ?></span>
+                                                <?php endif; ?>
+                                            <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
+                                                <button type="button" class="btn-small waves-effect waves-light red lighten-1 toggle-reject-item" data-target="reject-item-<?php echo $idDetalleItem; ?>" style="margin-left:6px; text-decoration:none; box-shadow:none;">
+                                                    <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
+                                                </button>
+                                                <form method="POST" id="reject-item-<?php echo $idDetalleItem; ?>" class="reject-item-form" data-reject-form="1" style="display:none; margin-top:6px; text-decoration:none;">
+                                                    <?php echo csrfInput(); ?>
+                                                    <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
+                                                    <input type="hidden" name="id_detalle" value="<?php echo $idDetalleItem; ?>">
+                                                    <input type="hidden" name="accion" value="producto_no_entregado">
+                                                    <select name="motivo_producto" data-reject-reason="1" class="browser-default" required style="margin-bottom:6px; height:36px; font-size:0.85rem;">
+                                                        <option value="" selected disabled>-- Motivo --</option>
+                                                        <?php foreach ($productRejectReasonOptions as $reasonKey => $reasonLabel): ?>
+                                                            <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                    <input type="text" name="motivo_producto_otro" data-reject-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:34px; margin-bottom:6px; padding:0 8px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box; font-size:0.85rem;">
+                                                    <button type="submit" class="btn-small red darken-2 waves-effect waves-light" onclick="return confirm('Confirmar que el cliente no quiere este producto? Se devolvera al inventario y se descontara del cobro.')">
+                                                        Confirmar
+                                                    </button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </li>
                                     <?php endforeach; ?>
                                 </ul>
                             </div>
@@ -837,6 +1028,34 @@ document.addEventListener('DOMContentLoaded', function() {
         reasonSelect.addEventListener('change', syncOtherFieldVisibility);
         syncOtherFieldVisibility();
     });
+
+    document.querySelectorAll('.toggle-reject-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (!target) return;
+            const isHidden = target.style.display === 'none' || target.style.display === '';
+            target.style.display = isHidden ? 'block' : 'none';
+        });
+    });
+
+    document.querySelectorAll('form.reject-item-form[data-reject-form="1"]').forEach((formEl) => {
+        const reasonSelect = formEl.querySelector('select[data-reject-reason="1"]');
+        const otherInput = formEl.querySelector('input[data-reject-other="1"]');
+        if (!reasonSelect || !otherInput) return;
+
+        const syncOtherFieldVisibility = () => {
+            const mustShow = reasonSelect.value === 'otro';
+            otherInput.style.display = mustShow ? 'block' : 'none';
+            otherInput.required = mustShow;
+            if (!mustShow) {
+                otherInput.value = '';
+            }
+        };
+
+        reasonSelect.addEventListener('change', syncOtherFieldVisibility);
+        syncOtherFieldVisibility();
+    });
 });
 </script>
 
@@ -873,6 +1092,18 @@ document.addEventListener('DOMContentLoaded', function() {
     let epUploadedId = null;
     let epUploadedForFile = null;
 
+    // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
+    // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
+    function epParseJsonResponse(response) {
+        return response.text().then(function (text) {
+            try {
+                return text ? JSON.parse(text) : null;
+            } catch (e) {
+                throw new Error('El servidor no respondio correctamente (codigo ' + response.status + '). Intenta de nuevo en unos segundos.');
+            }
+        });
+    }
+
     function epSetStatus(msg, isError) {
         statusEl.textContent = msg || '';
         statusEl.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
@@ -889,7 +1120,7 @@ document.addEventListener('DOMContentLoaded', function() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, csrf_token: epCsrfToken }),
     })
-        .then((r) => r.json())
+        .then(epParseJsonResponse)
         .then((data) => {
             if (data && data.success) {
                 textoEl.value = data.texto || '';
@@ -937,7 +1168,7 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('csrf_token', epCsrfToken);
 
         return fetch(epEndpoint, { method: 'POST', body: formData })
-            .then((r) => r.json())
+            .then(epParseJsonResponse)
             .then((data) => {
                 if (!data || !data.success) {
                     throw new Error((data && data.error) || 'No se pudo subir la foto.');
@@ -964,7 +1195,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     csrf_token: epCsrfToken,
                 }),
             }))
-            .then((r) => r.json())
+            .then(epParseJsonResponse)
             .then((data) => {
                 if (!data || !data.success) {
                     throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
@@ -1028,8 +1259,49 @@ const isAdminRouteView = <?php echo $isAdminView ? 'true' : 'false'; ?>;
 const routeDefaultOrigin = { lat: 20.6596988, lng: -103.3496092 };
 const routeSelectedDate = <?php echo json_encode($selectedFechaEntrega, JSON_UNESCAPED_UNICODE); ?>;
 const routeTodayDate = <?php echo json_encode(date('Y-m-d'), JSON_UNESCAPED_UNICODE); ?>;
+const routeStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0) . ($isAdminView ? '_rep' . $selectedRepartidorId : ''), JSON_UNESCAPED_UNICODE); ?>;
 let routeOriginSource = 'none';
 let routeGeoPermissionState = 'unknown';
+
+// La ruta generada solo vive en memoria del navegador (nunca se guarda en el servidor).
+// Cada "SALIR A ENTREGAR"/"ENTREGADO"/"No lo quiso" recarga la pagina completa, lo que
+// borraria la ruta ya acordada y obligaria a regenerarla desde la ubicacion actual del
+// repartidor (cambiando el orden ya calculado). Por eso se persiste en localStorage y se
+// restaura tal cual al cargar, filtrando solo las paradas que ya no siguen activas.
+function routeSaveStoredRoute(data, savedAt) {
+    try {
+        localStorage.setItem(routeStorageKey, JSON.stringify({ data, savedAt: savedAt || Date.now() }));
+    } catch (e) {}
+}
+
+function routeLoadStoredRoute() {
+    try {
+        const raw = localStorage.getItem(routeStorageKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return (parsed && parsed.data) ? parsed : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function routeClearStoredRoute() {
+    try {
+        localStorage.removeItem(routeStorageKey);
+    } catch (e) {}
+}
+
+function routeFormatSavedAt(timestamp) {
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts) || ts <= 0) {
+        return '';
+    }
+    try {
+        return new Date(ts).toLocaleString('es-MX', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    } catch (e) {
+        return '';
+    }
+}
 
 function routeEscapeHtml(value) {
     return String(value ?? '')
@@ -1349,12 +1621,19 @@ function routeUseCurrentLocation(button) {
     );
 }
 
-function routeRenderResult(data) {
+function routeRenderResult(data, options = {}) {
     const card = document.getElementById('route-result-card');
     const content = document.getElementById('route-result-content');
     if (!card || !content) {
         return;
     }
+
+    const storedNoticeHtml = options.fromStorage
+        ? `<div class="card-panel blue lighten-5" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <span><i class="material-icons tiny">history</i> Ruta guardada${options.savedAtText ? ' de las ' + routeEscapeHtml(options.savedAtText) : ''}. Se mantiene el mismo orden aunque recargues la pagina.</span>
+            <button type="button" id="route-discard-stored" class="btn-flat waves-effect red-text" style="padding:0 8px;">Descartar y generar nueva</button>
+        </div>`
+        : '';
 
     const summary = data.summary || {};
     const stops = Array.isArray(data.orderedStops) ? data.orderedStops : [];
@@ -1400,6 +1679,7 @@ function routeRenderResult(data) {
 
     content.innerHTML = `
         <span class="card-title">Ruta optimizada generada</span>
+        ${storedNoticeHtml}
         <p class="grey-text" style="margin-top:0;">
             Paradas: <strong>${routeEscapeHtml(summary.paradas_total || 0)}</strong> |
             Distancia: <strong>${routeEscapeHtml(((summary.distancia_total_m || 0) / 1000).toFixed(2))} km</strong> |
@@ -1418,6 +1698,16 @@ function routeRenderResult(data) {
 
     if (typeof window.waApplyBusinessLinks === 'function') {
         window.waApplyBusinessLinks(content);
+    }
+
+    const discardBtn = document.getElementById('route-discard-stored');
+    if (discardBtn) {
+        discardBtn.addEventListener('click', () => {
+            routeClearStoredRoute();
+            card.style.display = 'none';
+            content.innerHTML = '';
+            M.toast({html: 'Ruta guardada descartada. Genera una nueva cuando quieras.', classes: 'blue-grey darken-1'});
+        });
     }
 
     card.style.display = 'block';
@@ -1539,6 +1829,7 @@ async function routeGenerateOptimized() {
         }
 
         routeRenderResult(data);
+        routeSaveStoredRoute(data);
         if (String(data.routing_provider || 'google_routes') === 'local_fallback') {
             M.toast({html: 'Ruta generada en modo respaldo local.', classes: 'orange darken-2'});
         } else {
@@ -1580,6 +1871,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (useLocationBtn) {
         useLocationBtn.addEventListener('click', () => routeUseCurrentLocation(useLocationBtn));
+    }
+
+    const stored = routeLoadStoredRoute();
+    if (stored && stored.data) {
+        const activeIds = new Set(Array.from(document.querySelectorAll('.route-check')).map((el) => String(el.value)));
+        const allStops = Array.isArray(stored.data.orderedStops) ? stored.data.orderedStops : [];
+        const filteredStops = allStops.filter((stop) => activeIds.has(String(stop.id_pedido)));
+
+        if (filteredStops.length > 0) {
+            const dataToRender = Object.assign({}, stored.data, {
+                orderedStops: filteredStops,
+                summary: Object.assign({}, stored.data.summary || {}, { paradas_total: filteredStops.length }),
+            });
+            routeRenderResult(dataToRender, { fromStorage: true, savedAtText: routeFormatSavedAt(stored.savedAt) });
+            if (filteredStops.length !== allStops.length) {
+                // Alguna parada ya se entrego/cancelo/rechazo: se limpia del guardado para
+                // que la proxima recarga no la vuelva a mostrar como pendiente (conserva la
+                // hora original de generacion, no la de este filtrado).
+                routeSaveStoredRoute(dataToRender, stored.savedAt);
+            }
+        } else {
+            routeClearStoredRoute();
+        }
     }
 
     const latInput = document.getElementById('route-origin-lat');
