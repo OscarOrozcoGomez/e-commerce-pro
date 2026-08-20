@@ -75,4 +75,45 @@ final class SocialPostUtilsTest extends TestCase
     {
         $this->assertSame('¡Pedido entregado! 📦🚚 #EntregaExpress', buildDeliveryPostText(''));
     }
+
+    public function testBuildDeliveryPostTextIncludesOrdinalWhenNumeroEntregaGiven(): void
+    {
+        $this->assertSame(
+            '📦🚚 ¡Primera entrega del dia completada! #EntregaExpress #Chapalita',
+            buildDeliveryPostText('Chapalita', 1)
+        );
+        $this->assertSame(
+            '📦🚚 ¡Cuarta entrega del dia completada! #EntregaExpress',
+            buildDeliveryPostText('', 4)
+        );
+    }
+
+    public function testBuildDeliveryPostTextFallsBackToNumericOrdinalBeyondThirty(): void
+    {
+        $this->assertSame(
+            '📦🚚 ¡Entrega #31 del dia completada! #EntregaExpress',
+            buildDeliveryPostText('', 31)
+        );
+    }
+
+    public function testBuildDeliveryPostTextIgnoresNonPositiveNumeroEntrega(): void
+    {
+        $this->assertSame('¡Pedido entregado! 📦🚚 #EntregaExpress', buildDeliveryPostText('', 0));
+        $this->assertSame('¡Pedido entregado! 📦🚚 #EntregaExpress', buildDeliveryPostText('', null));
+    }
+
+    public function testOrdinalFemeninoEntregaCoversFirstAndLastOfEachDecade(): void
+    {
+        $this->assertSame('Primera', ordinalFemeninoEntrega(1));
+        $this->assertSame('Decima', ordinalFemeninoEntrega(10));
+        $this->assertSame('Undecima', ordinalFemeninoEntrega(11));
+        $this->assertSame('Vigesima', ordinalFemeninoEntrega(20));
+        $this->assertSame('Vigesima primera', ordinalFemeninoEntrega(21));
+        $this->assertSame('Trigesima', ordinalFemeninoEntrega(30));
+    }
+
+    public function testOrdinalFemeninoEntregaReturnsNullOutsideSupportedRange(): void
+    {
+        $this->assertNull(ordinalFemeninoEntrega(31));
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
+require_once __DIR__ . '/../core/entrega_item_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
@@ -31,6 +32,23 @@ $success = '';
 $repartidores = [];
 $justDeliveredPedidoId = null;
 
+// Mensajes de una accion POST anterior que ya se redirigio (ver Post/Redirect/Get abajo):
+// sin esto, recargar la pagina despues de marcar un pedido reenviaria el mismo formulario
+// (aviso "Confirm Form Resubmission" del navegador, mas notorio en movil cuando Chrome
+// descarta la pestana en segundo plano y debe recargarla desde cero).
+if (isset($_SESSION['entregas_flash_error'])) {
+    $error = (string)$_SESSION['entregas_flash_error'];
+    unset($_SESSION['entregas_flash_error']);
+}
+if (isset($_SESSION['entregas_flash_success'])) {
+    $success = (string)$_SESSION['entregas_flash_success'];
+    unset($_SESSION['entregas_flash_success']);
+}
+if (isset($_SESSION['entregas_flash_entregado_id'])) {
+    $justDeliveredPedidoId = (int)$_SESSION['entregas_flash_entregado_id'];
+    unset($_SESSION['entregas_flash_entregado_id']);
+}
+
 // Motivos preestablecidos para cuando el repartidor no pudo completar una entrega.
 $deliveryCancelReasonOptions = [
     'cliente_no_disponible' => 'Cliente no se encontraba disponible',
@@ -42,6 +60,19 @@ $deliveryCancelReasonOptions = [
     'clima_transito' => 'Clima o transito impidieron la entrega',
     'otro' => 'Otro',
 ];
+
+// Motivos preestablecidos para cuando el cliente rechaza UN producto especifico del pedido
+// (el resto del pedido si se entrega y se cobra normalmente).
+$productRejectReasonOptions = [
+    'cliente_no_lo_quiere' => 'El cliente ya no quiere este producto',
+    'producto_danado' => 'Producto danado en el trayecto',
+    'producto_incorrecto' => 'Producto no corresponde al pedido',
+    'otro' => 'Otro',
+];
+
+// Estados de pedido en los que el repartidor todavia puede editar la lista de productos
+// (definidos junto a dbMarkProductoNoEntregado en core/entrega_item_utils.php).
+$pedidoEntregaEditableEstados = PEDIDO_ENTREGA_EDITABLE_ESTADOS;
 
 // Procesar cambio de estado de reparto
 if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'], $_POST['id_pedido'])) {
@@ -159,7 +190,48 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                 }
             }
         }
+
+        if ($_POST['accion'] === 'producto_no_entregado') {
+            $idDetalle = intval($_POST['id_detalle'] ?? 0);
+            $motivoKey = trim((string)($_POST['motivo_producto'] ?? ''));
+            $motivoOtro = trim((string)($_POST['motivo_producto_otro'] ?? ''));
+
+            if ($idDetalle <= 0) {
+                $error = 'Producto invalido.';
+            } elseif (!isset($productRejectReasonOptions[$motivoKey])) {
+                $error = 'Selecciona un motivo valido para el producto no entregado.';
+            } elseif ($motivoKey === 'otro' && $motivoOtro === '') {
+                $error = 'Escribe el motivo cuando selecciones "Otro".';
+            } else {
+                $motivoEtiqueta = $motivoKey === 'otro' ? mb_substr($motivoOtro, 0, 180) : $productRejectReasonOptions[$motivoKey];
+
+                $resultadoNoEntregado = dbMarkProductoNoEntregado($pdo, $id_pedido, $idDetalle, (int)$usuario['id_usuario'], $motivoEtiqueta, (int)$usuario['id_usuario']);
+                if ($resultadoNoEntregado['success']) {
+                    $success = $resultadoNoEntregado['message'];
+                } else {
+                    $error = $resultadoNoEntregado['message'];
+                }
+            }
+        }
     }
+
+    // Patron Post/Redirect/Get: sin este redirect, recargar la pagina (o que el navegador
+    // la recargue solo porque la pestana estuvo en segundo plano) reenviaria el POST
+    // original y dispara el aviso "Confirm Form Resubmission" (ERR_CACHE_MISS en movil).
+    // El resultado de la accion se pasa por sesion (flash) para mostrarse en el GET siguiente.
+    $_SESSION['entregas_flash_error'] = $error;
+    $_SESSION['entregas_flash_success'] = $success;
+    if ($justDeliveredPedidoId !== null) {
+        $_SESSION['entregas_flash_entregado_id'] = $justDeliveredPedidoId;
+    }
+
+    $redirectParams = [];
+    if ($selectedFechaEntrega !== '') {
+        $redirectParams['fecha_entrega'] = $selectedFechaEntrega;
+    }
+    $redirectUrl = BASE_URL . 'views/entregas.php' . ($redirectParams !== [] ? ('?' . http_build_query($redirectParams)) : '');
+    header('Location: ' . $redirectUrl);
+    exit;
 }
 
 // Obtener entregas pendientes para vista de reparto
@@ -330,7 +402,7 @@ try {
     if (!empty($entregas)) {
         $idsPedidos = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $entregas)));
         $placeholders = implode(',', array_fill(0, count($idsPedidos), '?'));
-        $sqlDetalles = "SELECT dp.id_pedido, dp.cantidad, p.nombre, p.nombre_variante
+        $sqlDetalles = "SELECT dp.id_pedido, dp.id_detalle, dp.cantidad, dp.estado_entrega, dp.motivo_rechazo, p.nombre, p.nombre_variante
                         FROM detalle_pedidos dp
                         JOIN productos p ON dp.id_producto = p.id_producto
                         WHERE dp.id_pedido IN ($placeholders)
@@ -500,7 +572,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 
-    <div class="row">
+    <div class="row" id="entregas-cards-row">
         <?php if (empty($entregas)): ?>
             <div class="col s12 center-align" style="padding: 50px;">
                 <i class="material-icons grey-text" style="font-size: 5rem;">local_shipping</i>
@@ -608,7 +680,7 @@ include __DIR__ . '/includes/header.php';
                     $prioridadClass = $prioridadClases[$prioridadPedido] ?? 'grey';
                     $tieneCoordenadas = ($ent['latitud'] !== null && $ent['longitud'] !== null);
                 ?>
-                <div class="col s12 m6">
+                <div class="col s12 m6" data-pedido-id="<?php echo (int)$ent['id_pedido']; ?>">
                     <div class="card hoverable border-delivery">
                         <div class="card-content">
                             <?php if ($isRouteOptimizationAllowed): ?>
@@ -619,6 +691,7 @@ include __DIR__ . '/includes/header.php';
                                                                     value="<?php echo (int)$ent['id_pedido']; ?>"
                                                                     data-repartidor-id="<?php echo (int)$ent['id_repartidor']; ?>"
                                                                     data-fecha-entrega="<?php echo esc($ent['fecha_entrega_programada'] ? date('Y-m-d', strtotime((string)$ent['fecha_entrega_programada'])) : ''); ?>"
+                                                                    data-estado="<?php echo esc((string)($ent['estado'] ?? '')); ?>"
                                                                     <?php if (!$tieneCoordenadas): ?>
                                                                     disabled
                                                                     title="Este pedido no tiene coordenadas de ubicacion"
@@ -694,12 +767,45 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                         </div>
 
+                            <?php $puedeEditarProductos = $isRepartidorView && in_array($ent['estado'] ?? '', $pedidoEntregaEditableEstados, true); ?>
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
-                                <ul style="margin: 0; padding-left: 20px;">
+                                <ul style="margin: 0; padding-left: 20px; list-style: none;">
                                     <?php foreach (($detallesPorPedido[(int)$ent['id_pedido']] ?? []) as $d): ?>
-                                        <?php $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : ""); ?>
-                                        <li><?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?></li>
+                                        <?php
+                                            $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
+                                            $estadoEntregaItem = (string)($d['estado_entrega'] ?? 'entregado');
+                                            $idDetalleItem = (int)($d['id_detalle'] ?? 0);
+                                        ?>
+                                        <li style="margin-bottom:8px;<?php echo $estadoEntregaItem === 'rechazado' ? ' text-decoration: line-through; color:#9e9e9e;' : ''; ?>">
+                                            <?php echo $d['cantidad']; ?>x <?php echo esc($pName); ?>
+                                            <?php if ($estadoEntregaItem === 'rechazado'): ?>
+                                                <span class="new badge red" data-badge-caption="" style="margin-left:6px;">No entregado</span>
+                                                <?php if (!empty($d['motivo_rechazo'])): ?>
+                                                    <br><span class="grey-text" style="font-size:0.78rem; text-decoration:none;">Motivo: <?php echo esc((string)$d['motivo_rechazo']); ?></span>
+                                                <?php endif; ?>
+                                            <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
+                                                <button type="button" class="btn-small waves-effect waves-light red lighten-1 toggle-reject-item" data-target="reject-item-<?php echo $idDetalleItem; ?>" style="margin-left:6px; text-decoration:none; box-shadow:none;">
+                                                    <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
+                                                </button>
+                                                <form method="POST" id="reject-item-<?php echo $idDetalleItem; ?>" class="reject-item-form" data-reject-form="1" style="display:none; margin-top:6px; text-decoration:none;">
+                                                    <?php echo csrfInput(); ?>
+                                                    <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
+                                                    <input type="hidden" name="id_detalle" value="<?php echo $idDetalleItem; ?>">
+                                                    <input type="hidden" name="accion" value="producto_no_entregado">
+                                                    <select name="motivo_producto" data-reject-reason="1" class="browser-default" required style="margin-bottom:6px; height:36px; font-size:0.85rem;">
+                                                        <option value="" selected disabled>-- Motivo --</option>
+                                                        <?php foreach ($productRejectReasonOptions as $reasonKey => $reasonLabel): ?>
+                                                            <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                    <input type="text" name="motivo_producto_otro" data-reject-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:34px; margin-bottom:6px; padding:0 8px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box; font-size:0.85rem;">
+                                                    <button type="submit" class="btn-small red darken-2 waves-effect waves-light" onclick="return confirm('Confirmar que el cliente no quiere este producto? Se devolvera al inventario y se descontara del cobro.')">
+                                                        Confirmar
+                                                    </button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </li>
                                     <?php endforeach; ?>
                                 </ul>
                             </div>
@@ -716,10 +822,11 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
-                                <form method="POST">
+                                <?php $esAccionEntregar = !in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado']); ?>
+                                <form method="POST" data-entrega-pedido-form="1"<?php echo $esAccionEntregar ? ' data-accion-entregar="1"' : ''; ?>>
                                     <?php echo csrfInput(); ?>
                                     <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                    <?php if (in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado'])): ?>
+                                    <?php if (!$esAccionEntregar): ?>
                                         <input type="hidden" name="accion" value="en_camino">
                                         <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
                                             <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
@@ -734,7 +841,7 @@ include __DIR__ . '/includes/header.php';
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('Confirmar entrega y cobro del pedido?')">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
                                     <?php endif; ?>
@@ -771,6 +878,32 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($isRepartidorView): ?>
+<div id="modal-tomar-foto-entrega" class="modal">
+    <div class="modal-content">
+        <h5><i class="material-icons left">photo_camera</i> Foto de la entrega</h5>
+        <p class="grey-text">Toma o elige una foto de la entrega antes de confirmar el cobro. Con la foto lista, se marca como entregado y se abre la publicacion.</p>
+        <div class="file-field input-field">
+            <div class="btn blue darken-2">
+                <span>Foto</span>
+                <input type="file" id="tf-foto-input" accept="image/*">
+            </div>
+            <div class="file-path-wrapper">
+                <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
+            </div>
+        </div>
+        <div class="center-align" style="margin: 10px 0;">
+            <img id="tf-foto-preview" src="" alt="Vista previa" style="display:none; max-width: 100%; max-height: 260px; border-radius: 6px;">
+        </div>
+        <p id="tf-status" class="center-align" style="min-height: 1.2em;"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" id="tf-btn-omitir" class="modal-close waves-effect btn-flat red-text">Omitir foto</a>
+        <a href="#!" id="tf-btn-confirmar" class="waves-effect waves-light btn green disabled">
+            <i class="material-icons left">done_all</i> Confirmar entrega y cobro
+        </a>
+    </div>
+</div>
+
 <div id="modal-entrega-publicacion" class="modal">
     <div class="modal-content">
         <h5><i class="material-icons left">campaign</i> Publicar esta entrega</h5>
@@ -784,7 +917,7 @@ include __DIR__ . '/includes/header.php';
         <div class="file-field input-field">
             <div class="btn blue darken-2">
                 <span>Foto</span>
-                <input type="file" id="ep-foto-input" accept="image/*" capture="environment">
+                <input type="file" id="ep-foto-input" accept="image/*">
             </div>
             <div class="file-path-wrapper">
                 <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
@@ -805,6 +938,24 @@ include __DIR__ . '/includes/header.php';
         </a>
     </div>
 </div>
+
+<div id="modal-siguiente-en-camino" class="modal bottom-sheet">
+    <div class="modal-content">
+        <h5><i class="material-icons left">local_shipping</i> Siguiente entrega</h5>
+        <p id="sec-siguiente-info" class="grey-text"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect btn-flat">Ahora no</a>
+        <a href="#!" id="sec-btn-si" class="waves-effect waves-light btn orange darken-3">
+            <i class="material-icons left">navigation</i> Si, voy en camino
+        </a>
+    </div>
+</div>
+<form method="POST" id="sec-form-en-camino" style="display:none;">
+    <?php echo csrfInput(); ?>
+    <input type="hidden" name="accion" value="en_camino">
+    <input type="hidden" name="id_pedido" id="sec-form-id-pedido" value="">
+</form>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.toggle-cancel-entrega').forEach((btn) => {
@@ -837,6 +988,157 @@ document.addEventListener('DOMContentLoaded', function() {
         reasonSelect.addEventListener('change', syncOtherFieldVisibility);
         syncOtherFieldVisibility();
     });
+
+    document.querySelectorAll('.toggle-reject-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (!target) return;
+            const isHidden = target.style.display === 'none' || target.style.display === '';
+            target.style.display = isHidden ? 'block' : 'none';
+        });
+    });
+
+    document.querySelectorAll('form.reject-item-form[data-reject-form="1"]').forEach((formEl) => {
+        const reasonSelect = formEl.querySelector('select[data-reject-reason="1"]');
+        const otherInput = formEl.querySelector('input[data-reject-other="1"]');
+        if (!reasonSelect || !otherInput) return;
+
+        const syncOtherFieldVisibility = () => {
+            const mustShow = reasonSelect.value === 'otro';
+            otherInput.style.display = mustShow ? 'block' : 'none';
+            otherInput.required = mustShow;
+            if (!mustShow) {
+                otherInput.value = '';
+            }
+        };
+
+        reasonSelect.addEventListener('change', syncOtherFieldVisibility);
+        syncOtherFieldVisibility();
+    });
+});
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const tfCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
+    const tfEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+    const tfModalEl = document.getElementById('modal-tomar-foto-entrega');
+    const tfFotoInput = document.getElementById('tf-foto-input');
+    const tfPreview = document.getElementById('tf-foto-preview');
+    const tfStatus = document.getElementById('tf-status');
+    const tfBtnConfirmar = document.getElementById('tf-btn-confirmar');
+    const tfBtnOmitir = document.getElementById('tf-btn-omitir');
+    const tfForms = document.querySelectorAll('form[data-entrega-pedido-form="1"][data-accion-entregar="1"]');
+
+    // Sin modal/Materialize disponibles, los formularios se dejan tal cual (se envian de forma
+    // normal al hacer submit) para no bloquear la entrega si algo del JS fallo.
+    if (!tfModalEl || typeof M === 'undefined' || !M.Modal || tfForms.length === 0) {
+        return;
+    }
+
+    function tfGetModalInstance() {
+        return M.Modal.getInstance(tfModalEl) || M.Modal.init(tfModalEl, { dismissible: true });
+    }
+
+    let tfCurrentForm = null;
+    let tfUploadedId = null;
+
+    function tfSetStatus(msg, isError) {
+        tfStatus.textContent = msg || '';
+        tfStatus.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
+    }
+
+    function tfSubmitCurrentForm() {
+        if (!tfCurrentForm) {
+            return;
+        }
+        const formToSubmit = tfCurrentForm;
+        formToSubmit.dataset.tfConfirmado = '1';
+        if (formToSubmit.requestSubmit) {
+            formToSubmit.requestSubmit();
+        } else {
+            formToSubmit.submit();
+        }
+    }
+
+    tfForms.forEach((form) => {
+        form.addEventListener('submit', function (e) {
+            if (form.dataset.tfConfirmado === '1') {
+                return; // ya se subio la foto (o se omitio) y se confirmo desde el modal
+            }
+            e.preventDefault();
+            tfCurrentForm = form;
+            tfUploadedId = null;
+            tfFotoInput.value = '';
+            tfPreview.src = '';
+            tfPreview.style.display = 'none';
+            tfSetStatus('', false);
+            tfBtnConfirmar.classList.add('disabled');
+            tfGetModalInstance().open();
+        });
+    });
+
+    tfFotoInput.addEventListener('change', function () {
+        tfUploadedId = null;
+        tfBtnConfirmar.classList.add('disabled');
+        const file = tfFotoInput.files && tfFotoInput.files[0];
+        if (!file) {
+            tfPreview.style.display = 'none';
+            tfPreview.src = '';
+            tfSetStatus('', false);
+            return;
+        }
+        tfPreview.src = URL.createObjectURL(file);
+        tfPreview.style.display = 'block';
+
+        const idPedidoInput = tfCurrentForm ? tfCurrentForm.querySelector('[name="id_pedido"]') : null;
+        const idPedido = idPedidoInput ? idPedidoInput.value : '';
+        if (!idPedido) {
+            return;
+        }
+
+        tfSetStatus('Subiendo foto...', false);
+        const formData = new FormData();
+        formData.append('foto', file);
+        formData.append('id_pedido', idPedido);
+        formData.append('csrf_token', tfCsrfToken);
+
+        fetch(tfEndpoint, { method: 'POST', body: formData })
+            .then((r) => r.text())
+            .then((text) => {
+                let data;
+                try {
+                    data = text ? JSON.parse(text) : null;
+                } catch (err) {
+                    throw new Error('El servidor no respondio correctamente. Intenta de nuevo.');
+                }
+                if (!data || !data.success) {
+                    throw new Error((data && data.error) || 'No se pudo subir la foto.');
+                }
+                tfUploadedId = data.id_publicacion;
+                tfSetStatus('Foto lista.', false);
+                tfBtnConfirmar.classList.remove('disabled');
+            })
+            .catch((err) => {
+                tfSetStatus(err.message, true);
+            });
+    });
+
+    tfBtnConfirmar.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (tfBtnConfirmar.classList.contains('disabled') || !tfUploadedId) {
+            return;
+        }
+        tfGetModalInstance().close();
+        tfSubmitCurrentForm();
+    });
+
+    tfBtnOmitir.addEventListener('click', function () {
+        // El modal ya se cierra solo (btn-flat trae la clase modal-close); solo falta enviar
+        // el formulario de todos modos, sin foto.
+        setTimeout(tfSubmitCurrentForm, 0);
+    });
 });
 </script>
 
@@ -845,10 +1147,31 @@ document.addEventListener('DOMContentLoaded', function() {
     const epJustDeliveredId = <?php echo json_encode($justDeliveredPedidoId, JSON_UNESCAPED_UNICODE); ?>;
     const epCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
     const epEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+    const epRouteStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0), JSON_UNESCAPED_UNICODE); ?>;
 
     if (!epJustDeliveredId) {
         return;
     }
+
+    // Busca en que posicion iba este pedido dentro de la ultima ruta optimizada generada
+    // (guardada en localStorage, ver routeSaveStoredRoute mas abajo) para poder anunciar
+    // "Primera/Segunda/... entrega" en el orden real de reparto. Si no hay ruta guardada o
+    // el pedido ya no esta en ella, regresa null y el backend cae a contar entregas del dia.
+    function epFindNumeroEntregaFromRoute(idPedido) {
+        try {
+            const raw = localStorage.getItem(epRouteStorageKey);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const stops = parsed && parsed.data && Array.isArray(parsed.data.orderedStops) ? parsed.data.orderedStops : null;
+            if (!stops) return null;
+            const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(idPedido));
+            return idx >= 0 ? idx + 1 : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    const epNumeroEntrega = epFindNumeroEntregaFromRoute(epJustDeliveredId);
 
     const modalEl = document.getElementById('modal-entrega-publicacion');
     const textoEl = document.getElementById('ep-texto');
@@ -870,8 +1193,84 @@ document.addEventListener('DOMContentLoaded', function() {
         return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true });
     }
 
+    // Al cerrar el modal de publicacion (Omitir, Compartir/Facebook o clic afuera), sugiere
+    // marcar como "en camino" el siguiente pedido de la ruta guardada, para no tener que
+    // volver a buscarlo manualmente en la lista despues de cada entrega.
+    (function setupSiguienteEnCaminoPrompt() {
+        const stops = (function () {
+            try {
+                const raw = localStorage.getItem(epRouteStorageKey);
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                return (parsed && parsed.data && Array.isArray(parsed.data.orderedStops)) ? parsed.data.orderedStops : [];
+            } catch (e) {
+                return [];
+            }
+        })();
+
+        const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(epJustDeliveredId));
+        if (idx === -1) {
+            return;
+        }
+
+        let nextStop = null;
+        for (let i = idx + 1; i < stops.length; i++) {
+            const candidateId = stops[i].id_pedido;
+            const checkbox = document.querySelector('.route-check[value="' + CSS.escape(String(candidateId)) + '"]');
+            if (!checkbox) {
+                continue; // ya no esta en la lista (entregado/cancelado/rechazado por otra via)
+            }
+            const estado = checkbox.dataset.estado || '';
+            if (estado === 'pendiente_pago' || estado === 'pagado') {
+                nextStop = stops[i];
+                break;
+            }
+        }
+
+        if (!nextStop) {
+            return;
+        }
+
+        const secModalEl = document.getElementById('modal-siguiente-en-camino');
+        const secInfoEl = document.getElementById('sec-siguiente-info');
+        const secBtnSi = document.getElementById('sec-btn-si');
+        const secFormEl = document.getElementById('sec-form-en-camino');
+        const secFormIdPedido = document.getElementById('sec-form-id-pedido');
+        if (!secModalEl || !secInfoEl || !secBtnSi || !secFormEl || !secFormIdPedido) {
+            return;
+        }
+
+        const nextLabel = 'Pedido ' + (nextStop.numero_pedido || nextStop.id_pedido)
+            + (nextStop.cliente ? ' - ' + nextStop.cliente : '');
+        secInfoEl.textContent = nextLabel + '. Segun tu ruta guardada, es tu siguiente parada. ¿Marcarlo como "en camino"?';
+        secBtnSi.addEventListener('click', function () {
+            secFormIdPedido.value = nextStop.id_pedido;
+            secFormEl.submit();
+        });
+
+        const publishInstance = epGetModalInstance();
+        publishInstance.options.onCloseEnd = function () {
+            setTimeout(function () {
+                (M.Modal.getInstance(secModalEl) || M.Modal.init(secModalEl, { dismissible: true })).open();
+            }, 250);
+        };
+    })();
+
     let epUploadedId = null;
     let epUploadedForFile = null;
+    let epServerPhotoFile = null; // foto ya subida antes de cobrar, reconstruida como File para poder compartirla
+
+    // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
+    // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
+    function epParseJsonResponse(response) {
+        return response.text().then(function (text) {
+            try {
+                return text ? JSON.parse(text) : null;
+            } catch (e) {
+                throw new Error('El servidor no respondio correctamente (codigo ' + response.status + '). Intenta de nuevo en unos segundos.');
+            }
+        });
+    }
 
     function epSetStatus(msg, isError) {
         statusEl.textContent = msg || '';
@@ -887,17 +1286,36 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch(epEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, csrf_token: epCsrfToken }),
+        body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, numero_entrega: epNumeroEntrega, csrf_token: epCsrfToken }),
     })
-        .then((r) => r.json())
+        .then(epParseJsonResponse)
         .then((data) => {
             if (data && data.success) {
                 textoEl.value = data.texto || '';
                 M.textareaAutoResize(textoEl);
                 M.updateTextFields();
-                coloniaInfoEl.textContent = data.colonia_detectada
-                    ? 'Colonia detectada: ' + data.colonia_detectada + ' (puedes editar el texto arriba)'
-                    : 'No se pudo detectar la colonia automaticamente, ajusta el texto si quieres.';
+                const infoPartes = [];
+                infoPartes.push(data.colonia_detectada
+                    ? 'Colonia detectada: ' + data.colonia_detectada
+                    : 'No se pudo detectar la colonia automaticamente.');
+                if (data.numero_entrega) {
+                    infoPartes.push('Entrega #' + data.numero_entrega + ' del dia' + (epNumeroEntrega ? ' (segun tu ruta)' : ''));
+                }
+                coloniaInfoEl.textContent = infoPartes.join(' | ') + ' (puedes editar el texto arriba)';
+
+                // La foto ya se subio antes de cobrar (modal-tomar-foto-entrega); se muestra
+                // de una vez sin pedirle al repartidor que la vuelva a seleccionar.
+                if (data.id_publicacion && data.foto_url) {
+                    epUploadedId = data.id_publicacion;
+                    previewEl.src = data.foto_url;
+                    previewEl.style.display = 'block';
+                    fetch(data.foto_url)
+                        .then((r) => r.blob())
+                        .then((blob) => {
+                            epServerPhotoFile = new File([blob], 'entrega.jpg', { type: blob.type || 'image/jpeg' });
+                        })
+                        .catch(() => {});
+                }
             }
         })
         .catch(() => {});
@@ -925,6 +1343,9 @@ document.addEventListener('DOMContentLoaded', function() {
     function epEnsureUploaded() {
         const file = fotoInputEl.files && fotoInputEl.files[0];
         if (!file) {
+            if (epUploadedId) {
+                return Promise.resolve(epUploadedId); // ya se subio antes de cobrar
+            }
             return Promise.reject(new Error('Selecciona una foto de la entrega primero.'));
         }
         if (epUploadedId && epUploadedForFile === file) {
@@ -934,10 +1355,13 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('foto', file);
         formData.append('id_pedido', epJustDeliveredId);
         formData.append('texto', textoEl.value || '');
+        if (epNumeroEntrega) {
+            formData.append('numero_entrega', epNumeroEntrega);
+        }
         formData.append('csrf_token', epCsrfToken);
 
         return fetch(epEndpoint, { method: 'POST', body: formData })
-            .then((r) => r.json())
+            .then(epParseJsonResponse)
             .then((data) => {
                 if (!data || !data.success) {
                     throw new Error((data && data.error) || 'No se pudo subir la foto.');
@@ -964,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     csrf_token: epCsrfToken,
                 }),
             }))
-            .then((r) => r.json())
+            .then(epParseJsonResponse)
             .then((data) => {
                 if (!data || !data.success) {
                     throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
@@ -977,8 +1401,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     btnCompartir.addEventListener('click', function (e) {
         e.preventDefault();
-        const file = fotoInputEl.files && fotoInputEl.files[0];
-        if (!file) {
+        const file = (fotoInputEl.files && fotoInputEl.files[0]) || epServerPhotoFile;
+        if (!file && !epUploadedId) {
             epSetStatus('Selecciona una foto de la entrega primero.', true);
             return;
         }
@@ -986,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', function() {
         epSetStatus('Preparando para compartir...', false);
         epEnsureUploaded()
             .then((idPublicacion) => {
-                const canNativeShare = navigator.canShare && navigator.canShare({ files: [file] });
+                const canNativeShare = file && navigator.canShare && navigator.canShare({ files: [file] });
                 if (navigator.share && canNativeShare) {
                     return navigator.share({ text: textoEl.value, files: [file] })
                         .then(() => fetch(epEndpoint, {
@@ -1028,8 +1452,81 @@ const isAdminRouteView = <?php echo $isAdminView ? 'true' : 'false'; ?>;
 const routeDefaultOrigin = { lat: 20.6596988, lng: -103.3496092 };
 const routeSelectedDate = <?php echo json_encode($selectedFechaEntrega, JSON_UNESCAPED_UNICODE); ?>;
 const routeTodayDate = <?php echo json_encode(date('Y-m-d'), JSON_UNESCAPED_UNICODE); ?>;
+const routeStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0) . ($isAdminView ? '_rep' . $selectedRepartidorId : ''), JSON_UNESCAPED_UNICODE); ?>;
 let routeOriginSource = 'none';
 let routeGeoPermissionState = 'unknown';
+
+// La ruta generada solo vive en memoria del navegador (nunca se guarda en el servidor).
+// Cada "SALIR A ENTREGAR"/"ENTREGADO"/"No lo quiso" recarga la pagina completa, lo que
+// borraria la ruta ya acordada y obligaria a regenerarla desde la ubicacion actual del
+// repartidor (cambiando el orden ya calculado). Por eso se persiste en localStorage y se
+// restaura tal cual al cargar, filtrando solo las paradas que ya no siguen activas.
+function routeSaveStoredRoute(data, savedAt) {
+    try {
+        localStorage.setItem(routeStorageKey, JSON.stringify({ data, savedAt: savedAt || Date.now() }));
+    } catch (e) {}
+}
+
+function routeLoadStoredRoute() {
+    try {
+        const raw = localStorage.getItem(routeStorageKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return (parsed && parsed.data) ? parsed : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function routeClearStoredRoute() {
+    try {
+        localStorage.removeItem(routeStorageKey);
+    } catch (e) {}
+}
+
+// Reordena visualmente las tarjetas de "Entregas Asignadas" para que sigan el mismo orden
+// que la ruta ya generada/guardada, en vez del orden de fecha_creacion que trae la consulta.
+// Asi el repartidor va tachando de arriba hacia abajo en el mismo orden en que va manejando,
+// sin tener que buscar cual sigue entre las tarjetas. Las que no estan en la ruta guardada
+// (o cuando no hay ruta) se quedan al final en su orden original.
+function routeReorderEntregaCards(stops) {
+    const container = document.getElementById('entregas-cards-row');
+    if (!container || !Array.isArray(stops) || stops.length < 2) {
+        return;
+    }
+
+    const orderIndex = new Map();
+    stops.forEach((stop, i) => {
+        orderIndex.set(String(stop.id_pedido), i);
+    });
+
+    const cards = Array.from(container.children).filter((el) => el.dataset && el.dataset.pedidoId);
+    if (cards.length < 2) {
+        return;
+    }
+
+    cards.sort((a, b) => {
+        const idxA = orderIndex.has(a.dataset.pedidoId) ? orderIndex.get(a.dataset.pedidoId) : Infinity;
+        const idxB = orderIndex.has(b.dataset.pedidoId) ? orderIndex.get(b.dataset.pedidoId) : Infinity;
+        return idxA - idxB;
+    });
+
+    // Array.sort es estable (garantizado desde ES2019): las tarjetas fuera de la ruta
+    // (idx = Infinity) conservan su orden relativo original entre ellas.
+    cards.forEach((card) => container.appendChild(card));
+}
+
+function routeFormatSavedAt(timestamp) {
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts) || ts <= 0) {
+        return '';
+    }
+    try {
+        return new Date(ts).toLocaleString('es-MX', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    } catch (e) {
+        return '';
+    }
+}
 
 function routeEscapeHtml(value) {
     return String(value ?? '')
@@ -1089,12 +1586,39 @@ function routeFormatEtaHora(eta) {
     return match ? `${match[1]}:${match[2]} hrs` : '';
 }
 
+function routeFormatMoney(value) {
+    // Number(null) es 0 en JS, no NaN: hay que descartar null/undefined/'' explicitamente
+    // para no imprimir "Total: $0.00" cuando en realidad no hay total disponible.
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(2) : null;
+}
+
 function routeBuildWaMessage(stop) {
-    const numero = routeSafeText(stop.numero_pedido) || String(stop.id_pedido || '');
     const hora = routeFormatEtaHora(stop.eta_estimada);
-    let msg = `Hola! Tu pedido ${numero} va en camino.`;
+    const productos = Array.isArray(stop.productos) ? stop.productos : [];
+    const totalTexto = routeFormatMoney(stop.total);
+
+    let msg = 'Hola! Tu pedido va en camino';
+    if (productos.length > 0) {
+        const lista = productos
+            .map((p) => `• ${routeSafeText(p.cantidad) || '1'}x ${routeSafeText(p.nombre) || 'Producto'}`)
+            .join('\n');
+        msg += ':\n' + lista;
+    } else {
+        // Respaldo si el pedido no trae detalle de productos por alguna razon.
+        const numero = routeSafeText(stop.numero_pedido) || String(stop.id_pedido || '');
+        msg += ` ${numero}.`;
+    }
+
+    if (totalTexto !== null) {
+        msg += `\nTotal: $${totalTexto}`;
+    }
+
     if (hora) {
-        msg += ` Hora estimada de entrega: ${hora}.`;
+        msg += `\n\nHora estimada de entrega: ${hora}.`;
     }
     msg += ' Este horario es aproximado: podria cambiar segun el trafico o el clima. Te mantendremos informado por este mismo medio (WhatsApp). Gracias por tu paciencia.';
     return msg;
@@ -1349,12 +1873,19 @@ function routeUseCurrentLocation(button) {
     );
 }
 
-function routeRenderResult(data) {
+function routeRenderResult(data, options = {}) {
     const card = document.getElementById('route-result-card');
     const content = document.getElementById('route-result-content');
     if (!card || !content) {
         return;
     }
+
+    const storedNoticeHtml = options.fromStorage
+        ? `<div class="card-panel blue lighten-5" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <span><i class="material-icons tiny">history</i> Ruta guardada${options.savedAtText ? ' de las ' + routeEscapeHtml(options.savedAtText) : ''}. Se mantiene el mismo orden aunque recargues la pagina.</span>
+            <button type="button" id="route-discard-stored" class="btn-flat waves-effect red-text" style="padding:0 8px;">Descartar y generar nueva</button>
+        </div>`
+        : '';
 
     const summary = data.summary || {};
     const stops = Array.isArray(data.orderedStops) ? data.orderedStops : [];
@@ -1400,6 +1931,7 @@ function routeRenderResult(data) {
 
     content.innerHTML = `
         <span class="card-title">Ruta optimizada generada</span>
+        ${storedNoticeHtml}
         <p class="grey-text" style="margin-top:0;">
             Paradas: <strong>${routeEscapeHtml(summary.paradas_total || 0)}</strong> |
             Distancia: <strong>${routeEscapeHtml(((summary.distancia_total_m || 0) / 1000).toFixed(2))} km</strong> |
@@ -1418,6 +1950,16 @@ function routeRenderResult(data) {
 
     if (typeof window.waApplyBusinessLinks === 'function') {
         window.waApplyBusinessLinks(content);
+    }
+
+    const discardBtn = document.getElementById('route-discard-stored');
+    if (discardBtn) {
+        discardBtn.addEventListener('click', () => {
+            routeClearStoredRoute();
+            card.style.display = 'none';
+            content.innerHTML = '';
+            M.toast({html: 'Ruta guardada descartada. Genera una nueva cuando quieras.', classes: 'blue-grey darken-1'});
+        });
     }
 
     card.style.display = 'block';
@@ -1539,6 +2081,7 @@ async function routeGenerateOptimized() {
         }
 
         routeRenderResult(data);
+        routeSaveStoredRoute(data);
         if (String(data.routing_provider || 'google_routes') === 'local_fallback') {
             M.toast({html: 'Ruta generada en modo respaldo local.', classes: 'orange darken-2'});
         } else {
@@ -1580,6 +2123,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (useLocationBtn) {
         useLocationBtn.addEventListener('click', () => routeUseCurrentLocation(useLocationBtn));
+    }
+
+    const stored = routeLoadStoredRoute();
+    if (stored && stored.data) {
+        const activeIds = new Set(Array.from(document.querySelectorAll('.route-check')).map((el) => String(el.value)));
+        const allStops = Array.isArray(stored.data.orderedStops) ? stored.data.orderedStops : [];
+        const filteredStops = allStops.filter((stop) => activeIds.has(String(stop.id_pedido)));
+
+        routeReorderEntregaCards(allStops);
+
+        if (filteredStops.length > 0) {
+            const dataToRender = Object.assign({}, stored.data, {
+                orderedStops: filteredStops,
+                summary: Object.assign({}, stored.data.summary || {}, { paradas_total: filteredStops.length }),
+            });
+            routeRenderResult(dataToRender, { fromStorage: true, savedAtText: routeFormatSavedAt(stored.savedAt) });
+            if (filteredStops.length !== allStops.length) {
+                // Alguna parada ya se entrego/cancelo/rechazo: se limpia del guardado para
+                // que la proxima recarga no la vuelva a mostrar como pendiente (conserva la
+                // hora original de generacion, no la de este filtrado).
+                routeSaveStoredRoute(dataToRender, stored.savedAt);
+            }
+        } else {
+            routeClearStoredRoute();
+        }
     }
 
     const latInput = document.getElementById('route-origin-lat');

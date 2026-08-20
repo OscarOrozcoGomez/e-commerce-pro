@@ -3,6 +3,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/delivery_route_utils.php';
+require_once __DIR__ . '/../core/whatsapp_link_utils.php';
+require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 requireAuth();
 if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
@@ -285,7 +287,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     if ($idDireccion <= 0) {
                         throw new Exception('Direccion invalida para editar.');
                     }
-                    $stmtUpdateDir = $pdo->prepare('UPDATE cliente_direcciones SET alias = ?, direccion = ?, maps_link = ?, es_default = ?, latitud = ?, longitud = ? WHERE id_direccion = ? AND id_cliente = ?');
+                    // Cambiar la direccion invalida cualquier confirmacion previa del cliente:
+                    // si se movio/corrigio, hay que volver a confirmarla por WhatsApp.
+                    $stmtUpdateDir = $pdo->prepare('UPDATE cliente_direcciones SET alias = ?, direccion = ?, maps_link = ?, es_default = ?, latitud = ?, longitud = ?, confirmada_cliente = 0, confirmada_en = NULL, confirmada_por = NULL WHERE id_direccion = ? AND id_cliente = ?');
                     $stmtUpdateDir->execute([
                         $storeValue($alias),
                         $storeValue($direccion),
@@ -331,6 +335,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
                 $pdo->commit();
                 $success = 'Direccion eliminada.';
+            } elseif ($accion === 'marcar_direccion_confirmada') {
+                $idDireccion = (int)($_POST['id_direccion'] ?? 0);
+                if (!$hasClienteDireccionesTable) {
+                    throw new Exception('No se pudo confirmar la direccion.');
+                }
+                $idUsuarioActual = (int)($_SESSION['usuario']['id_usuario'] ?? 0);
+                $resultadoConfirmar = dbConfirmarDireccionCliente($pdo, $idCliente, $idDireccion, $idUsuarioActual);
+                if (!$resultadoConfirmar['success']) {
+                    throw new Exception($resultadoConfirmar['message']);
+                }
+                $success = $resultadoConfirmar['message'];
             } elseif ($accion === 'guardar_horario_direccion') {
                 if (!$hasClienteDireccionesTable) {
                     throw new Exception('La tabla de direcciones no esta disponible para horarios.');
@@ -432,7 +447,7 @@ if ($hasClienteDireccionesTable && !empty($idsClientes)) {
     if (!empty($idsClientes)) {
         $addressCountersByClient = [];
         $placeholders = implode(', ', array_fill(0, count($idsClientes), '?'));
-        $stmtDirecciones = $pdo->prepare("SELECT id_direccion, id_cliente, alias, direccion, maps_link, es_default FROM cliente_direcciones WHERE id_cliente IN ({$placeholders}) ORDER BY id_cliente ASC, es_default DESC, id_direccion ASC");
+        $stmtDirecciones = $pdo->prepare("SELECT id_direccion, id_cliente, alias, direccion, maps_link, es_default, confirmada_cliente, confirmada_en FROM cliente_direcciones WHERE id_cliente IN ({$placeholders}) ORDER BY id_cliente ASC, es_default DESC, id_direccion ASC");
         $stmtDirecciones->execute($idsClientes);
         $direccionesRaw = $stmtDirecciones->fetchAll(PDO::FETCH_ASSOC);
         foreach ($direccionesRaw as $dir) {
@@ -1064,6 +1079,7 @@ include __DIR__ . '/includes/header.php';
                     $origenRegistro = (string)($c['origen_registro'] ?? 'sucursal');
                     $direccionesCliente = $c['direcciones'] ?? [];
                     $horariosCliente = $horariosPorCliente[(int)$c['id_cliente']] ?? [];
+                    $waPhoneCliente = waBuildBusinessLinkPhone((string)($c['telefono'] ?? ''));
                 ?>
                 <div id="modal-editar-cliente-<?php echo (int)$c['id_cliente']; ?>" class="modal" style="max-width: 640px;">
                     <div class="modal-content">
@@ -1111,10 +1127,28 @@ include __DIR__ . '/includes/header.php';
                                         <li class="collection-item grey-text center">Sin direcciones registradas.</li>
                                     <?php else: ?>
                                         <?php foreach ($direccionesCliente as $d): ?>
+                                            <?php
+                                                $confirmadaCliente = ((int)($d['confirmada_cliente'] ?? 0)) === 1;
+                                                $mensajeWaDireccion = 'Hola ' . (string)$c['nombre'] . ', para asegurarnos de tener bien tu direccion de entrega, nos confirmas que esta es correcta? '
+                                                    . (string)$d['direccion']
+                                                    . (trim((string)($d['maps_link'] ?? '')) !== '' ? (' Ubicacion en el mapa: ' . trim((string)$d['maps_link'])) : '')
+                                                    . ' Responde SI para confirmar o dinos que corregir. Gracias!';
+                                            ?>
                                             <li class="collection-item">
                                                 <strong><?php echo esc((string)$d['alias']); ?></strong>
-                                                <?php if ((int)($d['es_default'] ?? 0) === 1): ?><span class="new badge blue" data-badge-caption="Predeterminada"></span><?php endif; ?><br>
+                                                <?php if ((int)($d['es_default'] ?? 0) === 1): ?><span class="new badge blue" data-badge-caption="Predeterminada"></span><?php endif; ?>
+                                                <?php if ($confirmadaCliente): ?>
+                                                    <span class="new badge green" data-badge-caption="Confirmada por cliente"></span>
+                                                <?php else: ?>
+                                                    <span class="new badge orange darken-1" data-badge-caption="Pendiente de confirmar"></span>
+                                                <?php endif; ?>
+                                                <br>
                                                 <span class="grey-text text-darken-1"><?php echo esc((string)$d['direccion']); ?></span>
+                                                <?php if ($confirmadaCliente && !empty($d['confirmada_en'])): ?>
+                                                    <div class="green-text text-darken-2" style="font-size:0.78rem; margin-top:2px;">
+                                                        <i class="material-icons tiny">check_circle</i> Confirmada el <?php echo date('d/m/Y H:i', strtotime((string)$d['confirmada_en'])); ?>
+                                                    </div>
+                                                <?php endif; ?>
                                                 <?php if (trim((string)($d['maps_link'] ?? '')) !== ''): ?>
                                                     <div style="margin-top:6px;">
                                                         <a href="<?php echo esc((string)$d['maps_link']); ?>" target="_blank" rel="noopener noreferrer" class="blue-text">
@@ -1147,6 +1181,26 @@ include __DIR__ . '/includes/header.php';
                                                         <button type="submit" class="btn-small red waves-effect waves-light" onclick="return confirm('¿Eliminar esta direccion?')">Eliminar</button>
                                                     </form>
                                                 </div>
+                                                <?php if (!$confirmadaCliente): ?>
+                                                    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                                                        <?php if ($waPhoneCliente !== ''): ?>
+                                                            <a href="https://wa.me/<?php echo esc($waPhoneCliente); ?>?text=<?php echo rawurlencode($mensajeWaDireccion); ?>" target="_blank" class="btn-small green darken-1 waves-effect waves-light whatsapp-business-link" data-wa-phone="<?php echo esc($waPhoneCliente); ?>" data-wa-text="<?php echo esc($mensajeWaDireccion); ?>">
+                                                                <i class="material-icons tiny">chat</i> Confirmar por WhatsApp
+                                                            </a>
+                                                        <?php else: ?>
+                                                            <span class="grey-text" style="font-size:0.78rem; align-self:center;">Sin telefono registrado para enviar WhatsApp.</span>
+                                                        <?php endif; ?>
+                                                        <form method="POST" style="display:inline;">
+                                                            <?php echo csrfInput(); ?>
+                                                            <input type="hidden" name="accion" value="marcar_direccion_confirmada">
+                                                            <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
+                                                            <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
+                                                            <button type="submit" class="btn-small teal waves-effect waves-light" onclick="return confirm('¿El cliente ya confirmo que esta direccion es correcta?')">
+                                                                <i class="material-icons tiny">check</i> Marcar confirmada
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                <?php endif; ?>
                                             </li>
                                         <?php endforeach; ?>
                                     <?php endif; ?>
@@ -1185,6 +1239,12 @@ include __DIR__ . '/includes/header.php';
                                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px;">
                                             <button type="submit" class="btn blue darken-2 waves-effect waves-light">Guardar direccion</button>
                                             <button type="button" class="btn-flat waves-effect" onclick="resetDireccionForm(<?php echo (int)$c['id_cliente']; ?>)">Cancelar edicion</button>
+                                        </div>
+                                        <div style="margin-top:8px;">
+                                            <button type="button" class="btn amber darken-2 waves-effect waves-light" style="width:100%;" onclick="enviarDireccionPorWhatsApp('<?php echo (int)$c['id_cliente']; ?>', '<?php echo esc($waPhoneCliente); ?>', <?php echo json_encode((string)$c['nombre'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>)" <?php echo $waPhoneCliente === '' ? 'disabled title="Cliente sin telefono registrado"' : ''; ?>>
+                                                <i class="material-icons left">chat</i> Enviar por WhatsApp para confirmar
+                                            </button>
+                                            <p class="grey-text text-small" style="margin:4px 0 0;">Manda la direccion de arriba (aun sin guardar) al cliente para que la confirme antes de guardarla.</p>
                                         </div>
                                     </form>
                                 </div>
@@ -1352,6 +1412,10 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <input type="hidden" name="maps_link" class="dir-maps-link">
                 <p class="grey-text text-small" id="dir-maps-link-status-crear" style="margin:-6px 0 0;">Sin ubicacion en mapa seleccionada aun.</p>
+                <button type="button" class="btn amber darken-2 waves-effect waves-light" style="width:100%; margin-top:10px;" onclick="enviarDireccionCrearPorWhatsApp()">
+                    <i class="material-icons left">chat</i> Enviar por WhatsApp para confirmar
+                </button>
+                <p class="grey-text text-small" style="margin:4px 0 0;">Usa el telefono capturado arriba. Confirma con el cliente antes de guardar.</p>
             </div>
 
             <div class="modal-footer" style="padding:0; background:transparent;">
@@ -1807,6 +1871,71 @@ function resetDireccionForm(idCliente) {
 
     M.updateTextFields();
     M.textareaAutoResize(form.querySelector('.dir-direccion'));
+}
+
+// Manda la direccion que se esta buscando/editando (aun sin guardar) al cliente por
+// WhatsApp para que la confirme antes de darla de alta, porque a veces ni el mapa
+// encuentra bien el lugar. Lee los campos del formulario en vivo, no lo que ya esta
+// guardado en la base, para que sirva igual con una direccion nueva que con una edicion.
+function enviarDireccionPorWhatsApp(idCliente, phoneDigits, nombreCliente) {
+    const form = document.getElementById(`dir-form-${idCliente}`);
+    const direccionTexto = (form ? form.querySelector('.dir-direccion').value : '').trim();
+    const mapsLink = (form ? form.querySelector('.dir-maps-link').value : '').trim();
+
+    if (!direccionTexto) {
+        if (typeof M !== 'undefined' && M.toast) {
+            M.toast({ html: 'Escribe o busca la direccion antes de enviarla por WhatsApp.', classes: 'orange darken-2' });
+        } else {
+            alert('Escribe o busca la direccion antes de enviarla por WhatsApp.');
+        }
+        return;
+    }
+    if (!phoneDigits) {
+        if (typeof M !== 'undefined' && M.toast) {
+            M.toast({ html: 'Este cliente no tiene telefono registrado.', classes: 'red darken-2' });
+        } else {
+            alert('Este cliente no tiene telefono registrado.');
+        }
+        return;
+    }
+
+    let mensaje = `Hola ${nombreCliente}, para asegurarnos de tener bien tu direccion de entrega, nos confirmas que esta es correcta? ${direccionTexto}`;
+    if (mapsLink) {
+        mensaje += ` Ubicacion en el mapa: ${mapsLink}`;
+    }
+    mensaje += ' Responde SI para confirmar o dinos que corregir. Gracias!';
+
+    // Se crea el link al vuelo (en vez de un <a> fijo) porque el texto depende de lo que
+    // haya en el formulario en ese momento. waApplyBusinessLinks lo reescribe a intent://
+    // en Android para forzar WhatsApp Business en vez del WhatsApp personal.
+    const link = document.createElement('a');
+    link.href = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(mensaje)}`;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'whatsapp-business-link';
+    link.style.display = 'none';
+    link.setAttribute('data-wa-phone', phoneDigits);
+    link.setAttribute('data-wa-text', mensaje);
+    document.body.appendChild(link);
+    if (typeof window.waApplyBusinessLinks === 'function') {
+        window.waApplyBusinessLinks(link.parentElement);
+    }
+    link.click();
+    link.remove();
+}
+
+// Variante para el modal de "Nuevo cliente": ahi el cliente aun no existe en la base, asi
+// que el nombre/telefono se leen del propio formulario en vez de venir ya renderizados
+// desde PHP.
+function enviarDireccionCrearPorWhatsApp() {
+    const form = document.getElementById('dir-form-crear');
+    if (!form) return;
+    const nombreEl = form.querySelector('[name="nombre"]');
+    const telefonoEl = form.querySelector('[name="telefono"]');
+    const nombre = ((nombreEl ? nombreEl.value : '') || '').trim() || 'cliente';
+    const phoneDigits = ((telefonoEl ? telefonoEl.value : '') || '').replace(/\D/g, '');
+    const phoneConLada = phoneDigits ? ('52' + phoneDigits) : '';
+    enviarDireccionPorWhatsApp('crear', phoneConLada, nombre);
 }
 
 function cargarEdicionDireccion(idCliente, data) {
