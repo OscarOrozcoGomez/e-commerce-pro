@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS `password_resets` (
   `token_hash` VARCHAR(255) NOT NULL,
   `expires_at` DATETIME NOT NULL,
   `usado` TINYINT(1) NOT NULL DEFAULT 0,
+  `intentos_fallidos` TINYINT UNSIGNED NOT NULL DEFAULT 0,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_password_reset`),
   INDEX `idx_password_resets_email` (`email`),
