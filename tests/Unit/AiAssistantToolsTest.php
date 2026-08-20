@@ -108,6 +108,25 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotEmpty(aiSearchInventory($this->pdo, 'vitaminico'));
     }
 
+    public function testAiResolveDeepSeekEndpointUsesRelayWhenConfigured(): void
+    {
+        $result = aiResolveDeepSeekEndpoint('http://159.89.87.3:3000/deepseek-relay');
+
+        $this->assertTrue($result['use_relay']);
+        $this->assertSame('http://159.89.87.3:3000/deepseek-relay', $result['url']);
+    }
+
+    public function testAiResolveDeepSeekEndpointFallsBackToDirectWhenNotConfigured(): void
+    {
+        $sinValor = aiResolveDeepSeekEndpoint(null);
+        $this->assertFalse($sinValor['use_relay']);
+        $this->assertSame('https://api.deepseek.com/chat/completions', $sinValor['url']);
+
+        $vacio = aiResolveDeepSeekEndpoint('   ');
+        $this->assertFalse($vacio['use_relay']);
+        $this->assertSame('https://api.deepseek.com/chat/completions', $vacio['url']);
+    }
+
     public function testAiSearchInventoryEscapesLikeWildcardCharactersInUserInput(): void
     {
         // Un cliente que escribe literalmente "%" o "_" no debe convertir su busqueda en

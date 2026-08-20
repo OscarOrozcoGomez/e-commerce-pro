@@ -242,6 +242,9 @@ function preloadSecretSources(): void
             'WA_BRIDGE_SEND_URL' => ['WA_BRIDGE_SEND_URL'],
             // Endpoint que expone el puente Node.js para aplicar/quitar etiquetas nativas de WhatsApp.
             'WA_BRIDGE_LABEL_URL' => ['WA_BRIDGE_LABEL_URL'],
+            // Endpoint que expone el puente Node.js para relevar llamadas a DeepSeek -- el hosting
+            // de PHP bloquea la salida directa a api.deepseek.com, el droplet si tiene salida libre.
+            'WA_BRIDGE_DEEPSEEK_URL' => ['WA_BRIDGE_DEEPSEEK_URL'],
             'GTM_CONTAINER_ID' => ['GTM_CONTAINER_ID'],
             'GA4_MEASUREMENT_ID' => ['GA4_MEASUREMENT_ID'],
             'GA4_DIRECT_ENABLED' => ['GA4_DIRECT_ENABLED'],

@@ -427,7 +427,6 @@ include __DIR__ . '/views/includes/header.php';
     let galleryImages = [];
     let currentSlide = 0;
     let mainImageFallbackApplied = false;
-    let mainImageLoadToken = 0;
     const thumbDebugPanel = document.getElementById('thumb-debug-panel');
     const thumbDebugMeta = document.getElementById('thumb-debug-meta');
     const thumbDebugList = document.getElementById('thumb-debug-list');
@@ -532,24 +531,14 @@ include __DIR__ . '/views/includes/header.php';
             return;
         }
 
-        const token = ++mainImageLoadToken;
+        // Antes se precargaba la imagen con un objeto Image() aparte y solo se
+        // asignaba a mainImg.src hasta que ese probe terminaba: eso duplicaba la
+        // descarga/decodificación de cada imagen. Ahora se asigna directo y el
+        // propio <img> (eventos load/error de mainImg, ya registrados abajo)
+        // controla el shimmer y el fallback.
         if (zoomContainer) zoomContainer.classList.add('is-loading');
-
-        const probe = new Image();
-        probe.decoding = 'async';
-        probe.onload = () => {
-            if (token !== mainImageLoadToken) return;
-            delete mainImg.dataset.retryTried;
-            mainImg.src = targetUrl;
-            if (zoomContainer) zoomContainer.classList.remove('is-loading');
-        };
-        probe.onerror = () => {
-            if (token !== mainImageLoadToken) return;
-            if (zoomContainer) zoomContainer.classList.remove('is-loading');
-            delete mainImg.dataset.retryTried;
-            mainImg.src = targetUrl;
-        };
-        probe.src = targetUrl;
+        delete mainImg.dataset.retryTried;
+        mainImg.src = targetUrl;
     }
 
     function handleMainImageError() {
@@ -591,6 +580,9 @@ include __DIR__ . '/views/includes/header.php';
     }
 
     if (mainImg) {
+        mainImg.addEventListener('load', () => {
+            if (zoomContainer) zoomContainer.classList.remove('is-loading');
+        });
         mainImg.addEventListener('error', handleMainImageError);
     }
 
@@ -810,7 +802,6 @@ include __DIR__ . '/views/includes/header.php';
             };
 
             const applyThumbSrc = (url, reason = '') => {
-                thumbImg.src = url;
                 thumbImg.dataset.currentSrc = String(url || '');
                 if (reason) {
                     thumbImg.dataset.fallbackReason = reason;
@@ -827,30 +818,27 @@ include __DIR__ . '/views/includes/header.php';
                     thumb.classList.remove('thumb-fallback');
                 }
 
-                if (thumbImg.complete) {
-                    if (thumbImg.naturalWidth > 0) {
-                        markThumbReady();
-                        pushThumbDebug(index, 'painted', imgSrc, url, 'complete=1');
-                    } else {
-                        repairBrokenGalleryImage(index, PDP_DEFAULT_PRODUCT_IMAGE);
-                        thumbImg.src = PDP_DEFAULT_PRODUCT_IMAGE;
-                        markThumbReady();
-                        pushThumbDebug(index, 'fallback', imgSrc, PDP_DEFAULT_PRODUCT_IMAGE, 'complete=1 naturalWidth=0');
-                    }
-                }
+                thumbImg.src = url;
             };
 
+            // Antes se precargaba cada miniatura con un objeto Image() aparte y
+            // solo se copiaba a thumbImg.src cuando ese probe terminaba: eso
+            // duplicaba la descarga/decodificación de cada miniatura. Ahora
+            // thumbImg carga directo y sus propios eventos load/error deciden.
             let thumbSettled = false;
             const settleThumb = (ok, finalUrl) => {
                 if (thumbSettled) return;
                 thumbSettled = true;
+                window.clearTimeout(thumbTimeout);
                 if (!ok) {
                     repairBrokenGalleryImage(index, PDP_DEFAULT_PRODUCT_IMAGE);
-                    pushThumbDebug(index, 'fallback', imgSrc, PDP_DEFAULT_PRODUCT_IMAGE, 'probe failed');
+                    pushThumbDebug(index, 'fallback', imgSrc, PDP_DEFAULT_PRODUCT_IMAGE, 'load failed');
+                    applyThumbSrc(PDP_DEFAULT_PRODUCT_IMAGE, 'load failed');
+                    markThumbReady();
                 } else {
-                    pushThumbDebug(index, 'ok', imgSrc, finalUrl, 'probe success');
+                    pushThumbDebug(index, 'ok', imgSrc, finalUrl, 'load success');
+                    markThumbReady();
                 }
-                applyThumbSrc(ok ? finalUrl : PDP_DEFAULT_PRODUCT_IMAGE, ok ? '' : 'probe failed');
             };
 
             const thumbTimeout = window.setTimeout(() => {
@@ -858,24 +846,25 @@ include __DIR__ . '/views/includes/header.php';
                 settleThumb(false, PDP_DEFAULT_PRODUCT_IMAGE);
             }, 5000);
 
-            const probeThumb = new Image();
-            probeThumb.decoding = 'async';
-            probeThumb.onload = () => {
-                window.clearTimeout(thumbTimeout);
-                settleThumb(true, imgSrc);
-            };
-            probeThumb.onerror = () => {
+            thumbImg.addEventListener('load', () => {
+                if (thumbImg.naturalWidth > 0) {
+                    settleThumb(true, String(thumbImg.currentSrc || thumbImg.src || imgSrc));
+                } else {
+                    settleThumb(false, PDP_DEFAULT_PRODUCT_IMAGE);
+                }
+            });
+            thumbImg.addEventListener('error', () => {
                 if (!thumbImg.dataset.retryTried) {
                     thumbImg.dataset.retryTried = '1';
                     const retried = addCacheBuster(imgSrc);
-                    pushThumbDebug(index, 'retry', imgSrc, retried, 'probe error first attempt');
-                    probeThumb.src = retried;
+                    pushThumbDebug(index, 'retry', imgSrc, retried, 'error first attempt');
+                    thumbImg.src = retried;
                     return;
                 }
-                window.clearTimeout(thumbTimeout);
                 settleThumb(false, PDP_DEFAULT_PRODUCT_IMAGE);
-            };
-            probeThumb.src = imgSrc;
+            });
+
+            applyThumbSrc(imgSrc);
 
             thumb.appendChild(thumbImg);
             thumb.onclick = () => {

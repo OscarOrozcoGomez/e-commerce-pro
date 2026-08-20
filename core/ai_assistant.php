@@ -978,6 +978,22 @@ function aiIsRateLimited(PDO $pdo, int $idConversacion): bool
  * Llamada al LLM (DeepSeek, API compatible con OpenAI function calling)
  * ------------------------------------------------------------------- */
 
+/**
+ * Decide si aiCallDeepSeek() llama a DeepSeek directo o via el relay del puente de
+ * DigitalOcean. Pura y testeable. El relay existe porque algunos hostings de PHP (ej.
+ * NEUBOX) bloquean la salida directa a api.deepseek.com; el droplet del puente si tiene
+ * salida libre. Si no hay relay configurado, el comportamiento es identico al de siempre.
+ */
+function aiResolveDeepSeekEndpoint(?string $relayUrl): array
+{
+    $relayUrl = trim((string)($relayUrl ?? ''));
+    if ($relayUrl !== '') {
+        return ['url' => $relayUrl, 'use_relay' => true];
+    }
+
+    return ['url' => 'https://api.deepseek.com/chat/completions', 'use_relay' => false];
+}
+
 function aiCallDeepSeek(array $messages, array $tools, string $model, float $temperature = 0.3, string $apiKeyVariable = 'DEEPSEEK_AI_ASSISTANT'): array
 {
     if (aiIsTestMode()) {
@@ -987,13 +1003,28 @@ function aiCallDeepSeek(array $messages, array $tools, string $model, float $tem
         ];
     }
 
-    // El nombre de la variable de entorno es configurable desde ai_asistente_config.api_key_variable
-    // (por defecto DEEPSEEK_AI_ASSISTANT) en vez de estar fijo en el codigo, para que el admin pueda
-    // apuntar a como se llame el secreto en su entorno sin tocar PHP.
-    $apiKeyVariable = trim($apiKeyVariable) !== '' ? trim($apiKeyVariable) : 'DEEPSEEK_AI_ASSISTANT';
-    $apiKey = getEnvVar($apiKeyVariable);
-    if ($apiKey === null || trim($apiKey) === '') {
-        throw new RuntimeException("La variable de entorno {$apiKeyVariable} no esta configurada.");
+    $endpoint = aiResolveDeepSeekEndpoint(getEnvVar('WA_BRIDGE_DEEPSEEK_URL'));
+
+    $headers = ['Content-Type: application/json'];
+    if ($endpoint['use_relay']) {
+        // El relay pone su propia llave de DeepSeek del lado del droplet; PHP no manda
+        // Authorization, solo el mismo token compartido que ya validan los demas endpoints
+        // del puente (whatsapp_webhook.php, import_history.php, sync_labels.php).
+        $webhookToken = getEnvVar('WA_WEBHOOK_TOKEN');
+        if ($webhookToken === null || trim($webhookToken) === '') {
+            throw new RuntimeException('WA_WEBHOOK_TOKEN no esta configurado; no se puede usar el relay de DeepSeek.');
+        }
+        $headers[] = 'X-Webhook-Token: ' . $webhookToken;
+    } else {
+        // El nombre de la variable de entorno es configurable desde ai_asistente_config.api_key_variable
+        // (por defecto DEEPSEEK_AI_ASSISTANT) en vez de estar fijo en el codigo, para que el admin pueda
+        // apuntar a como se llame el secreto en su entorno sin tocar PHP.
+        $apiKeyVariable = trim($apiKeyVariable) !== '' ? trim($apiKeyVariable) : 'DEEPSEEK_AI_ASSISTANT';
+        $apiKey = getEnvVar($apiKeyVariable);
+        if ($apiKey === null || trim($apiKey) === '') {
+            throw new RuntimeException("La variable de entorno {$apiKeyVariable} no esta configurada.");
+        }
+        $headers[] = 'Authorization: Bearer ' . $apiKey;
     }
 
     $payload = [
@@ -1005,12 +1036,9 @@ function aiCallDeepSeek(array $messages, array $tools, string $model, float $tem
     ];
 
     $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, 'https://api.deepseek.com/chat/completions');
+    curl_setopt($ch, CURLOPT_URL, $endpoint['url']);
     curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json',
-        'Authorization: Bearer ' . $apiKey,
-    ]);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
