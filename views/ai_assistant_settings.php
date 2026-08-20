@@ -26,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
         $promo = trim((string)($_POST['promocion_vigente_texto'] ?? ''));
         $envio = trim((string)($_POST['politica_envio_texto'] ?? ''));
         $pago = trim((string)($_POST['politica_pago_texto'] ?? ''));
+        $ubicacion = trim((string)($_POST['ubicacion_texto'] ?? ''));
         $bienvenida = trim((string)($_POST['mensaje_bienvenida'] ?? ''));
         $modelo = trim((string)($_POST['modelo_llm'] ?? 'deepseek-chat'));
         $temperatura = (float)($_POST['temperatura'] ?? 0.30);
@@ -46,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
         try {
             $stmt = $pdo->prepare(
                 'INSERT INTO ai_asistente_config
-                    (id_config, activo, nombre_persona, tono_instrucciones, promocion_vigente_texto, politica_envio_texto, politica_pago_texto, mensaje_bienvenida, modelo_llm, temperatura, prompt_sistema_override, api_key_variable)
-                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id_config, activo, nombre_persona, tono_instrucciones, promocion_vigente_texto, politica_envio_texto, politica_pago_texto, ubicacion_texto, mensaje_bienvenida, modelo_llm, temperatura, prompt_sistema_override, api_key_variable)
+                 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE
                     activo = VALUES(activo),
                     nombre_persona = VALUES(nombre_persona),
@@ -55,13 +56,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
                     promocion_vigente_texto = VALUES(promocion_vigente_texto),
                     politica_envio_texto = VALUES(politica_envio_texto),
                     politica_pago_texto = VALUES(politica_pago_texto),
+                    ubicacion_texto = VALUES(ubicacion_texto),
                     mensaje_bienvenida = VALUES(mensaje_bienvenida),
                     modelo_llm = VALUES(modelo_llm),
                     temperatura = VALUES(temperatura),
                     prompt_sistema_override = VALUES(prompt_sistema_override),
                     api_key_variable = VALUES(api_key_variable)'
             );
-            $stmt->execute([$activo, $nombrePersona, $tono, $promo, $envio, $pago, $bienvenida, $modelo, $temperatura, $promptOverride, $apiKeyVariable]);
+            $stmt->execute([$activo, $nombrePersona, $tono, $promo, $envio, $pago, $ubicacion, $bienvenida, $modelo, $temperatura, $promptOverride, $apiKeyVariable]);
             $success = 'Configuracion del asistente actualizada.';
         } catch (Throwable $e) {
             $error = 'Error al guardar la configuracion: ' . $e->getMessage();
@@ -180,6 +182,12 @@ include __DIR__ . '/includes/header.php';
                         <div class="input-field">
                             <textarea class="materialize-textarea" name="politica_pago_texto" id="politica_pago_texto" rows="2"><?php echo esc((string)$config['politica_pago_texto']); ?></textarea>
                             <label for="politica_pago_texto" class="active">Politica de pago</label>
+                        </div>
+
+                        <div class="input-field">
+                            <textarea class="materialize-textarea" name="ubicacion_texto" id="ubicacion_texto" rows="2"><?php echo esc((string)$config['ubicacion_texto']); ?></textarea>
+                            <label for="ubicacion_texto" class="active">Ubicacion del negocio (direccion + link de Maps)</label>
+                            <span class="helper-text">Lo que Alex responde cuando preguntan por sucursales o donde se encuentran.</span>
                         </div>
 
                         <div class="input-field">

@@ -47,6 +47,16 @@ exit;
 
 function aiAssistantAdminDispatch(string $action, array $data, PDO $pdo): void
 {
+    if ($action === 'toggle_bot_global') {
+        $activo = !empty($data['activo']);
+
+        aiSetGlobalActive($pdo, $activo);
+        logAudit('AI_ASISTENTE_GLOBAL_TOGGLE', 'ai_asistente_config', 1, $activo ? 'Alex activado globalmente' : 'Alex desactivado globalmente');
+
+        echo json_encode(['success' => true, 'activo' => $activo]);
+        exit;
+    }
+
     if ($action === 'reactivate_bot') {
         $idConversacion = (int)($data['id_conversacion'] ?? 0);
         if ($idConversacion <= 0) {

@@ -14,6 +14,14 @@ $isDryRun = array_key_exists('dry-run', $options);
 
 $pdo = getPDO();
 
+// El interruptor general del asistente (el mismo toggle del dashboard) tambien detiene
+// el cron por completo: si Alex esta apagado, no tiene sentido seguir mandando
+// seguimientos proactivos ni cerrando/etiquetando conversaciones por su cuenta.
+if (!aiIsAssistantGloballyActive($pdo)) {
+    fwrite(STDOUT, sprintf('RUN %s | asistente desactivado globalmente, no se ejecuta nada.%s', date('Y-m-d H:i:s'), PHP_EOL));
+    exit(0);
+}
+
 $resueltas = 0;
 $cerradasPorInactividad = 0;
 $seguimientosEnviados = 0;

@@ -13,6 +13,7 @@ final class AiAssistantPromptTest extends TestCase
             'promocion_vigente_texto' => '',
             'politica_envio_texto' => '',
             'politica_pago_texto' => '',
+            'ubicacion_texto' => '',
         ];
     }
 
@@ -47,6 +48,27 @@ final class AiAssistantPromptTest extends TestCase
 
         $this->assertStringContainsString('Entregamos en 24-48h', $prompt);
         $this->assertStringContainsString('Aceptamos tarjeta, transferencia y OXXO.', $prompt);
+    }
+
+    public function testSystemPromptIncludesLocationOnlyWhenSet(): void
+    {
+        $withoutUbicacion = aiBuildSystemPrompt($this->baseConfig(), null);
+        $this->assertStringNotContainsString('Ubicacion del negocio', $withoutUbicacion);
+
+        $config = $this->baseConfig();
+        $config['ubicacion_texto'] = 'Tabachín 248, Bosques de Tonalá, 45400 Tonalá, Jal. Puedes ver el mapa aquí: https://maps.app.goo.gl/cBpMFXU27MXL4k9F6';
+        $conUbicacion = aiBuildSystemPrompt($config, null);
+
+        $this->assertStringContainsString('Tabachín 248, Bosques de Tonalá', $conUbicacion);
+        $this->assertStringContainsString('https://maps.app.goo.gl/cBpMFXU27MXL4k9F6', $conUbicacion);
+    }
+
+    public function testSystemPromptInstructsPresentingMultiplePresentations(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('presentaciones', $prompt);
+        $this->assertStringContainsString('categorias', $prompt);
     }
 
     public function testSystemPromptNeverContainsWebMarkdownOrHtml(): void

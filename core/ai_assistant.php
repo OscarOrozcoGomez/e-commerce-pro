@@ -45,6 +45,14 @@ const AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS = 24;
 // para los casos en que el LLM contesta en texto libre sin invocar la funcion.
 const AI_HANDOFF_TEXT_FLAG = '[PASE_A_HUMANO]';
 
+// Tope de resultados que consultar_inventario le manda al LLM por busqueda. Se probo contra
+// datos reales: busquedas amplias tipo "vitamina" o "magnesio" facilmente superan 20-60
+// coincidencias (por variantes de presentacion), asi que este valor es un balance entre no
+// truncar de mas y no inflar el prompt -- aiToolConsultarInventario() siempre le dice al LLM
+// el total real encontrado ademas de la lista, para que nunca le diga al cliente "no tenemos
+// mucha variedad" cuando en realidad se truncaron los resultados.
+const AI_INVENTORY_SEARCH_LIMIT = 12;
+
 function aiIsTestMode(): bool
 {
     $raw = strtolower((string)(getEnvVar('AI_ASSISTANT_TEST_MODE', '0') ?? '0'));
@@ -65,6 +73,7 @@ function aiGetConfig(PDO $pdo): array
         'promocion_vigente_texto' => '',
         'politica_envio_texto' => '',
         'politica_pago_texto' => '',
+        'ubicacion_texto' => '',
         'mensaje_bienvenida' => '',
         'modelo_llm' => 'deepseek-chat',
         'temperatura' => 0.30,
@@ -83,6 +92,38 @@ function aiGetConfig(PDO $pdo): array
     }
 
     return $defaults;
+}
+
+/**
+ * Interruptor general del asistente. Es el mismo campo ai_asistente_config.activo que ya
+ * usa aiRunAssistantTurn() para decidir si contesta o no -- esta funcion existe para que
+ * cualquier otro punto de entrada (el cron de seguimiento, el toggle del dashboard) lo
+ * consulte con la misma logica exacta en vez de reinterpretar el valor crudo cada vez.
+ */
+function aiIsAssistantGloballyActive(PDO $pdo): bool
+{
+    $config = aiGetConfig($pdo);
+
+    return !isset($config['activo']) || (int)$config['activo'] === 1;
+}
+
+function aiSetGlobalActive(PDO $pdo, bool $activo): bool
+{
+    // Se checa existencia por separado en vez de confiar en rowCount() del UPDATE: un
+    // UPDATE que deja el valor igual al que ya tenia reporta 0 filas afectadas en MySQL,
+    // lo cual no significa "no habia fila que actualizar".
+    $existe = (bool)$pdo->query('SELECT 1 FROM ai_asistente_config WHERE id_config = 1')->fetchColumn();
+
+    if ($existe) {
+        $pdo->prepare('UPDATE ai_asistente_config SET activo = ? WHERE id_config = 1')
+            ->execute([$activo ? 1 : 0]);
+    } else {
+        // Entorno recien migrado sin fila todavia: se crea con el valor pedido.
+        $pdo->prepare('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, ?)')
+            ->execute([$activo ? 1 : 0]);
+    }
+
+    return true;
 }
 
 /* ---------------------------------------------------------------------
@@ -119,12 +160,13 @@ function aiBuildSystemPrompt(
         $lines[] = '';
         $lines[] = 'Flujo de atencion:';
         $lines[] = '1. Saluda y da seguimiento a lo que el cliente ya pregunto antes en esta conversacion (tienes el historial completo).';
-        $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
-        $lines[] = '3. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
-        $lines[] = '4. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad) y metodo de pago preferido.';
-        $lines[] = '5. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
+        $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. El catalogo tiene productos de varias categorias (vitaminas, minerales, suplementos, etc.) y muchos vienen en varias presentaciones/tamanos (por ejemplo 120, 240 o 500 capsulas) a precios distintos -- si consultar_inventario te regresa varias presentaciones del mismo producto, mencionalas todas para que el cliente elija la que le convenga, no asumas una sola. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
+        $lines[] = '3. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
+        $lines[] = '4. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
+        $lines[] = '5. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad) y metodo de pago preferido.';
+        $lines[] = '6. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
         $lines[] = '';
-        $lines[] = 'Cada respuesta debe invitar al siguiente paso de la compra, sin ser agresivo.';
+        $lines[] = 'Cierre de venta: eres habil y educado para conducir la conversacion hacia la compra, sin presionar ni sonar como script. Cada respuesta debe invitar al siguiente paso concreto (nunca dejes la conversacion en un punto muerto): si el cliente ya pregunto precio, ofrece apartarlo o pasar a los datos de envio; si duda entre opciones, ayudalo a decidir con una pregunta o recomendacion breve en vez de solo esperar; si menciona una necesidad (para dormir, energia, digestion, etc.), sugiere tu mismo el producto mas adecuado del inventario real en vez de esperar a que el cliente lo pida por nombre. Se calido y genuino, no insistas si el cliente ya dijo que no.';
         $lines[] = 'Si el cliente pide hablar con una persona, muestra molestia fuerte, o tiene una duda que no puedes resolver con tus funciones (quejas, reembolsos, temas administrativos), llama a transferir_a_humano con el motivo.';
 
         $promo = trim((string)($config['promocion_vigente_texto'] ?? ''));
@@ -144,6 +186,12 @@ function aiBuildSystemPrompt(
             if ($pago !== '') {
                 $lines[] = '- Pago: ' . $pago;
             }
+        }
+
+        $ubicacion = trim((string)($config['ubicacion_texto'] ?? ''));
+        if ($ubicacion !== '') {
+            $lines[] = '';
+            $lines[] = 'Ubicacion del negocio (usala solo si el cliente pregunta por sucursales, donde se encuentran, o si tienen tienda fisica): ' . $ubicacion;
         }
 
         $tono = trim((string)($config['tono_instrucciones'] ?? ''));
@@ -217,7 +265,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_inventario',
-                'description' => 'Busca productos reales en el catalogo por texto y regresa su id, nombre, precio y existencia actual.',
+                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1049,6 +1097,40 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     }, $rows);
 }
 
+/**
+ * Cuenta el total real de productos activos que coinciden con la busqueda, usando el mismo
+ * criterio que aiSearchInventory() (nombre/codigo_barras/nombre_variante/descripcion/
+ * ingredientes/beneficios), sin el LIMIT. Sirve para que consultar_inventario le diga al LLM
+ * cuantas coincidencias hay en total aunque la lista que le manda este acotada -- probado
+ * contra datos reales, busquedas como "vitamina" superan las 60 coincidencias.
+ */
+function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
+{
+    $busqueda = trim($busquedaTexto);
+    if ($busqueda === '') {
+        $stmt = $pdo->query("SELECT COUNT(*) FROM productos WHERE estado = 'activo'");
+
+        return $stmt ? (int)$stmt->fetchColumn() : 0;
+    }
+
+    $sql = "SELECT COUNT(*) FROM productos p
+            WHERE p.estado = 'activo'
+              AND (p.nombre LIKE :term1 OR p.codigo_barras LIKE :term2 OR p.nombre_variante LIKE :term3
+                   OR p.descripcion LIKE :term4 OR p.ingredientes LIKE :term5 OR p.beneficios LIKE :term6)";
+    $term = '%' . $busqueda . '%';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':term1' => $term,
+        ':term2' => $term,
+        ':term3' => $term,
+        ':term4' => $term,
+        ':term5' => $term,
+        ':term6' => $term,
+    ]);
+
+    return (int)$stmt->fetchColumn();
+}
+
 function aiToolConsultarInventario(PDO $pdo, array $args): array
 {
     $busqueda = trim((string)($args['busqueda_texto'] ?? ''));
@@ -1056,12 +1138,19 @@ function aiToolConsultarInventario(PDO $pdo, array $args): array
         return ['ok' => false, 'message' => 'Falta el texto de busqueda.'];
     }
 
-    $resultados = aiSearchInventory($pdo, $busqueda, 8);
+    $resultados = aiSearchInventory($pdo, $busqueda, AI_INVENTORY_SEARCH_LIMIT);
     if (empty($resultados)) {
-        return ['ok' => true, 'productos' => [], 'message' => 'No se encontraron productos activos que coincidan con esa busqueda.'];
+        return ['ok' => true, 'productos' => [], 'total_encontrados' => 0, 'message' => 'No se encontraron productos activos que coincidan con esa busqueda.'];
     }
 
-    return ['ok' => true, 'productos' => $resultados];
+    $total = aiCountInventoryMatches($pdo, $busqueda);
+    $result = ['ok' => true, 'productos' => $resultados, 'total_encontrados' => $total];
+
+    if ($total > count($resultados)) {
+        $result['message'] = "Se encontraron {$total} productos en total; aqui se muestran los primeros " . count($resultados) . ". Si es una busqueda amplia, no los listes todos de golpe: destaca 2-3 opciones y pregunta algo puntual para acotar antes de seguir.";
+    }
+
+    return $result;
 }
 
 function aiResolveOrderItems(PDO $pdo, array $listaProductos): array

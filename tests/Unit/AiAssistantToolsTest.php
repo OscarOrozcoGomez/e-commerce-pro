@@ -65,6 +65,49 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame(14, $porBeneficio[0]['id_producto']);
     }
 
+    public function testAiSearchInventoryReturnsEachPresentationAsASeparateResult(): void
+    {
+        // Mismo producto base, 3 presentaciones/tamanos distintos -- cada una con su propio
+        // id_producto, precio y stock, tal como estan modelados en el catalogo real.
+        $this->seedProducto(15, 'Citrate Mag', 'CIT120', '120', 600.00);
+        $this->seedProducto(16, 'Citrate Mag', 'CIT240', '240', 649.00);
+        $this->seedProducto(17, 'Citrate Mag', 'CIT500', '500', 200.00);
+        $this->seedInventario(15, 1, 10);
+        $this->seedInventario(16, 1, 5);
+        $this->seedInventario(17, 1, 20);
+
+        $resultados = aiSearchInventory($this->pdo, 'citrate mag');
+
+        $this->assertCount(3, $resultados);
+        $nombres = array_map(static fn(array $r) => $r['nombre'], $resultados);
+        $this->assertContains('Citrate Mag - 120', $nombres);
+        $this->assertContains('Citrate Mag - 240', $nombres);
+        $this->assertContains('Citrate Mag - 500', $nombres);
+
+        // Cada presentacion conserva su propio precio, no se mezclan.
+        $porNombreVariante = [];
+        foreach ($resultados as $r) {
+            $porNombreVariante[$r['nombre']] = $r['precio'];
+        }
+        $this->assertSame(600.0, $porNombreVariante['Citrate Mag - 120']);
+        $this->assertSame(649.0, $porNombreVariante['Citrate Mag - 240']);
+        $this->assertSame(200.0, $porNombreVariante['Citrate Mag - 500']);
+    }
+
+    public function testAiSearchInventoryFindsProductsAcrossDifferentCategoriesByKeyword(): void
+    {
+        // "Categorias" en este catalogo se expresan como palabras clave en nombre/descripcion/
+        // ingredientes/beneficios, no como un catalogo formal -- confirmar que una busqueda por
+        // tema general (no el nombre exacto del producto) encuentra productos de distintas lineas.
+        $this->seedProducto(70, 'Omega 3 Forte', 'OM70', null, 280.00, 'activo', 'Acidos grasos esenciales EPA y DHA');
+        $this->seedProducto(71, 'Colageno Marino', 'COL71', null, 320.00, 'activo', null, null, 'piel, articulaciones, cabello');
+        $this->seedProducto(72, 'Multivitaminico Senior', 'MUL72', null, 210.00, 'activo', 'Formula completa de vitaminas y minerales');
+
+        $this->assertNotEmpty(aiSearchInventory($this->pdo, 'omega'));
+        $this->assertNotEmpty(aiSearchInventory($this->pdo, 'colageno'));
+        $this->assertNotEmpty(aiSearchInventory($this->pdo, 'vitaminico'));
+    }
+
     public function testAiToolConsultarInventarioRejectsEmptySearch(): void
     {
         $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => '  ']);
@@ -76,6 +119,54 @@ final class AiAssistantToolsTest extends TestCase
         $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'producto-inexistente']);
         $this->assertTrue($result['ok']);
         $this->assertSame([], $result['productos']);
+        $this->assertSame(0, $result['total_encontrados']);
+    }
+
+    public function testAiToolConsultarInventarioReportsTotalCountEvenWhenTruncated(): void
+    {
+        // AI_INVENTORY_SEARCH_LIMIT es 12; se siembran 15 productos que matchean "vitamina"
+        // para confirmar que el total real (15) se reporta aunque la lista se corte antes.
+        for ($i = 100; $i < 115; $i++) {
+            $this->seedProducto($i, "Vitamina Test {$i}", "VTEST{$i}", null, 100.00 + $i);
+            $this->seedInventario($i, 1, 5);
+        }
+
+        $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'vitamina test']);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(15, $result['total_encontrados']);
+        $this->assertLessThan(15, count($result['productos']));
+        $this->assertArrayHasKey('message', $result);
+        $this->assertStringContainsString('15 productos en total', $result['message']);
+    }
+
+    public function testAiToolConsultarInventarioOmitsMessageWhenNothingWasTruncated(): void
+    {
+        $this->seedProducto(80, 'Producto Unico', 'UNI80', null, 100.00);
+        $this->seedInventario(80, 1, 5);
+
+        $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'Producto Unico']);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1, $result['total_encontrados']);
+        $this->assertArrayNotHasKey('message', $result);
+    }
+
+    public function testAiCountInventoryMatchesMatchesActualRowCountIgnoringLimit(): void
+    {
+        for ($i = 200; $i < 220; $i++) {
+            $this->seedProducto($i, "Producto Conteo {$i}", "CONT{$i}", null, 50.00);
+        }
+
+        $this->assertSame(20, aiCountInventoryMatches($this->pdo, 'Producto Conteo'));
+    }
+
+    public function testAiCountInventoryMatchesExcludesInactiveProducts(): void
+    {
+        $this->seedProducto(230, 'Producto Activo Conteo', 'PAC230', null, 50.00, 'activo');
+        $this->seedProducto(231, 'Producto Inactivo Conteo', 'PIC231', null, 50.00, 'inactivo');
+
+        $this->assertSame(1, aiCountInventoryMatches($this->pdo, 'Conteo'));
     }
 
     public function testAiResolveOrderItemsUsesDbPriceIgnoringSuppliedPrice(): void
@@ -232,6 +323,47 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('MI_LLAVE_CUSTOM', $config['api_key_variable']);
         $this->assertSame('deepseek-reasoner', $config['modelo_llm']);
         $this->assertSame('Prompt a la medida', $config['prompt_sistema_override']);
+    }
+
+    public function testIsAssistantGloballyActiveDefaultsToTrueWhenNoRowStored(): void
+    {
+        $this->assertTrue(aiIsAssistantGloballyActive($this->pdo));
+    }
+
+    public function testSetGlobalActiveCreatesRowWhenNoneExistsYet(): void
+    {
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM ai_asistente_config')->fetchColumn());
+
+        $ok = aiSetGlobalActive($this->pdo, false);
+
+        $this->assertTrue($ok);
+        $this->assertFalse(aiIsAssistantGloballyActive($this->pdo));
+        $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM ai_asistente_config')->fetchColumn());
+    }
+
+    public function testSetGlobalActiveTogglesBothWaysOnExistingRow(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $this->assertTrue(aiIsAssistantGloballyActive($this->pdo));
+
+        aiSetGlobalActive($this->pdo, false);
+        $this->assertFalse(aiIsAssistantGloballyActive($this->pdo));
+
+        aiSetGlobalActive($this->pdo, true);
+        $this->assertTrue(aiIsAssistantGloballyActive($this->pdo));
+    }
+
+    public function testSetGlobalActiveToTheSameValueTwiceStaysConsistent(): void
+    {
+        // Regresion especifica: no debe depender de rowCount() del UPDATE (que en MySQL da 0
+        // filas afectadas cuando el valor no cambia, lo cual no significa "no existe la fila").
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        aiSetGlobalActive($this->pdo, true);
+        aiSetGlobalActive($this->pdo, true);
+
+        $this->assertTrue(aiIsAssistantGloballyActive($this->pdo));
+        $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM ai_asistente_config')->fetchColumn());
     }
 
     public function testEnviarPlantillaReturnsMediaForActiveTemplate(): void
@@ -859,6 +991,7 @@ final class AiAssistantToolsTest extends TestCase
                 promocion_vigente_texto TEXT NULL,
                 politica_envio_texto TEXT NULL,
                 politica_pago_texto TEXT NULL,
+                ubicacion_texto TEXT NULL,
                 mensaje_bienvenida TEXT NULL,
                 modelo_llm TEXT NOT NULL DEFAULT "deepseek-chat",
                 temperatura REAL NOT NULL DEFAULT 0.30,
