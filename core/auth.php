@@ -522,13 +522,21 @@ function generatePasswordResetToken(string $email): bool
         return false;
     }
 
+    // Evita reenviar/renovar el código en ráfaga (spam y ventana extra para adivinarlo).
+    $stmtExisting = $pdo->prepare('SELECT created_at FROM password_resets WHERE email = :email AND usado = 0 AND expires_at >= NOW() ORDER BY id_password_reset DESC LIMIT 1');
+    $stmtExisting->execute([':email' => $email]);
+    $existing = $stmtExisting->fetch(PDO::FETCH_ASSOC);
+    if ($existing && (time() - strtotime((string)$existing['created_at'])) < 60) {
+        return true;
+    }
+
     // Generar un código de 6 dígitos para mejor UX sin links
     $code = (string)random_int(100000, 999999);
     $tokenHash = hash('sha256', $code);
     $expiresAt = date('Y-m-d H:i:s', time() + 3600);
 
     $pdo->prepare('DELETE FROM password_resets WHERE email = :email')->execute([':email' => $email]);
-    $stmt = $pdo->prepare('INSERT INTO password_resets (email, token_hash, expires_at, usado, created_at) VALUES (:email, :token_hash, :expires_at, 0, NOW())');
+    $stmt = $pdo->prepare('INSERT INTO password_resets (email, token_hash, expires_at, usado, intentos_fallidos, created_at) VALUES (:email, :token_hash, :expires_at, 0, 0, NOW())');
     $stmt->execute([
         ':email' => $email,
         ':token_hash' => $tokenHash,
@@ -538,32 +546,68 @@ function generatePasswordResetToken(string $email): bool
     return sendPasswordResetEmail($email, $code);
 }
 
-function getPasswordResetRecord(string $token): ?array
+/**
+ * Busca el código de recuperación vigente para un email especifico.
+ * El código SIEMPRE se valida contra el email indicado por el usuario
+ * (nunca contra cualquier código vigente en el sistema), para que adivinar
+ * un código al azar no permita tomar una cuenta distinta a la solicitada.
+ */
+function getPasswordResetRecordByEmail(string $email): ?array
 {
     $pdo = getPDO();
-    $tokenHash = hash('sha256', $token);
-    $stmt = $pdo->prepare('SELECT * FROM password_resets WHERE token_hash = :token_hash AND usado = 0 AND expires_at >= NOW() LIMIT 1');
-    $stmt->execute([':token_hash' => $tokenHash]);
+    $stmt = $pdo->prepare('SELECT * FROM password_resets WHERE email = :email AND usado = 0 AND expires_at >= NOW() ORDER BY id_password_reset DESC LIMIT 1');
+    $stmt->execute([':email' => $email]);
     $record = $stmt->fetch(PDO::FETCH_ASSOC);
     return $record !== false ? $record : null;
 }
 
-function resetPasswordWithToken(string $token, string $newPassword, ?string &$errorMessage = null): bool
+function resetPasswordWithToken(string $email, string $token, string $newPassword, ?string &$errorMessage = null): bool
 {
     $errorMessage = null;
+    $email = trim($email);
+    $token = trim($token);
 
     if (!isPasswordSecure($newPassword)) {
         $errorMessage = 'La nueva contraseña debe tener al menos 10 caracteres, incluir mayúsculas, minúsculas, números y un símbolo.';
         return false;
     }
 
-    $record = getPasswordResetRecord($token);
-    if (!$record) {
+    if ($email === '' || $token === '') {
         $errorMessage = 'El código es inválido o ha expirado.';
         return false;
     }
 
     $pdo = getPDO();
+
+    $record = getPasswordResetRecordByEmail($email);
+    if (!$record) {
+        $errorMessage = 'El código es inválido o ha expirado.';
+        return false;
+    }
+
+    // Bloquea el código tras 5 intentos fallidos, igual que el bloqueo de login,
+    // para que no pueda adivinarse por fuerza bruta (1,000,000 combinaciones).
+    if ((int)$record['intentos_fallidos'] >= 5) {
+        $pdo->prepare('UPDATE password_resets SET usado = 1 WHERE id_password_reset = :id')
+            ->execute([':id' => $record['id_password_reset']]);
+        $errorMessage = 'Demasiados intentos fallidos. Solicita un nuevo código.';
+        return false;
+    }
+
+    if (!hash_equals((string)$record['token_hash'], hash('sha256', $token))) {
+        $nuevosIntentos = (int)$record['intentos_fallidos'] + 1;
+        if ($nuevosIntentos >= 5) {
+            $pdo->prepare('UPDATE password_resets SET usado = 1, intentos_fallidos = ? WHERE id_password_reset = ?')
+                ->execute([$nuevosIntentos, $record['id_password_reset']]);
+            $errorMessage = 'Demasiados intentos fallidos. Solicita un nuevo código.';
+        } else {
+            $pdo->prepare('UPDATE password_resets SET intentos_fallidos = ? WHERE id_password_reset = ?')
+                ->execute([$nuevosIntentos, $record['id_password_reset']]);
+            $errorMessage = 'El código es inválido o ha expirado.';
+        }
+        return false;
+    }
+
     $stmtCurrent = $pdo->prepare('SELECT contrasena FROM usuarios WHERE email = :email LIMIT 1');
     $stmtCurrent->execute([':email' => $record['email']]);
     $currentHash = $stmtCurrent->fetchColumn();

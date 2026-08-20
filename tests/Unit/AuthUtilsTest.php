@@ -38,7 +38,7 @@ final class AuthUtilsTest extends TestCase
     public function testResetPasswordWithTokenRejectsWeakPasswordBeforeTokenValidation(): void
     {
         $error = null;
-        $result = resetPasswordWithToken('123456', 'weakpass', $error);
+        $result = resetPasswordWithToken('test@example.com', '123456', 'weakpass', $error);
 
         $this->assertFalse($result);
         $this->assertSame(
@@ -50,7 +50,7 @@ final class AuthUtilsTest extends TestCase
     public function testResetPasswordWithTokenRejectsTooShortPassword(): void
     {
         $error = null;
-        $result = resetPasswordWithToken('123456', 'Ab1!short', $error);
+        $result = resetPasswordWithToken('test@example.com', '123456', 'Ab1!short', $error);
 
         $this->assertFalse($result);
         $this->assertSame(
