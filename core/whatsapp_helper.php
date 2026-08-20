@@ -112,12 +112,20 @@ function waParseBridgePayload(array $payload): ?array
         return null;
     }
 
+    $waIdDigits = preg_replace('/\D+/', '', $senderPhone) ?? '';
+    // Un numero real de WhatsApp (con codigo de pais) nunca tiene menos de 10 digitos --
+    // mismo minimo que usa aiWaIdToMxDigits(). Sin este piso, un telefono corrupto como
+    // "abc-123-!!*" se reduce a "123" y se acepta como si fuera un cliente real.
+    if (strlen($waIdDigits) < 10) {
+        return null;
+    }
+
     // message_id es opcional: Baileys expone msg.key.id, pero si el puente no lo manda
     // todavia se procesa el mensaje, solo que sin proteccion de deduplicado ante reintentos.
     $messageId = waExtractScalarString($payload, 'message_id') ?? '';
 
     return [
-        'wa_id' => preg_replace('/\D+/', '', $senderPhone) ?? '',
+        'wa_id' => $waIdDigits,
         'wa_message_id' => $messageId !== '' ? $messageId : null,
         'texto' => $message,
         'from_me' => !empty($payload['from_me']),
@@ -203,6 +211,62 @@ function waParseLabelsSyncPayload(array $payload): ?array
             'id_etiqueta_wa' => substr($idEtiquetaWa, 0, 50),
             'nombre' => $nombre,
             'color' => $color,
+        ];
+    }
+
+    return $out;
+}
+
+/**
+ * Parsea el lote que manda el puente al hacer POST a api/whatsapp/import_history.php con
+ * el historial completo (evento messaging-history.set de Baileys, disparado UNA VEZ al
+ * conectar): { "lote": "2026-08-21T10:00:00Z", "messages": [{"wa_id","nombre_perfil",
+ * "message","from_me","timestamp"}, ...] }
+ * Pura y testeable. Regresa null si "messages" no es un arreglo; entradas individuales
+ * invalidas (sin wa_id/message/timestamp, tipos no escalares, texto fuera de rango) se
+ * descartan sin invalidar el lote completo -- un historial real puede traer miles de
+ * mensajes y no tiene sentido tirar todo el lote por una fila corrupta.
+ */
+function waParseHistoryImportPayload(array $payload): ?array
+{
+    if (!isset($payload['messages']) || !is_array($payload['messages'])) {
+        return null;
+    }
+
+    $out = [];
+    foreach ($payload['messages'] as $mensaje) {
+        if (!is_array($mensaje)) {
+            continue;
+        }
+
+        $waId = waExtractScalarString($mensaje, 'wa_id');
+        $texto = waExtractScalarString($mensaje, 'message');
+        $timestamp = waExtractScalarString($mensaje, 'timestamp');
+        if ($waId === null || $texto === null || $timestamp === null || $waId === '' || $texto === '') {
+            continue;
+        }
+        if (strlen($waId) > 20 || strlen($texto) > 65536) {
+            continue;
+        }
+
+        $fechaMensaje = strtotime($timestamp);
+        if ($fechaMensaje === false) {
+            continue;
+        }
+
+        $waIdDigits = preg_replace('/\D+/', '', $waId) ?? '';
+        if ($waIdDigits === '') {
+            continue;
+        }
+
+        $nombrePerfil = waExtractScalarString($mensaje, 'nombre_perfil') ?? '';
+
+        $out[] = [
+            'wa_id' => $waIdDigits,
+            'nombre_perfil' => substr($nombrePerfil, 0, 150),
+            'mensaje' => $texto,
+            'from_me' => !empty($mensaje['from_me']),
+            'fecha_mensaje' => date('Y-m-d H:i:s', $fechaMensaje),
         ];
     }
 

@@ -99,11 +99,20 @@ final class SecurityAndEdgeCasesTest extends TestCase
 
     public function testParseBridgePayloadHandlesAlphanumericPhoneWithNoDigits(): void
     {
-        // Numero puramente alfabetico: no debe tronar, solo terminar en wa_id vacio (el
-        // siguiente nivel -- aiRunAssistantTurn -- ya descarta wa_id vacio).
+        // Numero puramente alfabetico: sin digitos, se rechaza en el parseo (no llega a
+        // crear una conversacion con wa_id vacio).
         $result = waParseBridgePayload(['sender_phone' => 'no-es-un-telefono', 'message' => 'hola']);
-        $this->assertNotNull($result);
-        $this->assertSame('', $result['wa_id']);
+        $this->assertNull($result);
+    }
+
+    public function testParseBridgePayloadRejectsPhoneWithFewerThanTenDigits(): void
+    {
+        // Un telefono corrupto que solo deja unos cuantos digitos ("abc-123-!!*-XYZ" -> "123")
+        // no debe aceptarse como si fuera un cliente real -- mismo piso de 10 digitos que
+        // usa aiWaIdToMxDigits() en otras partes del codigo.
+        $this->assertNull(waParseBridgePayload(['sender_phone' => 'abc-123-!!*-XYZ', 'message' => 'hola']));
+        $this->assertNull(waParseBridgePayload(['sender_phone' => '123456789', 'message' => 'hola']));
+        $this->assertNotNull(waParseBridgePayload(['sender_phone' => '1234567890', 'message' => 'hola']));
     }
 
     public function testParseBridgePayloadHandlesNullBytesAndUnicodeInMessage(): void
@@ -151,6 +160,47 @@ final class SecurityAndEdgeCasesTest extends TestCase
         $this->assertSame(50, strlen($result[0]['id_etiqueta_wa']));
         $this->assertSame(60, strlen($result[0]['nombre']));
         $this->assertSame(20, strlen($result[0]['color']));
+    }
+
+    public function testParseHistoryImportPayloadRejectsArrayInsteadOfStringFields(): void
+    {
+        $result = waParseHistoryImportPayload([
+            'messages' => [
+                ['wa_id' => ['no-valido'], 'message' => 'hola', 'timestamp' => '2026-01-05T12:00:00Z'],
+                ['wa_id' => '5215512345678', 'message' => 'hola', 'timestamp' => ['no-valido']],
+            ],
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertSame([], $result);
+    }
+
+    public function testParseHistoryImportPayloadTruncatesOversizedNombrePerfil(): void
+    {
+        $result = waParseHistoryImportPayload([
+            'messages' => [
+                ['wa_id' => '5215512345678', 'nombre_perfil' => str_repeat('a', 300), 'message' => 'hola', 'timestamp' => '2026-01-05T12:00:00Z'],
+            ],
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertCount(1, $result);
+        $this->assertSame(150, strlen($result[0]['nombre_perfil']));
+    }
+
+    public function testParseHistoryImportPayloadWithHugeMessagesArrayStaysBounded(): void
+    {
+        // Un lote real de historial puede traer miles de mensajes; confirmar que un lote
+        // grande no truena, no solo que uno pequeno funciona.
+        $messages = [];
+        for ($i = 0; $i < 2000; $i++) {
+            $messages[] = ['wa_id' => '5215512345678', 'message' => 'mensaje ' . $i, 'timestamp' => '2026-01-05T12:00:00Z'];
+        }
+
+        $result = waParseHistoryImportPayload(['messages' => $messages]);
+
+        $this->assertNotNull($result);
+        $this->assertCount(2000, $result);
     }
 
     public function testPayloadTooLargeRespectsBoundary(): void

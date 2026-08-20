@@ -136,7 +136,8 @@ function aiBuildSystemPrompt(
     array $etiquetasDisponibles = [],
     array $reglasAprendizaje = [],
     ?float $horasInactividad = null,
-    ?bool $esLadaLocal = null
+    ?bool $esLadaLocal = null,
+    ?string $perfilClienteTexto = null
 ): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
@@ -205,6 +206,10 @@ function aiBuildSystemPrompt(
     $lines[] = "Fecha de hoy: {$fecha}.";
     if ($perfil !== '') {
         $lines[] = "El nombre de perfil de WhatsApp del cliente es: {$perfil}. Puedes usarlo para personalizar el saludo si tiene sentido.";
+    }
+    $perfilCliente = trim((string)($perfilClienteTexto ?? ''));
+    if ($perfilCliente !== '') {
+        $lines[] = $perfilCliente . ' Usalo solo para personalizar sugerencias de forma natural (por ejemplo, mencionar que hay reabastecimiento de algo que ya compro), nunca lo repitas de forma literal ni digas que "tienes registrado" nada.';
     }
     if ($horasInactividad !== null && $horasInactividad >= AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS) {
         $diasInactivo = max(1, (int)round($horasInactividad / 24));
@@ -1053,6 +1058,29 @@ function aiParseDeepSeekResponse(int $httpCode, string $rawResponse): array
  * El LLM nunca decide precio ni stock; todo se re-resuelve contra la BD.
  * ------------------------------------------------------------------- */
 
+// Caracter de escape para LIKE. Deliberadamente NO es backslash: MySQL/MariaDB procesan
+// backslash como escape dentro de literales de cadena (asi que '\' en el texto SQL no
+// cierra la cadena donde parece), mientras que SQLite no lo procesa en absoluto -- un
+// mismo texto SQL con backslash como caracter ESCAPE no se puede escribir de forma que
+// signifique lo mismo en ambos motores. "!" no es especial en ninguno de los dos.
+const AI_LIKE_ESCAPE_CHAR = '!';
+
+/**
+ * Escapa los caracteres comodin de LIKE (%, _ y el propio caracter de escape) antes de
+ * envolver el termino en %...%. Sin esto, un cliente que escribe literalmente "%" o "_"
+ * en su mensaje convierte su propia busqueda en un comodin que regresa casi todo el
+ * catalogo -- no es inyeccion SQL (los parametros van preparados), pero si un resultado
+ * incorrecto.
+ */
+function aiEscapeLikeTerm(string $term): string
+{
+    return str_replace(
+        [AI_LIKE_ESCAPE_CHAR, '%', '_'],
+        [AI_LIKE_ESCAPE_CHAR . AI_LIKE_ESCAPE_CHAR, AI_LIKE_ESCAPE_CHAR . '%', AI_LIKE_ESCAPE_CHAR . '_'],
+        $term
+    );
+}
+
 function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): array
 {
     $busqueda = trim($busquedaTexto);
@@ -1068,9 +1096,9 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         // PDO::ATTR_EMULATE_PREPARES esta desactivado (ver core/config.php), y el driver
         // nativo de MySQL no soporta reutilizar el mismo placeholder con nombre varias
         // veces en una sola consulta -- cada ocurrencia necesita su propio nombre.
-        $sql .= ' AND (p.nombre LIKE :term1 OR p.codigo_barras LIKE :term2 OR p.nombre_variante LIKE :term3
-                       OR p.descripcion LIKE :term4 OR p.ingredientes LIKE :term5 OR p.beneficios LIKE :term6)';
-        $term = '%' . $busqueda . '%';
+        $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
+                       OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!')";
+        $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
         $params[':term1'] = $term;
         $params[':term2'] = $term;
         $params[':term3'] = $term;
@@ -1115,9 +1143,9 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
 
     $sql = "SELECT COUNT(*) FROM productos p
             WHERE p.estado = 'activo'
-              AND (p.nombre LIKE :term1 OR p.codigo_barras LIKE :term2 OR p.nombre_variante LIKE :term3
-                   OR p.descripcion LIKE :term4 OR p.ingredientes LIKE :term5 OR p.beneficios LIKE :term6)";
-    $term = '%' . $busqueda . '%';
+              AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
+                   OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!')";
+    $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
         ':term1' => $term,
@@ -1701,6 +1729,305 @@ function aiBuildFewShotBlock(array $reglas): string
 }
 
 /* ---------------------------------------------------------------------
+ * Respaldo de historial, deteccion de temas y perfil de cliente.
+ *
+ * Todo lo de este bloque es 100% codigo determinista (SQL/PHP): ninguna funcion de aqui
+ * llama a DeepSeek. El objetivo es "nutrir" a Alex con datos reales del negocio sin gastar
+ * tokens de IA en analizar el historial -- el unico lugar donde se gasta un token es la
+ * conversacion en vivo con el cliente, que de todos modos ya se paga.
+ * ------------------------------------------------------------------- */
+
+// Palabras clave de negocio (no productos) que vale la pena rastrear por cliente, ademas
+// de los nombres reales del catalogo. Coincidencia de texto simple, sin interpretacion.
+const AI_TOPIC_KEYWORDS = [
+    'envio', 'envío', 'entrega', 'pago', 'garantia', 'garantía', 'sucursal',
+    'devolucion', 'devolución', 'factura', 'descuento', 'promocion', 'promoción',
+];
+
+// Tope de conversaciones/mensajes que procesa una corrida del cron de analisis, para que
+// una corrida nunca se quede corriendo indefinidamente si hay un backlog enorme.
+const AI_HISTORY_ANALYSIS_BATCH_SIZE = 500;
+
+/**
+ * Guarda un lote del historial importado por el puente. Filas individuales sin datos
+ * minimos ya se descartaron en waParseHistoryImportPayload(); aqui solo se insertan.
+ */
+function aiStoreHistoryImportBatch(PDO $pdo, array $mensajes, string $lote): int
+{
+    if (empty($mensajes)) {
+        return 0;
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO whatsapp_historial_importado (wa_id, nombre_perfil, mensaje, from_me, fecha_mensaje, lote_importacion)
+         VALUES (?, ?, ?, ?, ?, ?)'
+    );
+
+    $insertados = 0;
+    foreach ($mensajes as $mensaje) {
+        $stmt->execute([
+            (string)($mensaje['wa_id'] ?? ''),
+            ($mensaje['nombre_perfil'] ?? '') !== '' ? $mensaje['nombre_perfil'] : null,
+            (string)($mensaje['mensaje'] ?? ''),
+            !empty($mensaje['from_me']) ? 1 : 0,
+            (string)($mensaje['fecha_mensaje'] ?? ''),
+            substr($lote, 0, 40),
+        ]);
+        $insertados++;
+    }
+
+    return $insertados;
+}
+
+function aiGetAnalysisProgress(PDO $pdo): array
+{
+    $stmt = $pdo->query('SELECT ultimo_id_historial_procesado, ultimo_id_mensaje_procesado FROM whatsapp_analisis_progreso WHERE id_progreso = 1');
+    $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : null;
+
+    return is_array($row) ? [
+        'ultimo_id_historial_procesado' => (int)$row['ultimo_id_historial_procesado'],
+        'ultimo_id_mensaje_procesado' => (int)$row['ultimo_id_mensaje_procesado'],
+    ] : ['ultimo_id_historial_procesado' => 0, 'ultimo_id_mensaje_procesado' => 0];
+}
+
+function aiSetAnalysisProgress(PDO $pdo, int $ultimoHistorial, int $ultimoMensaje): void
+{
+    $existe = (bool)$pdo->query('SELECT 1 FROM whatsapp_analisis_progreso WHERE id_progreso = 1')->fetchColumn();
+
+    if ($existe) {
+        $pdo->prepare('UPDATE whatsapp_analisis_progreso SET ultimo_id_historial_procesado = ?, ultimo_id_mensaje_procesado = ? WHERE id_progreso = 1')
+            ->execute([$ultimoHistorial, $ultimoMensaje]);
+    } else {
+        $pdo->prepare('INSERT INTO whatsapp_analisis_progreso (id_progreso, ultimo_id_historial_procesado, ultimo_id_mensaje_procesado) VALUES (1, ?, ?)')
+            ->execute([$ultimoHistorial, $ultimoMensaje]);
+    }
+}
+
+/**
+ * Trae mensajes de cliente pendientes de analizar, de ambas fuentes: el respaldo
+ * historico (una sola vez, hasta agotarse) y los mensajes reales que Alex ya atendio
+ * (whatsapp_mensajes, rol=user) -- esta segunda fuente es la que hace que el analisis
+ * mensual siga teniendo sentido de ahi en adelante, sin volver a pedirle nada al puente.
+ */
+function aiGetMessagesPendingAnalysis(PDO $pdo, array $progreso, int $limit = AI_HISTORY_ANALYSIS_BATCH_SIZE): array
+{
+    $limit = max(1, min(5000, $limit));
+    $mitad = (int)ceil($limit / 2);
+
+    $stmtHistorial = $pdo->prepare(
+        'SELECT id_historial AS id, wa_id, mensaje, fecha_mensaje
+         FROM whatsapp_historial_importado
+         WHERE id_historial > ? AND from_me = 0
+         ORDER BY id_historial ASC
+         LIMIT ' . $mitad
+    );
+    $stmtHistorial->execute([$progreso['ultimo_id_historial_procesado'] ?? 0]);
+    $deHistorial = array_map(static function (array $row): array {
+        $row['fuente'] = 'historial';
+        return $row;
+    }, $stmtHistorial->fetchAll(PDO::FETCH_ASSOC) ?: []);
+
+    $stmtMensajes = $pdo->prepare(
+        'SELECT m.id_mensaje AS id, c.wa_id, m.contenido AS mensaje, m.creado_en AS fecha_mensaje
+         FROM whatsapp_mensajes m
+         INNER JOIN whatsapp_conversaciones c ON c.id_conversacion = m.id_conversacion
+         WHERE m.id_mensaje > ? AND m.rol = \'user\'
+         ORDER BY m.id_mensaje ASC
+         LIMIT ' . $mitad
+    );
+    $stmtMensajes->execute([$progreso['ultimo_id_mensaje_procesado'] ?? 0]);
+    $deMensajes = array_map(static function (array $row): array {
+        $row['fuente'] = 'mensaje';
+        return $row;
+    }, $stmtMensajes->fetchAll(PDO::FETCH_ASSOC) ?: []);
+
+    return ['historial' => $deHistorial, 'mensajes' => $deMensajes];
+}
+
+/**
+ * Nombres reales de productos activos, para detectar por coincidencia de texto (no IA)
+ * si un mensaje menciona alguno. Deduplicados y ordenados por largo descendente para que,
+ * al escanear, un nombre mas especifico ("Magnesio Citrate") se detecte antes que uno mas
+ * generico que tambien aparezca como subcadena.
+ */
+function aiGetCatalogTermsForTopicDetection(PDO $pdo): array
+{
+    $stmt = $pdo->query("SELECT DISTINCT nombre FROM productos WHERE estado = 'activo'");
+    $nombres = $stmt ? array_column($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [], 'nombre') : [];
+
+    // Nombres muy cortos generan demasiados falsos positivos como "tema" de conversacion.
+    $nombres = array_values(array_filter($nombres, static fn(string $n): bool => mb_strlen(trim($n)) >= 4));
+
+    usort($nombres, static fn(string $a, string $b): int => mb_strlen($b) <=> mb_strlen($a));
+
+    return $nombres;
+}
+
+/**
+ * Pura y testeable: dado un mensaje y una lista de terminos de catalogo/palabras clave,
+ * regresa los temas detectados por coincidencia de texto simple (case-insensitive,
+ * sin acentos exactos -- no es interpretacion de lenguaje natural, es busqueda de
+ * subcadena, igual que el resto del proyecto usa LIKE '%termino%' para buscar productos).
+ */
+function aiDetectTopicsInMessage(string $mensaje, array $catalogTerms, array $topicKeywords = AI_TOPIC_KEYWORDS): array
+{
+    $mensaje = trim($mensaje);
+    if ($mensaje === '') {
+        return [];
+    }
+
+    $detectados = [];
+    $vistos = [];
+
+    foreach ($catalogTerms as $termino) {
+        $termino = trim((string)$termino);
+        if ($termino === '' || isset($vistos['producto:' . mb_strtolower($termino)])) {
+            continue;
+        }
+        if (mb_stripos($mensaje, $termino) !== false) {
+            $detectados[] = ['tipo' => 'producto', 'valor' => $termino];
+            $vistos['producto:' . mb_strtolower($termino)] = true;
+        }
+    }
+
+    foreach ($topicKeywords as $palabra) {
+        $palabra = trim((string)$palabra);
+        if ($palabra === '' || isset($vistos['tema_general:' . mb_strtolower($palabra)])) {
+            continue;
+        }
+        if (mb_stripos($mensaje, $palabra) !== false) {
+            $detectados[] = ['tipo' => 'tema_general', 'valor' => $palabra];
+            $vistos['tema_general:' . mb_strtolower($palabra)] = true;
+        }
+    }
+
+    return $detectados;
+}
+
+function aiUpsertHistorialTema(PDO $pdo, string $waId, string $tipo, string $valor, string $fechaMensaje): void
+{
+    // Mismo patron de SELECT-antes-de-branch que aiUpsertWhatsAppLabel()/aiSetGlobalActive():
+    // portable entre MySQL (produccion) y SQLite (tests), a diferencia de un
+    // "ON DUPLICATE KEY UPDATE" que solo existe en MySQL.
+    $valor = substr($valor, 0, 150);
+    $stmt = $pdo->prepare('SELECT id_tema, ultima_mencion FROM whatsapp_historial_temas WHERE wa_id = ? AND tipo = ? AND valor = ?');
+    $stmt->execute([$waId, $tipo, $valor]);
+    $existente = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (is_array($existente)) {
+        $ultimaMencion = (string)$existente['ultima_mencion'] >= $fechaMensaje ? (string)$existente['ultima_mencion'] : $fechaMensaje;
+        $pdo->prepare('UPDATE whatsapp_historial_temas SET veces_mencionado = veces_mencionado + 1, ultima_mencion = ? WHERE id_tema = ?')
+            ->execute([$ultimaMencion, (int)$existente['id_tema']]);
+
+        return;
+    }
+
+    $pdo->prepare(
+        'INSERT INTO whatsapp_historial_temas (wa_id, tipo, valor, veces_mencionado, primera_mencion, ultima_mencion)
+         VALUES (?, ?, ?, 1, ?, ?)'
+    )->execute([$waId, $tipo, $valor, $fechaMensaje, $fechaMensaje]);
+}
+
+/**
+ * Temas/productos mas mencionados por un cliente especifico, para personalizar su
+ * conversacion en vivo (ver aiBuildClientProfileContextLine).
+ */
+function aiGetTopHistorialTemas(PDO $pdo, string $waId, int $limit = 5): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT tipo, valor, veces_mencionado
+         FROM whatsapp_historial_temas
+         WHERE wa_id = ?
+         ORDER BY veces_mencionado DESC, ultima_mencion DESC
+         LIMIT ' . max(1, min(20, $limit))
+    );
+    $stmt->execute([$waId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+/**
+ * Temas/productos mas mencionados en general (todos los clientes), para el panel admin --
+ * informacion que el negocio puede usar para decidir manualmente que convertir en regla
+ * de aprendizaje, sin que ninguna IA la haya generado.
+ */
+function aiGetTopHistorialTemasGlobal(PDO $pdo, int $limit = 15): array
+{
+    $stmt = $pdo->query(
+        'SELECT tipo, valor, SUM(veces_mencionado) AS total_menciones, COUNT(DISTINCT wa_id) AS total_clientes
+         FROM whatsapp_historial_temas
+         GROUP BY tipo, valor
+         ORDER BY total_menciones DESC
+         LIMIT ' . max(1, min(100, $limit))
+    );
+
+    return $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+}
+
+/**
+ * Historial de compra REAL de un cliente (pedidos ya pagados/entregados/en curso, nunca
+ * cancelados), directo de pedidos/detalle_pedidos -- dato estructurado y confiable, sin
+ * necesidad de interpretar texto.
+ */
+function aiGetClientPurchaseProfile(PDO $pdo, int $idCliente, int $limit = 5): array
+{
+    if ($idCliente <= 0) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT p.nombre, p.nombre_variante, COUNT(*) AS veces_comprado, MAX(ped.fecha_creacion) AS ultima_compra
+         FROM detalle_pedidos dp
+         INNER JOIN pedidos ped ON ped.id_pedido = dp.id_pedido
+         INNER JOIN productos p ON p.id_producto = dp.id_producto
+         WHERE ped.id_cliente = ? AND ped.estado <> 'cancelado'
+         GROUP BY p.id_producto, p.nombre, p.nombre_variante
+         ORDER BY ultima_compra DESC
+         LIMIT " . max(1, min(20, $limit))
+    );
+    $stmt->execute([$idCliente]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+/**
+ * Pura: arma la linea de contexto (generada por codigo, no por IA) que se agrega al
+ * prompt del sistema para personalizar la conversacion de un cliente ya conocido.
+ */
+function aiBuildClientProfileContextLine(array $compras, array $temas): string
+{
+    $partes = [];
+
+    if (!empty($compras)) {
+        $nombresCompras = array_map(static function (array $c): string {
+            $nombre = trim((string)($c['nombre'] ?? ''));
+            $variante = trim((string)($c['nombre_variante'] ?? ''));
+            return $variante !== '' ? "{$nombre} {$variante}" : $nombre;
+        }, $compras);
+        $partes[] = 'ya compro antes: ' . implode(', ', array_filter($nombresCompras));
+    }
+
+    $temasGenerales = array_values(array_filter($temas, static fn(array $t): bool => ($t['tipo'] ?? '') === 'tema_general'));
+    $temasProducto = array_values(array_filter($temas, static fn(array $t): bool => ($t['tipo'] ?? '') === 'producto'));
+
+    if (!empty($temasProducto)) {
+        $nombresTemas = array_map(static fn(array $t): string => trim((string)($t['valor'] ?? '')), $temasProducto);
+        $partes[] = 'ha preguntado por: ' . implode(', ', array_filter($nombresTemas));
+    }
+
+    if (!empty($temasGenerales)) {
+        $nombresGenerales = array_map(static fn(array $t): string => trim((string)($t['valor'] ?? '')), $temasGenerales);
+        $partes[] = 'le ha interesado el tema de: ' . implode(', ', array_filter($nombresGenerales));
+    }
+
+    if (empty($partes)) {
+        return '';
+    }
+
+    return 'Este cliente ' . implode('; tambien ', $partes) . '.';
+}
+
+/* ---------------------------------------------------------------------
  * Orquestacion de un turno de conversacion.
  *
  * El puente de DigitalOcean es sincrono: hace POST del mensaje entrante y espera la
@@ -1754,13 +2081,24 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
 
     $etiquetasDisponibles = aiGetAllTags($pdo);
     $reglasAprendizaje = aiGetActiveLearningRules($pdo);
+
+    // Perfil de cliente generado por codigo (compras reales + temas detectados por
+    // coincidencia de texto) -- no cuesta ningun token extra, viaja dentro del mismo
+    // prompt de este turno. Ver aiGetClientPurchaseProfile()/aiGetTopHistorialTemas().
+    $idClienteConocido = (int)($conversacion['id_cliente'] ?? 0);
+    $perfilClienteTexto = aiBuildClientProfileContextLine(
+        $idClienteConocido > 0 ? aiGetClientPurchaseProfile($pdo, $idClienteConocido) : [],
+        aiGetTopHistorialTemas($pdo, $waId)
+    );
+
     $systemPrompt = aiBuildSystemPrompt(
         $config,
         (string)($conversacion['nombre_perfil'] ?? $perfilNombre ?? ''),
         $etiquetasDisponibles,
         $reglasAprendizaje,
         $horasInactividad,
-        $esLadaLocal
+        $esLadaLocal,
+        $perfilClienteTexto
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],

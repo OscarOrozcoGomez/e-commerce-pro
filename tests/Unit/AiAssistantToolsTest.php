@@ -108,6 +108,37 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotEmpty(aiSearchInventory($this->pdo, 'vitaminico'));
     }
 
+    public function testAiSearchInventoryEscapesLikeWildcardCharactersInUserInput(): void
+    {
+        // Un cliente que escribe literalmente "%" o "_" no debe convertir su busqueda en
+        // un comodin de SQL que regrese practicamente todo el catalogo.
+        $this->seedProducto(80, 'Omega 3 Forte', 'OM80', null, 280.00);
+        $this->seedProducto(81, 'Colageno Marino', 'COL81', null, 320.00);
+        $this->seedProducto(82, 'Multivitaminico Senior', 'MUL82', null, 210.00);
+
+        $this->assertSame([], aiSearchInventory($this->pdo, '%'));
+        $this->assertSame([], aiSearchInventory($this->pdo, '_'));
+        $this->assertSame(0, aiCountInventoryMatches($this->pdo, '%'));
+    }
+
+    public function testAiSearchInventoryStillMatchesProductsContainingLiteralPercentOrUnderscore(): void
+    {
+        // El escape no debe romper la busqueda cuando el propio catalogo SI tiene esos
+        // caracteres en el nombre (ej. "Omega 3 100% Puro").
+        $this->seedProducto(83, 'Omega 3 100% Puro', 'OM83', null, 280.00);
+
+        $resultados = aiSearchInventory($this->pdo, '100%');
+        $this->assertCount(1, $resultados);
+        $this->assertSame(83, $resultados[0]['id_producto']);
+    }
+
+    public function testAiEscapeLikeTermEscapesPercentUnderscoreAndTheEscapeCharItself(): void
+    {
+        $this->assertSame('50!%', aiEscapeLikeTerm('50%'));
+        $this->assertSame('a!_b', aiEscapeLikeTerm('a_b'));
+        $this->assertSame('c!!d', aiEscapeLikeTerm('c!d'));
+    }
+
     public function testAiToolConsultarInventarioRejectsEmptySearch(): void
     {
         $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => '  ']);

@@ -20,11 +20,13 @@ $errores = [];
 $pendientesCount = 0;
 $reglas = [];
 $etiquetas = [];
+$temasGlobales = [];
 try {
     $errores = aiGetDiagnosticErrors($pdo, !$verTodos, 200);
     $pendientesCount = aiCountUnresolvedDiagnosticErrors($pdo);
     $reglas = aiGetAllLearningRules($pdo);
     $etiquetas = aiGetAllTags($pdo);
+    $temasGlobales = aiGetTopHistorialTemasGlobal($pdo);
 } catch (Throwable $e) {
     // Las tablas pueden no existir todavia si las migraciones no se han aplicado en este entorno.
 }
@@ -48,6 +50,43 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <p class="grey-text">Aqui quedan registrados los problemas que Alex tuvo al atender a un cliente: fallas de herramientas, datos incompletos, caidas de DeepSeek o transferencias por incertidumbre.</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col s12">
+            <ul class="collapsible z-depth-1" id="ayuda-diagnostico">
+                <li>
+                    <div class="collapsible-header" style="display: flex; align-items: center; gap: 8px;">
+                        <i class="material-icons">help_outline</i> <strong>Que hago aqui? (guia rapida)</strong>
+                    </div>
+                    <div class="collapsible-body white">
+                        <p><strong>Que es esta pantalla.</strong> Cada vez que Alex no pudo resolver algo solo (le faltaron datos, DeepSeek fallo, o no tuvo la certeza para contestar), queda un registro aqui abajo. Es tu forma de revisar esos casos y, si hace falta, "ensenarle" a Alex la respuesta correcta sin tocar codigo.</p>
+
+                        <p><strong>Que significa cada tipo de incidente:</strong></p>
+                        <ul class="browser-default" style="margin-bottom: 16px;">
+                            <li><span class="chip">venta_sin_direccion</span> El cliente quiso comprar pero no dio su direccion completa. Alex ya lo registro como cliente/pedido pendiente; solo falta que alguien complete la direccion o confirme con el cliente.</li>
+                            <li><span class="chip">tool_datos_incompletos</span> Alex intento usar una herramienta (buscar producto, agendar venta, etc.) pero le faltaron datos o la accion no se pudo completar del todo.</li>
+                            <li><span class="chip">tool_excepcion</span> Ocurrio un error tecnico al ejecutar una herramienta (por ejemplo, un problema de base de datos). Vale la pena revisar el detalle por si es un bug real.</li>
+                            <li><span class="chip">deepseek_conexion</span> El modelo de IA (DeepSeek) no respondio o fallo la conexion. Alex transfirio la conversacion a un humano automaticamente.</li>
+                            <li><span class="chip">pase_a_humano_incertidumbre</span> Alex prefirio no arriesgarse a inventar una respuesta (precios exactos, promesas medicas, preguntas muy especificas) y paso la conversacion a una persona. Esto es un comportamiento correcto, no necesariamente un error.</li>
+                        </ul>
+
+                        <p><strong>Que hacer con cada fila:</strong></p>
+                        <ol style="padding-left: 20px;">
+                            <li>Da clic en "Ver detalle" para leer el contexto completo (que pregunto el cliente, que datos tenia Alex).</li>
+                            <li>Si fue un caso aislado y no se puede repetir (o ya se atendio manualmente), da clic en <strong>"Marcar revisado"</strong> para sacarlo de la lista de pendientes.</li>
+                            <li>Si crees que esa situacion se va a repetir y quieres que Alex la maneje mejor la proxima vez, da clic en <strong>"Convertir en regla"</strong>: describe la situacion y como debio responder o actuar Alex, y guarda. Eso marca el incidente como revisado automaticamente.</li>
+                        </ol>
+
+                        <p><strong>Reglas de aprendizaje (la tabla de abajo).</strong> Cada regla que creas se le muestra a Alex como ejemplo dentro de sus instrucciones, para que no repita el mismo error. Puedes apagar una regla con el switch de "Activa" sin necesidad de borrarla, por si quieres probar sin ella.</p>
+
+                        <p><strong>Temas y productos mas mencionados.</strong> Esta tabla se llena sola, por codigo (sin gastar nada de IA): cada vez que corre el analisis periodico del historial de WhatsApp, cuenta cuantas veces se menciona cada producto real del catalogo y algunas palabras clave de negocio (envio, pago, garantia, etc.) en los mensajes de los clientes. Es informacion cruda para que TU decidas que vale la pena convertir en regla de aprendizaje manual -- ninguna IA genera reglas por su cuenta.</p>
+
+                        <p class="grey-text" style="margin-bottom: 0;"><strong>Tip:</strong> usa el filtro "Sin revisar" para enfocarte solo en lo pendiente, y "Todos" cuando quieras ver el historial completo, incluido lo ya revisado.</p>
+                    </div>
+                </li>
+            </ul>
         </div>
     </div>
 
@@ -111,6 +150,41 @@ include __DIR__ . '/includes/header.php';
                                                 data-contexto="<?php echo esc((string)($err['mensaje_usuario'] ?? '')); ?>"
                                             >Convertir en regla</button>
                                         </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col s12">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title">Temas y productos mas mencionados</span>
+                    <p class="grey-text" style="margin-top: 0;">Contado por codigo (sin IA) a partir del historial de WhatsApp. Util para decidir manualmente que convertir en regla de aprendizaje.</p>
+                    <table class="responsive-table">
+                        <thead>
+                            <tr>
+                                <th>Tema / producto</th>
+                                <th>Tipo</th>
+                                <th>Menciones</th>
+                                <th>Clientes distintos</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($temasGlobales)): ?>
+                                <tr><td colspan="4">Todavia no hay datos suficientes. Corre el analisis del historial para empezar a ver esta tabla.</td></tr>
+                            <?php else: ?>
+                                <?php foreach ($temasGlobales as $tema): ?>
+                                    <tr>
+                                        <td><?php echo esc((string)$tema['valor']); ?></td>
+                                        <td><span class="chip"><?php echo (string)$tema['tipo'] === 'producto' ? 'Producto' : 'Tema general'; ?></span></td>
+                                        <td><?php echo (int)$tema['total_menciones']; ?></td>
+                                        <td><?php echo (int)$tema['total_clientes']; ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
@@ -198,6 +272,11 @@ include __DIR__ . '/includes/header.php';
 <script>
 (function () {
     var csrfToken = <?php echo json_encode(getCsrfToken()); ?>;
+
+    var ayudaElem = document.getElementById('ayuda-diagnostico');
+    if (ayudaElem) {
+        M.Collapsible.init(ayudaElem, { accordion: false });
+    }
 
     document.querySelectorAll('.btn-resolver-error').forEach(function (btn) {
         btn.addEventListener('click', function () {

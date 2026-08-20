@@ -63,6 +63,15 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('https://maps.app.goo.gl/cBpMFXU27MXL4k9F6', $conUbicacion);
     }
 
+    public function testSystemPromptIncludesClientProfileLineOnlyWhenSet(): void
+    {
+        $sinPerfil = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null, null);
+        $this->assertStringNotContainsString('Este cliente', $sinPerfil);
+
+        $conPerfil = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null, 'Este cliente ya compro antes: Magnesio Citrate 240.');
+        $this->assertStringContainsString('Este cliente ya compro antes: Magnesio Citrate 240.', $conPerfil);
+    }
+
     public function testSystemPromptInstructsPresentingMultiplePresentations(): void
     {
         $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
