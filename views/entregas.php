@@ -658,7 +658,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 
-    <div class="row">
+    <div class="row" id="entregas-cards-row">
         <?php if (empty($entregas)): ?>
             <div class="col s12 center-align" style="padding: 50px;">
                 <i class="material-icons grey-text" style="font-size: 5rem;">local_shipping</i>
@@ -766,7 +766,7 @@ include __DIR__ . '/includes/header.php';
                     $prioridadClass = $prioridadClases[$prioridadPedido] ?? 'grey';
                     $tieneCoordenadas = ($ent['latitud'] !== null && $ent['longitud'] !== null);
                 ?>
-                <div class="col s12 m6">
+                <div class="col s12 m6" data-pedido-id="<?php echo (int)$ent['id_pedido']; ?>">
                     <div class="card hoverable border-delivery">
                         <div class="card-content">
                             <?php if ($isRouteOptimizationAllowed): ?>
@@ -777,6 +777,7 @@ include __DIR__ . '/includes/header.php';
                                                                     value="<?php echo (int)$ent['id_pedido']; ?>"
                                                                     data-repartidor-id="<?php echo (int)$ent['id_repartidor']; ?>"
                                                                     data-fecha-entrega="<?php echo esc($ent['fecha_entrega_programada'] ? date('Y-m-d', strtotime((string)$ent['fecha_entrega_programada'])) : ''); ?>"
+                                                                    data-estado="<?php echo esc((string)($ent['estado'] ?? '')); ?>"
                                                                     <?php if (!$tieneCoordenadas): ?>
                                                                     disabled
                                                                     title="Este pedido no tiene coordenadas de ubicacion"
@@ -907,10 +908,11 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
-                                <form method="POST">
+                                <?php $esAccionEntregar = !in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado']); ?>
+                                <form method="POST" data-entrega-pedido-form="1"<?php echo $esAccionEntregar ? ' data-accion-entregar="1"' : ''; ?>>
                                     <?php echo csrfInput(); ?>
                                     <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                    <?php if (in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado'])): ?>
+                                    <?php if (!$esAccionEntregar): ?>
                                         <input type="hidden" name="accion" value="en_camino">
                                         <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
                                             <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
@@ -925,7 +927,7 @@ include __DIR__ . '/includes/header.php';
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="return confirm('Confirmar entrega y cobro del pedido?')">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
                                     <?php endif; ?>
@@ -962,6 +964,32 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($isRepartidorView): ?>
+<div id="modal-tomar-foto-entrega" class="modal">
+    <div class="modal-content">
+        <h5><i class="material-icons left">photo_camera</i> Foto de la entrega</h5>
+        <p class="grey-text">Toma o elige una foto de la entrega antes de confirmar el cobro. Con la foto lista, se marca como entregado y se abre la publicacion.</p>
+        <div class="file-field input-field">
+            <div class="btn blue darken-2">
+                <span>Foto</span>
+                <input type="file" id="tf-foto-input" accept="image/*">
+            </div>
+            <div class="file-path-wrapper">
+                <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
+            </div>
+        </div>
+        <div class="center-align" style="margin: 10px 0;">
+            <img id="tf-foto-preview" src="" alt="Vista previa" style="display:none; max-width: 100%; max-height: 260px; border-radius: 6px;">
+        </div>
+        <p id="tf-status" class="center-align" style="min-height: 1.2em;"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" id="tf-btn-omitir" class="modal-close waves-effect btn-flat red-text">Omitir foto</a>
+        <a href="#!" id="tf-btn-confirmar" class="waves-effect waves-light btn green disabled">
+            <i class="material-icons left">done_all</i> Confirmar entrega y cobro
+        </a>
+    </div>
+</div>
+
 <div id="modal-entrega-publicacion" class="modal">
     <div class="modal-content">
         <h5><i class="material-icons left">campaign</i> Publicar esta entrega</h5>
@@ -975,7 +1003,7 @@ include __DIR__ . '/includes/header.php';
         <div class="file-field input-field">
             <div class="btn blue darken-2">
                 <span>Foto</span>
-                <input type="file" id="ep-foto-input" accept="image/*" capture="environment">
+                <input type="file" id="ep-foto-input" accept="image/*">
             </div>
             <div class="file-path-wrapper">
                 <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
@@ -996,6 +1024,24 @@ include __DIR__ . '/includes/header.php';
         </a>
     </div>
 </div>
+
+<div id="modal-siguiente-en-camino" class="modal bottom-sheet">
+    <div class="modal-content">
+        <h5><i class="material-icons left">local_shipping</i> Siguiente entrega</h5>
+        <p id="sec-siguiente-info" class="grey-text"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect btn-flat">Ahora no</a>
+        <a href="#!" id="sec-btn-si" class="waves-effect waves-light btn orange darken-3">
+            <i class="material-icons left">navigation</i> Si, voy en camino
+        </a>
+    </div>
+</div>
+<form method="POST" id="sec-form-en-camino" style="display:none;">
+    <?php echo csrfInput(); ?>
+    <input type="hidden" name="accion" value="en_camino">
+    <input type="hidden" name="id_pedido" id="sec-form-id-pedido" value="">
+</form>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.toggle-cancel-entrega').forEach((btn) => {
@@ -1060,14 +1106,158 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <script>
+document.addEventListener('DOMContentLoaded', function () {
+    const tfCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
+    const tfEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+    const tfModalEl = document.getElementById('modal-tomar-foto-entrega');
+    const tfFotoInput = document.getElementById('tf-foto-input');
+    const tfPreview = document.getElementById('tf-foto-preview');
+    const tfStatus = document.getElementById('tf-status');
+    const tfBtnConfirmar = document.getElementById('tf-btn-confirmar');
+    const tfBtnOmitir = document.getElementById('tf-btn-omitir');
+    const tfForms = document.querySelectorAll('form[data-entrega-pedido-form="1"][data-accion-entregar="1"]');
+
+    // Sin modal/Materialize disponibles, los formularios se dejan tal cual (se envian de forma
+    // normal al hacer submit) para no bloquear la entrega si algo del JS fallo.
+    if (!tfModalEl || typeof M === 'undefined' || !M.Modal || tfForms.length === 0) {
+        return;
+    }
+
+    function tfGetModalInstance() {
+        return M.Modal.getInstance(tfModalEl) || M.Modal.init(tfModalEl, { dismissible: true });
+    }
+
+    let tfCurrentForm = null;
+    let tfUploadedId = null;
+
+    function tfSetStatus(msg, isError) {
+        tfStatus.textContent = msg || '';
+        tfStatus.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
+    }
+
+    function tfSubmitCurrentForm() {
+        if (!tfCurrentForm) {
+            return;
+        }
+        const formToSubmit = tfCurrentForm;
+        formToSubmit.dataset.tfConfirmado = '1';
+        if (formToSubmit.requestSubmit) {
+            formToSubmit.requestSubmit();
+        } else {
+            formToSubmit.submit();
+        }
+    }
+
+    tfForms.forEach((form) => {
+        form.addEventListener('submit', function (e) {
+            if (form.dataset.tfConfirmado === '1') {
+                return; // ya se subio la foto (o se omitio) y se confirmo desde el modal
+            }
+            e.preventDefault();
+            tfCurrentForm = form;
+            tfUploadedId = null;
+            tfFotoInput.value = '';
+            tfPreview.src = '';
+            tfPreview.style.display = 'none';
+            tfSetStatus('', false);
+            tfBtnConfirmar.classList.add('disabled');
+            tfGetModalInstance().open();
+        });
+    });
+
+    tfFotoInput.addEventListener('change', function () {
+        tfUploadedId = null;
+        tfBtnConfirmar.classList.add('disabled');
+        const file = tfFotoInput.files && tfFotoInput.files[0];
+        if (!file) {
+            tfPreview.style.display = 'none';
+            tfPreview.src = '';
+            tfSetStatus('', false);
+            return;
+        }
+        tfPreview.src = URL.createObjectURL(file);
+        tfPreview.style.display = 'block';
+
+        const idPedidoInput = tfCurrentForm ? tfCurrentForm.querySelector('[name="id_pedido"]') : null;
+        const idPedido = idPedidoInput ? idPedidoInput.value : '';
+        if (!idPedido) {
+            return;
+        }
+
+        tfSetStatus('Subiendo foto...', false);
+        const formData = new FormData();
+        formData.append('foto', file);
+        formData.append('id_pedido', idPedido);
+        formData.append('csrf_token', tfCsrfToken);
+
+        fetch(tfEndpoint, { method: 'POST', body: formData })
+            .then((r) => r.text())
+            .then((text) => {
+                let data;
+                try {
+                    data = text ? JSON.parse(text) : null;
+                } catch (err) {
+                    throw new Error('El servidor no respondio correctamente. Intenta de nuevo.');
+                }
+                if (!data || !data.success) {
+                    throw new Error((data && data.error) || 'No se pudo subir la foto.');
+                }
+                tfUploadedId = data.id_publicacion;
+                tfSetStatus('Foto lista.', false);
+                tfBtnConfirmar.classList.remove('disabled');
+            })
+            .catch((err) => {
+                tfSetStatus(err.message, true);
+            });
+    });
+
+    tfBtnConfirmar.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (tfBtnConfirmar.classList.contains('disabled') || !tfUploadedId) {
+            return;
+        }
+        tfGetModalInstance().close();
+        tfSubmitCurrentForm();
+    });
+
+    tfBtnOmitir.addEventListener('click', function () {
+        // El modal ya se cierra solo (btn-flat trae la clase modal-close); solo falta enviar
+        // el formulario de todos modos, sin foto.
+        setTimeout(tfSubmitCurrentForm, 0);
+    });
+});
+</script>
+
+<script>
 document.addEventListener('DOMContentLoaded', function() {
     const epJustDeliveredId = <?php echo json_encode($justDeliveredPedidoId, JSON_UNESCAPED_UNICODE); ?>;
     const epCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
     const epEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+    const epRouteStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0), JSON_UNESCAPED_UNICODE); ?>;
 
     if (!epJustDeliveredId) {
         return;
     }
+
+    // Busca en que posicion iba este pedido dentro de la ultima ruta optimizada generada
+    // (guardada en localStorage, ver routeSaveStoredRoute mas abajo) para poder anunciar
+    // "Primera/Segunda/... entrega" en el orden real de reparto. Si no hay ruta guardada o
+    // el pedido ya no esta en ella, regresa null y el backend cae a contar entregas del dia.
+    function epFindNumeroEntregaFromRoute(idPedido) {
+        try {
+            const raw = localStorage.getItem(epRouteStorageKey);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const stops = parsed && parsed.data && Array.isArray(parsed.data.orderedStops) ? parsed.data.orderedStops : null;
+            if (!stops) return null;
+            const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(idPedido));
+            return idx >= 0 ? idx + 1 : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    const epNumeroEntrega = epFindNumeroEntregaFromRoute(epJustDeliveredId);
 
     const modalEl = document.getElementById('modal-entrega-publicacion');
     const textoEl = document.getElementById('ep-texto');
@@ -1089,8 +1279,72 @@ document.addEventListener('DOMContentLoaded', function() {
         return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true });
     }
 
+    // Al cerrar el modal de publicacion (Omitir, Compartir/Facebook o clic afuera), sugiere
+    // marcar como "en camino" el siguiente pedido de la ruta guardada, para no tener que
+    // volver a buscarlo manualmente en la lista despues de cada entrega.
+    (function setupSiguienteEnCaminoPrompt() {
+        const stops = (function () {
+            try {
+                const raw = localStorage.getItem(epRouteStorageKey);
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                return (parsed && parsed.data && Array.isArray(parsed.data.orderedStops)) ? parsed.data.orderedStops : [];
+            } catch (e) {
+                return [];
+            }
+        })();
+
+        const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(epJustDeliveredId));
+        if (idx === -1) {
+            return;
+        }
+
+        let nextStop = null;
+        for (let i = idx + 1; i < stops.length; i++) {
+            const candidateId = stops[i].id_pedido;
+            const checkbox = document.querySelector('.route-check[value="' + CSS.escape(String(candidateId)) + '"]');
+            if (!checkbox) {
+                continue; // ya no esta en la lista (entregado/cancelado/rechazado por otra via)
+            }
+            const estado = checkbox.dataset.estado || '';
+            if (estado === 'pendiente_pago' || estado === 'pagado') {
+                nextStop = stops[i];
+                break;
+            }
+        }
+
+        if (!nextStop) {
+            return;
+        }
+
+        const secModalEl = document.getElementById('modal-siguiente-en-camino');
+        const secInfoEl = document.getElementById('sec-siguiente-info');
+        const secBtnSi = document.getElementById('sec-btn-si');
+        const secFormEl = document.getElementById('sec-form-en-camino');
+        const secFormIdPedido = document.getElementById('sec-form-id-pedido');
+        if (!secModalEl || !secInfoEl || !secBtnSi || !secFormEl || !secFormIdPedido) {
+            return;
+        }
+
+        const nextLabel = 'Pedido ' + (nextStop.numero_pedido || nextStop.id_pedido)
+            + (nextStop.cliente ? ' - ' + nextStop.cliente : '');
+        secInfoEl.textContent = nextLabel + '. Segun tu ruta guardada, es tu siguiente parada. ¿Marcarlo como "en camino"?';
+        secBtnSi.addEventListener('click', function () {
+            secFormIdPedido.value = nextStop.id_pedido;
+            secFormEl.submit();
+        });
+
+        const publishInstance = epGetModalInstance();
+        publishInstance.options.onCloseEnd = function () {
+            setTimeout(function () {
+                (M.Modal.getInstance(secModalEl) || M.Modal.init(secModalEl, { dismissible: true })).open();
+            }, 250);
+        };
+    })();
+
     let epUploadedId = null;
     let epUploadedForFile = null;
+    let epServerPhotoFile = null; // foto ya subida antes de cobrar, reconstruida como File para poder compartirla
 
     // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
     // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
@@ -1118,7 +1372,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch(epEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, csrf_token: epCsrfToken }),
+        body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, numero_entrega: epNumeroEntrega, csrf_token: epCsrfToken }),
     })
         .then(epParseJsonResponse)
         .then((data) => {
@@ -1126,9 +1380,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 textoEl.value = data.texto || '';
                 M.textareaAutoResize(textoEl);
                 M.updateTextFields();
-                coloniaInfoEl.textContent = data.colonia_detectada
-                    ? 'Colonia detectada: ' + data.colonia_detectada + ' (puedes editar el texto arriba)'
-                    : 'No se pudo detectar la colonia automaticamente, ajusta el texto si quieres.';
+                const infoPartes = [];
+                infoPartes.push(data.colonia_detectada
+                    ? 'Colonia detectada: ' + data.colonia_detectada
+                    : 'No se pudo detectar la colonia automaticamente.');
+                if (data.numero_entrega) {
+                    infoPartes.push('Entrega #' + data.numero_entrega + ' del dia' + (epNumeroEntrega ? ' (segun tu ruta)' : ''));
+                }
+                coloniaInfoEl.textContent = infoPartes.join(' | ') + ' (puedes editar el texto arriba)';
+
+                // La foto ya se subio antes de cobrar (modal-tomar-foto-entrega); se muestra
+                // de una vez sin pedirle al repartidor que la vuelva a seleccionar.
+                if (data.id_publicacion && data.foto_url) {
+                    epUploadedId = data.id_publicacion;
+                    previewEl.src = data.foto_url;
+                    previewEl.style.display = 'block';
+                    fetch(data.foto_url)
+                        .then((r) => r.blob())
+                        .then((blob) => {
+                            epServerPhotoFile = new File([blob], 'entrega.jpg', { type: blob.type || 'image/jpeg' });
+                        })
+                        .catch(() => {});
+                }
             }
         })
         .catch(() => {});
@@ -1156,6 +1429,9 @@ document.addEventListener('DOMContentLoaded', function() {
     function epEnsureUploaded() {
         const file = fotoInputEl.files && fotoInputEl.files[0];
         if (!file) {
+            if (epUploadedId) {
+                return Promise.resolve(epUploadedId); // ya se subio antes de cobrar
+            }
             return Promise.reject(new Error('Selecciona una foto de la entrega primero.'));
         }
         if (epUploadedId && epUploadedForFile === file) {
@@ -1165,6 +1441,9 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('foto', file);
         formData.append('id_pedido', epJustDeliveredId);
         formData.append('texto', textoEl.value || '');
+        if (epNumeroEntrega) {
+            formData.append('numero_entrega', epNumeroEntrega);
+        }
         formData.append('csrf_token', epCsrfToken);
 
         return fetch(epEndpoint, { method: 'POST', body: formData })
@@ -1289,6 +1568,38 @@ function routeClearStoredRoute() {
     try {
         localStorage.removeItem(routeStorageKey);
     } catch (e) {}
+}
+
+// Reordena visualmente las tarjetas de "Entregas Asignadas" para que sigan el mismo orden
+// que la ruta ya generada/guardada, en vez del orden de fecha_creacion que trae la consulta.
+// Asi el repartidor va tachando de arriba hacia abajo en el mismo orden en que va manejando,
+// sin tener que buscar cual sigue entre las tarjetas. Las que no estan en la ruta guardada
+// (o cuando no hay ruta) se quedan al final en su orden original.
+function routeReorderEntregaCards(stops) {
+    const container = document.getElementById('entregas-cards-row');
+    if (!container || !Array.isArray(stops) || stops.length < 2) {
+        return;
+    }
+
+    const orderIndex = new Map();
+    stops.forEach((stop, i) => {
+        orderIndex.set(String(stop.id_pedido), i);
+    });
+
+    const cards = Array.from(container.children).filter((el) => el.dataset && el.dataset.pedidoId);
+    if (cards.length < 2) {
+        return;
+    }
+
+    cards.sort((a, b) => {
+        const idxA = orderIndex.has(a.dataset.pedidoId) ? orderIndex.get(a.dataset.pedidoId) : Infinity;
+        const idxB = orderIndex.has(b.dataset.pedidoId) ? orderIndex.get(b.dataset.pedidoId) : Infinity;
+        return idxA - idxB;
+    });
+
+    // Array.sort es estable (garantizado desde ES2019): las tarjetas fuera de la ruta
+    // (idx = Infinity) conservan su orden relativo original entre ellas.
+    cards.forEach((card) => container.appendChild(card));
 }
 
 function routeFormatSavedAt(timestamp) {
@@ -1878,6 +2189,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const activeIds = new Set(Array.from(document.querySelectorAll('.route-check')).map((el) => String(el.value)));
         const allStops = Array.isArray(stored.data.orderedStops) ? stored.data.orderedStops : [];
         const filteredStops = allStops.filter((stop) => activeIds.has(String(stop.id_pedido)));
+
+        routeReorderEntregaCards(allStops);
 
         if (filteredStops.length > 0) {
             const dataToRender = Object.assign({}, stored.data, {
