@@ -299,6 +299,40 @@ function catalogBuildPaginationMeta(int $totalProducts, int $itemsPerPage, int $
     ];
 }
 
+/**
+ * Resuelve la URL de imagen de una tarjeta de catálogo verificando en disco que
+ * el archivo local realmente exista. Sin esto, una referencia rota en la DB
+ * (ruta_archivo/imagen apuntando a un archivo borrado o movido) se manda tal
+ * cual al navegador, que tiene que abrir la conexión, recibir el 404 y recién
+ * entonces disparar el onerror del <img> para mostrar el placeholder -- ese
+ * viaje de ida y vuelta es justo lo que hace que "tarden" imágenes que en
+ * realidad nunca iban a cargar.
+ */
+function catalogResolveCardImageSrc(string $rawImagen, int $productId): string
+{
+    $imgSrc = getProductImageUrl($rawImagen, $productId);
+
+    $marker = '/assets/img/products/';
+    $pos = stripos($imgSrc, $marker);
+    if ($pos === false) {
+        // URL externa (http/https), data-uri, o ya el placeholder: no verificable
+        // en disco local, se manda tal cual como antes.
+        return $imgSrc;
+    }
+
+    $rel = ltrim((string) (strtok(substr($imgSrc, $pos + strlen($marker)), '?#') ?: ''), '/');
+    if ($rel === '') {
+        return $imgSrc;
+    }
+
+    $fullPath = __DIR__ . '/../assets/img/products/' . str_replace('/', DIRECTORY_SEPARATOR, $rel);
+    if (!is_file($fullPath)) {
+        return getDefaultProductImageUrl();
+    }
+
+    return $imgSrc;
+}
+
 function catalogRenderProductCard(array $p): string
 {
     $groupKey = catalogGroupKey((string) ($p['nombre'] ?? ''));
@@ -312,7 +346,7 @@ function catalogRenderProductCard(array $p): string
         <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int) ($p['id_producto'] ?? 0); ?>" class="card-link">
             <div class="card hoverable border-radius-8" style="height: 360px; display: flex; flex-direction: column;">
                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
-                    <?php $imgSrc = getProductImageUrl((string) ($p['imagen'] ?? ''), (int) ($p['id_producto'] ?? 0)); ?>
+                    <?php $imgSrc = catalogResolveCardImageSrc((string) ($p['imagen'] ?? ''), (int) ($p['id_producto'] ?? 0)); ?>
                     <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" style="max-height: 100%; width: auto; object-fit: contain;">
                 </div>
                 <div class="card-content" style="flex-grow: 1;">
