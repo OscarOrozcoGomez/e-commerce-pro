@@ -44,6 +44,11 @@ function epDecryptIfNeeded(?string $value): string
     return trim($value);
 }
 
+// Todo lo que sigue (incluida la conexion a BD) va dentro del try: si algo truena aqui sin
+// capturarlo, el manejador global de core/config.php redirige a error.php (HTML) y el fetch()
+// del navegador ya no puede parsear JSON (ver nota en el catch de abajo).
+try {
+
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $esAdmin = isAdmin();
@@ -86,12 +91,13 @@ function epBuildDireccionExpr(PDO $pdo): string
 }
 
 /**
- * Confirma que el pedido esta entregado y pertenece al repartidor (o que el usuario es admin).
- * Devuelve la fila del pedido (incluyendo direccion ya descifrada) o null si no aplica.
+ * Busca el pedido y confirma que pertenece al repartidor (o que el usuario es admin), sin
+ * restringir por estado. Los llamadores aplican su propio filtro de estado segun el caso
+ * (ver epFindPedidoParaFoto / epFindPedidoEntregado).
  *
  * @return array<string, mixed>|null
  */
-function epFindPedidoEntregado(PDO $pdo, int $idPedido, int $idRepartidor, bool $esAdmin): ?array
+function epFindPedidoBase(PDO $pdo, int $idPedido, int $idRepartidor, bool $esAdmin): ?array
 {
     $direccionExpr = epBuildDireccionExpr($pdo);
     $stmt = $pdo->prepare(
@@ -104,7 +110,7 @@ function epFindPedidoEntregado(PDO $pdo, int $idPedido, int $idRepartidor, bool 
     $stmt->execute([':id_pedido' => $idPedido]);
     $pedido = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
-    if (!$pedido || (string)$pedido['estado'] !== 'entregado') {
+    if (!$pedido) {
         return null;
     }
     if (!$esAdmin && (int)$pedido['id_repartidor'] !== $idRepartidor) {
@@ -115,9 +121,62 @@ function epFindPedidoEntregado(PDO $pdo, int $idPedido, int $idRepartidor, bool 
     return $pedido;
 }
 
-$idUsuario = (int)($usuario['id_usuario'] ?? 0);
+/**
+ * Igual que epFindPedidoBase, pero solo acepta pedidos en un estado donde tiene sentido
+ * adjuntarles una foto de entrega: la foto se puede subir ANTES de marcar la entrega (flujo
+ * nuevo: foto -> cobrar -> publicar, con el pedido todavia en_reparto) o despues (compatibilidad
+ * con el flujo anterior).
+ *
+ * @return array<string, mixed>|null
+ */
+function epFindPedidoParaFoto(PDO $pdo, int $idPedido, int $idRepartidor, bool $esAdmin): ?array
+{
+    $estadosPermitidos = ['pendiente_pago', 'pagado', 'en_reparto', 'entregado'];
+    $pedido = epFindPedidoBase($pdo, $idPedido, $idRepartidor, $esAdmin);
+    if (!$pedido || !in_array((string)$pedido['estado'], $estadosPermitidos, true)) {
+        return null;
+    }
 
-try {
+    return $pedido;
+}
+
+/**
+ * Igual que epFindPedidoBase, pero solo acepta pedidos ya entregados (se usa para generar el
+ * texto sugerido y para publicar en Facebook, que solo debe pasar despues del cobro).
+ *
+ * @return array<string, mixed>|null
+ */
+function epFindPedidoEntregado(PDO $pdo, int $idPedido, int $idRepartidor, bool $esAdmin): ?array
+{
+    $pedido = epFindPedidoBase($pdo, $idPedido, $idRepartidor, $esAdmin);
+    if (!$pedido || (string)$pedido['estado'] !== 'entregado') {
+        return null;
+    }
+
+    return $pedido;
+}
+
+/**
+ * Determina que numero de entrega es esta (Primera, Segunda...) para el texto de la
+ * publicacion. Preferimos el valor que manda el navegador (posicion dentro de la ruta
+ * optimizada generada, que solo vive en localStorage del repartidor); si no lo manda
+ * (no genero ruta, o la limpio), caemos a contar cuantos pedidos lleva entregados hoy.
+ */
+function epResolverNumeroEntrega(PDO $pdo, int $idRepartidor, mixed $numeroEntregaCliente): int
+{
+    $numero = is_numeric($numeroEntregaCliente) ? (int)$numeroEntregaCliente : 0;
+    if ($numero > 0) {
+        return $numero;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM pedidos WHERE id_repartidor = :id_repartidor AND estado = 'entregado' AND DATE(fecha_entrega) = CURDATE()"
+    );
+    $stmt->execute([':id_repartidor' => $idRepartidor]);
+    return max(1, (int)$stmt->fetchColumn());
+}
+
+$idUsuario = (int)($usuario['id_usuario'] ?? 0);
 
 // La subida de foto llega como multipart/form-data (no JSON), por eso se detecta aparte.
 if (isset($_FILES['foto'])) {
@@ -126,7 +185,7 @@ if (isset($_FILES['foto'])) {
     }
 
     $idPedido = (int)($_POST['id_pedido'] ?? 0);
-    $pedido = epFindPedidoEntregado($pdo, $idPedido, $idUsuario, $esAdmin);
+    $pedido = epFindPedidoParaFoto($pdo, $idPedido, $idUsuario, $esAdmin);
     if (!$pedido) {
         epJsonResponse(['success' => false, 'error' => 'Pedido no encontrado o no disponible para publicar.'], 404);
     }
@@ -163,7 +222,10 @@ if (isset($_FILES['foto'])) {
 
     $rutaRelativa = $idPedido . '/' . $fileName;
     $colonia = extractColoniaFromAddress($pedido['direccion']);
-    $texto = trim((string)($_POST['texto'] ?? '')) ?: buildDeliveryPostText($colonia);
+    $texto = trim((string)($_POST['texto'] ?? '')) ?: buildDeliveryPostText(
+        $colonia,
+        epResolverNumeroEntrega($pdo, (int)$pedido['id_repartidor'], $_POST['numero_entrega'] ?? null)
+    );
 
     $stmtInsert = $pdo->prepare(
         "INSERT INTO pedido_publicaciones (id_pedido, id_repartidor, colonia_detectada, texto, ruta_foto)
@@ -205,10 +267,23 @@ if ($action === 'preparar') {
     }
 
     $colonia = extractColoniaFromAddress($pedido['direccion']);
+    $numeroEntrega = epResolverNumeroEntrega($pdo, (int)$pedido['id_repartidor'], $payload['numero_entrega'] ?? null);
+
+    // Si ya se subio una foto para este pedido (flujo nuevo: foto antes de cobrar), la
+    // reusamos en vez de pedirsela de nuevo al repartidor.
+    $stmtFotoExistente = $pdo->prepare(
+        "SELECT id_publicacion, ruta_foto FROM pedido_publicaciones WHERE id_pedido = :id_pedido ORDER BY id_publicacion DESC LIMIT 1"
+    );
+    $stmtFotoExistente->execute([':id_pedido' => $idPedido]);
+    $fotoExistente = $stmtFotoExistente->fetch(PDO::FETCH_ASSOC) ?: null;
+
     epJsonResponse([
         'success' => true,
         'colonia_detectada' => $colonia,
-        'texto' => buildDeliveryPostText($colonia),
+        'numero_entrega' => $numeroEntrega,
+        'texto' => buildDeliveryPostText($colonia, $numeroEntrega),
+        'id_publicacion' => $fotoExistente['id_publicacion'] ?? null,
+        'foto_url' => $fotoExistente ? BASE_URL . 'assets/img/entregas/' . $fotoExistente['ruta_foto'] : null,
     ]);
 }
 

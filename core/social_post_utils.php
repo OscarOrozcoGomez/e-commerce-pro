@@ -60,12 +60,46 @@ function slugifyHashtag(string $texto): string
 }
 
 /**
+ * Convierte un numero de entrega (1, 2, 3...) a su ordinal femenino en espanol, para frases
+ * como "Primera entrega", "Segunda entrega". Cubre 1-30 (rango realista de paradas por ruta);
+ * fuera de ese rango regresa null y el llamador usa un formato numerico simple como respaldo.
+ */
+function ordinalFemeninoEntrega(int $numero): ?string
+{
+    static $ordinales = [
+        1 => 'Primera', 2 => 'Segunda', 3 => 'Tercera', 4 => 'Cuarta', 5 => 'Quinta',
+        6 => 'Sexta', 7 => 'Septima', 8 => 'Octava', 9 => 'Novena', 10 => 'Decima',
+        11 => 'Undecima', 12 => 'Duodecima', 13 => 'Decimotercera', 14 => 'Decimocuarta',
+        15 => 'Decimoquinta', 16 => 'Decimosexta', 17 => 'Decimoseptima', 18 => 'Decimoctava',
+        19 => 'Decimonovena', 20 => 'Vigesima', 21 => 'Vigesima primera', 22 => 'Vigesima segunda',
+        23 => 'Vigesima tercera', 24 => 'Vigesima cuarta', 25 => 'Vigesima quinta',
+        26 => 'Vigesima sexta', 27 => 'Vigesima septima', 28 => 'Vigesima octava',
+        29 => 'Vigesima novena', 30 => 'Trigesima',
+    ];
+
+    return $ordinales[$numero] ?? null;
+}
+
+/**
  * Arma el texto sugerido para la publicacion de entrega. Si no hay colonia detectable,
  * regresa la plantilla sin ese hashtag (el repartidor la completa a mano si quiere).
+ * $numeroEntrega (si se da y es > 0) antepone "Primera/Segunda/... entrega del dia" en base
+ * al orden de la ruta generada (o, si no hay ruta, al conteo de entregas del dia).
  */
-function buildDeliveryPostText(string $colonia): string
+function buildDeliveryPostText(string $colonia, ?int $numeroEntrega = null): string
 {
-    $base = '¡Pedido entregado! 📦🚚 #EntregaExpress';
+    $prefijo = '';
+    if ($numeroEntrega !== null && $numeroEntrega > 0) {
+        $ordinal = ordinalFemeninoEntrega($numeroEntrega);
+        $prefijo = $ordinal !== null
+            ? '¡' . $ordinal . ' entrega del dia completada! '
+            : '¡Entrega #' . $numeroEntrega . ' del dia completada! ';
+    }
+
+    $base = $prefijo !== ''
+        ? '📦🚚 ' . $prefijo . '#EntregaExpress'
+        : '¡Pedido entregado! 📦🚚 #EntregaExpress';
+
     $hashtagColonia = slugifyHashtag($colonia);
 
     if ($hashtagColonia === '') {

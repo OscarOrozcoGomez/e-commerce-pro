@@ -1487,8 +1487,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     btnCompartir.addEventListener('click', function (e) {
         e.preventDefault();
-        const file = fotoInputEl.files && fotoInputEl.files[0];
-        if (!file) {
+        const file = (fotoInputEl.files && fotoInputEl.files[0]) || epServerPhotoFile;
+        if (!file && !epUploadedId) {
             epSetStatus('Selecciona una foto de la entrega primero.', true);
             return;
         }
@@ -1496,7 +1496,7 @@ document.addEventListener('DOMContentLoaded', function() {
         epSetStatus('Preparando para compartir...', false);
         epEnsureUploaded()
             .then((idPublicacion) => {
-                const canNativeShare = navigator.canShare && navigator.canShare({ files: [file] });
+                const canNativeShare = file && navigator.canShare && navigator.canShare({ files: [file] });
                 if (navigator.share && canNativeShare) {
                     return navigator.share({ text: textoEl.value, files: [file] })
                         .then(() => fetch(epEndpoint, {
