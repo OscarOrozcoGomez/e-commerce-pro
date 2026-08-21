@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -300,66 +301,77 @@ final class SecurityAndEdgeCasesTest extends TestCase
         }
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsOnEmptyBody(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsOnGarbageNonJsonBody(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '<html>502 Bad Gateway</html>');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsOnTruncatedJson(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '{"choices":[{"message":{"role":"assist');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsWhenJsonIsScalarNotObject(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '"solo un string"');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsWhenChoicesMissing(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '{"id":"abc","object":"chat.completion"}');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsWhenChoicesIsEmptyArray(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '{"choices":[]}');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsWhenMessageKeyMissing(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '{"choices":[{"finish_reason":"stop"}]}');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsWhenMessageIsStringNotObject(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(200, '{"choices":[{"message":"deberia ser un objeto"}]}');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsOnHttpErrorEvenWithValidJson(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(500, '{"error":{"message":"internal server error"}}');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseThrowsOnRateLimitStatus(): void
     {
         $this->expectException(RuntimeException::class);
         aiParseDeepSeekResponse(429, '{"error":{"message":"rate limited"}}');
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseAcceptsValidContentOnlyShape(): void
     {
         $result = aiParseDeepSeekResponse(200, '{"choices":[{"message":{"role":"assistant","content":"Hola!"},"finish_reason":"stop"}]}');
@@ -368,6 +380,7 @@ final class SecurityAndEdgeCasesTest extends TestCase
         $this->assertSame('stop', $result['finish_reason']);
     }
 
+    #[Group('ai_deepseek')]
     public function testParseDeepSeekResponseAcceptsValidToolCallsShape(): void
     {
         $body = '{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"consultar_inventario","arguments":"{\"busqueda_texto\":\"omega\"}"}}]},"finish_reason":"tool_calls"}]}';
