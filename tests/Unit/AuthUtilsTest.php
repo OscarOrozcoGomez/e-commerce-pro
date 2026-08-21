@@ -58,4 +58,19 @@ final class AuthUtilsTest extends TestCase
             $error
         );
     }
+
+    public function testResolveCheckoutWarehouseDefaultsToAlmacenCentral(): void
+    {
+        // Los pedidos web a domicilio siempre se surten del Almacen Central (id 1); ya no se
+        // reparte entre sucursales segun quien tenga stock (ver core/auth.php).
+        $this->assertSame(1, resolveCheckoutWarehouse());
+        $this->assertSame(1, resolveCheckoutWarehouse(null));
+        $this->assertSame(1, resolveCheckoutWarehouse(0));
+    }
+
+    public function testResolveCheckoutWarehouseRespectsExplicitRequest(): void
+    {
+        $this->assertSame(3, resolveCheckoutWarehouse(3));
+        $this->assertSame(3, resolveCheckoutWarehouse('3'));
+    }
 }

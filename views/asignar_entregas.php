@@ -15,8 +15,12 @@ if (!canManageDeliveryOrders()) {
 $pageTitle = 'Asignar Entregas';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
-// El encargado solo debe ver y asignar pedidos de su propia sucursal; el admin ve todas.
-$scopeAlmacenId = (!isAdmin() && isEncargado()) ? getCurrentAlmacenId() : null;
+// Esta pantalla es solo para entregas a domicilio (ver $deliveryFilter mas abajo). El id_almacen
+// de un pedido a domicilio es de donde se surte el stock (siempre el Almacen Central, ver
+// resolveCheckoutWarehouse en core/auth.php), no de que encargado le corresponde: cualquier
+// encargado (o el admin) puede asignar repartidor a cualquier entrega a domicilio. El filtro por
+// sucursal si aplica para pickup, que se maneja aparte en views/pickup_notifications.php.
+$scopeAlmacenId = null;
 $error = '';
 $success = '';
 $successActionUrl = '';
