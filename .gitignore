@@ -67,3 +67,9 @@ scripts/_tmp_*.php
 
 # Catalogo local (solo uso interno, no subir al repo)
 /assets/Cat*logo Beneficios Digital Blife.pdf
+
+# Dependencias y artefactos de Playwright/Node (tooling de tests, no se despliega al host)
+/node_modules/
+/playwright-report/
+/test-results/
+/tests/e2e/.auth/

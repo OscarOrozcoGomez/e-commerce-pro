@@ -244,6 +244,15 @@ include __DIR__ . '/includes/header.php';
             .join(', ');
     }
 
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function getSinStockProductIdSet() {
         const tipoEntregaActual = document.getElementById('tipo_entrega')?.value || '';
         if (tipoEntregaActual !== 'Sucursal') {
@@ -252,15 +261,6 @@ include __DIR__ . '/includes/header.php';
 
         if (!latestPickupStockCheck || latestPickupStockCheck.status !== 'sin_stock') {
             return new Set();
-        }
-
-        function escapeHtml(text) {
-            return String(text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
         }
 
         const faltantes = Array.isArray(latestPickupStockCheck.faltantes) ? latestPickupStockCheck.faltantes : [];
