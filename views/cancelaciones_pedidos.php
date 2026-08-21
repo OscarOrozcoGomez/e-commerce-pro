@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/alex_insights_utils.php';
 
 requireAuth();
 if (!isAdmin() && !isEncargado()) {
@@ -16,6 +17,8 @@ $pdo = getPDO();
 $resumen = [];
 $cancelaciones = [];
 $totalCancelaciones = 0;
+$cancelacionesRepartidor = [];
+$senalesAlex = ['confirmadas' => [], 'resueltas_no_canceladas' => [], 'sin_confirmar' => []];
 
 try {
     $stmtResumen = $pdo->query(
@@ -31,7 +34,7 @@ try {
     $stmtDetalle = $pdo->query(
         "SELECT pc.motivo_detalle, pc.fecha_cancelacion,
                 p.id_pedido, p.numero_pedido, p.total,
-                COALESCE(cl.nombre, 'Cliente') AS cliente_nombre,
+                cl.nombre AS cliente_nombre_raw,
                 COALESCE(m.motivo, 'Sin motivo especificado') AS motivo
          FROM pedido_cancelaciones pc
          JOIN pedidos p ON p.id_pedido = pc.id_pedido
@@ -41,6 +44,14 @@ try {
          LIMIT 300"
     );
     $cancelaciones = $stmtDetalle->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($cancelaciones as &$fila) {
+        $fila['cliente_nombre'] = alexInsightsDecryptClienteNombre($fila['cliente_nombre_raw'] ?? null);
+        unset($fila['cliente_nombre_raw']);
+    }
+    unset($fila);
+
+    $cancelacionesRepartidor = alexInsightsGetRepartidorCancellations($pdo);
+    $senalesAlex = alexInsightsGetAlexCancellationSignals($pdo);
 } catch (PDOException $e) {
     error_log('Error en cancelaciones_pedidos: ' . $e->getMessage());
 }
@@ -137,6 +148,104 @@ include __DIR__ . '/includes/header.php';
                                 </tbody>
                             </table>
                         </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col s12">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title">Cancelaciones por Repartidor (entrega no realizada)</span>
+                    <p class="grey-text" style="margin-top: 0;">
+                        Pedidos que el repartidor no pudo entregar, con el motivo que registro al marcarlo.
+                    </p>
+                    <?php if (empty($cancelacionesRepartidor)): ?>
+                        <p class="center-align">No hay cancelaciones de repartidor registradas.</p>
+                    <?php else: ?>
+                        <div style="overflow-x: auto;">
+                            <table class="striped">
+                                <thead>
+                                    <tr>
+                                        <th>Pedido</th>
+                                        <th>Cliente</th>
+                                        <th>Motivo</th>
+                                        <th>Total</th>
+                                        <th>Fecha</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($cancelacionesRepartidor as $cr): ?>
+                                        <tr>
+                                            <td><a href="detalle_compra.php?id=<?php echo (int)$cr['id_pedido']; ?>"><?php echo esc((string)$cr['numero_pedido']); ?></a></td>
+                                            <td><?php echo esc((string)$cr['cliente_nombre']); ?></td>
+                                            <td><?php echo esc((string)$cr['motivo']); ?></td>
+                                            <td>$<?php echo number_format((float)$cr['total'], 2); ?></td>
+                                            <td><?php echo date('d/m/Y H:i', strtotime((string)$cr['fecha_creacion'])); ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col s12">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title"><i class="material-icons left">smart_toy</i>Señales de Alex (WhatsApp)</span>
+                    <p class="grey-text" style="margin-top: 0;">
+                        Intenciones de cancelar que Alex detecto en conversaciones de WhatsApp. Esta vista es
+                        parcial: se pierde el dato cuando un admin reactiva el bot de una conversacion ya atendida.
+                    </p>
+
+                    <?php if (!empty($senalesAlex['confirmadas'])): ?>
+                        <h6>Confirmadas (el pedido si quedo cancelado)</h6>
+                        <ul class="collection">
+                            <?php foreach ($senalesAlex['confirmadas'] as $s): ?>
+                                <li class="collection-item">
+                                    <a href="detalle_compra.php?id=<?php echo (int)$s['pedido']['id_pedido']; ?>"><?php echo esc((string)$s['pedido']['numero_pedido']); ?></a>
+                                    &mdash; <?php echo esc($s['motivo']); ?>
+                                    <span class="grey-text" style="font-size: 0.8rem;"> (<?php echo esc($s['contacto']); ?>)</span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+
+                    <?php if (!empty($senalesAlex['resueltas_no_canceladas'])): ?>
+                        <h6>Pidieron cancelar pero el pedido NO quedo cancelado (posible "salvada")</h6>
+                        <ul class="collection">
+                            <?php foreach ($senalesAlex['resueltas_no_canceladas'] as $s): ?>
+                                <li class="collection-item">
+                                    <a href="detalle_compra.php?id=<?php echo (int)$s['pedido']['id_pedido']; ?>"><?php echo esc((string)$s['pedido']['numero_pedido']); ?></a>
+                                    <span class="chip green lighten-4">Estado actual: <?php echo esc(ucfirst((string)$s['pedido']['estado'])); ?></span>
+                                    &mdash; <?php echo esc($s['motivo']); ?>
+                                    <span class="grey-text" style="font-size: 0.8rem;"> (<?php echo esc($s['contacto']); ?>)</span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+
+                    <?php if (!empty($senalesAlex['sin_confirmar'])): ?>
+                        <h6>Detectado por Alex (sin pedido identificado)</h6>
+                        <ul class="collection">
+                            <?php foreach ($senalesAlex['sin_confirmar'] as $s): ?>
+                                <li class="collection-item">
+                                    <?php echo esc($s['motivo']); ?>
+                                    <span class="grey-text" style="font-size: 0.8rem;"> (<?php echo esc($s['contacto']); ?>)</span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+
+                    <?php if (empty($senalesAlex['confirmadas']) && empty($senalesAlex['resueltas_no_canceladas']) && empty($senalesAlex['sin_confirmar'])): ?>
+                        <p class="center-align">No hay senales de cancelacion detectadas por Alex por ahora.</p>
                     <?php endif; ?>
                 </div>
             </div>

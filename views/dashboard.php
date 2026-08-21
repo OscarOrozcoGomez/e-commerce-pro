@@ -456,6 +456,17 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
+                        <span class="card-title">Alex Insights (WhatsApp)</span>
+                        <p>Datos que Alex ya genera al atender WhatsApp: motivos de transferencia, busquedas, ventas y etiquetas</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/alex_insights.php" class="btn waves-effect waves-light deep-purple darken-1">Ver Reporte</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
                         <span class="card-title">
                             Asistente de IA (WhatsApp)
                             <?php if ($aiPendientesCount > 0): ?>
@@ -602,6 +613,17 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/cancelaciones_pedidos.php" class="btn waves-effect waves-light red darken-2">Ver Reporte</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Alex Insights (WhatsApp)</span>
+                        <p>Datos que Alex ya genera al atender WhatsApp: motivos de transferencia, busquedas, ventas y etiquetas</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/alex_insights.php" class="btn waves-effect waves-light deep-purple darken-1">Ver Reporte</a>
                     </div>
                 </div>
             </div>
