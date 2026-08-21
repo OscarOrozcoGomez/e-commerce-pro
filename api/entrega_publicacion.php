@@ -44,6 +44,32 @@ function epDecryptIfNeeded(?string $value): string
     return trim($value);
 }
 
+/**
+ * El token guardado en FB_PAGE_ACCESS_TOKEN normalmente es un token de System User con permisos
+ * sobre la pagina (asi lo entrega el generador de tokens de Meta Business), NO el Page Access
+ * Token real que exige el endpoint de publicar. Facebook los distingue: /me con un token de
+ * System User devuelve la identidad del bot, no la de la pagina, y /{page}/photos lo rechaza con
+ * un error de permisos enganoso ("publish_actions deprecated"). Aqui lo intercambiamos por el
+ * Page Access Token real en cada publicacion, asi no importa si regeneran el token guardado y
+ * olvidan este paso otra vez. Si la llamada falla (p.ej. ya guardaron el Page Access Token
+ * directo), se usa el valor guardado tal cual como respaldo.
+ */
+function epResolvePageAccessToken(string $pageId, string $storedToken): string
+{
+    $ch = curl_init("https://graph.facebook.com/v21.0/{$pageId}?fields=access_token&access_token=" . urlencode($storedToken));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $response = curl_exec($ch);
+    curl_close($ch);
+
+    $decoded = is_string($response) ? json_decode($response, true) : null;
+    $derivedToken = is_array($decoded) ? ($decoded['access_token'] ?? null) : null;
+
+    return is_string($derivedToken) && $derivedToken !== '' ? $derivedToken : $storedToken;
+}
+
 // Todo lo que sigue (incluida la conexion a BD) va dentro del try: si algo truena aqui sin
 // capturarlo, el manejador global de core/config.php redirige a error.php (HTML) y el fetch()
 // del navegador ya no puede parsear JSON (ver nota en el catch de abajo).
@@ -314,8 +340,8 @@ if ($action === 'publicar_facebook') {
     }
 
     $pageId = getEnvVar('FB_PAGE_ID');
-    $pageToken = getEnvVar('FB_PAGE_ACCESS_TOKEN');
-    if (!$pageId || !$pageToken) {
+    $storedToken = getEnvVar('FB_PAGE_ACCESS_TOKEN');
+    if (!$pageId || !$storedToken) {
         epJsonResponse(['success' => false, 'error' => 'Facebook no esta configurado (falta FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN). Usa "Compartir" mientras tanto.'], 500);
     }
 
@@ -323,6 +349,8 @@ if ($action === 'publicar_facebook') {
     if (!is_file($fotoPath)) {
         epJsonResponse(['success' => false, 'error' => 'La foto de esta publicacion ya no existe en el servidor.'], 404);
     }
+
+    $pageToken = epResolvePageAccessToken($pageId, $storedToken);
 
     $ch = curl_init("https://graph.facebook.com/v21.0/{$pageId}/photos");
     curl_setopt_array($ch, [

@@ -8,6 +8,17 @@
         </testsuite>
     </testsuites>
 
+    <!-- Los tests del grupo ai_deepseek solo prueban aiParseDeepSeekResponse() con respuestas
+         fabricadas (nunca llaman a la red real ni gastan tokens), pero generan advertencias
+         ruidosas via error_log() en la salida. Se excluyen por defecto; para correrlos usa el
+         flag "group ai_deepseek" (dos guiones) de phpunit cuando se trabaje en Alex/el
+         asistente de IA. -->
+    <groups>
+        <exclude>
+            <group>ai_deepseek</group>
+        </exclude>
+    </groups>
+
     <php>
         <env name="APP_ENV" value="qa"/>
         <env name="DISABLE_GSM" value="1"/>

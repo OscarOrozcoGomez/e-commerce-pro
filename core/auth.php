@@ -1080,7 +1080,7 @@ function dbCreatePublicOrder(array $data): array {
         // Si hay faltantes transferibles, permitimos surtir desde almacenes de apoyo.
         $id_almacen_pedido = $esPickupSucursal
             ? (int)$pickupWarehouseId
-            : resolveCheckoutWarehouse($pdo, $data['items'] ?? [], $data['id_almacen'] ?? null);
+            : resolveCheckoutWarehouse($data['id_almacen'] ?? null);
 
         // Almacén principal de salida para escenarios que no son pickup transferible.
         $id_almacen_despacho = $esPickupSucursal
@@ -1256,6 +1256,7 @@ function dbCreatePublicOrder(array $data): array {
             $idProducto = (int)($item['id_producto'] ?? 0);
             $cantidad = max(0, (int)($item['quantity'] ?? 0));
             $precio = (float)($item['precio'] ?? 0);
+            $nombreProducto = trim((string)($item['nombre'] ?? ''));
 
             if ($idProducto <= 0 || $cantidad <= 0 || $precio <= 0) {
                 throw new Exception('Producto o cantidad inválidos en el pedido.');
@@ -1276,7 +1277,7 @@ function dbCreatePublicOrder(array $data): array {
 
                 if ($faltante > 0) {
                     if (!$allowSupportTransferPickup) {
-                        throw new Exception('Stock insuficiente para uno o más productos.');
+                        throw new Exception('stock_insuficiente::' . $idProducto . '::' . $nombreProducto);
                     }
 
                     // Repartir faltantes entre almacenes de apoyo disponibles.
@@ -1302,14 +1303,14 @@ function dbCreatePublicOrder(array $data): array {
                     }
 
                     if ($faltante > 0) {
-                        throw new Exception('Stock insuficiente para uno o más productos.');
+                        throw new Exception('stock_insuficiente::' . $idProducto . '::' . $nombreProducto);
                     }
                 }
             } else {
                 $stmtStockCheck->execute([$idProducto, $id_almacen_despacho]);
                 $stockActual = (int)$stmtStockCheck->fetchColumn();
                 if ($stockActual < $cantidad) {
-                    throw new Exception('Stock insuficiente para uno o más productos.');
+                    throw new Exception('stock_insuficiente::' . $idProducto . '::' . $nombreProducto);
                 }
 
                 $consumos[] = ['id_almacen' => (int)$id_almacen_despacho, 'cantidad' => $cantidad];
@@ -1371,6 +1372,19 @@ function dbCreatePublicOrder(array $data): array {
                 return ['success' => false, 'message' => 'No podemos completar el pedido: no hay existencia ni en sucursal ni en bodega para: ' . $detalle . '. Elimina esos productos del carrito para continuar.'];
             }
             return ['success' => false, 'message' => 'No podemos completar el pedido porque no hay existencia ni en sucursal ni en bodega para uno o más productos. Elimina esos productos del carrito para continuar.'];
+        }
+        if (stripos($msg, 'stock_insuficiente::') === 0) {
+            $partes = explode('::', $msg, 3);
+            $idProductoFaltante = (int)($partes[1] ?? 0);
+            $nombreFaltante = trim((string)($partes[2] ?? ''));
+            $mensaje = $nombreFaltante !== ''
+                ? 'No hay stock suficiente de "' . $nombreFaltante . '". Elimínalo o ajusta la cantidad en tu carrito e intenta de nuevo.'
+                : 'No hay stock suficiente para uno o más productos del carrito. Actualiza tu carrito e intenta de nuevo.';
+            return [
+                'success' => false,
+                'message' => $mensaje,
+                'productos_sin_stock' => $idProductoFaltante > 0 ? [$idProductoFaltante] : [],
+            ];
         }
         if (stripos($msg, 'stock insuficiente') !== false) {
             return ['success' => false, 'message' => 'No hay stock suficiente para uno o más productos del carrito. Actualiza tu carrito e intenta de nuevo.'];
@@ -1607,62 +1621,20 @@ function dbCreatePickupNotification(PDO $pdo, array $data): void
 }
 
 /**
- * Resuelve el almacén para surtir checkout web.
+ * Resuelve el almacén para surtir checkout web (pedidos a domicilio).
  *
- * Prioridad:
- * 1) Si el frontend envía id_almacen válido, se respeta.
- * 2) Buscar un almacén que cubra todos los productos requeridos.
- * 3) Si no existe uno que cubra todo, devolver 1 y dejar que la validación de stock responda error.
+ * Los pedidos web SIEMPRE se surten desde el Almacén Central (id 1, "Ubicacion principal" en
+ * la tabla almacenes): las demás sucursales manejan su propio inventario para venta en piso y
+ * no se debe drenar su stock por ventas en línea, ni tampoco conviene "repartir" el pedido entre
+ * varias sucursales solo porque tengan existencia, ya que eso rompe el filtro por almacén que usan
+ * los encargados para ver sus propios pedidos. Si el Almacén Central no tiene existencia
+ * suficiente, el checkout ya valida el stock producto por producto y regresa un error claro
+ * (ver dbCreatePublicOrder) en vez de tomar stock de otra sucursal silenciosamente.
  */
-function resolveCheckoutWarehouse(PDO $pdo, array $items, mixed $requestedWarehouseId = null): int
+function resolveCheckoutWarehouse(mixed $requestedWarehouseId = null): int
 {
     $requestedId = (int)($requestedWarehouseId ?? 0);
-    if ($requestedId > 0) {
-        return $requestedId;
-    }
-
-    $required = [];
-    foreach ($items as $item) {
-        $idProducto = (int)($item['id_producto'] ?? 0);
-        $cantidad = max(0, (int)($item['quantity'] ?? 0));
-        if ($idProducto <= 0 || $cantidad <= 0) {
-            continue;
-        }
-        $required[$idProducto] = ($required[$idProducto] ?? 0) + $cantidad;
-    }
-
-    if (empty($required)) {
-        return 1;
-    }
-
-    $selects = [];
-    $params = [];
-    foreach ($required as $idProducto => $cantidadRequerida) {
-        $selects[] = 'SELECT ? AS id_producto, ? AS cantidad_requerida';
-        $params[] = $idProducto;
-        $params[] = $cantidadRequerida;
-    }
-
-    $requiredSql = implode(' UNION ALL ', $selects);
-    $requiredCount = count($required);
-
-    $sql = "
-        SELECT ia.id_almacen,
-               SUM(CASE WHEN ia.cantidad_actual >= req.cantidad_requerida THEN 1 ELSE 0 END) AS cubiertos,
-               SUM(ia.cantidad_actual) AS stock_total
-        FROM inventario_almacen ia
-        INNER JOIN ({$requiredSql}) req ON req.id_producto = ia.id_producto
-        GROUP BY ia.id_almacen
-        HAVING cubiertos = ?
-        ORDER BY stock_total DESC, ia.id_almacen ASC
-        LIMIT 1";
-
-    $params[] = $requiredCount;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $warehouseId = (int)($stmt->fetchColumn() ?: 0);
-
-    return $warehouseId > 0 ? $warehouseId : 1;
+    return $requestedId > 0 ? $requestedId : 1;
 }
 
 /**

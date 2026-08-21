@@ -318,29 +318,29 @@ try {
     $stmtVar->execute([$nombre_base]);
     $variantes = $stmtVar->fetchAll(PDO::FETCH_ASSOC);
     
-    // Filtro de Calidad: Evitamos duplicados en el array final usando sus IDs únicos
+    // Filtro de Calidad: Evitamos duplicados en el array final usando sus IDs únicos.
+    //
+    // Nota sobre imagenes: aqui NO se resuelve la imagen de cada variante (antes
+    // se hacia is_file()/glob() por cada una, sincronico, antes de poder
+    // responder el JSON). El frontend (product_detail.php) nunca lee v.imagen
+    // ni variant_image_source -- los pills de variante solo muestran texto, y
+    // al hacer click ya se vuelve a llamar a este mismo endpoint con el
+    // id_producto de la variante, que trae su galeria completa via el bloque
+    // de arriba. Resolver esas imagenes aqui era trabajo muerto que escalaba
+    // con el numero de variantes del producto.
     $variantes_unicas = [];
     $ids_vistos = [];
-    
+
     foreach ($variantes as $v) {
         $v_id = (int)$v['id_producto'];
-        if (!in_array($v_id, $ids_vistos)) {
-            $ids_vistos[] = $v_id;
-            $resolvedVariantImage = getProductImageUrl((string)($v['imagen'] ?? ''), (int)($v['id_producto'] ?? 0));
-            if (!$localProductAssetExists($resolvedVariantImage)) {
-                    $variantName = trim((string)($v['nombre'] ?? ''));
-                    $variantPreferredFolder = slugify($variantName) . '-' . $v_id;
-                $fallbackFolderImages = $collectFolderImagesByProductId($v_id, $variantPreferredFolder);
-                if (!empty($fallbackFolderImages)) {
-                    $resolvedVariantImage = getProductImageUrl($fallbackFolderImages[0], $v_id);
-                }
-            }
-            $v['imagen'] = $localProductAssetExists($resolvedVariantImage) ? $resolvedVariantImage : '';
-            $v['variant_image_source'] = $v['imagen'] !== '' ? 'local' : 'fallback';
-            $variantes_unicas[] = normalizeProductDisplayRow($v);
+        if (isset($ids_vistos[$v_id])) {
+            continue;
         }
+        $ids_vistos[$v_id] = true;
+        $v['imagen'] = '';
+        $variantes_unicas[] = normalizeProductDisplayRow($v);
     }
-    
+
     $product['variantes'] = $variantes_unicas;
 
     // Enviamos la respuesta limpia al frontend

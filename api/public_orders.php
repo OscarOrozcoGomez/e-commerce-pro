@@ -175,5 +175,9 @@ if ($result['success']) {
 
     echo json_encode($payload);
 } else {
-    echo json_encode(['success' => false, 'message' => $result['message']]);
+    echo json_encode([
+        'success' => false,
+        'message' => $result['message'],
+        'productos_sin_stock' => $result['productos_sin_stock'] ?? [],
+    ]);
 }

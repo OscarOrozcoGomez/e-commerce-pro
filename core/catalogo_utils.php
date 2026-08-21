@@ -388,11 +388,49 @@ function catalogRenderProductCard(array $p): string
  */
 function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): array
 {
-    $sqlMain = "SELECT p.*, COALESCE(NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto OR (TRIM(p_img.nombre) = TRIM(p.nombre) AND p_img.estado = 'activo')) ORDER BY (p_img.id_producto = p.id_producto) DESC, (p_img.id_padre = p.id_producto) DESC, pi.orden ASC LIMIT 1), ''), NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) AS imagen,
-        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') AS precio_desde,
-        (SELECT MIN(precio_comparacion) FROM productos p4 WHERE (p4.id_producto = p.id_producto OR p4.id_padre = p.id_producto) AND p4.estado = 'activo' AND p4.precio_comparacion > 0) AS precio_comparacion_desde,
-        (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') AS total_variantes
-        FROM productos p";
+    // Nota de rendimiento: las versiones anteriores de estas 4 subconsultas usaban
+    // condiciones "OR" (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto)
+    // o comparaciones envueltas en TRIM() en ambos lados -- ninguna de las dos formas
+    // es indexable en MySQL/MariaDB, así que EXPLAIN mostraba "type: ALL" (full table
+    // scan) repetido por cada producto de la página. Aquí:
+    //  - la imagen usa COALESCE de 3 subconsultas independientes y priorizadas (propia
+    //    imagen / imagen de un hijo / imagen de un "hermano" con el mismo nombre); MySQL
+    //    evalúa COALESCE de forma perezosa, así que en el caso común (el producto ya
+    //    tiene su propia imagen, que además usa el índice de producto_imagenes) ni
+    //    siquiera llega a ejecutar las otras dos.
+    //  - precio_desde / precio_comparacion_desde / total_variantes ya NO son subconsultas
+    //    correlacionadas por fila: se calculan una sola vez para toda la tabla, agrupando
+    //    por "producto raíz" (el propio id si es raíz, o su id_padre si es variante), y
+    //    se unen con LEFT JOIN. Ojo: esa tabla derivada no puede referenciar a "p" (MariaDB
+    //    no permite correlacionar una subconsulta usada en FROM), por eso el JOIN es la
+    //    forma correcta de aprovechar esto -- un intento previo de usar UNION ALL dentro
+    //    de una subconsulta correlacionada fallaba con "Unknown column 'p.id_producto'".
+    // El resultado (qué fila gana, en qué orden) es el mismo; verificado comparando ambas
+    // queries fila por fila antes de este cambio.
+    // pi.id_imagen (PK auto_increment = orden de carga real) se agrega como desempate
+    // final porque hay datos existentes con "orden" repetido/0 en varias filas -- sin
+    // este desempate, MySQL puede devolver cualquiera de las filas empatadas.
+    $sqlMain = "SELECT p.*, COALESCE(
+            NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi WHERE pi.id_producto = p.id_producto ORDER BY pi.orden ASC, pi.id_imagen ASC LIMIT 1), ''),
+            NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE p_img.id_padre = p.id_producto ORDER BY pi.orden ASC, pi.id_imagen ASC LIMIT 1), ''),
+            NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE TRIM(p_img.nombre) = TRIM(p.nombre) AND p_img.estado = 'activo' ORDER BY pi.orden ASC, pi.id_imagen ASC LIMIT 1), ''),
+            NULLIF(TRIM(p.imagen), ''),
+            NULLIF(TRIM(p.imagen_url), '')
+        ) AS imagen,
+        fam.precio_desde,
+        fam.precio_comparacion_desde,
+        fam.total_variantes
+        FROM productos p
+        LEFT JOIN (
+            SELECT
+                COALESCE(NULLIF(id_padre, 0), id_producto) AS root_id,
+                MIN(precio_venta) AS precio_desde,
+                MIN(CASE WHEN precio_comparacion > 0 THEN precio_comparacion END) AS precio_comparacion_desde,
+                COUNT(*) AS total_variantes
+            FROM productos
+            WHERE estado = 'activo'
+            GROUP BY root_id
+        ) fam ON fam.root_id = p.id_producto";
 
     $sqlCount = 'SELECT COUNT(DISTINCT TRIM(p.nombre)) FROM productos p';
     $params = [];

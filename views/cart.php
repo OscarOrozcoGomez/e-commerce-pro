@@ -201,6 +201,9 @@ include __DIR__ . '/includes/header.php';
     const CHECKOUT_DELIVERY_STORAGE_KEY = 'checkoutDeliveryType';
     let pickupStockCheckTimer = null;
     let latestPickupStockCheck = null;
+    // IDs de producto que el backend rechazo al confirmar el pedido por falta de stock
+    // (a diferencia de latestPickupStockCheck, esto aplica a cualquier tipo de entrega).
+    let orderSubmitSinStockIds = new Set();
 
     function getCheckoutSubmitButton() {
         return document.querySelector('#form-checkout button[type="submit"]');
@@ -365,6 +368,7 @@ include __DIR__ . '/includes/header.php';
         }).then((result) => {
             if (result.isConfirmed) {
                 localStorage.removeItem('cart');
+                orderSubmitSinStockIds.clear();
                 renderCart();
                 updateCartBadge();
                 M.toast({html: 'Carrito vaciado', classes: 'grey darken-3 rounded'});
@@ -377,7 +381,7 @@ include __DIR__ . '/includes/header.php';
         const tbody = document.getElementById('cart-table-body');
         let total = 0;
         let totalPieces = 0;
-        const sinStockProductIds = getSinStockProductIdSet();
+        const sinStockProductIds = new Set([...getSinStockProductIdSet(), ...orderSubmitSinStockIds]);
         const suggestedMaxByProduct = getSuggestedMaxByProductId();
         
         tbody.innerHTML = cart.length === 0 ? '<tr><td colspan="5" class="center">El carrito está vacío</td></tr>' : '';
@@ -548,6 +552,7 @@ include __DIR__ . '/includes/header.php';
         let cart = getCart();
         cart.splice(index, 1);
         localStorage.setItem('cart', JSON.stringify(cart));
+        orderSubmitSinStockIds.clear();
         renderCart();
         updateCartBadge();
         schedulePickupStockCheck();
@@ -555,6 +560,7 @@ include __DIR__ . '/includes/header.php';
 
     function persistCartAndRefresh(cart) {
         localStorage.setItem('cart', JSON.stringify(cart));
+        orderSubmitSinStockIds.clear();
         renderCart();
         updateCartBadge();
         schedulePickupStockCheck();
@@ -970,7 +976,23 @@ include __DIR__ . '/includes/header.php';
                     });
                 });
             } else {
-                M.toast({html: 'Error: ' + data.message});
+                const idsSinStock = Array.isArray(data.productos_sin_stock)
+                    ? data.productos_sin_stock.map((id) => parseInt(id, 10)).filter((id) => id > 0)
+                    : [];
+
+                if (idsSinStock.length > 0) {
+                    orderSubmitSinStockIds = new Set(idsSinStock);
+                    renderCart();
+                    Swal.fire({
+                        title: 'Sin stock suficiente',
+                        html: `${data.message}<br><br><b>El producto marcado en rojo en tu carrito no tiene existencia suficiente. Elimínalo o ajusta la cantidad para continuar.</b>`,
+                        icon: 'error',
+                        confirmButtonText: 'Entendido',
+                        confirmButtonColor: '#c62828'
+                    });
+                } else {
+                    M.toast({html: 'Error: ' + data.message});
+                }
                 btn.disabled = false;
                 btn.textContent = 'Confirmar Pedido';
             }

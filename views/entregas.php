@@ -5,12 +5,14 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
+require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
 
 $pageTitle = 'Entregas Asignadas';
 $pdo = getPDO();
+$clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
 $usuario = $_SESSION['usuario'];
 $isAdminView = isAdmin();
 $isRepartidorView = isRepartidor();
@@ -718,6 +720,7 @@ include __DIR__ . '/includes/header.php';
                                 <i class="material-icons tiny indigo-text">person</i>
                                 <strong>Cliente:</strong>
                                 <span class="delivery-value"><?php echo esc($clienteNombre !== '' ? $clienteNombre : 'N/A'); ?></span>
+                                <?php if (in_array((int)($ent['id_cliente'] ?? 0), $clientesFrecuentesIds, true)): ?><?php echo clienteFrecuenteBadgeHtml(); ?><?php endif; ?>
                             </p>
                             <p>
                                 <i class="material-icons tiny indigo-text">phone</i>
