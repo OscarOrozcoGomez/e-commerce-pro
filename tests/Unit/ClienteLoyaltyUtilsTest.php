@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Las pruebas usan CLIENTE_FRECUENTE_MIN_PEDIDOS en vez de un numero fijo, para no romperse
+ * cada vez que el dueño del negocio ajuste el umbral (ver core/cliente_loyalty_utils.php).
+ */
 final class ClienteLoyaltyUtilsTest extends TestCase
 {
     private PDO $pdo;
@@ -26,22 +30,28 @@ final class ClienteLoyaltyUtilsTest extends TestCase
         $stmt->execute([$idCliente, $estado]);
     }
 
+    private function seedPedidos(?int $idCliente, int $cantidad, string $estado = 'entregado'): void
+    {
+        for ($i = 0; $i < $cantidad; $i++) {
+            $this->seedPedido($idCliente, $estado);
+        }
+    }
+
     public function testClienteFrecuenteGetIdsRequiresMinimumThreshold(): void
     {
-        // Cliente 10: 2 pedidos reales -> si califica (umbral = 2).
-        $this->seedPedido(10, 'pagado');
-        $this->seedPedido(10, 'entregado');
-        // Cliente 20: 1 solo pedido real -> no califica.
-        $this->seedPedido(20, 'entregado');
+        // Cliente 10: justo en el umbral -> si califica.
+        $this->seedPedidos(10, CLIENTE_FRECUENTE_MIN_PEDIDOS);
+        // Cliente 20: uno menos que el umbral -> no califica.
+        $this->seedPedidos(20, CLIENTE_FRECUENTE_MIN_PEDIDOS - 1);
 
         $this->assertSame([10], clienteFrecuenteGetIds($this->pdo));
     }
 
     public function testClienteFrecuenteGetIdsIgnoresCancelledOrders(): void
     {
-        // Cliente 30 tiene 3 pedidos en total, pero 2 estan cancelados -> solo 1 real, no califica.
-        $this->seedPedido(30, 'cancelado');
-        $this->seedPedido(30, 'cancelado');
+        // Cliente 30 tiene varios pedidos cancelados (aunque alcancen el umbral en cantidad) y
+        // solo 1 real -> no debe calificar.
+        $this->seedPedidos(30, CLIENTE_FRECUENTE_MIN_PEDIDOS, 'cancelado');
         $this->seedPedido(30, 'entregado');
 
         $this->assertSame([], clienteFrecuenteGetIds($this->pdo));
@@ -50,20 +60,16 @@ final class ClienteLoyaltyUtilsTest extends TestCase
     public function testClienteFrecuenteGetIdsIgnoresOrdersWithoutClient(): void
     {
         // Pedidos de mostrador/invitado sin id_cliente nunca deben contar para nadie.
-        $this->seedPedido(null, 'entregado');
-        $this->seedPedido(null, 'entregado');
+        $this->seedPedidos(null, CLIENTE_FRECUENTE_MIN_PEDIDOS + 5);
 
         $this->assertSame([], clienteFrecuenteGetIds($this->pdo));
     }
 
     public function testClienteFrecuenteGetIdsReturnsMultipleQualifyingClients(): void
     {
-        $this->seedPedido(1, 'pagado');
-        $this->seedPedido(1, 'pagado');
-        $this->seedPedido(1, 'pagado');
-        $this->seedPedido(2, 'entregado');
-        $this->seedPedido(2, 'entregado');
-        $this->seedPedido(3, 'entregado');
+        $this->seedPedidos(1, CLIENTE_FRECUENTE_MIN_PEDIDOS);
+        $this->seedPedidos(2, CLIENTE_FRECUENTE_MIN_PEDIDOS);
+        $this->seedPedidos(3, CLIENTE_FRECUENTE_MIN_PEDIDOS - 1);
 
         $frecuentes = clienteFrecuenteGetIds($this->pdo);
         sort($frecuentes);
@@ -72,9 +78,8 @@ final class ClienteLoyaltyUtilsTest extends TestCase
 
     public function testClienteEsFrecuenteMatchesGetIds(): void
     {
-        $this->seedPedido(10, 'pagado');
-        $this->seedPedido(10, 'entregado');
-        $this->seedPedido(20, 'entregado');
+        $this->seedPedidos(10, CLIENTE_FRECUENTE_MIN_PEDIDOS);
+        $this->seedPedidos(20, CLIENTE_FRECUENTE_MIN_PEDIDOS - 1);
 
         $this->assertTrue(clienteEsFrecuente($this->pdo, 10));
         $this->assertFalse(clienteEsFrecuente($this->pdo, 20));

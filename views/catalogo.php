@@ -89,72 +89,32 @@ if (!empty($busqueda)) {
 }
 
 // --- Lógica para obtener y filtrar productos ---
+// La SQL en si (imagen/precio_desde/precio_comparacion_desde/total_variantes) vive en
+// catalogBuildQueries() -- antes estaba duplicada aqui, con el riesgo de que las dos
+// copias se fueran desalineando con el tiempo (y de hecho ya iban desalineadas en
+// detalles menores). Un solo punto de verdad para la query principal + la de conteo.
 $pdo = getPDO();
-$sql = "SELECT p.*,         COALESCE(NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE (p_img.id_producto = p.id_producto OR p_img.id_padre = p.id_producto OR (TRIM(p_img.nombre) = TRIM(p.nombre) AND p_img.estado = 'activo')) ORDER BY (p_img.id_producto = p.id_producto) DESC, (p_img.id_padre = p.id_producto) DESC, pi.orden ASC LIMIT 1), ''), NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) as imagen,        (SELECT MIN(precio_venta) FROM productos p3 WHERE (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto) AND p3.estado = 'activo') as precio_desde,
-    (SELECT MIN(precio_comparacion) FROM productos p4 WHERE (p4.id_producto = p.id_producto OR p4.id_padre = p.id_producto) AND p4.estado = 'activo' AND p4.precio_comparacion > 0) as precio_comparacion_desde,
-    (SELECT COUNT(*) FROM productos p2 WHERE (p2.id_producto = p.id_producto OR p2.id_padre = p.id_producto) AND p2.estado = 'activo') as total_variantes 
-        FROM productos p";
-$params = [];
-
-// Mostramos sólo productos raíz.
-// Permitimos un padre inactivo si tiene variantes activas.
-$whereClauses = [
-    "(p.id_padre IS NULL OR p.id_padre = 0)",
-    "(p.estado = 'activo' OR EXISTS (SELECT 1 FROM productos p_child WHERE p_child.id_padre = p.id_producto AND p_child.estado = 'activo'))"
-];
-
-if (!empty($categoriaSeleccionada)) {
-    $sql .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
-              JOIN categorias c ON pc.id_categoria = c.id_categoria ";
-    $whereClauses[] = "c.nombre = :cat";
-    $params[':cat'] = $categoriaSeleccionada;
-}
-
-if (!empty($busqueda)) {
-    $whereClauses[] = "(p.nombre LIKE :search_name OR p.codigo_barras LIKE :search_code OR p.nombre_variante LIKE :search_variant OR EXISTS (
-        SELECT 1 FROM productos p_v 
-        WHERE p_v.id_padre = p.id_producto 
-          AND (p_v.nombre LIKE :search_ex OR p_v.codigo_barras LIKE :search_ex_code OR p_v.nombre_variante LIKE :search_ex_variant)
-    ))";
-    $params[':search_name'] = '%' . $busqueda . '%';
-    $params[':search_code'] = '%' . $busqueda . '%';
-    $params[':search_variant'] = '%' . $busqueda . '%';
-    $params[':search_ex'] = '%' . $busqueda . '%';
-    $params[':search_ex_code'] = '%' . $busqueda . '%';
-    $params[':search_ex_variant'] = '%' . $busqueda . '%';
-}
-
-$sql .= " WHERE " . implode(" AND ", $whereClauses);
+$queryParts = catalogBuildQueries($categoriaSeleccionada, $busqueda);
+$sql = $queryParts['sql_main'];
+$sqlCount = $queryParts['sql_count'];
+$params = $queryParts['params'];
 
 // --- Conteo de total de productos para paginación ---
 $totalProductos = 0;
 if (!$isAjaxLoadMore) {
-    $sqlCount = "SELECT COUNT(DISTINCT TRIM(p.nombre)) FROM productos p";
-    if (!empty($categoriaSeleccionada)) {
-        $sqlCount .= " JOIN producto_categorias pc ON p.id_producto = pc.id_producto 
-                       JOIN categorias c ON pc.id_categoria = c.id_categoria ";
-    }
-    $sqlCount .= " WHERE " . implode(" AND ", $whereClauses);
-
     $stmtCount = $pdo->prepare($sqlCount);
-    $countParams = [];
-    foreach ($params as $key => $value) {
-        if (strpos($sqlCount, $key) !== false) {
-            $countParams[$key] = $value;
-        }
-    }
 
     if ($isSearchRequest) {
         catalogDebugLog('search_count_query', [
             'page' => $page,
             'is_ajax' => $isAjaxLoadMore,
             'sql' => $sqlCount,
-            'params' => $countParams,
+            'params' => $params,
         ]);
     }
 
     try {
-        catalogBindNamedParams($stmtCount, $countParams);
+        catalogBindNamedParams($stmtCount, $params);
         $stmtCount->execute();
         $totalProductos = (int)$stmtCount->fetchColumn();
     } catch (PDOException $e) {
@@ -175,9 +135,7 @@ $sql .= " ORDER BY p.nombre ASC LIMIT :limit OFFSET :offset";
 
 try {
     $stmt = $pdo->prepare($sql);
-    foreach ($params as $key => $value) {
-        $stmt->bindValue($key, $value, PDO::PARAM_STR);
-    }
+    catalogBindNamedParams($stmt, $params);
     $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 

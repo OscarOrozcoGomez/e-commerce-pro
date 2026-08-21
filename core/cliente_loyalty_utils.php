@@ -3,11 +3,10 @@ declare(strict_types=1);
 
 /**
  * Numero minimo de pedidos reales (no cancelados) para marcar a un cliente como "Frecuente".
- * A la escala actual del negocio, 2 ya distingue a quien repite; subir este numero conforme
- * crezca el volumen de pedidos (no hay pantalla de admin para esto todavia, es a proposito
- * -- ver decision con el dueño del negocio).
+ * Definido por el dueño del negocio; subir este numero conforme crezca el volumen de pedidos
+ * (no hay pantalla de admin para esto todavia, es a proposito).
  */
-const CLIENTE_FRECUENTE_MIN_PEDIDOS = 2;
+const CLIENTE_FRECUENTE_MIN_PEDIDOS = 7;
 
 /**
  * IDs de clientes que califican como "Frecuente": CLIENTE_FRECUENTE_MIN_PEDIDOS o mas pedidos
