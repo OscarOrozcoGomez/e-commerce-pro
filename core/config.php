@@ -389,9 +389,22 @@ preloadSecretSources();
 // o en el entorno de ejecución en lugar de dejar valores en el código.
 function getEnvVar(string $name, ?string $default = null, bool $required = false): ?string
 {
-    $value = getenv($name);
-    if ($value === false) {
-        $value = $_SERVER[$name] ?? $_ENV[$name] ?? $_SERVER['REDIRECT_' . $name] ?? null;
+    // $_SERVER/$_ENV se leen primero porque son aislados por request; putenv()
+    // (usado por applySecretValue() para publicar los secretos que carga esta
+    // funcion) escribe una variable de entorno compartida por TODO el proceso de
+    // Apache, y bajo el MPM con hilos de Windows (mpm_winnt) eso puede hacer que
+    // un request lea a mitad de escritura el putenv() de otro request concurrente
+    // -- causaba, por ejemplo, que PII_ENCRYPTION_KEY se leyera corrupta bajo
+    // carga concurrente y el descifrado de datos de clientes fallara de forma
+    // intermitente. getenv() se deja como respaldo para variables que sí vienen
+    // del entorno real del proceso (p.ej. las que setea CI vía `env:`) y que
+    // nunca pasan por applySecretValue().
+    $value = $_SERVER[$name] ?? $_ENV[$name] ?? null;
+    if ($value === null) {
+        $value = getenv($name);
+        if ($value === false) {
+            $value = $_SERVER['REDIRECT_' . $name] ?? null;
+        }
     }
     if ($value !== null) {
         $value = trim((string) $value);

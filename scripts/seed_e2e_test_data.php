@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
+require_once __DIR__ . '/../core/auth.php'; // isPublicPickupWarehouseName()
 
 if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
     http_response_code(403);
@@ -25,10 +26,63 @@ $productsToSeed = [
     ['nombre' => E2E_LOW_STOCK_PRODUCT_NAME, 'codigo_barras' => E2E_LOW_STOCK_PRODUCT_BARCODE, 'precio' => 49.99, 'stock' => 1],
 ];
 
+// Cliente fijo (no autoregistrado) con un domicilio guardado real, para que
+// tests/e2e/sales-agendar-pedido.staff.spec.ts pueda elegirlo por nombre en el
+// autocomplete de views/sales.php sin depender del autocompletado de Google Maps
+// (que los tests bloquean a proposito, ver tests/e2e/fixtures.ts). El nombre es
+// deliberadamente distintivo para no chocar con clientes reales ni con las
+// cuentas "Playwright QA" que registran los demas specs.
+const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
+const E2E_SALES_CLIENTE_TELEFONO = '3320001122';
+const E2E_SALES_CLIENTE_DIRECCION = 'Av. Vallarta 1500, Guadalajara, Jal.';
+
+// resolvePickupWarehouseId() (core/auth.php) solo reconoce como sucursal publica de
+// pickup un almacen cuyo nombre contenga "papeler" o "liz" -- ninguno de los que
+// siembra database.sql ("Almacen Central", "Sucursal 1") califica. En un ambiente
+// nuevo (CI, o un deploy limpio) el flujo de "Recoger en Sucursal" fallaria por
+// completo con "No se pudo resolver sucursal pickup". Sembramos un almacen de
+// prueba con un nombre que sí califica en vez de tocar esa logica de negocio.
+const E2E_PICKUP_ALMACEN_NOMBRE = 'Papelería E2E Playwright';
+
 $pdo = getPDO();
 
 try {
     $pdo->beginTransaction();
+
+    // Housekeeping: cada corrida de la suite crea una cuenta "Playwright QA"
+    // desechable (tests/e2e/helpers.ts::registerAndLogin). En una BD local que se
+    // reusa entre muchas corridas manuales, esto se acumula sin límite -- llegamos
+    // a tener 500+ clientes activos, lo que hizo que views/sales.php (que limita
+    // su lista de clientes a LIMIT 500 ordenados por nombre) dejara de encontrar
+    // nuestro cliente fijo de prueba. Sin foreign keys hacia `clientes` en este
+    // esquema, es seguro borrar las que no tienen ningún pedido asociado. No
+    // aplica en CI (base de datos efímera, nunca acumula) -- es higiene solo para
+    // desarrollo local repetido.
+    // clientes.nombre esta cifrado (piiEncryptValue, no determinista), asi que no
+    // se puede filtrar por WHERE nombre = '...' en SQL -- hay que descifrar en PHP.
+    $sinPedidos = $pdo->query(
+        "SELECT id_cliente, nombre FROM clientes
+         WHERE id_cliente NOT IN (SELECT DISTINCT id_cliente FROM pedidos WHERE id_cliente IS NOT NULL)"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $idsDesechables = [];
+    foreach ($sinPedidos as $c) {
+        $nombreRaw = trim((string) ($c['nombre'] ?? ''));
+        $nombre = (function_exists('piiIsEncryptedValue') && piiIsEncryptedValue($nombreRaw))
+            ? trim((string) piiDecryptValue($nombreRaw))
+            : $nombreRaw;
+        if ($nombre === 'Playwright QA') {
+            $idsDesechables[] = (int) $c['id_cliente'];
+        }
+    }
+
+    if (!empty($idsDesechables)) {
+        $placeholders = implode(', ', array_fill(0, count($idsDesechables), '?'));
+        $pdo->prepare("DELETE FROM cliente_direcciones WHERE id_cliente IN ({$placeholders})")->execute($idsDesechables);
+        $stmtDel = $pdo->prepare("DELETE FROM clientes WHERE id_cliente IN ({$placeholders})");
+        $stmtDel->execute($idsDesechables);
+        echo 'Limpieza: ' . count($idsDesechables) . " cuentas 'Playwright QA' desechables sin pedidos eliminadas.\n";
+    }
 
     $idAlmacen = (int) $pdo->query(
         "SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1"
@@ -37,6 +91,39 @@ try {
     if ($idAlmacen <= 0) {
         throw new RuntimeException('No se pudo resolver id_almacen. ¿Se importó database.sql?');
     }
+
+    // Busca un almacen existente cuyo nombre ya califique como sucursal publica de
+    // pickup (p.ej. si el ambiente ya tiene uno real como "Papelería Liz"); si
+    // ninguno califica, siembra el de prueba.
+    $idAlmacenPickup = 0;
+    $stmt = $pdo->query("SELECT id_almacen, nombre FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $almacen) {
+        if (isPublicPickupWarehouseName((string) $almacen['nombre'])) {
+            $idAlmacenPickup = (int) $almacen['id_almacen'];
+            break;
+        }
+    }
+
+    if ($idAlmacenPickup <= 0) {
+        $stmt = $pdo->prepare('SELECT id_almacen FROM almacenes WHERE nombre = :nombre LIMIT 1');
+        $stmt->execute(['nombre' => E2E_PICKUP_ALMACEN_NOMBRE]);
+        $idAlmacenPickup = (int) $stmt->fetchColumn();
+
+        if ($idAlmacenPickup <= 0) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO almacenes (nombre, ubicacion, estado) VALUES (:nombre, :ubicacion, "activo")'
+            );
+            $stmt->execute([
+                'nombre' => E2E_PICKUP_ALMACEN_NOMBRE,
+                'ubicacion' => 'Almacen de prueba para tests/e2e/*.pickup.spec.ts',
+            ]);
+            $idAlmacenPickup = (int) $pdo->lastInsertId();
+        }
+    }
+
+    echo 'Seed OK: sucursal pickup -> id_almacen=' . $idAlmacenPickup . "\n";
+
+    $idProductoPrincipal = 0;
 
     foreach ($productsToSeed as $p) {
         $stmt = $pdo->prepare(
@@ -70,7 +157,62 @@ try {
         ]);
 
         echo "Seed OK: {$p['nombre']} -> id_producto={$idProducto}, id_almacen={$idAlmacen}, stock={$p['stock']}\n";
+
+        if ($p['nombre'] === E2E_PRODUCT_NAME) {
+            $idProductoPrincipal = $idProducto;
+        }
     }
+
+    // El producto con stock alto tambien se siembra en la sucursal de pickup, para
+    // el caso feliz de "Recoger en Sucursal" (status 'ok'). El producto de stock
+    // bajo se deja SIN existencia ahi a proposito: sirve para probar 'transferible'
+    // (pidiendo 1, se cubre transfiriendo desde el almacen principal) y 'sin_stock'
+    // (pidiendo mas de lo que existe en total) en tests/e2e/*.pickup.spec.ts.
+    if ($idProductoPrincipal > 0) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual)
+             VALUES (:id_producto, :id_almacen, 9999)
+             ON DUPLICATE KEY UPDATE cantidad_actual = 9999'
+        );
+        $stmt->execute(['id_producto' => $idProductoPrincipal, 'id_almacen' => $idAlmacenPickup]);
+        echo 'Seed OK: ' . E2E_PRODUCT_NAME . " -> stock=9999 tambien en la sucursal de pickup (id_almacen={$idAlmacenPickup})\n";
+    }
+
+    // La tabla clientes no tiene una llave unica sobre nombre, asi que la
+    // idempotencia se resuelve buscando primero en vez de ON DUPLICATE KEY.
+    $stmt = $pdo->prepare('SELECT id_cliente FROM clientes WHERE nombre = :nombre LIMIT 1');
+    $stmt->execute(['nombre' => E2E_SALES_CLIENTE_NOMBRE]);
+    $idCliente = (int) $stmt->fetchColumn();
+
+    if ($idCliente <= 0) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO clientes (nombre, telefono, estado) VALUES (:nombre, :telefono, "activo")'
+        );
+        $stmt->execute([
+            'nombre' => E2E_SALES_CLIENTE_NOMBRE,
+            'telefono' => E2E_SALES_CLIENTE_TELEFONO,
+        ]);
+        $idCliente = (int) $pdo->lastInsertId();
+    } else {
+        $stmt = $pdo->prepare('UPDATE clientes SET telefono = :telefono, estado = "activo" WHERE id_cliente = :id_cliente');
+        $stmt->execute(['telefono' => E2E_SALES_CLIENTE_TELEFONO, 'id_cliente' => $idCliente]);
+    }
+
+    $stmt = $pdo->prepare('SELECT id_direccion FROM cliente_direcciones WHERE id_cliente = :id_cliente LIMIT 1');
+    $stmt->execute(['id_cliente' => $idCliente]);
+    $idDireccion = (int) $stmt->fetchColumn();
+
+    if ($idDireccion <= 0) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO cliente_direcciones (id_cliente, alias, direccion, es_default) VALUES (:id_cliente, "Casa", :direccion, 1)'
+        );
+        $stmt->execute(['id_cliente' => $idCliente, 'direccion' => E2E_SALES_CLIENTE_DIRECCION]);
+    } else {
+        $stmt = $pdo->prepare('UPDATE cliente_direcciones SET direccion = :direccion WHERE id_direccion = :id_direccion');
+        $stmt->execute(['direccion' => E2E_SALES_CLIENTE_DIRECCION, 'id_direccion' => $idDireccion]);
+    }
+
+    echo "Seed OK: " . E2E_SALES_CLIENTE_NOMBRE . " -> id_cliente={$idCliente}, con domicilio 'Casa'\n";
 
     $pdo->commit();
     exit(0);

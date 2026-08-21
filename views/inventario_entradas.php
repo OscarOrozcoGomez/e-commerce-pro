@@ -120,7 +120,7 @@ include __DIR__ . '/includes/header.php';
                                     <tr>
                                         <td>
                                             <strong><?php echo esc($p['nombre']); ?></strong><br>
-                                            <small class="grey-text">SKU: <?php echo esc($p['sku']); ?></small>
+                                            <small class="grey-text">SKU: <?php echo esc($p['sku'] ?? ''); ?></small>
                                         </td>
                                         <td class="center-align">
                                             <span class="badge <?php echo $p['cantidad_actual'] <= $p['stock_minimo'] ? 'red white-text' : 'grey lighten-2'; ?>" style="float: none;">
@@ -148,6 +148,84 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     const API_INV = '<?php echo BASE_URL; ?>api/inventory_handler.php';
+
+    // Autocompletado del buscador de "Entrada Individual" (#buscador-inbound):
+    // resuelve por nombre o SKU y llena el input oculto #id_producto_inbound.
+    // Mismo patron (M.Autocomplete + resolucion por blur) que usan otros
+    // buscadores del proyecto, p.ej. el de cliente en views/sales.php.
+    function initAutocomplete(productos) {
+        const el = document.getElementById('buscador-inbound');
+        const hiddenId = document.getElementById('id_producto_inbound');
+        if (!el || !hiddenId) return;
+
+        const data = {};
+        const lookup = {};
+        productos.forEach((p) => {
+            const nombre = String(p.nombre || '').trim();
+            if (nombre === '') return;
+            const sku = String(p.sku || '').trim();
+            const label = sku !== '' ? `${nombre} (${sku})` : nombre;
+            data[label] = null;
+            lookup[label.toLowerCase()] = p;
+            lookup[nombre.toLowerCase()] = p;
+            if (sku !== '') lookup[sku.toLowerCase()] = p;
+        });
+
+        function resolveProducto(value) {
+            return lookup[String(value || '').trim().toLowerCase()] || null;
+        }
+
+        function seleccionarProducto(p) {
+            hiddenId.value = p.id_producto;
+        }
+
+        try {
+            M.Autocomplete.init(el, {
+                data,
+                limit: 10,
+                minLength: 1,
+                onAutocomplete: function (val) {
+                    const producto = resolveProducto(val);
+                    if (producto) seleccionarProducto(producto);
+                }
+            });
+        } catch (err) {
+            console.warn('No se pudo inicializar autocomplete de inventario:', err);
+        }
+
+        el.addEventListener('input', () => { hiddenId.value = ''; });
+        el.addEventListener('blur', () => {
+            const producto = resolveProducto(el.value);
+            if (producto) seleccionarProducto(producto);
+        });
+    }
+
+    // Envia la entrada individual a api/inventory_handler.php (accion=entrada_individual).
+    function enviarEntrada(formData) {
+        const form = document.getElementById('form-inbound-manual');
+        const btn = form ? form.querySelector('button[type="submit"]') : null;
+        if (btn) btn.disabled = true;
+
+        fetch(API_INV, { method: 'POST', body: formData })
+            .then((response) => response.json())
+            .then((data) => {
+                if (data.success) {
+                    M.toast({ html: data.message || 'Entrada registrada con éxito', classes: 'green' });
+                    if (form) form.reset();
+                    const hiddenId = document.getElementById('id_producto_inbound');
+                    if (hiddenId) hiddenId.value = '';
+                } else {
+                    M.toast({ html: data.message || 'Error al registrar la entrada', classes: 'red' });
+                }
+            })
+            .catch((err) => {
+                console.error(err);
+                M.toast({ html: 'Error de conexión. Inténtalo de nuevo.', classes: 'red' });
+            })
+            .finally(() => {
+                if (btn) btn.disabled = false;
+            });
+    }
 
     document.addEventListener('DOMContentLoaded', function() {
         const productos = <?php echo json_encode($productos); ?>;
