@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
 require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
+require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
 if (!canManageDeliveryOrders()) {
@@ -15,6 +16,7 @@ if (!canManageDeliveryOrders()) {
 $pageTitle = 'Asignar Entregas';
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
+$clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
 // Esta pantalla es solo para entregas a domicilio (ver $deliveryFilter mas abajo). El id_almacen
 // de un pedido a domicilio es de donde se surte el stock (siempre el Almacen Central, ver
 // resolveCheckoutWarehouse en core/auth.php), no de que encargado le corresponde: cualquier
@@ -443,6 +445,7 @@ include __DIR__ . '/includes/header.php';
                                             <div class="assign-delivery-row">
                                                 <i class="material-icons tiny">person</i>
                                                 <span><?php echo esc($p['cliente'] ?? 'N/A'); ?></span>
+                                                <?php if (in_array((int)($p['id_cliente'] ?? 0), $clientesFrecuentesIds, true)): ?><?php echo clienteFrecuenteBadgeHtml(); ?><?php endif; ?>
                                             </div>
                                             <div class="assign-delivery-row">
                                                 <i class="material-icons tiny">place</i>
@@ -531,6 +534,7 @@ include __DIR__ . '/includes/header.php';
                                             <div class="assign-delivery-row">
                                                 <i class="material-icons tiny">person</i>
                                                 <span><?php echo esc((string)($pa['cliente'] ?? 'N/A')); ?></span>
+                                                <?php if (in_array((int)($pa['id_cliente'] ?? 0), $clientesFrecuentesIds, true)): ?><?php echo clienteFrecuenteBadgeHtml(); ?><?php endif; ?>
                                             </div>
                                             <div class="assign-delivery-row">
                                                 <i class="material-icons tiny">place</i>

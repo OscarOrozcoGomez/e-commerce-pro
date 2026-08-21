@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/delivery_route_utils.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
+require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 requireAuth();
 if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
@@ -416,6 +417,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         }
     }
 }
+
+$clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
 
 $clientes = $pdo->query("SELECT c.*, u.id_usuario, u.estado AS estado_usuario, u.contrasena, COALESCE(u.estado, c.estado, 'activo') AS estado_visible, CASE WHEN u.id_usuario IS NULL THEN 'sucursal' ELSE 'sitio_web' END AS origen_registro, CASE WHEN u.id_usuario IS NOT NULL AND u.contrasena IS NOT NULL AND TRIM(u.contrasena) <> '' THEN 1 ELSE 0 END AS tiene_acceso_web, (SELECT a.nombre FROM pedidos p0 INNER JOIN almacenes a ON a.id_almacen = p0.id_almacen WHERE p0.id_cliente = c.id_cliente ORDER BY p0.id_pedido ASC LIMIT 1) AS sucursal_origen FROM clientes c LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario ORDER BY c.nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -901,7 +904,7 @@ include __DIR__ . '/includes/header.php';
                         $letraAncla = $alphabetLetterByFirstClientId[(int)$c['id_cliente']] ?? null;
                     ?>
                     <tr<?php echo $letraAncla !== null ? ' id="cust-letter-row-' . esc($letraAncla) . '"' : ''; ?> data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
-                        <td><strong class="manage-customers-name"><?php echo esc((string)$c['nombre']); ?></strong></td>
+                        <td><strong class="manage-customers-name"><?php echo esc((string)$c['nombre']); ?></strong><?php if (in_array((int)$c['id_cliente'], $clientesFrecuentesIds, true)): ?><?php echo clienteFrecuenteBadgeHtml(); ?><?php endif; ?></td>
                         <td><span class="manage-customers-phone"><?php echo esc((string)($c['telefono'] ?: 'N/A')); ?></span></td>
                         <td><?php echo esc((string)($c['email'] ?: 'N/A')); ?></td>
                         <td class="manage-customers-badge-cell js-col-direcciones">
@@ -987,7 +990,7 @@ include __DIR__ . '/includes/header.php';
                 ?>
                 <div<?php echo $letraAncla !== null ? ' id="cust-letter-card-' . esc($letraAncla) . '"' : ''; ?> class="manage-customers-card" data-client-id="<?php echo (int)$c['id_cliente']; ?>" data-nombre="<?php echo esc(mb_strtolower((string)$c['nombre'])); ?>" data-origen="<?php echo esc($origenRegistro); ?>" data-acceso-web="<?php echo esc($accesoWebFiltro); ?>" data-estado="<?php echo esc($estadoVisible); ?>" data-sucursal="<?php echo esc($sucursalFiltro); ?>">
                     <div class="manage-customers-card-header">
-                        <span class="manage-customers-card-name"><?php echo esc((string)$c['nombre']); ?></span>
+                        <span class="manage-customers-card-name"><?php echo esc((string)$c['nombre']); ?></span><?php if (in_array((int)$c['id_cliente'], $clientesFrecuentesIds, true)): ?><?php echo clienteFrecuenteBadgeHtml(); ?><?php endif; ?>
                         <span class="badge <?php echo $estadoVisible === 'activo' ? 'green' : 'red'; ?> white-text" style="float:none; flex-shrink:0;">
                             <?php echo strtoupper($estadoVisible); ?>
                         </span>

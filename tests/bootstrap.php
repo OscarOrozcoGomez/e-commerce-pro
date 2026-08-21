@@ -26,3 +26,4 @@ require_once __DIR__ . '/../core/entrega_item_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
 require_once __DIR__ . '/../core/alex_insights_utils.php';
+require_once __DIR__ . '/../core/cliente_loyalty_utils.php';

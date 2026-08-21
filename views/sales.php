@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
 if (!canScheduleSalesOrders()) {
@@ -89,12 +90,15 @@ try {
     $stmt->execute();
     $clientesActivos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    $clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
+
     foreach ($clientesActivos as &$cliente) {
         $cliente['direccion'] = '';
         $cliente['maps_link'] = '';
         $cliente['direcciones'] = [];
         $cliente['nombre'] = $safeDecryptValue($cliente['nombre'] ?? '', 'Cliente protegido');
         $cliente['telefono'] = $safeDecryptValue($cliente['telefono'] ?? '', '');
+        $cliente['es_frecuente'] = in_array((int)($cliente['id_cliente'] ?? 0), $clientesFrecuentesIds, true);
     }
     unset($cliente);
 
@@ -810,7 +814,10 @@ include __DIR__ . '/includes/header.php';
         const direcciones = Array.isArray(c.direcciones) ? c.direcciones : [];
         if (nombre === '') return null;
 
-        const label = telefono !== '' ? `${nombre} (${telefono})` : nombre;
+        // El buscador de Materialize solo muestra texto plano por item, asi que la marca de
+        // "frecuente" se antepone al nombre en vez de un badge HTML.
+        const nombreEtiquetado = c.es_frecuente ? `★ ${nombre}` : nombre;
+        const label = telefono !== '' ? `${nombreEtiquetado} (${telefono})` : nombreEtiquetado;
         const customerRecord = { id_cliente: idCliente, nombre, telefono, direccion, maps_link: mapsLink, direcciones, label };
         registerCustomerOption(label, customerRecord);
         registerCustomerLookupAlias(nombre, customerRecord);
