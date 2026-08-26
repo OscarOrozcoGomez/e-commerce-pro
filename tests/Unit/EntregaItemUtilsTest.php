@@ -220,9 +220,184 @@ final class EntregaItemUtilsTest extends TestCase
         $this->assertFalse($result['success']);
     }
 
+    public function testCancelaPedidoCompletoRestituyeInventarioDeTodosLosProductos(): void
+    {
+        $this->seedPedido(200, 5, 1, 'en_reparto', 900.00, 0.00, 900.00);
+        $this->seedDetalle(30, 200, 10, 2, 300.00, 0.00, 'entregado');
+        $this->seedDetalle(31, 200, 20, 1, 600.00, 0.00, 'entregado');
+        $this->seedInventario(10, 1, 3);
+        $this->seedInventario(20, 1, 0);
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 200, 5, 'Cliente no contesto', 5);
+
+        $this->assertTrue($result['success']);
+
+        $pedido = $this->pdo->query('SELECT estado, observaciones FROM pedidos WHERE id_pedido = 200')->fetch();
+        $this->assertSame('cancelado', $pedido['estado']);
+        $this->assertStringContainsString('Cliente no contesto', (string) $pedido['observaciones']);
+
+        $stock10 = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 10 AND id_almacen = 1')->fetchColumn();
+        $stock20 = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 20 AND id_almacen = 1')->fetchColumn();
+        $this->assertSame(5, $stock10); // 3 + 2 devueltas
+        $this->assertSame(1, $stock20); // 0 + 1 devuelta
+
+        $movimientos = (int) $this->pdo->query("SELECT COUNT(*) FROM movimientos_inventario WHERE tipo_movimiento = 'entrada'")->fetchColumn();
+        $this->assertSame(2, $movimientos);
+    }
+
+    public function testCancelarPedidoCompletoObservacionesMarcadorEsConfigurable(): void
+    {
+        // views/entregas.php (repartidor) pasa 'ENTREGA_NO_REALIZADA' explicitamente para no
+        // romper alexInsightsGetRepartidorCancellations() (core/alex_insights_utils.php), que ya
+        // buscaba ese marcador literal. El default (admin/encargado, sin overridear) es distinto.
+        $this->seedPedido(220, 5, 1, 'en_reparto', 300.00, 0.00, 300.00);
+        $this->seedDetalle(60, 220, 10, 1, 300.00, 0.00, 'entregado');
+        $resultDefault = dbCancelarPedidoCompleto($this->pdo, 220, 5, 'Motivo A', 5);
+        $this->assertTrue($resultDefault['success']);
+        $obsDefault = (string) $this->pdo->query('SELECT observaciones FROM pedidos WHERE id_pedido = 220')->fetchColumn();
+        $this->assertStringContainsString('PEDIDO_CANCELADO: Motivo A', $obsDefault);
+
+        $this->seedPedido(221, 5, 1, 'en_reparto', 300.00, 0.00, 300.00);
+        $this->seedDetalle(61, 221, 10, 1, 300.00, 0.00, 'entregado');
+        $resultRepartidor = dbCancelarPedidoCompleto($this->pdo, 221, 5, 'Motivo B', 5, null, 'PEDIDO_ENTREGA_CANCELADA_REPARTIDOR', 'ENTREGA_NO_REALIZADA');
+        $this->assertTrue($resultRepartidor['success']);
+        $obsRepartidor = (string) $this->pdo->query('SELECT observaciones FROM pedidos WHERE id_pedido = 221')->fetchColumn();
+        $this->assertStringContainsString('ENTREGA_NO_REALIZADA: Motivo B', $obsRepartidor);
+    }
+
+    public function testCancelaPedidoConUnSoloProductoSinBloqueoDelUltimoItem(): void
+    {
+        // A diferencia de dbMarkProductoNoEntregado(), cancelar el pedido completo SI debe
+        // permitir hacerlo aunque solo quede un producto -- es justo el flujo al que ese otro
+        // helper redirige cuando bloquea quitar el ultimo producto uno por uno.
+        $this->seedPedido(201, 5, 1, 'pagado', 300.00, 0.00, 300.00);
+        $this->seedDetalle(32, 201, 10, 1, 300.00, 0.00, 'entregado');
+        $this->seedInventario(10, 1, 0);
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 201, 5, 'Motivo', 5);
+
+        $this->assertTrue($result['success']);
+        $estado = $this->pdo->query('SELECT estado FROM pedidos WHERE id_pedido = 201')->fetchColumn();
+        $this->assertSame('cancelado', $estado);
+        $stock = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 10 AND id_almacen = 1')->fetchColumn();
+        $this->assertSame(1, $stock);
+    }
+
+    public function testCancelarPedidoCompletoSkipsAlreadyRejectedItems(): void
+    {
+        // Un producto ya marcado 'rechazado' ya devolvio su stock antes; no debe volver a
+        // sumarse al cancelar el pedido completo.
+        $this->seedPedido(202, 5, 1, 'en_reparto', 600.00, 0.00, 600.00);
+        $this->seedDetalle(33, 202, 10, 1, 300.00, 0.00, 'rechazado');
+        $this->seedDetalle(34, 202, 20, 1, 300.00, 0.00, 'entregado');
+        $this->seedInventario(10, 1, 5); // ya se le devolvio antes
+        $this->seedInventario(20, 1, 0);
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 202, 5, 'Motivo', 5);
+
+        $this->assertTrue($result['success']);
+        $stock10 = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 10 AND id_almacen = 1')->fetchColumn();
+        $stock20 = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 20 AND id_almacen = 1')->fetchColumn();
+        $this->assertSame(5, $stock10); // sin cambio, ya se habia restituido
+        $this->assertSame(1, $stock20);
+    }
+
+    public function testCancelarPedidoCompletoRejectsWhenNotOwnedByRepartidor(): void
+    {
+        $this->seedPedido(203, 5, 1, 'en_reparto', 300.00, 0.00, 300.00);
+        $this->seedDetalle(35, 203, 10, 1, 300.00, 0.00, 'entregado');
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 203, 999, 'Motivo', 999);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('no esta asignado a ti', $result['message']);
+        $estado = $this->pdo->query('SELECT estado FROM pedidos WHERE id_pedido = 203')->fetchColumn();
+        $this->assertSame('en_reparto', $estado);
+    }
+
+    /**
+     * @dataProvider nonCancelableStatesProvider
+     */
+    public function testCancelarPedidoCompletoRejectsWhenStateIsNotCancelable(string $estado): void
+    {
+        $this->seedPedido(204, 5, 1, $estado, 300.00, 0.00, 300.00);
+        $this->seedDetalle(36, 204, 10, 1, 300.00, 0.00, 'entregado');
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 204, 5, 'Motivo', 5);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('estado actual', $result['message']);
+    }
+
+    public static function nonCancelableStatesProvider(): array
+    {
+        return [
+            'entregado' => ['entregado'],
+            'cancelado' => ['cancelado'],
+        ];
+    }
+
+    public function testCancelarPedidoCompletoAdminCanCancelWithoutRepartidorFilter(): void
+    {
+        // Uso de admin/encargado (views/asignar_entregas.php): sin filtro de repartidor, puede
+        // cancelar el pedido de cualquier repartidor.
+        $this->seedPedido(205, 5, 1, 'pagado', 300.00, 0.00, 300.00);
+        $this->seedDetalle(37, 205, 10, 1, 300.00, 0.00, 'entregado');
+        $this->seedInventario(10, 1, 0);
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 205, null, 'Ajuste de staff', 9, null, 'PEDIDO_CANCELADO_ADMIN');
+
+        $this->assertTrue($result['success']);
+        $estado = $this->pdo->query('SELECT estado FROM pedidos WHERE id_pedido = 205')->fetchColumn();
+        $this->assertSame('cancelado', $estado);
+        $stock = (int) $this->pdo->query('SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = 10 AND id_almacen = 1')->fetchColumn();
+        $this->assertSame(1, $stock);
+    }
+
+    public function testCancelarPedidoCompletoAdminCannotCancelAlreadyDeliveredByDefault(): void
+    {
+        // A diferencia de dbMarkProductoNoEntregado (donde admin SI puede editar 'entregado'),
+        // cancelar el pedido completo no aplica a uno ya entregado a menos que se pase un
+        // $estadosPermitidos explicito -- seria una devolucion, no una cancelacion de entrega.
+        $this->seedPedido(206, 5, 1, 'entregado', 300.00, 0.00, 300.00);
+        $this->seedDetalle(38, 206, 10, 1, 300.00, 0.00, 'entregado');
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 206, null, 'Ajuste de staff', 9);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('estado actual', $result['message']);
+    }
+
+    public function testCancelarPedidoCompletoReturnsFailureForInvalidIds(): void
+    {
+        $result = dbCancelarPedidoCompleto($this->pdo, 0, 5, 'Motivo', 5);
+        $this->assertFalse($result['success']);
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 200, 0, 'Motivo', 5);
+        $this->assertFalse($result['success']);
+    }
+
+    public function testCancelarPedidoCompletoReturnsFailureForEmptyMotivo(): void
+    {
+        $this->seedPedido(207, 5, 1, 'en_reparto', 300.00, 0.00, 300.00);
+        $this->seedDetalle(39, 207, 10, 1, 300.00, 0.00, 'entregado');
+
+        $result = dbCancelarPedidoCompleto($this->pdo, 207, 5, '   ', 5);
+
+        $this->assertFalse($result['success']);
+    }
+
+    public function testCancelarPedidoCompletoReturnsFailureWhenPedidoNotFound(): void
+    {
+        $result = dbCancelarPedidoCompleto($this->pdo, 9999, null, 'Motivo', 5);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('No se encontro el pedido', $result['message']);
+    }
+
     private function createSchema(): void
     {
-        $this->pdo->exec('CREATE TABLE pedidos (id_pedido INTEGER PRIMARY KEY, id_repartidor INTEGER NOT NULL, id_almacen INTEGER NOT NULL, estado TEXT NOT NULL, subtotal REAL NOT NULL DEFAULT 0, descuento_total REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0)');
+        $this->pdo->exec('CREATE TABLE pedidos (id_pedido INTEGER PRIMARY KEY, id_repartidor INTEGER NOT NULL, id_almacen INTEGER NOT NULL, estado TEXT NOT NULL, subtotal REAL NOT NULL DEFAULT 0, descuento_total REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0, observaciones TEXT NULL)');
         $this->pdo->exec('CREATE TABLE detalle_pedidos (id_detalle INTEGER PRIMARY KEY, id_pedido INTEGER NOT NULL, id_producto INTEGER NOT NULL, cantidad INTEGER NOT NULL, subtotal REAL NOT NULL DEFAULT 0, monto_descuento REAL NOT NULL DEFAULT 0, estado_entrega TEXT NOT NULL DEFAULT \'entregado\', motivo_rechazo TEXT NULL)');
         $this->pdo->exec('CREATE TABLE inventario_almacen (id_producto INTEGER NOT NULL, id_almacen INTEGER NOT NULL, cantidad_actual INTEGER NOT NULL DEFAULT 0, stock_minimo INTEGER NOT NULL DEFAULT 0, stock_maximo INTEGER NOT NULL DEFAULT 0)');
         $this->pdo->exec('CREATE TABLE movimientos_inventario (id_movimiento INTEGER PRIMARY KEY AUTOINCREMENT, id_producto INTEGER NOT NULL, tipo_movimiento TEXT NOT NULL, id_almacen_destino INTEGER NULL, cantidad INTEGER NOT NULL, id_usuario INTEGER NULL, observacion TEXT NULL)');

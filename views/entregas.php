@@ -121,74 +121,14 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
             } else {
                 $motivoEtiqueta = $motivoKey === 'otro' ? mb_substr($motivoOtro, 0, 180) : $deliveryCancelReasonOptions[$motivoKey];
 
-                $pdo->beginTransaction();
-                try {
-                    $stmtPedido = $pdo->prepare("SELECT estado, id_almacen FROM pedidos WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor FOR UPDATE");
-                    $stmtPedido->execute([':id_pedido' => $id_pedido, ':id_repartidor' => $usuario['id_usuario']]);
-                    $pedido = $stmtPedido->fetch(PDO::FETCH_ASSOC) ?: null;
-
-                    if (!$pedido) {
-                        throw new RuntimeException('No se encontro el pedido o no esta asignado a ti.');
-                    }
-
-                    $estadoPedido = (string)($pedido['estado'] ?? '');
-                    if (!in_array($estadoPedido, ['pendiente_pago', 'pagado', 'en_reparto'], true)) {
-                        throw new RuntimeException('Este pedido ya no se puede cancelar (estado actual: ' . strtoupper($estadoPedido) . ').');
-                    }
-
-                    $idAlmacenPedido = (int)($pedido['id_almacen'] ?? 0);
-
-                    $stmtDetalle = $pdo->prepare("SELECT id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = :id_pedido AND cantidad > 0 FOR UPDATE");
-                    $stmtDetalle->execute([':id_pedido' => $id_pedido]);
-                    $items = $stmtDetalle->fetchAll(PDO::FETCH_ASSOC);
-
-                    $stmtResurtir = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
-                                                   VALUES (:id_producto, :id_almacen, :cantidad, 2, 5)
-                                                   ON DUPLICATE KEY UPDATE cantidad_actual = cantidad_actual + VALUES(cantidad_actual)");
-                    // Deja rastro de auditoria del movimiento, igual que 'salida' se registra al vender (api/ventas.php).
-                    $stmtMovEntrada = $pdo->prepare(
-                        "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
-                         VALUES (:producto, 'entrada', :almacen, :cantidad, :usuario, :observacion)"
-                    );
-                    foreach ($items as $it) {
-                        $idProducto = (int)($it['id_producto'] ?? 0);
-                        $cantidad = max(0, (int)($it['cantidad'] ?? 0));
-                        if ($idProducto <= 0 || $cantidad <= 0 || $idAlmacenPedido <= 0) {
-                            continue;
-                        }
-                        $stmtResurtir->execute([
-                            ':id_producto' => $idProducto,
-                            ':id_almacen' => $idAlmacenPedido,
-                            ':cantidad' => $cantidad,
-                        ]);
-                        $stmtMovEntrada->execute([
-                            ':producto' => $idProducto,
-                            ':almacen' => $idAlmacenPedido,
-                            ':cantidad' => $cantidad,
-                            ':usuario' => $usuario['id_usuario'],
-                            ':observacion' => 'Entrega no realizada, pedido #' . $id_pedido . ' cancelado por repartidor',
-                        ]);
-                    }
-
-                    $stmtCancelar = $pdo->prepare("UPDATE pedidos
-                                                    SET estado = 'cancelado',
-                                                        observaciones = CONCAT(COALESCE(observaciones, ''),
-                                                            ' | ENTREGA_NO_REALIZADA: ', :motivo)
-                                                    WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor");
-                    $stmtCancelar->execute([
-                        ':motivo' => $motivoEtiqueta,
-                        ':id_pedido' => $id_pedido,
-                        ':id_repartidor' => $usuario['id_usuario'],
-                    ]);
-
-                    $pdo->commit();
+                // 'ENTREGA_NO_REALIZADA' preserva el marcador historico que ya buscaba
+                // alexInsightsGetRepartidorCancellations() (core/alex_insights_utils.php) en
+                // pedidos.observaciones; no cambiar sin actualizar esa consulta tambien.
+                $resultadoCancelar = dbCancelarPedidoCompleto($pdo, $id_pedido, (int)$usuario['id_usuario'], $motivoEtiqueta, (int)$usuario['id_usuario'], null, 'PEDIDO_ENTREGA_CANCELADA_REPARTIDOR', 'ENTREGA_NO_REALIZADA');
+                if ($resultadoCancelar['success']) {
                     $success = 'Entrega cancelada. El stock fue devuelto al inventario de la sucursal.';
-                    logAudit('PEDIDO_ENTREGA_CANCELADA_REPARTIDOR', 'pedidos', $id_pedido, 'Repartidor no pudo entregar. Motivo: ' . $motivoEtiqueta);
-                } catch (Throwable $txe) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    $error = $txe->getMessage();
+                } else {
+                    $error = $resultadoCancelar['message'];
                 }
             }
         }
@@ -774,7 +714,10 @@ include __DIR__ . '/includes/header.php';
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
                                 <ul style="margin: 0; padding-left: 0; list-style: none;">
-                                    <?php $itemsPedidoTarjeta = $detallesPorPedido[(int)$ent['id_pedido']] ?? []; ?>
+                                    <?php
+                                        $itemsPedidoTarjeta = $detallesPorPedido[(int)$ent['id_pedido']] ?? [];
+                                        $entregadosRestantesTarjeta = count(array_filter($itemsPedidoTarjeta, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
+                                    ?>
                                     <?php foreach ($itemsPedidoTarjeta as $indexItemTarjeta => $d): ?>
                                         <?php
                                             $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
@@ -789,6 +732,10 @@ include __DIR__ . '/includes/header.php';
                                                 </span>
                                                 <?php if ($estadoEntregaItem === 'rechazado'): ?>
                                                     <span class="new badge red" data-badge-caption="" style="margin:0; flex-shrink:0;">No entregado</span>
+                                                <?php elseif ($puedeEditarProductos && $idDetalleItem > 0 && $entregadosRestantesTarjeta <= 1): ?>
+                                                    <button type="button" class="btn-small waves-effect waves-light grey lighten-1" style="text-decoration:none; box-shadow:none; flex-shrink:0; cursor:not-allowed;" disabled title="No puedes quitar el ultimo producto; usa 'No pude entregar' para cancelar todo el pedido.">
+                                                        <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
+                                                    </button>
                                                 <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
                                                     <button type="button" class="btn-small waves-effect waves-light red lighten-1 toggle-reject-item" data-target="reject-item-<?php echo $idDetalleItem; ?>" style="text-decoration:none; box-shadow:none; flex-shrink:0;">
                                                         <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
@@ -799,7 +746,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php if (!empty($d['motivo_rechazo'])): ?>
                                                     <div class="grey-text" style="font-size:0.78rem; text-decoration:none; margin-top:4px;">Motivo: <?php echo esc((string)$d['motivo_rechazo']); ?></div>
                                                 <?php endif; ?>
-                                            <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
+                                            <?php elseif ($puedeEditarProductos && $idDetalleItem > 0 && $entregadosRestantesTarjeta > 1): ?>
                                                 <form method="POST" id="reject-item-<?php echo $idDetalleItem; ?>" class="reject-item-form" data-reject-form="1" style="display:none; margin-top:8px; text-decoration:none;">
                                                     <?php echo csrfInput(); ?>
                                                     <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
@@ -874,7 +821,7 @@ include __DIR__ . '/includes/header.php';
                                         <?php endforeach; ?>
                                     </select>
                                     <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
-                                    <button type="submit" class="btn red darken-2 waves-effect waves-light w-100" onclick="return confirm('Confirmar que no se pudo entregar este pedido? Se cancelara la venta y se devolvera el stock al inventario.')">
+                                    <button type="submit" class="btn red darken-2 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas que no se pudo entregar este pedido? Se cancelara la venta y se devolvera el stock al inventario.', 'red darken-2', 'Sí, cancelar'); return false;">
                                         CONFIRMAR CANCELACION <i class="material-icons right">cancel</i>
                                     </button>
                                 </form>
