@@ -798,11 +798,31 @@ function deliveryFindWindowViolations(array $orderedStopsWithEta, DateTimeImmuta
                 'numero_pedido' => $stop['numero_pedido'] ?? null,
                 'eta_estimada' => $etaText,
                 'ventana_fin' => (string)($resolved['window']['end'] ?? ''),
+                'retraso_s' => $eta->getTimestamp() - $deadline,
             ];
         }
     }
 
     return $violations;
+}
+
+/**
+ * Suma el retraso (en segundos, sobre el fin de ventana) de un listado de violaciones
+ * devuelto por deliveryFindWindowViolations. Se usa para decidir si un reordenamiento
+ * de correccion realmente mejoro las cosas, incluso cuando no logro eliminar la
+ * violacion por completo (por ejemplo, la parada sigue llegando tarde pero mucho menos
+ * tarde que antes). Comparar solo la CANTIDAD de violaciones no detecta esa mejora
+ * parcial y descartaria una correccion que en realidad ayuda.
+ *
+ * @param array<int, array{retraso_s?: int}> $violations
+ */
+function deliverySumWindowLateness(array $violations): int
+{
+    $total = 0;
+    foreach ($violations as $violation) {
+        $total += max(0, (int)($violation['retraso_s'] ?? 0));
+    }
+    return $total;
 }
 
 /**

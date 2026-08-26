@@ -945,7 +945,10 @@ try {
     // confiando en que "sobra tiempo". Si la ruta real (con calles y trafico reales)
     // demuestra que esa confianza fue falsa y alguna parada con ventana quedo fuera de
     // horario, se reintenta una vez con un orden estricto (ventanas primero, por
-    // deadline) y solo se adopta ese resultado si mejora el numero de violaciones.
+    // deadline). Se compara el RETRASO TOTAL (segundos tarde sobre el fin de ventana),
+    // no solo la cantidad de violaciones: un reordenamiento que reduce el retraso de
+    // 90 min a 10 min sigue contando como "1 violacion" en ambos casos, y comparar solo
+    // el conteo descartaria esa mejora real dejando el peor orden sin corregir.
     if (!empty($windowViolations) && count($validStops) > 1) {
         $strictOrder = deliveryOrderStopsStrictWindowFirst($validStops, $departureForOrdering, $origin);
         $strictOrderIds = array_map(static fn(array $stop): int => (int)$stop['id_pedido'], $strictOrder);
@@ -953,9 +956,11 @@ try {
 
         if ($strictOrderIds !== $currentOrderIds) {
             $retry = routeTryComputeRoute($origin, $strictOrder, $forceLocalNoCostMode, $routesKey);
-            if ($retry !== null) {
+            if ($retry === null) {
+                error_log('optimize_delivery_route: reintento de correccion por ventana de horario fallo, se conserva el orden original.');
+            } else {
                 $retryEtaResult = deliveryBuildOrderedStopsWithEta($strictOrder, $retry['route'], $departure);
-                if (count($retryEtaResult['windowViolations']) < count($windowViolations)) {
+                if (deliverySumWindowLateness($retryEtaResult['windowViolations']) < deliverySumWindowLateness($windowViolations)) {
                     $orderedByGoogle = $strictOrder;
                     $optimizedIndex = array_keys($orderedByGoogle);
                     $route = $retry['route'];
