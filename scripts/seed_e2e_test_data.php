@@ -26,6 +26,16 @@ const E2E_LOW_STOCK_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0002';
 const E2E_OUT_OF_STOCK_PRODUCT_NAME = 'Playwright E2E Out Of Stock Product';
 const E2E_OUT_OF_STOCK_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0003';
 
+// Producto de uso exclusivo del test de "posponer" en purchase_orders.php (ver
+// tests/e2e/purchase-orders.staff.spec.ts). Ese test reactiva el posponer con un ingreso real
+// de 1 unidad -unico mecanismo que expone la app para reactivar pospuestos-, asi que el stock
+// sube un poco en cada corrida; se le da un stock_minimo generoso (ver mas abajo) para que siga
+// calificando para la lista de resurtido muchas corridas despues sin resembrar. Es un producto
+// aparte de E2E_OUT_OF_STOCK_PRODUCT_NAME a proposito: ese otro debe quedarse SIEMPRE en 0.
+const E2E_PURCHASE_ORDER_PRODUCT_NAME = 'Playwright E2E Purchase Order Product';
+const E2E_PURCHASE_ORDER_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0004';
+const E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO = 1000;
+
 $productsToSeed = [
     ['nombre' => E2E_PRODUCT_NAME, 'codigo_barras' => E2E_PRODUCT_BARCODE, 'precio' => 99.99, 'stock' => 9999],
     ['nombre' => E2E_LOW_STOCK_PRODUCT_NAME, 'codigo_barras' => E2E_LOW_STOCK_PRODUCT_BARCODE, 'precio' => 49.99, 'stock' => 1],
@@ -183,6 +193,39 @@ try {
         $stmt->execute(['id_producto' => $idProductoPrincipal, 'id_almacen' => $idAlmacenPickup]);
         echo 'Seed OK: ' . E2E_PRODUCT_NAME . " -> stock=9999 tambien en la sucursal de pickup (id_almacen={$idAlmacenPickup})\n";
     }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO productos (nombre, codigo_barras, precio_venta, estado)
+         VALUES (:nombre, :codigo_barras, :precio, "activo")
+         ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), precio_venta = VALUES(precio_venta), estado = "activo"'
+    );
+    $stmt->execute([
+        'nombre' => E2E_PURCHASE_ORDER_PRODUCT_NAME,
+        'codigo_barras' => E2E_PURCHASE_ORDER_PRODUCT_BARCODE,
+        'precio' => 19.99,
+    ]);
+    $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE codigo_barras = :codigo_barras');
+    $stmt->execute(['codigo_barras' => E2E_PURCHASE_ORDER_PRODUCT_BARCODE]);
+    $idProductoPO = (int) $stmt->fetchColumn();
+    if ($idProductoPO <= 0) {
+        throw new RuntimeException('No se pudo resolver id_producto para ' . E2E_PURCHASE_ORDER_PRODUCT_BARCODE . '.');
+    }
+    // cantidad_actual NO se resetea en cada corrida a proposito (ver comentario junto a la
+    // constante arriba): solo se fija en 1 la primera vez que se crea esta fila. stock_minimo/
+    // maximo si se garantizan siempre, para que el margen siga siendo generoso aunque este
+    // script no se vuelva a correr en un rato.
+    $stmt = $pdo->prepare(
+        'INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
+         VALUES (:id_producto, :id_almacen, 1, :stock_minimo, :stock_maximo)
+         ON DUPLICATE KEY UPDATE stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)'
+    );
+    $stmt->execute([
+        'id_producto' => $idProductoPO,
+        'id_almacen' => $idAlmacen,
+        'stock_minimo' => E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO,
+        'stock_maximo' => E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO + 5,
+    ]);
+    echo 'Seed OK: ' . E2E_PURCHASE_ORDER_PRODUCT_NAME . " -> id_producto={$idProductoPO}, id_almacen={$idAlmacen}, stock_minimo=" . E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO . "\n";
 
     // La tabla clientes no tiene una llave unica sobre nombre, asi que la
     // idempotencia se resuelve buscando primero en vez de ON DUPLICATE KEY.
