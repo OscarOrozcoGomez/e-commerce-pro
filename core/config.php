@@ -455,6 +455,11 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
     define('GOOGLE_MAPS_API_KEY', getMapsApiKey(false));
 }
 
+// Palabra clave que, si aparece en las notas de un pedido capturado por un admin/encargado,
+// hace que ese pedido no descuente inventario (ventas de muestra, cortesía, etc.).
+// Configurable por entorno para no dejarla fija en el código.
+define('SALE_INVENTORY_BYPASS_KEYWORD', getEnvVar('SALE_INVENTORY_BYPASS_KEYWORD', 'SININVENTARIO'));
+
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
 const PRODUCTS_IMG_DIR = __DIR__ . '/../assets/img/products/';

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
 
 requireAuth();
 
@@ -90,6 +91,10 @@ try {
     $mapsLinkEntrega = trim((string)($_POST['maps_link_entrega'] ?? ''));
     $observaciones = trim((string)($_POST['observaciones'] ?? ''));
 
+    $bypassInventario = resolveVentaSinInventario($observaciones, isAdmin() || isEncargado(), SALE_INVENTORY_BYPASS_KEYWORD);
+    $ventaSinInventario = $bypassInventario['sin_inventario'];
+    $observaciones = $bypassInventario['observaciones'];
+
     if ($clienteTelefono === null) {
         throw new Exception('Si capturas teléfono, debe tener 10 dígitos.');
     }
@@ -111,6 +116,7 @@ try {
     $hasClienteDireccionesTable = $tableExists($pdo, 'cliente_direcciones');
     $hasClienteDireccionesLatitud = $hasClienteDireccionesTable && $columnExists($pdo, 'cliente_direcciones', 'latitud');
     $hasClienteDireccionesLongitud = $hasClienteDireccionesTable && $columnExists($pdo, 'cliente_direcciones', 'longitud');
+    $hasPedidosAfectaInventario = $columnExists($pdo, 'pedidos', 'afecta_inventario');
 
     if ($customerAddressSelection !== '' && !ctype_digit($customerAddressSelection)) {
         throw new Exception('Debes seleccionar una direccion guardada del cliente.');
@@ -286,6 +292,9 @@ try {
         if ($mapsLinkEntrega !== '') {
             $observacionesChunks[] = 'Maps: ' . $mapsLinkEntrega;
         }
+        if ($ventaSinInventario) {
+            $observacionesChunks[] = 'VENTA SIN AFECTAR INVENTARIO (autorizado por ' . (string)($usuario['nombre'] ?? $usuario['id_usuario']) . ')';
+        }
 
         $pedidoColumns = [
             'numero_pedido',
@@ -354,6 +363,11 @@ try {
             $pedidoPlaceholders[] = ':longitud';
             $pedidoParams[':longitud'] = $longitudEntrega;
         }
+        if ($hasPedidosAfectaInventario) {
+            $pedidoColumns[] = 'afecta_inventario';
+            $pedidoPlaceholders[] = ':afecta_inventario';
+            $pedidoParams[':afecta_inventario'] = $ventaSinInventario ? 0 : 1;
+        }
 
         $sqlPedido = sprintf(
             'INSERT INTO pedidos (%s) VALUES (%s)',
@@ -415,29 +429,31 @@ try {
                 ':subtotal' => $producto['subtotal'],
             ]);
 
-            $stmtStock = $pdo->prepare(
-                'UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - :cantidad1 WHERE id_producto = :producto AND id_almacen = :almacen AND cantidad_actual >= :cantidad2'
-            );
-            $stmtStock->execute([
-                ':cantidad1' => $producto['cantidad'],
-                ':cantidad2' => $producto['cantidad'],
-                ':producto' => $producto['id_producto'],
-                ':almacen' => $almacenVentaId,
-            ]);
-            if ($stmtStock->rowCount() === 0) {
-                throw new Exception('Stock insuficiente para el producto ID: ' . $producto['id_producto']);
-            }
+            if (!$ventaSinInventario) {
+                $stmtStock = $pdo->prepare(
+                    'UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - :cantidad1 WHERE id_producto = :producto AND id_almacen = :almacen AND cantidad_actual >= :cantidad2'
+                );
+                $stmtStock->execute([
+                    ':cantidad1' => $producto['cantidad'],
+                    ':cantidad2' => $producto['cantidad'],
+                    ':producto' => $producto['id_producto'],
+                    ':almacen' => $almacenVentaId,
+                ]);
+                if ($stmtStock->rowCount() === 0) {
+                    throw new Exception('Stock insuficiente para el producto ID: ' . $producto['id_producto']);
+                }
 
-            $stmtMov = $pdo->prepare(
-                "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_origen, cantidad, id_usuario, observacion) VALUES (:producto, 'salida', :almacen, :cantidad, :usuario, :observacion)"
-            );
-            $stmtMov->execute([
-                ':producto' => $producto['id_producto'],
-                ':almacen' => $almacenVentaId,
-                ':cantidad' => $producto['cantidad'],
-                ':usuario' => $usuario['id_usuario'],
-                ':observacion' => 'Pedido a domicilio ' . $numeroPedido,
-            ]);
+                $stmtMov = $pdo->prepare(
+                    "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_origen, cantidad, id_usuario, observacion) VALUES (:producto, 'salida', :almacen, :cantidad, :usuario, :observacion)"
+                );
+                $stmtMov->execute([
+                    ':producto' => $producto['id_producto'],
+                    ':almacen' => $almacenVentaId,
+                    ':cantidad' => $producto['cantidad'],
+                    ':usuario' => $usuario['id_usuario'],
+                    ':observacion' => 'Pedido a domicilio ' . $numeroPedido,
+                ]);
+            }
         }
 
         if (!empty($auditNotes)) {
@@ -448,6 +464,9 @@ try {
         $pdo->commit();
 
         logAudit('PEDIDO_DOMICILIO_AGENDADO', 'pedidos', $idPedido, "Pedido agendado: $numeroPedido. Total: $total");
+        if ($ventaSinInventario) {
+            logAudit('PEDIDO_SIN_AFECTAR_INVENTARIO', 'pedidos', $idPedido, "Pedido $numeroPedido creado sin afectar inventario por usuario ID {$usuario['id_usuario']}.");
+        }
 
         $response['success'] = true;
         $response['message'] = 'Pedido agendado correctamente: ' . $numeroPedido;
