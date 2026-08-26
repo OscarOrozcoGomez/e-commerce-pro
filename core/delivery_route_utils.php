@@ -549,18 +549,27 @@ function deliveryNormalizeDeliveryDay(?string $value): string
  *
  * @return array{day: ?string, start: string, end: string, source: string}
  */
+/**
+ * Normaliza una hora a formato HH:MM, aceptando tambien HH:MM:SS. Las columnas
+ * TIME de MySQL (cliente_horarios_entrega.hora_inicio/hora_fin) regresan por PDO
+ * como "HH:MM:SS", que sin este paso no coincidia con el formato esperado y hacia
+ * que la ventana se descartara en silencio (ver deliveryNormalizeWindow).
+ */
+function deliveryNormalizeTimeToHm(string $value): ?string
+{
+    $value = trim($value);
+    if (preg_match('/^(\d{1,2}):(\d{2})(?::\d{2})?$/', $value, $m) !== 1) {
+        return null;
+    }
+
+    return sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
+}
+
 function deliveryNormalizeWindow(array $window, string $fallbackSource = 'default'): array
 {
     $day = deliveryNormalizeWeekdayKey((string) ($window['dia'] ?? $window['day'] ?? $window['weekday'] ?? ''));
-    $start = trim((string) ($window['inicio'] ?? $window['start'] ?? $window['hora_inicio'] ?? '00:00'));
-    $end = trim((string) ($window['fin'] ?? $window['end'] ?? $window['hora_fin'] ?? '23:59'));
-
-    if (!preg_match('/^\d{1,2}:\d{2}$/', $start)) {
-        $start = '00:00';
-    }
-    if (!preg_match('/^\d{1,2}:\d{2}$/', $end)) {
-        $end = '23:59';
-    }
+    $start = deliveryNormalizeTimeToHm((string) ($window['inicio'] ?? $window['start'] ?? $window['hora_inicio'] ?? '00:00')) ?? '00:00';
+    $end = deliveryNormalizeTimeToHm((string) ($window['fin'] ?? $window['end'] ?? $window['hora_fin'] ?? '23:59')) ?? '23:59';
 
     return [
         'day' => $day,

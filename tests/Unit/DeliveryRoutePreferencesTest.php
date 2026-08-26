@@ -26,6 +26,27 @@ final class DeliveryRoutePreferencesTest extends TestCase
         $this->assertSame('18:00', $preferences['default_window']['end']);
     }
 
+    /**
+     * Bug real encontrado en produccion: cliente_horarios_entrega.hora_inicio/hora_fin
+     * son columnas TIME en MySQL (ver database.sql), y PDO las regresa como "HH:MM:SS"
+     * (con segundos). deliveryNormalizeWindow solo aceptaba "HH:MM" sin segundos, asi
+     * que cualquier ventana leida de la base de datos se descartaba en silencio y caia
+     * al default "00:00-23:59" (todo el dia), haciendo que la ventana real (ej. 15:00-16:00)
+     * nunca se detectara como incumplida sin importar que tan tarde llegara la ruta.
+     */
+    public function testDeliveryNormalizeWindowAcceptsTimeColumnsWithSeconds(): void
+    {
+        $window = deliveryNormalizeWindow([
+            'dia' => 'miercoles',
+            'inicio' => '15:00:00', // formato real que regresa PDO para una columna TIME
+            'fin' => '16:00:00',
+        ], 'cliente_horario');
+
+        $this->assertSame('miercoles', $window['day']);
+        $this->assertSame('15:00', $window['start']);
+        $this->assertSame('16:00', $window['end']);
+    }
+
     public function testDeliveryOrderStopsByWindowPriorityPrioritizesEarlierClosingWindows(): void
     {
         $stops = [
@@ -199,6 +220,35 @@ final class DeliveryRoutePreferencesTest extends TestCase
         $this->assertTrue($result['valid']);
         $this->assertSame('2026-08-19 00:00:00', $result['fecha']);
         $this->assertNull($result['error']);
+    }
+
+    /**
+     * Reproduce el bug de produccion end-to-end tal como llegaba desde la base de datos:
+     * un pedido con ventana miercoles 15:00:00-16:00:00 (formato TIME real de MySQL, con
+     * segundos) y un ETA real de 17:34 debe detectarse como violacion. Antes del fix de
+     * deliveryNormalizeTimeToHm, esta ventana se descartaba en silencio y caia al default
+     * de todo el dia, por lo que jamas se detectaba como incumplida.
+     */
+    public function testWindowFromDatabaseTimeColumnsIsDetectedAsViolatedWhenLate(): void
+    {
+        $departure = new DateTimeImmutable('2026-08-26 15:00:00'); // miercoles
+
+        $stopFromDb = [
+            'id_pedido' => 35,
+            'numero_pedido' => 'DOM-20260825173114-8f8c',
+            'delivery_preferences' => [
+                'ventanas' => [
+                    ['dia' => 'miercoles', 'inicio' => '15:00:00', 'fin' => '16:00:00'],
+                ],
+            ],
+            'eta_estimada' => '2026-08-26 17:34:55',
+        ];
+
+        $violations = deliveryFindWindowViolations([$stopFromDb], $departure);
+
+        $this->assertCount(1, $violations, 'La ventana con segundos (formato TIME de MySQL) debe detectarse, no descartarse.');
+        $this->assertSame(35, $violations[0]['id_pedido']);
+        $this->assertSame('16:00', $violations[0]['ventana_fin']);
     }
 
     public function testDeliveryFindWindowViolationsFlagsStopsThatArriveAfterWindowEnds(): void
