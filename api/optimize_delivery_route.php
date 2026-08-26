@@ -239,6 +239,115 @@ function routeBuildLocalFallback(array $origin, array $stops): array
     ];
 }
 
+/**
+ * Intenta calcular una ruta para un orden de paradas dado sin terminar la
+ * ejecucion si algo falla (a diferencia del flujo principal). Se usa solo para
+ * el intento de correccion por ventana de horario: si falla, el llamador
+ * simplemente conserva el resultado del primer intento.
+ *
+ * @param array<int, array<string, mixed>> $stops
+ * @return array{route: array<string, mixed>, usingFallback: bool, fallbackReason: string}|null
+ */
+function routeTryComputeRoute(array $origin, array $stops, bool $forceLocalNoCostMode, string $routesKey): ?array
+{
+    if ($forceLocalNoCostMode) {
+        $fallback = routeBuildLocalFallback($origin, $stops);
+        if (count($fallback['optimizedIndex']) < count($stops)) {
+            return null;
+        }
+
+        return [
+            'route' => [
+                'optimizedIntermediateWaypointIndex' => $fallback['optimizedIndex'],
+                'legs' => $fallback['legs'],
+                'distanceMeters' => $fallback['distanceMeters'],
+                'duration' => $fallback['durationSeconds'] . 's',
+            ],
+            'usingFallback' => true,
+            'fallbackReason' => 'Modo local sin costo activo: no se consulto Google Routes API.',
+        ];
+    }
+
+    $body = [
+        'origin' => [
+            'location' => ['latLng' => ['latitude' => $origin['lat'], 'longitude' => $origin['lng']]],
+        ],
+        'destination' => [
+            'location' => ['latLng' => ['latitude' => $origin['lat'], 'longitude' => $origin['lng']]],
+        ],
+        'intermediates' => array_map(static function (array $stop): array {
+            return [
+                'location' => [
+                    'latLng' => [
+                        'latitude' => (float)$stop['lat'],
+                        'longitude' => (float)$stop['lng'],
+                    ],
+                ],
+            ];
+        }, $stops),
+        'optimizeWaypointOrder' => false,
+        'travelMode' => 'DRIVE',
+        'routingPreference' => 'TRAFFIC_AWARE',
+    ];
+
+    $requestBody = json_encode($body);
+    if ($requestBody === false) {
+        return null;
+    }
+
+    $endpoint = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+    $responseBody = '';
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($endpoint);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'X-Goog-Api-Key: ' . $routesKey,
+            'X-Goog-FieldMask: routes.optimizedIntermediateWaypointIndex,routes.legs,routes.distanceMeters,routes.duration',
+        ]);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+
+        $exec = curl_exec($ch);
+        curl_close($ch);
+
+        if ($exec === false) {
+            return null;
+        }
+        $responseBody = (string)$exec;
+    } else {
+        $res = gsmHttpRequest('POST', $endpoint, $requestBody, [
+            'Content-Type' => 'application/json',
+            'X-Goog-Api-Key' => $routesKey,
+            'X-Goog-FieldMask' => 'routes.optimizedIntermediateWaypointIndex,routes.legs,routes.distanceMeters,routes.duration',
+        ], 20);
+
+        if (!$res['ok']) {
+            return null;
+        }
+        $responseBody = (string)($res['body'] ?? '');
+    }
+
+    $decoded = json_decode($responseBody, true);
+    if (!is_array($decoded)) {
+        return null;
+    }
+
+    $route = $decoded['routes'][0] ?? null;
+    if (!is_array($route)) {
+        return null;
+    }
+
+    return [
+        'route' => $route,
+        'usingFallback' => false,
+        'fallbackReason' => '',
+    ];
+}
+
 $raw = json_decode((string)file_get_contents('php://input'), true);
 $payload = is_array($raw) ? $raw : [];
 
@@ -825,51 +934,39 @@ try {
         $departure = new DateTimeImmutable('now');
     }
 
-    foreach ($orderedByGoogle as $pos => $stop) {
-        $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
-        $stop['delivery_preferences'] = $preferences;
-        $orderedByGoogle[$pos] = $stop;
-    }
+    $etaResult = deliveryBuildOrderedStopsWithEta($orderedByGoogle, $route, $departure);
+    $orderedWithEta = $etaResult['orderedWithEta'];
+    $riskyStops = $etaResult['riskyStops'];
+    $windowViolations = $etaResult['windowViolations'];
+    $windowCorrectionApplied = false;
 
-    $legs = is_array($route['legs'] ?? null) ? $route['legs'] : [];
+    // El preordenamiento (deliveryOrderStopsByWindowPriority) estima tiempos de traslado
+    // con linea recta y puede intercalar paradas sin horario antes de una con ventana
+    // confiando en que "sobra tiempo". Si la ruta real (con calles y trafico reales)
+    // demuestra que esa confianza fue falsa y alguna parada con ventana quedo fuera de
+    // horario, se reintenta una vez con un orden estricto (ventanas primero, por
+    // deadline) y solo se adopta ese resultado si mejora el numero de violaciones.
+    if (!empty($windowViolations) && count($validStops) > 1) {
+        $strictOrder = deliveryOrderStopsStrictWindowFirst($validStops, $departureForOrdering, $origin);
+        $strictOrderIds = array_map(static fn(array $stop): int => (int)$stop['id_pedido'], $strictOrder);
+        $currentOrderIds = array_map(static fn(array $stop): int => (int)$stop['id_pedido'], $orderedByGoogle);
 
-    $runningSeconds = 0;
-    $orderedWithEta = [];
-    $riskyStops = [];
-
-    foreach ($orderedByGoogle as $pos => $stop) {
-        $leg = $legs[$pos] ?? [];
-        $legSeconds = deliveryDurationToSeconds(is_array($leg) ? (($leg['duration'] ?? null)) : null);
-        $runningSeconds += $legSeconds;
-
-        $eta = $departure->modify('+' . $runningSeconds . ' seconds');
-        $etaText = $eta->format('Y-m-d H:i:s');
-
-        $fechaLimite = $stop['fecha_limite_entrega'];
-        $enRiesgo = false;
-        if (is_string($fechaLimite) && trim($fechaLimite) !== '') {
-            try {
-                $deadline = new DateTimeImmutable($fechaLimite);
-                $enRiesgo = $eta > $deadline;
-            } catch (Throwable $e) {
-                $enRiesgo = false;
+        if ($strictOrderIds !== $currentOrderIds) {
+            $retry = routeTryComputeRoute($origin, $strictOrder, $forceLocalNoCostMode, $routesKey);
+            if ($retry !== null) {
+                $retryEtaResult = deliveryBuildOrderedStopsWithEta($strictOrder, $retry['route'], $departure);
+                if (count($retryEtaResult['windowViolations']) < count($windowViolations)) {
+                    $orderedByGoogle = $strictOrder;
+                    $optimizedIndex = array_keys($orderedByGoogle);
+                    $route = $retry['route'];
+                    $usingFallbackRoute = $retry['usingFallback'];
+                    $fallbackReason = $retry['fallbackReason'];
+                    $orderedWithEta = $retryEtaResult['orderedWithEta'];
+                    $riskyStops = $retryEtaResult['riskyStops'];
+                    $windowViolations = $retryEtaResult['windowViolations'];
+                    $windowCorrectionApplied = true;
+                }
             }
-        }
-
-        $stop['eta_estimada'] = $etaText;
-        $stop['duracion_tramo_s'] = $legSeconds;
-        $stop['en_riesgo'] = $enRiesgo;
-        $orderedWithEta[] = $stop;
-
-        $runningSeconds += max(0, (int)$stop['tiempo_servicio_min']) * 60;
-
-        if ($enRiesgo) {
-            $riskyStops[] = [
-                'id_pedido' => $stop['id_pedido'],
-                'numero_pedido' => $stop['numero_pedido'],
-                'fecha_limite_entrega' => $stop['fecha_limite_entrega'],
-                'eta_estimada' => $etaText,
-            ];
         }
     }
 
@@ -903,9 +1000,12 @@ try {
         'optimizedIntermediateWaypointIndex' => array_values(array_map('intval', $optimizedIndex)),
         'warnings' => $warnings,
         'incumplibles_probables' => $riskyStops,
+        'ventana_ajuste_aplicado' => $windowCorrectionApplied,
+        'paradas_fuera_de_ventana' => $windowViolations,
         'summary' => [
             'paradas_total' => count($orderedWithEta),
             'paradas_en_riesgo' => count($riskyStops),
+            'paradas_fuera_de_ventana' => count($windowViolations),
             'distancia_total_m' => $distanceMeters,
             'duracion_total_s' => $durationSeconds,
             'duracion_total_hhmm' => deliveryFormatSecondsToHm($durationSeconds),
