@@ -7,6 +7,9 @@ import * as path from 'path';
 export const E2E_PRODUCT_NAME = 'Playwright E2E Test Product';
 // Sembrado con stock=1 a propósito, para los tests negativos de stock insuficiente.
 export const E2E_LOW_STOCK_PRODUCT_NAME = 'Playwright E2E Low Stock Product';
+// Sembrado con stock=0 en la sucursal por defecto, para el test negativo de
+// "producto agotado" en views/sales.php.
+export const E2E_OUT_OF_STOCK_PRODUCT_NAME = 'Playwright E2E Out Of Stock Product';
 // Cliente fijo (no autoregistrado) con domicilio guardado, para views/sales.php.
 export const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
 
@@ -55,6 +58,9 @@ export const E2E_STAFF_EMAILS = {
   encargado: 'e2e-encargado@playwright.test',
   vendedor: 'e2e-vendedor@playwright.test',
   repartidor: 'e2e-repartidor@playwright.test',
+  // Encargado asignado a la sucursal de pickup (resolvePickupWarehouseId), no a
+  // la sucursal "default" -- necesario para views/pickup_notifications.php.
+  encargadoPickup: 'e2e-encargado-pickup@playwright.test',
 } as const;
 
 /**
@@ -141,6 +147,26 @@ export async function submitSucursalCheckoutForm(
   await page.locator('#nombre').fill(overrides.nombre ?? 'Playwright QA');
   await page.locator('#telefono').fill(overrides.telefono ?? '3311234567');
   await page.getByRole('button', { name: 'Confirmar Pedido' }).click();
+}
+
+/**
+ * Registra + inicia sesión con una cuenta cliente nueva, agrega el producto
+ * sembrado al carrito y completa el checkout por "Recoger en Sucursal" (con
+ * el producto principal, que sí tiene stock ahí -- ver
+ * scripts/seed_e2e_test_data.php). Devuelve el id_pedido creado.
+ */
+export async function completeSucursalCheckout(page: Page): Promise<number> {
+  const cliente = await registerAndLogin(page);
+  await addSeededProductToCart(page);
+  await submitSucursalCheckoutForm(page, { nombre: cliente.nombre });
+
+  // A diferencia de Domicilio, Sucursal no pregunta por guardar dirección: va
+  // directo a "¡Pedido Confirmado!" -> Continuar -> gracias.php.
+  await page.getByRole('button', { name: 'Continuar' }).click();
+  await page.waitForURL(/gracias\.php\?id=\d+/);
+
+  const url = new URL(page.url());
+  return Number(url.searchParams.get('id'));
 }
 
 /**

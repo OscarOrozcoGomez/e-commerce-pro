@@ -21,9 +21,15 @@ const E2E_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0001';
 const E2E_LOW_STOCK_PRODUCT_NAME = 'Playwright E2E Low Stock Product';
 const E2E_LOW_STOCK_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0002';
 
+// Producto sin existencia en la sucursal por defecto, para el test negativo de
+// "producto agotado" en views/sales.php (ver tests/e2e/sales-agendar-pedido-edge-cases.staff.spec.ts).
+const E2E_OUT_OF_STOCK_PRODUCT_NAME = 'Playwright E2E Out Of Stock Product';
+const E2E_OUT_OF_STOCK_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0003';
+
 $productsToSeed = [
     ['nombre' => E2E_PRODUCT_NAME, 'codigo_barras' => E2E_PRODUCT_BARCODE, 'precio' => 99.99, 'stock' => 9999],
     ['nombre' => E2E_LOW_STOCK_PRODUCT_NAME, 'codigo_barras' => E2E_LOW_STOCK_PRODUCT_BARCODE, 'precio' => 49.99, 'stock' => 1],
+    ['nombre' => E2E_OUT_OF_STOCK_PRODUCT_NAME, 'codigo_barras' => E2E_OUT_OF_STOCK_PRODUCT_BARCODE, 'precio' => 29.99, 'stock' => 0],
 ];
 
 // Cliente fijo (no autoregistrado) con un domicilio guardado real, para que
