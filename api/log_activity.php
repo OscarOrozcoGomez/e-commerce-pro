@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/geo_lookup.php';
 
 ignore_user_abort(true);
 
@@ -43,15 +44,48 @@ if (!in_array($tipo, ['visit', 'click'], true)) {
     exit;
 }
 
+$ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+
 $payload = [
     ':id_usuario' => $idUsuario,
     ':tipo' => $tipo,
     ':url' => (string)($data['url'] ?? $_SERVER['HTTP_REFERER'] ?? ''),
     ':elemento_id' => $data['id'] ?? null,
     ':elemento_texto' => mb_substr((string)($data['texto'] ?? ''), 0, 255),
-    ':ip' => (string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'),
+    ':ip' => $ip,
     ':ua' => (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+    ':utm_source' => null,
+    ':utm_medium' => null,
+    ':utm_campaign' => null,
+    ':utm_term' => null,
+    ':utm_content' => null,
+    ':gclid' => null,
+    ':wbraid' => null,
+    ':gbraid' => null,
+    ':referrer' => null,
+    ':landing_page' => null,
+    ':plataforma' => null,
+    ':visitor_id' => getVisitorId(),
+    ':pais' => null,
+    ':region' => null,
 ];
+
+// La atribucion de campana (UTM/gclid/referrer) y la geolocalizacion solo aplican
+// a visitas -- un click hereda la atribucion de su visita via visitor_id, no necesita
+// repetirla ni pagar el costo del lookup de geo en cada click.
+if ($tipo === 'visit') {
+    $attributionFields = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'wbraid', 'gbraid', 'referrer', 'landing_page'];
+    foreach ($attributionFields as $field) {
+        $value = trim((string) ($data[$field] ?? ''));
+        $payload[':' . $field] = $value !== '' ? $value : null;
+    }
+
+    $payload[':plataforma'] = classifyPlatform($data);
+
+    $geo = lookupGeo($ip);
+    $payload[':pais'] = $geo['pais'];
+    $payload[':region'] = $geo['region'];
+}
 
 $storeLog = static function () use ($payload): void {
     try {
@@ -60,8 +94,12 @@ $storeLog = static function () use ($payload): void {
         $pdo->exec('SET SESSION innodb_lock_wait_timeout = 2');
 
         $sql = "INSERT INTO logs_actividad
-                (id_usuario, tipo_accion, url, elemento_id, elemento_texto, ip_address, user_agent)
-                VALUES (:id_usuario, :tipo, :url, :elemento_id, :elemento_texto, :ip, :ua)";
+                (id_usuario, tipo_accion, url, elemento_id, elemento_texto, ip_address, user_agent,
+                 utm_source, utm_medium, utm_campaign, utm_term, utm_content, gclid, wbraid, gbraid,
+                 referrer, landing_page, plataforma, visitor_id, pais, region)
+                VALUES (:id_usuario, :tipo, :url, :elemento_id, :elemento_texto, :ip, :ua,
+                        :utm_source, :utm_medium, :utm_campaign, :utm_term, :utm_content, :gclid, :wbraid, :gbraid,
+                        :referrer, :landing_page, :plataforma, :visitor_id, :pais, :region)";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($payload);

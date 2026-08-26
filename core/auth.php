@@ -5,6 +5,9 @@ require_once __DIR__ . '/pickup_offer_utils.php';
 require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/delivery_route_utils.php';
 require_once __DIR__ . '/order_cancel_utils.php';
+require_once __DIR__ . '/attribution.php';
+require_once __DIR__ . '/ventas_features.php';
+require_once __DIR__ . '/referrals.php';
 
 /**
  * Verifica si el usuario está autenticado.
@@ -1039,6 +1042,8 @@ function dbCreatePublicOrder(array $data): array {
         $hasPedidosMapsLinkEntrega = $columnExists($pdo, 'pedidos', 'maps_link_entrega');
         $hasPedidosLatitud = $columnExists($pdo, 'pedidos', 'latitud');
         $hasPedidosLongitud = $columnExists($pdo, 'pedidos', 'longitud');
+        $hasPedidosVisitorId = $columnExists($pdo, 'pedidos', 'visitor_id');
+        $hasPedidosPlataforma = $columnExists($pdo, 'pedidos', 'plataforma');
 
         $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $esPickupSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0;
@@ -1120,6 +1125,23 @@ function dbCreatePublicOrder(array $data): array {
             && ((float)($pickupOffer['ahorro'] ?? 0.0) > 0.0);
 
         $descuentoTotal = $aplicarIncentivoSucursal ? round((float)$pickupOffer['ahorro'], 2) : 0.0;
+
+        $referidoValidacion = null;
+        $telefonoDigitsReferido = normalizePhoneDigitsMx($telefonoEntrega) ?? '';
+        if (ventasFeatureIsActive($pdo, 'programa_referidos') && !empty($data['codigo_referido'])) {
+            $referidoValidacion = referralValidate(
+                $pdo,
+                (string) $data['codigo_referido'],
+                $id_cliente !== null ? (int) $id_cliente : null,
+                $telefonoDigitsReferido,
+                $subtotal
+            );
+            if (!empty($referidoValidacion['valido'])) {
+                $descuentoTotal = round($descuentoTotal + (float) $referidoValidacion['descuento'], 2);
+                $infoCliente .= ' | REFERIDO: ' . strtoupper((string) $data['codigo_referido']) . ' (-$' . number_format((float) $referidoValidacion['descuento'], 2, '.', '') . ')';
+            }
+        }
+
         $totalPedido = round(max(0.0, $subtotal - $descuentoTotal), 2);
 
         if ($aplicarIncentivoSucursal) {
@@ -1213,6 +1235,22 @@ function dbCreatePublicOrder(array $data): array {
             $pedidoParams[':longitud'] = $coordsEntrega['lng'];
         }
 
+        if ($hasPedidosVisitorId && $hasPedidosPlataforma && ventasFeatureIsActive($pdo, 'atribucion_ventas')) {
+            $atribucion = getLastTouchAttribution($pdo, function_exists('getVisitorId') ? getVisitorId() : null);
+            $pedidoColumns[] = 'visitor_id';
+            $pedidoColumns[] = 'plataforma';
+            $pedidoColumns[] = 'utm_source';
+            $pedidoColumns[] = 'utm_campaign';
+            $pedidoPlaceholders[] = ':visitor_id';
+            $pedidoPlaceholders[] = ':plataforma';
+            $pedidoPlaceholders[] = ':utm_source';
+            $pedidoPlaceholders[] = ':utm_campaign';
+            $pedidoParams[':visitor_id'] = $atribucion['visitor_id'];
+            $pedidoParams[':plataforma'] = $atribucion['plataforma'];
+            $pedidoParams[':utm_source'] = $atribucion['utm_source'];
+            $pedidoParams[':utm_campaign'] = $atribucion['utm_campaign'];
+        }
+
         $sqlPedido = sprintf(
             'INSERT INTO pedidos (%s) VALUES (%s)',
             implode(', ', $pedidoColumns),
@@ -1221,6 +1259,18 @@ function dbCreatePublicOrder(array $data): array {
         $stmt = $pdo->prepare($sqlPedido);
         $stmt->execute($pedidoParams);
         $id_pedido = $pdo->lastInsertId();
+
+        if ($referidoValidacion !== null && !empty($referidoValidacion['valido'])) {
+            referralRecordUsage(
+                $pdo,
+                (int) $id_pedido,
+                (string) $data['codigo_referido'],
+                (int) $referidoValidacion['id_cliente_referidor'],
+                $id_cliente !== null ? (int) $id_cliente : null,
+                $telefonoDigitsReferido,
+                (float) $referidoValidacion['descuento']
+            );
+        }
 
         if (strcasecmp((string)$entrega, 'Sucursal') === 0) {
             dbCreatePickupNotification($pdo, [

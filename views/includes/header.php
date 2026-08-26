@@ -1017,11 +1017,36 @@
                 }).catch(() => {});
             }
             
-            // 1. Registrar Visita a la página
-            sendActivity({
-                tipo: 'visit',
-                url: window.location.href
-            });
+            // 1. Registrar Visita a la página, incluyendo atribucion de marketing
+            // (persistAttribution() ya la guardo en localStorage si la URL trajo UTM/gclid).
+            // El referrer se lee siempre en este momento, no solo cuando hay UTM, para que
+            // el trafico organico/referido puro tambien quede clasificado.
+            (function() {
+                const visitPayload = {
+                    tipo: 'visit',
+                    url: window.location.href,
+                    referrer: document.referrer || ''
+                };
+
+                try {
+                    const stored = localStorage.getItem('bb_marketing_attribution');
+                    if (stored) {
+                        const attribution = JSON.parse(stored);
+                        ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'wbraid', 'gbraid', 'landing_page'].forEach(function(key) {
+                            if (attribution && attribution[key]) {
+                                visitPayload[key] = attribution[key];
+                            }
+                        });
+                        if (attribution && attribution.referrer && !visitPayload.referrer) {
+                            visitPayload.referrer = attribution.referrer;
+                        }
+                    }
+                } catch (e) {
+                    // No bloquear el registro de la visita si localStorage falla.
+                }
+
+                sendActivity(visitPayload);
+            })();
 
             // 2. Registrar Clics en elementos interactivos
             document.addEventListener('click', function(e) {

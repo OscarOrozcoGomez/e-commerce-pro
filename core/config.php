@@ -46,6 +46,21 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// Cookie de visitante anonimo (independiente de la sesion) para poder correlacionar
+// varias visitas de un mismo invitado y atribuirlas a la misma campana/origen.
+if (!headers_sent() && (!isset($_COOKIE['visitor_id']) || !preg_match('/^[a-f0-9]{32}$/', (string) $_COOKIE['visitor_id']))) {
+    $visitorId = bin2hex(random_bytes(16));
+    setcookie('visitor_id', $visitorId, [
+        'expires' => time() + 63072000,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isHttpsRequest,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    $_COOKIE['visitor_id'] = $visitorId;
+}
+
 $sessionRotateIntervalEnv = getenv('SESSION_ROTATE_INTERVAL');
 if ($sessionRotateIntervalEnv === false) {
     $sessionRotateIntervalEnv = $_SERVER['SESSION_ROTATE_INTERVAL'] ?? $_ENV['SESSION_ROTATE_INTERVAL'] ?? null;
@@ -535,6 +550,19 @@ function esc(string $value): string
         $value = (string)piiDecryptValue($value);
     }
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/**
+ * Devuelve el visitor_id anonimo persistido en cookie, o null si no existe
+ * (por ejemplo, si config.php se cargo despues de headers_sent()).
+ */
+function getVisitorId(): ?string
+{
+    $visitorId = $_COOKIE['visitor_id'] ?? null;
+    if (!is_string($visitorId) || !preg_match('/^[a-f0-9]{32}$/', $visitorId)) {
+        return null;
+    }
+    return $visitorId;
 }
 
 function rotateSessionIdIfNeeded(int $intervalSeconds = 600): void

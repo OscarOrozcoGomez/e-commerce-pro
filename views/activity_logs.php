@@ -15,11 +15,15 @@ $pdo = getPDO();
 
 $filtro_usuario = isset($_GET['usuario']) ? intval($_GET['usuario']) : 0;
 $filtro_tipo = isset($_GET['tipo']) ? $_GET['tipo'] : '';
+$filtro_plataforma = $_GET['plataforma'] ?? '';
 $fecha_inicio = $_GET['fecha_inicio'] ?? '';
 $fecha_fin = $_GET['fecha_fin'] ?? '';
 
 // Obtener lista de usuarios para el filtro
 $usuarios = $pdo->query("SELECT id_usuario, nombre, email FROM usuarios ORDER BY nombre")->fetchAll();
+
+// Plataformas presentes en los datos, para poblar el filtro sin hardcodear valores.
+$plataformas = $pdo->query("SELECT DISTINCT plataforma FROM logs_actividad WHERE plataforma IS NOT NULL AND plataforma != '' ORDER BY plataforma")->fetchAll(PDO::FETCH_COLUMN);
 
 // Construir consulta de logs
 $query = "SELECT l.*, u.nombre as usuario_nombre, u.email as usuario_email 
@@ -37,6 +41,10 @@ if ($filtro_usuario > 0) {
 if ($filtro_tipo !== '') {
     $query .= " AND l.tipo_accion = :tipo";
     $params[':tipo'] = $filtro_tipo;
+}
+if ($filtro_plataforma !== '') {
+    $query .= " AND l.plataforma = :plataforma";
+    $params[':plataforma'] = $filtro_plataforma;
 }
 if ($fecha_inicio) {
     $query .= " AND DATE(l.fecha_creacion) >= :inicio";
@@ -101,11 +109,19 @@ include __DIR__ . '/includes/header.php';
                         <option value="click" <?php echo $filtro_tipo == 'click' ? 'selected' : ''; ?>>Clics</option>
                     </select>
                 </div>
-                <div class="input-field col s6 m2">
+                <div class="input-field col s12 m2">
+                    <select name="plataforma" class="browser-default">
+                        <option value="">Todas las plataformas</option>
+                        <?php foreach ($plataformas as $p): ?>
+                            <option value="<?php echo esc($p); ?>" <?php echo $filtro_plataforma === $p ? 'selected' : ''; ?>><?php echo esc($p); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="input-field col s6 m1">
                     <input type="date" name="fecha_inicio" id="fecha_inicio" value="<?php echo esc($fecha_inicio); ?>">
                     <label for="fecha_inicio" class="active">Desde</label>
                 </div>
-                <div class="input-field col s6 m2">
+                <div class="input-field col s6 m1">
                     <input type="date" name="fecha_fin" id="fecha_fin" value="<?php echo esc($fecha_fin); ?>">
                     <label for="fecha_fin" class="active">Hasta</label>
                 </div>
@@ -149,6 +165,8 @@ include __DIR__ . '/includes/header.php';
                                             <th>Usuario</th>
                                             <th>Acción</th>
                                             <th>Detalle</th>
+                                            <th>Plataforma</th>
+                                            <th>País</th>
                                             <th>IP</th>
                                         </tr>
                                     </thead>
@@ -173,6 +191,8 @@ include __DIR__ . '/includes/header.php';
                                                     <?php endif; ?>
                                                     <small class="grey-text"><?php echo esc(str_replace(BASE_URL, '/', $log['url'])); ?></small>
                                                 </td>
+                                                <td><small><?php echo esc($log['plataforma'] ?? ''); ?></small></td>
+                                                <td><small><?php echo esc($log['pais'] ?? ''); ?></small></td>
                                                 <td><small><?php echo esc($log['ip_address']); ?></small></td>
                                             </tr>
                                         <?php endforeach; ?>
