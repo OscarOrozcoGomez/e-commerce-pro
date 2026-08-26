@@ -227,6 +227,35 @@ final class DeliveryRoutePreferencesTest extends TestCase
         $this->assertCount(1, $violations);
         $this->assertSame(2, $violations[0]['id_pedido']);
         $this->assertSame('16:00', $violations[0]['ventana_fin']);
+        $this->assertSame(5640, $violations[0]['retraso_s']); // 17:34 - 16:00 = 1h34min tarde
+    }
+
+    /**
+     * Reproduce un bug real encontrado tras el primer despliegue: cuando el orden
+     * estricto reduce el retraso mucho (de 90 min a 10 min) pero no logra ELIMINAR
+     * la violacion por completo, seguia contando como "1 violacion" en ambos ordenes.
+     * Comparar solo la CANTIDAD de violaciones (1 < 1 es falso) rechazaba una mejora
+     * real y dejaba el peor orden sin corregir. deliverySumWindowLateness debe permitir
+     * distinguir ambos casos por el retraso total, no por el conteo.
+     */
+    public function testDeliverySumWindowLatenessDistinguishesPartialImprovementThatCountAloneWouldMiss(): void
+    {
+        $optimisticViolations = [
+            ['id_pedido' => 4, 'retraso_s' => 5400], // 90 min tarde
+        ];
+        $strictViolations = [
+            ['id_pedido' => 4, 'retraso_s' => 600], // 10 min tarde: mucho mejor, pero sigue siendo 1 violacion
+        ];
+
+        $this->assertCount(1, $optimisticViolations);
+        $this->assertCount(1, $strictViolations);
+        $this->assertFalse(count($strictViolations) < count($optimisticViolations), 'Precondicion: comparar solo el conteo no detecta la mejora.');
+
+        $this->assertLessThan(
+            deliverySumWindowLateness($optimisticViolations),
+            deliverySumWindowLateness($strictViolations),
+            'El orden estricto debe preferirse por tener mucho menos retraso total, aunque el conteo de violaciones sea igual.'
+        );
     }
 
     public function testDeliveryOrderStopsStrictWindowFirstPutsScheduledStopsBeforeUnscheduledRegardlessOfDistance(): void
