@@ -732,6 +732,147 @@ function deliveryWindowDeadlineTimestamp(array $window, DateTimeImmutable $depar
 }
 
 /**
+ * Resuelve, para una parada, la ventana de horario con el deadline mas proximo
+ * respecto a la salida. Se comparte entre el ordenamiento y la verificacion
+ * posterior para que ambos midan "cumple/no cumple" de la misma forma.
+ *
+ * @param array<string, mixed> $stop
+ * @return array{deadline: ?int, window: ?array}
+ */
+function deliveryResolveBestWindowDeadline(array $stop, DateTimeImmutable $departure): array
+{
+    $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
+
+    $bestDeadline = null;
+    $bestWindow = null;
+
+    foreach ($preferences['ventanas'] as $window) {
+        $deadline = deliveryWindowDeadlineTimestamp($window, $departure);
+        if ($deadline === null) {
+            continue;
+        }
+
+        if ($bestDeadline === null || $deadline < $bestDeadline) {
+            $bestDeadline = $deadline;
+            $bestWindow = $window;
+        }
+    }
+
+    return ['deadline' => $bestDeadline, 'window' => $bestWindow];
+}
+
+/**
+ * Revisa un listado de paradas ya con ETA calculado (eta_estimada) contra su
+ * ventana de horario y regresa las que llegarian tarde. Se usa despues de pedir
+ * la ruta real a Google, porque el preordenamiento solo estima tiempos con
+ * linea recta y puede equivocarse.
+ *
+ * @param array<int, array<string, mixed>> $orderedStopsWithEta
+ * @return array<int, array{id_pedido: mixed, numero_pedido: mixed, eta_estimada: string, ventana_fin: string}>
+ */
+function deliveryFindWindowViolations(array $orderedStopsWithEta, DateTimeImmutable $departure): array
+{
+    $violations = [];
+
+    foreach ($orderedStopsWithEta as $stop) {
+        $resolved = deliveryResolveBestWindowDeadline($stop, $departure);
+        $deadline = $resolved['deadline'];
+        if ($deadline === null) {
+            continue;
+        }
+
+        $etaText = (string)($stop['eta_estimada'] ?? '');
+        if ($etaText === '') {
+            continue;
+        }
+
+        try {
+            $eta = new DateTimeImmutable($etaText);
+        } catch (Throwable $e) {
+            continue;
+        }
+
+        if ($eta->getTimestamp() > $deadline) {
+            $violations[] = [
+                'id_pedido' => $stop['id_pedido'] ?? null,
+                'numero_pedido' => $stop['numero_pedido'] ?? null,
+                'eta_estimada' => $etaText,
+                'ventana_fin' => (string)($resolved['window']['end'] ?? ''),
+            ];
+        }
+    }
+
+    return $violations;
+}
+
+/**
+ * Calcula ETAs reales por parada a partir de una ruta ya obtenida (de Google o del
+ * fallback local) y detecta tanto incumplimientos de fecha_limite_entrega como de
+ * ventana de horario. Se usa tanto para el intento inicial de optimize_delivery_route.php
+ * como para el intento de correccion cuando se recalcula con orden estricto por ventana.
+ *
+ * @param array<int, array<string, mixed>> $orderedStops
+ * @param array<string, mixed> $route
+ * @return array{orderedWithEta: array<int, array<string, mixed>>, riskyStops: array<int, array<string, mixed>>, windowViolations: array<int, array<string, mixed>>}
+ */
+function deliveryBuildOrderedStopsWithEta(array $orderedStops, array $route, DateTimeImmutable $departure): array
+{
+    foreach ($orderedStops as $pos => $stop) {
+        $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
+        $stop['delivery_preferences'] = $preferences;
+        $orderedStops[$pos] = $stop;
+    }
+
+    $legs = is_array($route['legs'] ?? null) ? $route['legs'] : [];
+
+    $runningSeconds = 0;
+    $orderedWithEta = [];
+    $riskyStops = [];
+
+    foreach ($orderedStops as $pos => $stop) {
+        $leg = $legs[$pos] ?? [];
+        $legSeconds = deliveryDurationToSeconds(is_array($leg) ? (($leg['duration'] ?? null)) : null);
+        $runningSeconds += $legSeconds;
+
+        $eta = $departure->modify('+' . $runningSeconds . ' seconds');
+        $etaText = $eta->format('Y-m-d H:i:s');
+
+        $fechaLimite = $stop['fecha_limite_entrega'] ?? null;
+        $enRiesgo = false;
+        if (is_string($fechaLimite) && trim($fechaLimite) !== '') {
+            try {
+                $deadline = new DateTimeImmutable($fechaLimite);
+                $enRiesgo = $eta > $deadline;
+            } catch (Throwable $e) {
+                $enRiesgo = false;
+            }
+        }
+
+        $stop['eta_estimada'] = $etaText;
+        $stop['duracion_tramo_s'] = $legSeconds;
+        $stop['en_riesgo'] = $enRiesgo;
+        $orderedWithEta[] = $stop;
+
+        $runningSeconds += max(0, (int)($stop['tiempo_servicio_min'] ?? 0)) * 60;
+
+        if ($enRiesgo) {
+            $riskyStops[] = [
+                'id_pedido' => $stop['id_pedido'] ?? null,
+                'numero_pedido' => $stop['numero_pedido'] ?? null,
+                'fecha_limite_entrega' => $fechaLimite,
+                'eta_estimada' => $etaText,
+            ];
+        }
+    }
+
+    return [
+        'orderedWithEta' => $orderedWithEta,
+        'riskyStops' => $riskyStops,
+        'windowViolations' => deliveryFindWindowViolations($orderedWithEta, $departure),
+    ];
+}
+
+/**
  * Ordena paradas por urgencia de horario de entrega antes de generar la ruta.
  *
  * @param array<int, array<string, mixed>> $stops
@@ -743,31 +884,17 @@ function deliveryOrderStopsByWindowPriority(array $stops, DateTimeImmutable $dep
     $unscheduled = [];
 
     foreach ($stops as $index => $stop) {
-        $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
-        $bestDeadline = null;
-        $bestWindow = null;
-
-        foreach ($preferences['ventanas'] as $window) {
-            $deadline = deliveryWindowDeadlineTimestamp($window, $departure);
-            if ($deadline === null) {
-                continue;
-            }
-
-            if ($bestDeadline === null || $deadline < $bestDeadline) {
-                $bestDeadline = $deadline;
-                $bestWindow = $window;
-            }
-        }
+        $resolved = deliveryResolveBestWindowDeadline($stop, $departure);
 
         $enrichedStop = [
             'index' => $index,
             'stop' => $stop,
-            'window' => $bestWindow,
-            'deadline' => $bestDeadline,
+            'window' => $resolved['window'],
+            'deadline' => $resolved['deadline'],
             'priority' => (int) ($stop['prioridad_entrega'] ?? 0),
         ];
 
-        if ($bestDeadline !== null) {
+        if ($resolved['deadline'] !== null) {
             $scheduled[] = $enrichedStop;
         } else {
             $unscheduled[] = $enrichedStop;
@@ -840,6 +967,85 @@ function deliveryOrderStopsByWindowPriority(array $stops, DateTimeImmutable $dep
         $clockTs += max(0, ((int)($scheduledStop['tiempo_servicio_min'] ?? 5)) * 60);
         $currentPoint = deliveryExtractPoint($scheduledStop) ?? $currentPoint;
     }
+
+    while (!empty($unscheduled)) {
+        if ($currentPoint === null) {
+            $chosenKey = array_key_first($unscheduled);
+        } else {
+            $chosenKey = null;
+            $chosenDistance = null;
+            foreach ($unscheduled as $key => $candidate) {
+                $distance = deliveryEstimateTravelSeconds($currentPoint, $candidate['stop']);
+                if ($chosenDistance === null || $distance < $chosenDistance) {
+                    $chosenDistance = $distance;
+                    $chosenKey = $key;
+                }
+            }
+        }
+
+        if ($chosenKey === null) {
+            break;
+        }
+
+        $stop = $unscheduled[$chosenKey]['stop'];
+        $ordered[] = $stop;
+        $currentPoint = deliveryExtractPoint($stop) ?? $currentPoint;
+        unset($unscheduled[$chosenKey]);
+        $unscheduled = array_values($unscheduled);
+    }
+
+    return $ordered;
+}
+
+/**
+ * Variante estricta de deliveryOrderStopsByWindowPriority: coloca todas las
+ * paradas con ventana de horario, en orden de deadline, antes que cualquier
+ * parada sin horario (sin intercalar). Se usa como correccion cuando el
+ * entrelazado optimista resulto en una violacion real de ventana, porque
+ * garantiza llegar a las paradas con horario lo antes fisicamente posible.
+ *
+ * @param array<int, array<string, mixed>> $stops
+ * @return array<int, array<string, mixed>>
+ */
+function deliveryOrderStopsStrictWindowFirst(array $stops, DateTimeImmutable $departure, ?array $origin = null): array
+{
+    $scheduled = [];
+    $unscheduled = [];
+
+    foreach ($stops as $index => $stop) {
+        $resolved = deliveryResolveBestWindowDeadline($stop, $departure);
+
+        $enrichedStop = [
+            'index' => $index,
+            'stop' => $stop,
+            'deadline' => $resolved['deadline'],
+            'priority' => (int) ($stop['prioridad_entrega'] ?? 0),
+        ];
+
+        if ($resolved['deadline'] !== null) {
+            $scheduled[] = $enrichedStop;
+        } else {
+            $unscheduled[] = $enrichedStop;
+        }
+    }
+
+    usort($scheduled, static function (array $left, array $right): int {
+        if ($left['deadline'] === $right['deadline']) {
+            return $right['priority'] <=> $left['priority'];
+        }
+        return $left['deadline'] <=> $right['deadline'];
+    });
+
+    $ordered = [];
+    foreach ($scheduled as $scheduledItem) {
+        $ordered[] = $scheduledItem['stop'];
+    }
+
+    $currentPoint = !empty($ordered)
+        ? deliveryExtractPoint($ordered[count($ordered) - 1])
+        : ($origin !== null && isset($origin['lat'], $origin['lng'])
+            ? ['lat' => (float)$origin['lat'], 'lng' => (float)$origin['lng']]
+            : null);
 
     while (!empty($unscheduled)) {
         if ($currentPoint === null) {
