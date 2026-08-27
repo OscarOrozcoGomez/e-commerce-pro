@@ -1150,6 +1150,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let epUploadedForFile = null;
     let epServerPhotoFile = null; // foto ya subida en un intento anterior, reconstruida como File para poder compartirla
     let epDidPublishSomething = false; // si se logro publicar algo en este pedido, recargar al cerrar
+    let epFacebookDone = false; // publicado en Facebook en ESTA sesion del modal
+    let epCompartirDone = false; // compartido/WhatsApp en ESTA sesion del modal
+    const btnFacebookDefaultHtml = btnFacebook.innerHTML;
+    const btnCompartirDefaultHtml = btnCompartir.innerHTML;
 
     // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
     // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
@@ -1168,10 +1172,11 @@ document.addEventListener('DOMContentLoaded', function() {
         statusEl.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
     }
 
-    function epSetButtonsDisabled(disabled) {
-        [btnFacebook, btnCompartir].forEach((btn) => {
-            btn.classList.toggle('disabled', disabled);
-        });
+    // A diferencia de antes, cada boton se habilita/deshabilita por su cuenta: publicar en
+    // Facebook no debe bloquear el boton de Compartir (y viceversa), para poder hacer ambas
+    // redes en la misma sesion del modal sin que una tape a la otra.
+    function epSetButtonBusy(btn, busy) {
+        btn.classList.toggle('disabled', busy);
     }
 
     // Prepara el modal para un pedido dado: pide texto/colonia sugeridos y precarga la foto si
@@ -1184,6 +1189,12 @@ document.addEventListener('DOMContentLoaded', function() {
         epUploadedForFile = null;
         epServerPhotoFile = null;
         epDidPublishSomething = false;
+        epFacebookDone = false;
+        epCompartirDone = false;
+        btnFacebook.innerHTML = btnFacebookDefaultHtml;
+        btnCompartir.innerHTML = btnCompartirDefaultHtml;
+        epSetButtonBusy(btnFacebook, false);
+        epSetButtonBusy(btnCompartir, false);
         epSetStatus('', false);
         previewEl.style.display = 'none';
         previewEl.src = '';
@@ -1357,18 +1368,19 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     }
 
-    // Tras publicar (Facebook o compartir) se recarga la pagina un momento despues, para que
-    // la tarjeta de este pedido refleje el nuevo estado (o desaparezca si ya quedo publicado
-    // en ambas redes). Se deja ver el mensaje de status un momento antes de recargar.
-    function epReloadSoonIfPublished() {
-        if (epDidPublishSomething) {
-            setTimeout(function () { location.reload(); }, 900);
-        }
-    }
-
+    // No se recarga la pagina justo despues de publicar en Facebook o WhatsApp: eso sacaba al
+    // repartidor del modal a medio proceso (publicar Facebook recargaba la pagina y lo obligaba
+    // a volver a abrir el modal para hacer WhatsApp, y se sentia como si "se hubiera
+    // desmarcado"). Ahora puede hacer ambas dentro de la MISMA sesion del modal, cada boton
+    // se deshabilita solo por su cuenta al terminar (no el otro), y la pagina solo se recarga
+    // al cerrar el modal (boton OMITIR), para que la tarjeta refleje el estado final o
+    // desaparezca si ya quedo completo en ambas redes.
     btnFacebook.addEventListener('click', function (e) {
         e.preventDefault();
-        epSetButtonsDisabled(true);
+        if (epFacebookDone) {
+            return;
+        }
+        epSetButtonBusy(btnFacebook, true);
         epSetStatus('Publicando en Facebook...', false);
         epEnsureUploaded()
             .then((idPublicacion) => fetch(epEndpoint, {
@@ -1387,22 +1399,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!data || !data.success) {
                     throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
                 }
-                epSetStatus('Publicado en Facebook correctamente.', false);
+                epSetStatus('Publicado en Facebook correctamente. Puedes seguir con WhatsApp o cerrar.', false);
                 epDidPublishSomething = true;
-                epReloadSoonIfPublished();
+                epFacebookDone = true;
+                btnFacebook.innerHTML = '<i class="material-icons left">check_circle</i> YA PUBLICADO EN FACEBOOK';
+                // Se queda deshabilitado (evita publicar dos veces); Compartir sigue disponible.
             })
-            .catch((err) => epSetStatus(err.message, true))
-            .finally(() => epSetButtonsDisabled(false));
+            .catch((err) => {
+                epSetStatus(err.message, true);
+                epSetButtonBusy(btnFacebook, false);
+            });
     });
 
     btnCompartir.addEventListener('click', function (e) {
         e.preventDefault();
+        if (epCompartirDone) {
+            return;
+        }
         const file = (fotoInputEl.files && fotoInputEl.files[0]) || epServerPhotoFile;
         if (!file && !epUploadedId) {
             epSetStatus('Selecciona una foto de la entrega primero.', true);
             return;
         }
-        epSetButtonsDisabled(true);
+        epSetButtonBusy(btnCompartir, true);
         epSetStatus('Preparando para compartir...', false);
         epEnsureUploaded()
             .then((idPublicacion) => {
@@ -1415,13 +1434,16 @@ document.addEventListener('DOMContentLoaded', function() {
                             body: JSON.stringify({ action: 'marcar_compartido', id_pedido: epCurrentIdPedido, id_publicacion: idPublicacion, csrf_token: epCsrfToken }),
                         }))
                         .then(() => {
-                            epSetStatus('Listo, elige WhatsApp (Estado) o Facebook en el menu para publicar.', false);
+                            epSetStatus('Listo. Puedes seguir con Facebook o cerrar.', false);
                             epDidPublishSomething = true;
-                            epReloadSoonIfPublished();
+                            epCompartirDone = true;
+                            btnCompartir.innerHTML = '<i class="material-icons left">check_circle</i> YA COMPARTIDO';
+                            // Se queda deshabilitado; Facebook sigue disponible.
                         })
                         .catch((err) => {
                             if (err && err.name === 'AbortError') {
                                 epSetStatus('', false);
+                                epSetButtonBusy(btnCompartir, false);
                                 return;
                             }
                             throw err;
@@ -1432,14 +1454,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     navigator.clipboard.writeText(textoEl.value).catch(() => {});
                 }
                 epSetStatus('Tu navegador no soporta compartir directo. Se copio el texto; descarga la foto desde la vista previa y compartela manualmente.', true);
+                epSetButtonBusy(btnCompartir, false);
             })
-            .catch((err) => epSetStatus(err.message, true))
-            .finally(() => epSetButtonsDisabled(false));
+            .catch((err) => {
+                epSetStatus(err.message, true);
+                epSetButtonBusy(btnCompartir, false);
+            });
     });
 
     btnOmitir.addEventListener('click', function () {
         epGetModalInstance().close();
-        epReloadSoonIfPublished();
+        if (epDidPublishSomething) {
+            location.reload();
+        }
     });
 });
 </script>
