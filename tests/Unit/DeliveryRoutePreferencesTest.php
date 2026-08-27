@@ -148,7 +148,10 @@ final class DeliveryRoutePreferencesTest extends TestCase
 
     public function testDeliveryOrderStopsByWindowPriorityKeepsUrgentWindowBeforeUnscheduledWhenNoSlack(): void
     {
-        $departure = new DateTimeImmutable('2026-08-10 16:50:00'); // lunes
+        // 17:10, a 10 min del deadline efectivo (17:00 + 20 min de tolerancia por
+        // distancia, ya que el origen esta a menos de 10km de la parada 10): no alcanza
+        // el margen de 5 min que exige el algoritmo para justificar un desvio.
+        $departure = new DateTimeImmutable('2026-08-10 17:10:00'); // lunes
         $origin = ['lat' => 20.6596988, 'lng' => -103.3496092];
 
         $stops = [
@@ -249,6 +252,52 @@ final class DeliveryRoutePreferencesTest extends TestCase
         $this->assertCount(1, $violations, 'La ventana con segundos (formato TIME de MySQL) debe detectarse, no descartarse.');
         $this->assertSame(35, $violations[0]['id_pedido']);
         $this->assertSame('16:00', $violations[0]['ventana_fin']);
+    }
+
+    public function testDeliveryToleranceSecondsForDistanceUsesTieredScale(): void
+    {
+        $this->assertSame(20 * 60, deliveryToleranceSecondsForDistance(5000.0));
+        $this->assertSame(20 * 60, deliveryToleranceSecondsForDistance(9999.0));
+        $this->assertSame(30 * 60, deliveryToleranceSecondsForDistance(10000.0));
+        $this->assertSame(30 * 60, deliveryToleranceSecondsForDistance(25000.0));
+        $this->assertSame(60 * 60, deliveryToleranceSecondsForDistance(25001.0));
+        $this->assertSame(60 * 60, deliveryToleranceSecondsForDistance(60000.0));
+    }
+
+    /**
+     * La tolerancia es interna (logistica): no cambia la ventana que se le prometio al
+     * cliente, solo evita que el sistema trate como "incumplida" una llegada apenas tarde
+     * cuando la parada esta lejos del origen. Una parada cercana (<10km) con 25 min de
+     * retraso SI debe marcarse (excede su tolerancia de 20 min); una parada lejana
+     * (>25km) con el mismo retraso NO debe marcarse (esta dentro de su tolerancia de 60 min).
+     */
+    public function testDeliveryFindWindowViolationsAppliesDistanceBasedTolerance(): void
+    {
+        $departure = new DateTimeImmutable('2026-08-26 14:00:00'); // miercoles
+        $origin = ['lat' => 20.6596988, 'lng' => -103.3496092];
+
+        $stopCercanaConRetraso25Min = [
+            'id_pedido' => 1,
+            'numero_pedido' => 'DOM-1',
+            'lat' => 20.6650, // a pocos km del origen
+            'lng' => -103.3550,
+            'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
+            'eta_estimada' => '2026-08-26 16:25:00', // 25 min tarde
+        ];
+
+        $stopLejanaConRetraso25Min = [
+            'id_pedido' => 2,
+            'numero_pedido' => 'DOM-2',
+            'lat' => 20.9000, // muy lejos del origen (>25km)
+            'lng' => -103.6000,
+            'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
+            'eta_estimada' => '2026-08-26 16:25:00', // mismo retraso: 25 min tarde
+        ];
+
+        $violations = deliveryFindWindowViolations([$stopCercanaConRetraso25Min, $stopLejanaConRetraso25Min], $departure, $origin);
+
+        $this->assertCount(1, $violations, 'Solo la parada cercana deberia marcarse: su retraso excede su tolerancia de 20 min.');
+        $this->assertSame(1, $violations[0]['id_pedido']);
     }
 
     public function testDeliveryFindWindowViolationsFlagsStopsThatArriveAfterWindowEnds(): void
