@@ -97,13 +97,30 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
 
         if ($_POST['accion'] === 'entregar') {
             try {
-                // Confirma entrega y cobro simultaneamente (pago contra entrega)
-                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
-                $stmt->execute([$id_pedido, $usuario['id_usuario']]);
-                if ($stmt->rowCount() > 0) {
-                    logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
-                    $success = 'Pedido entregado y cobrado correctamente.';
-                    $justDeliveredPedidoId = $id_pedido;
+                // Flujo nuevo: la foto de evidencia se sube ANTES de cobrar (mientras el pedido
+                // sigue en_reparto, ver boton "SUBIR EVIDENCIA" en la tarjeta). Esta comprobacion
+                // es la misma regla que ya oculta el boton "ENTREGADO Y COBRADO" en la interfaz,
+                // repetida aqui por si alguien intenta mandar el POST directo sin pasar por la UI.
+                $tieneEvidencia = true;
+                $stmtEvTabla = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedido_publicaciones'");
+                $stmtEvTabla->execute();
+                if (((int)$stmtEvTabla->fetchColumn()) > 0) {
+                    $stmtEv = $pdo->prepare("SELECT COUNT(*) FROM pedido_publicaciones WHERE id_pedido = ?");
+                    $stmtEv->execute([$id_pedido]);
+                    $tieneEvidencia = ((int)$stmtEv->fetchColumn()) > 0;
+                }
+
+                if (!$tieneEvidencia) {
+                    $error = 'Sube una foto de evidencia de la entrega antes de confirmar el cobro.';
+                } else {
+                    // Confirma entrega y cobro simultaneamente (pago contra entrega)
+                    $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
+                    $stmt->execute([$id_pedido, $usuario['id_usuario']]);
+                    if ($stmt->rowCount() > 0) {
+                        logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
+                        $success = 'Pedido entregado y cobrado correctamente.';
+                        $justDeliveredPedidoId = $id_pedido;
+                    }
                 }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
@@ -295,11 +312,22 @@ try {
         ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = p.id_pedido)"
         : '';
 
+    $stmtMetaPublicaciones = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedido_publicaciones'");
+    $stmtMetaPublicaciones->execute();
+    $hasPedidoPublicacionesTable = ((int)$stmtMetaPublicaciones->fetchColumn()) > 0;
+    // Flujo nuevo: foto de evidencia ANTES de cobrar (mientras el pedido sigue en_reparto).
+    // Se toma la fila mas reciente por si el repartidor subio mas de una.
+    $evidenciaExpr = $hasPedidoPublicacionesTable
+        ? "(SELECT pp.id_publicacion FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1) AS id_publicacion_evidencia,
+           (SELECT pp.ruta_foto FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1) AS ruta_foto_evidencia"
+        : "NULL AS id_publicacion_evidencia, NULL AS ruta_foto_evidencia";
+
         $sql = "SELECT p.*, p.observaciones,
                    c.nombre as cliente, {$direccionExpr}, {$telefonoExpr}, {$mapExpr},
                    {$fechaLimiteExpr}, {$prioridadExpr},
                    ur.nombre AS repartidor_nombre,
-                   {$latitudExpr}, {$longitudExpr}
+                   {$latitudExpr}, {$longitudExpr},
+                   {$evidenciaExpr}
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN usuarios ur ON p.id_repartidor = ur.id_usuario
@@ -781,11 +809,14 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
-                                <?php $esAccionEntregar = !in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado']); ?>
-                                <form method="POST">
-                                    <?php echo csrfInput(); ?>
-                                    <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                    <?php if (!$esAccionEntregar): ?>
+                                <?php
+                                    $enReparto = ($ent['estado'] ?? '') === 'en_reparto';
+                                    $tieneEvidencia = !empty($ent['id_publicacion_evidencia']);
+                                ?>
+                                <?php if (!$enReparto): ?>
+                                    <form method="POST">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
                                         <input type="hidden" name="accion" value="en_camino">
                                         <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
                                             <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
@@ -795,16 +826,38 @@ include __DIR__ . '/includes/header.php';
                                         <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Vas a salir a entregar este pedido?', 'orange darken-3', 'Sí, salir'); return false;">
                                             SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
                                         </button>
-                                    <?php else: ?>
+                                    </form>
+                                <?php elseif (!$tieneEvidencia): ?>
+                                    <!-- Flujo nuevo: la foto se sube ANTES de cobrar, mientras el pedido sigue
+                                         en_reparto. La venta se queda en esta lista (no desaparece) hasta que
+                                         el repartidor confirma "ENTREGADO Y COBRADO" mas abajo. -->
+                                    <p class="orange-text" style="font-size:0.85rem; margin-bottom:4px;">
+                                        <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                    </p>
+                                    <p class="blue-text text-darken-2" style="font-size:0.85rem; margin-bottom:8px;">
+                                        <i class="material-icons tiny">photo_camera</i> Sube una foto de evidencia antes de cobrar
+                                    </p>
+                                    <input type="file" accept="image/*" capture="environment" class="ev-foto-input" id="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
+                                    <button type="button" class="btn blue waves-effect waves-light w-100 ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
+                                        <i class="material-icons left">photo_camera</i> SUBIR EVIDENCIA
+                                    </button>
+                                    <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
+                                <?php else: ?>
+                                    <form method="POST">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
                                         <input type="hidden" name="accion" value="entregar">
+                                        <p class="green-text text-darken-2" style="font-size:0.8rem; margin-bottom:4px;">
+                                            <i class="material-icons tiny">check_circle</i> Evidencia subida
+                                        </p>
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro de este pedido? Despues podras subir la foto y publicarlo en redes.', 'green', 'Sí, confirmar'); return false;">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro de este pedido? Despues podras publicarlo en redes.', 'green', 'Sí, confirmar'); return false;">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
-                                    <?php endif; ?>
-                                </form>
+                                    </form>
+                                <?php endif; ?>
 
                                 <button type="button" class="btn-flat red-text waves-effect toggle-cancel-entrega w-100" data-target="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px;">
                                     <i class="material-icons left">cancel</i> No pude entregar
@@ -1289,6 +1342,88 @@ document.addEventListener('DOMContentLoaded', function() {
 
     btnOmitir.addEventListener('click', function () {
         epGetModalInstance().close();
+    });
+});
+</script>
+
+<script>
+// Flujo nuevo: subir la foto de evidencia ANTES de cobrar, mientras el pedido sigue
+// en_reparto (boton "SUBIR EVIDENCIA" en la tarjeta). Independiente del script de arriba:
+// corre siempre, no solo justo despues de marcar una entrega (ver epJustDeliveredId), porque
+// aplica a cualquier tarjeta en_reparto sin evidencia todavia, sin importar cuando se cargo
+// la pagina.
+document.addEventListener('DOMContentLoaded', function () {
+    const evCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
+    const evEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+
+    function evParseJsonResponse(response) {
+        return response.text().then(function (text) {
+            try {
+                return text ? JSON.parse(text) : null;
+            } catch (e) {
+                throw new Error('El servidor no respondio correctamente (codigo ' + response.status + '). Intenta de nuevo en unos segundos.');
+            }
+        });
+    }
+
+    document.querySelectorAll('.ev-btn-subir').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const inputEl = document.getElementById(btn.getAttribute('data-input') || '');
+            if (inputEl) {
+                inputEl.click();
+            }
+        });
+    });
+
+    document.querySelectorAll('.ev-foto-input').forEach(function (inputEl) {
+        inputEl.addEventListener('change', function () {
+            const file = inputEl.files && inputEl.files[0];
+            if (!file) {
+                return;
+            }
+
+            const idPedido = inputEl.getAttribute('data-id-pedido');
+            const statusEl = document.querySelector('[data-status-for="' + idPedido + '"]');
+            const btnEl = document.querySelector('.ev-btn-subir[data-input="' + inputEl.id + '"]');
+
+            if (statusEl) {
+                statusEl.textContent = 'Subiendo evidencia...';
+                statusEl.className = 'ev-status grey-text';
+            }
+            if (btnEl) {
+                btnEl.classList.add('disabled');
+            }
+
+            const formData = new FormData();
+            formData.append('foto', file);
+            formData.append('id_pedido', idPedido);
+            formData.append('csrf_token', evCsrfToken);
+
+            fetch(evEndpoint, { method: 'POST', body: formData })
+                .then(evParseJsonResponse)
+                .then(function (data) {
+                    if (!data || !data.success) {
+                        throw new Error((data && data.error) || 'No se pudo subir la evidencia.');
+                    }
+                    if (statusEl) {
+                        statusEl.textContent = 'Evidencia subida. Actualizando...';
+                        statusEl.className = 'ev-status green-text';
+                    }
+                    // Recarga para que la tarjeta pase a mostrar "ENTREGADO Y COBRADO": el
+                    // servidor ya detecta la evidencia recien subida en pedido_publicaciones.
+                    setTimeout(function () { location.reload(); }, 500);
+                })
+                .catch(function (err) {
+                    if (statusEl) {
+                        statusEl.textContent = err.message;
+                        statusEl.className = 'ev-status red-text';
+                    }
+                    if (btnEl) {
+                        btnEl.classList.remove('disabled');
+                    }
+                    inputEl.value = '';
+                });
+        });
     });
 });
 </script>
