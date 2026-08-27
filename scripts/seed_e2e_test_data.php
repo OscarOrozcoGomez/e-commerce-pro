@@ -100,6 +100,25 @@ try {
         echo 'Limpieza: ' . count($idsDesechables) . " cuentas 'Playwright QA' desechables sin pedidos eliminadas.\n";
     }
 
+    // Housekeeping: tests/e2e/bulk-assign-category.staff.spec.ts crea una categoria nueva
+    // ("Playwright BAC Categoria ..." / "Playwright BAC Encargado Categoria ...") en cada
+    // corrida via la pestaña "Nueva" de views/bulk_assign_category.php, y nada las borraba
+    // despues -- en una BD local que se reusa entre muchas corridas, el <select> de
+    // categorias termina con cientos de opciones desechables, al grado de romper el layout
+    // de esa vista y hacer que el checkbox de producto (Playwright) ya no sea clickeable en
+    // su posicion esperada. A diferencia de clientes, aqui si se puede filtrar por nombre en
+    // SQL directamente porque categorias.nombre no esta cifrado.
+    $idsCategoriasDesechables = $pdo->query(
+        "SELECT id_categoria FROM categorias WHERE nombre LIKE 'Playwright BAC%'"
+    )->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!empty($idsCategoriasDesechables)) {
+        $placeholdersCat = implode(', ', array_fill(0, count($idsCategoriasDesechables), '?'));
+        $pdo->prepare("DELETE FROM producto_categorias WHERE id_categoria IN ({$placeholdersCat})")->execute($idsCategoriasDesechables);
+        $pdo->prepare("DELETE FROM categorias WHERE id_categoria IN ({$placeholdersCat})")->execute($idsCategoriasDesechables);
+        echo 'Limpieza: ' . count($idsCategoriasDesechables) . " categorias 'Playwright BAC*' desechables eliminadas.\n";
+    }
+
     $idAlmacen = (int) $pdo->query(
         "SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1"
     )->fetchColumn();
