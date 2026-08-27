@@ -934,7 +934,7 @@ try {
         $departure = new DateTimeImmutable('now');
     }
 
-    $etaResult = deliveryBuildOrderedStopsWithEta($orderedByGoogle, $route, $departure);
+    $etaResult = deliveryBuildOrderedStopsWithEta($orderedByGoogle, $route, $departure, $origin);
     $orderedWithEta = $etaResult['orderedWithEta'];
     $riskyStops = $etaResult['riskyStops'];
     $windowViolations = $etaResult['windowViolations'];
@@ -959,7 +959,7 @@ try {
             if ($retry === null) {
                 error_log('optimize_delivery_route: reintento de correccion por ventana de horario fallo, se conserva el orden original.');
             } else {
-                $retryEtaResult = deliveryBuildOrderedStopsWithEta($strictOrder, $retry['route'], $departure);
+                $retryEtaResult = deliveryBuildOrderedStopsWithEta($strictOrder, $retry['route'], $departure, $origin);
                 if (deliverySumWindowLateness($retryEtaResult['windowViolations']) < deliverySumWindowLateness($windowViolations)) {
                     $orderedByGoogle = $strictOrder;
                     $optimizedIndex = array_keys($orderedByGoogle);
