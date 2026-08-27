@@ -56,6 +56,10 @@ scripts/_img_diag_after.php
 scripts/_img_diag_after_report.txt
 scripts/_tmp_*.php
 
+# Scripts de un solo uso para sembrar/probar datos de prueba en local (ej. seed de
+# Comportamiento en el Sitio) -- generan datos, no logica; nunca se suben al repo.
+scripts/dev_*.php
+
 # Guia interna local, no subir al repo
 /VENTA_SIN_INVENTARIO.md
 
