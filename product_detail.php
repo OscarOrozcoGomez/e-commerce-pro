@@ -632,6 +632,9 @@ include __DIR__ . '/views/includes/header.php';
                 }
                 localStorage.setItem('cart', JSON.stringify(cart));
                 if (typeof updateCartBadge === 'function') updateCartBadge();
+                if (typeof window.bbTrackEvent === 'function') {
+                    window.bbTrackEvent({ tipo: 'click', url: window.location.href, id: 'add_to_cart', texto: 'Agregar al Carrito', id_producto: currentProduct.id_producto });
+                }
                 M.toast({html: `¡${qty}x ${currentProduct.nombre} agregado!`, classes: 'rounded green'});
             }
         });

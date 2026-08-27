@@ -13,6 +13,7 @@ const VENTAS_FEATURE_KEYS = [
     'catalogo_feed',
     'programa_referidos',
     'stock_calendario_campanas',
+    'comportamiento_sitio',
 ];
 
 function ventasFeaturesGetAll(PDO $pdo): array

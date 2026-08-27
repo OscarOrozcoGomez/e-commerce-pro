@@ -1016,7 +1016,28 @@
                     credentials: 'same-origin'
                 }).catch(() => {});
             }
-            
+
+            // Otras paginas (ej. handleAddToCart en catalogo.php) usan esto para reportar
+            // clics con contexto que el listener genérico de abajo no puede inferir del DOM
+            // (ej. id_producto en un boton "Agregar al Carrito" sin id fijo en el HTML).
+            window.bbTrackEvent = sendActivity;
+
+            // Id unico por carga de pagina (no por visitante -- ver getVisitorId() para eso).
+            // Enlaza el evento 'visit' de abajo con el evento 'duration' que se manda al
+            // salir de la pagina, para saber cuanto tiempo estuvo viendola el visitante.
+            function makePageviewId() {
+                const bytes = new Uint8Array(16);
+                if (window.crypto && window.crypto.getRandomValues) {
+                    window.crypto.getRandomValues(bytes);
+                } else {
+                    for (let i = 0; i < bytes.length; i++) {
+                        bytes[i] = Math.floor(Math.random() * 256);
+                    }
+                }
+                return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+            const pageviewId = makePageviewId();
+
             // 1. Registrar Visita a la página, incluyendo atribucion de marketing
             // (persistAttribution() ya la guardo en localStorage si la URL trajo UTM/gclid).
             // El referrer se lee siempre en este momento, no solo cuando hay UTM, para que
@@ -1025,7 +1046,8 @@
                 const visitPayload = {
                     tipo: 'visit',
                     url: window.location.href,
-                    referrer: document.referrer || ''
+                    referrer: document.referrer || '',
+                    pageview_id: pageviewId
                 };
 
                 try {
@@ -1046,6 +1068,36 @@
                 }
 
                 sendActivity(visitPayload);
+            })();
+
+            // 1b. Medir cuanto tiempo estuvo la pagina visible (no solo abierta -- una
+            // pestaña en segundo plano no cuenta) y mandarlo al salir. Comportamiento en
+            // el Sitio: que tanto se detiene la gente a ver un producto/pagina.
+            (function() {
+                let visibleSinceMs = document.visibilityState === 'visible' ? Date.now() : null;
+                let accumulatedMs = 0;
+
+                function flush() {
+                    if (visibleSinceMs !== null) {
+                        accumulatedMs += Date.now() - visibleSinceMs;
+                        visibleSinceMs = null;
+                    }
+                    const segundos = Math.round(accumulatedMs / 1000);
+                    if (segundos > 0) {
+                        sendActivity({ tipo: 'duration', pageview_id: pageviewId, segundos: segundos });
+                    }
+                }
+
+                document.addEventListener('visibilitychange', function() {
+                    if (document.visibilityState === 'visible') {
+                        visibleSinceMs = Date.now();
+                    } else {
+                        // Manda el acumulado parcial en cada cambio a oculto, no solo al
+                        // cerrar: en movil, 'pagehide' no siempre dispara de forma confiable.
+                        flush();
+                    }
+                });
+                window.addEventListener('pagehide', flush);
             })();
 
             // 2. Registrar Clics en elementos interactivos

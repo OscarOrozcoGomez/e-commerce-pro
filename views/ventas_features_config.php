@@ -41,6 +41,12 @@ $featureLabels = [
         'requiere_cuenta' => 'No.',
         'tiene_config' => false,
     ],
+    'comportamiento_sitio' => [
+        'nombre' => 'Comportamiento en el Sitio',
+        'descripcion' => 'Qué productos y páginas ven más tus visitantes, cuánto tiempo se quedan, y qué tanto le dan clic a "Agregar al Carrito" — lo que Google/Facebook no reportan porque pasa dentro de tu sitio.',
+        'requiere_cuenta' => 'No.',
+        'tiene_config' => false,
+    ],
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guardar_config') {
