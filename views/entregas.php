@@ -333,9 +333,23 @@ try {
     // por el flujo de cobro) pero AUN le falta publicar en Facebook o en WhatsApp. Solo aplica
     // a la vista del repartidor: la vista admin es de planeacion de ruta y no necesita ver
     // entregas ya completadas.
+    //
+    // IMPORTANTE: pedido_publicaciones existe desde ANTES de este flujo (commit 41190d1), asi
+    // que hay entregas reales, ya cerradas hace tiempo, con una fila de evidencia pero sin
+    // publicado_facebook/compartido_manual en 1 (el repartidor publico una sola red, o ninguna,
+    // porque antes eso era opcional). Sin este corte, TODAS esas entregas historicas
+    // reaparecerian de golpe como "pendientes" al desplegar este cambio (paso justo eso en
+    // produccion). ENTREGA_PUBLICACION_PERSISTENCIA_DESDE limita el comportamiento nuevo a
+    // evidencia subida a partir de este despliegue, dejando en paz el historial.
+    // TODO: una vez que ya no haya riesgo de confundir historial viejo, se puede quitar este
+    // corte y aplicar el filtro sin importar la fecha.
+    if (!defined('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE')) {
+        define('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE', '2026-08-26 22:00:00');
+    }
     $entregadoPendientePublicarFilter = ($hasPedidoPublicacionesTable && $isRepartidorView)
         ? " OR (p.estado = 'entregado' AND EXISTS (
-                SELECT 1 FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido
+                SELECT 1 FROM pedido_publicaciones pp
+                WHERE pp.id_pedido = p.id_pedido AND pp.creado_en >= " . $pdo->quote(ENTREGA_PUBLICACION_PERSISTENCIA_DESDE) . "
             ) AND (
                 COALESCE((SELECT pp.publicado_facebook FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1), 0) = 0
                 OR COALESCE((SELECT pp.compartido_manual FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1), 0) = 0
