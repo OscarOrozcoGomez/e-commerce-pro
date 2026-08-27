@@ -25,10 +25,14 @@ $porPagina = [];
 $porElemento = [];
 
 if ($featureActiva) {
+    // id_usuario IS NULL en todas las consultas de aqui en adelante: descarta la
+    // actividad de personal logueado (vendedores/almacen usando el panel admin) para
+    // que el reporte refleje comportamiento de visitantes/compradores, no clics
+    // internos del sistema (ej. "CONFIRMAR PEDIDO", "ASIGNAR ENTREGAS").
     $totalesStmt = $pdo->prepare(
         "SELECT COUNT(*) AS visitas, COUNT(duracion_segundos) AS con_tiempo, AVG(duracion_segundos) AS promedio
          FROM logs_actividad
-         WHERE tipo_accion = 'visit' AND DATE(fecha_creacion) BETWEEN :inicio AND :fin"
+         WHERE tipo_accion = 'visit' AND id_usuario IS NULL AND DATE(fecha_creacion) BETWEEN :inicio AND :fin"
     );
     $totalesStmt->execute([':inicio' => $fecha_inicio, ':fin' => $fecha_fin]);
     $totales = $totalesStmt->fetch() ?: $totales;
@@ -45,14 +49,14 @@ if ($featureActiva) {
          INNER JOIN (
              SELECT id_producto, COUNT(*) AS vistas, AVG(duracion_segundos) AS tiempo_promedio
              FROM logs_actividad
-             WHERE tipo_accion = 'visit' AND id_producto IS NOT NULL
+             WHERE tipo_accion = 'visit' AND id_producto IS NOT NULL AND id_usuario IS NULL
                AND DATE(fecha_creacion) BETWEEN :inicio1 AND :fin1
              GROUP BY id_producto
          ) v ON v.id_producto = p.id_producto
          LEFT JOIN (
              SELECT id_producto, COUNT(*) AS clics
              FROM logs_actividad
-             WHERE tipo_accion = 'click' AND elemento_id = 'add_to_cart' AND id_producto IS NOT NULL
+             WHERE tipo_accion = 'click' AND elemento_id = 'add_to_cart' AND id_producto IS NOT NULL AND id_usuario IS NULL
                AND DATE(fecha_creacion) BETWEEN :inicio2 AND :fin2
              GROUP BY id_producto
          ) c ON c.id_producto = p.id_producto
@@ -73,7 +77,7 @@ if ($featureActiva) {
                 COUNT(*) AS vistas,
                 AVG(duracion_segundos) AS tiempo_promedio
          FROM logs_actividad
-         WHERE tipo_accion = 'visit' AND url != ''
+         WHERE tipo_accion = 'visit' AND url != '' AND id_usuario IS NULL
            AND DATE(fecha_creacion) BETWEEN :inicio AND :fin
          GROUP BY pagina
          ORDER BY vistas DESC
@@ -85,7 +89,7 @@ if ($featureActiva) {
     $porElementoStmt = $pdo->prepare(
         "SELECT COALESCE(NULLIF(elemento_texto, ''), '(sin texto)') AS elemento, COUNT(*) AS clics
          FROM logs_actividad
-         WHERE tipo_accion = 'click' AND DATE(fecha_creacion) BETWEEN :inicio AND :fin
+         WHERE tipo_accion = 'click' AND id_usuario IS NULL AND DATE(fecha_creacion) BETWEEN :inicio AND :fin
          GROUP BY elemento
          ORDER BY clics DESC
          LIMIT 20"
