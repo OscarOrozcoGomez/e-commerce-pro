@@ -838,7 +838,7 @@ include __DIR__ . '/includes/header.php';
                                         <i class="material-icons tiny">photo_camera</i> Sube una foto de evidencia antes de cobrar
                                     </p>
                                     <input type="file" accept="image/*" capture="environment" class="ev-foto-input" id="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
-                                    <button type="button" class="btn blue waves-effect waves-light w-100 ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
+                                    <button type="button" class="btn deep-purple waves-effect waves-light w-100 ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
                                         <i class="material-icons left">photo_camera</i> SUBIR EVIDENCIA
                                     </button>
                                     <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
