@@ -138,6 +138,20 @@ try {
         echo 'Limpieza: ' . count($idsSucursalesDesechables) . " sucursales 'Playwright Sucursal*' desechables eliminadas.\n";
     }
 
+    // Housekeeping: tests/e2e/manage-blogs.staff.spec.ts crea articulos nuevos
+    // ("Playwright Blog ...") en cada corrida y nada los borraba despues -- mismo patron que
+    // arriba. blogs no tiene FKs entrantes (solo id_usuario, que es el autor), asi que se
+    // pueden borrar directo por nombre.
+    $idsBlogsDesechables = $pdo->query(
+        "SELECT id_blog FROM blogs WHERE titulo LIKE 'Playwright Blog%'"
+    )->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!empty($idsBlogsDesechables)) {
+        $placeholdersBlog = implode(', ', array_fill(0, count($idsBlogsDesechables), '?'));
+        $pdo->prepare("DELETE FROM blogs WHERE id_blog IN ({$placeholdersBlog})")->execute($idsBlogsDesechables);
+        echo 'Limpieza: ' . count($idsBlogsDesechables) . " articulos 'Playwright Blog*' desechables eliminados.\n";
+    }
+
     $idAlmacen = (int) $pdo->query(
         "SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1"
     )->fetchColumn();
