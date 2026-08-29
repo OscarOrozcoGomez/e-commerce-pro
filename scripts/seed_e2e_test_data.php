@@ -119,6 +119,25 @@ try {
         echo 'Limpieza: ' . count($idsCategoriasDesechables) . " categorias 'Playwright BAC*' desechables eliminadas.\n";
     }
 
+    // Housekeeping: tests/e2e/admin-branches.staff.spec.ts crea una sucursal nueva
+    // ("Playwright Sucursal ...") en cada corrida (alta, editar, cambiar estado) y nada las
+    // borraba despues -- mismo patron que las categorias de arriba. Solo se borran las que
+    // nadie mas referencia (sin inventario, sin usuarios ni pedidos asignados), que es
+    // siempre el caso para estas de prueba.
+    $idsSucursalesDesechables = $pdo->query(
+        "SELECT id_almacen FROM almacenes
+         WHERE nombre LIKE 'Playwright Sucursal%'
+           AND id_almacen NOT IN (SELECT DISTINCT id_almacen FROM inventario_almacen WHERE id_almacen IS NOT NULL)
+           AND id_almacen NOT IN (SELECT DISTINCT id_almacen FROM usuarios WHERE id_almacen IS NOT NULL)
+           AND id_almacen NOT IN (SELECT DISTINCT id_almacen FROM pedidos WHERE id_almacen IS NOT NULL)"
+    )->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!empty($idsSucursalesDesechables)) {
+        $placeholdersSuc = implode(', ', array_fill(0, count($idsSucursalesDesechables), '?'));
+        $pdo->prepare("DELETE FROM almacenes WHERE id_almacen IN ({$placeholdersSuc})")->execute($idsSucursalesDesechables);
+        echo 'Limpieza: ' . count($idsSucursalesDesechables) . " sucursales 'Playwright Sucursal*' desechables eliminadas.\n";
+    }
+
     $idAlmacen = (int) $pdo->query(
         "SELECT id_almacen FROM almacenes WHERE estado = 'activo' ORDER BY id_almacen ASC LIMIT 1"
     )->fetchColumn();

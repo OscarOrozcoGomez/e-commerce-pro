@@ -70,7 +70,12 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="id_almacen" value="<?php echo (int)$almacenId; ?>">
                         
                         <div class="input-field">
-                            <input type="text" id="buscador-inbound" class="autocomplete" autocomplete="off">
+                            <!-- no-autoinit: views/includes/footer.php llama M.AutoInit() en cada pagina, que
+                                 reinicializa CUALQUIER .autocomplete despues de que initAutocomplete() (abajo) ya lo
+                                 inicializo con los productos reales -- la segunda inicializacion trae data:{} por
+                                 defecto y deja caer el dropdown vacio (la resolucion por blur seguia funcionando,
+                                 pero sin sugerencias visibles). no-autoinit excluye este input de ese segundo pase. -->
+                            <input type="text" id="buscador-inbound" class="autocomplete no-autoinit" autocomplete="off">
                             <label for="buscador-inbound">Buscar Producto (SKU o Nombre)</label>
                             <input type="hidden" name="id_producto" id="id_producto_inbound">
                         </div>

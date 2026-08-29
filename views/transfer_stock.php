@@ -41,7 +41,12 @@ include __DIR__ . '/includes/header.php';
                         <div class="row">
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">search</i>
-                                <input type="text" id="p-search" class="autocomplete" autocomplete="off" required>
+                                <!-- no-autoinit: views/includes/footer.php llama M.AutoInit() en cada pagina, que
+                                     reinicializa CUALQUIER .autocomplete despues de que este script ya lo inicializo
+                                     con los productos reales -- la segunda inicializacion (de AutoInit) trae data:{}
+                                     por defecto y deja el dropdown sin opciones, sin ninguna forma de elegir un
+                                     producto. no-autoinit excluye este input del pase de AutoInit. -->
+                                <input type="text" id="p-search" class="autocomplete no-autoinit" autocomplete="off" required>
                                 <label for="p-search">Buscar Producto (SKU o Nombre)</label>
                                 <input type="hidden" name="id_producto" id="id_producto_transfer">
                             </div>
