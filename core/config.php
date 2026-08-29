@@ -468,6 +468,11 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
     define('GOOGLE_MAPS_API_KEY', getMapsApiKey(false));
 }
 
+// Palabra clave que, si aparece en las notas de un pedido capturado por un admin/encargado,
+// hace que ese pedido no descuente inventario (ventas de muestra, cortesía, etc.).
+// Configurable por entorno para no dejarla fija en el código.
+define('SALE_INVENTORY_BYPASS_KEYWORD', getEnvVar('SALE_INVENTORY_BYPASS_KEYWORD', 'SININVENTARIO'));
+
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
 const PRODUCTS_IMG_DIR = __DIR__ . '/../assets/img/products/';
@@ -625,7 +630,8 @@ function sendSecurityHeaders(): void
     // bloquea por CSP y el tinymce.init() que le sigue en la misma etiqueta <script> lanza
     // "tinymce is not defined", lo que aborta el resto de ese bloque -- incluido el listener de
     // autogeneracion de slug -- para todo admin/encargado real, no solo en pruebas.
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
+    // googleads.g.doubleclick.net / googleadservices.com: tag de Google Ads (ver PR #74).
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 
     // Evitar que páginas autenticadas queden en cache del navegador/proxies compartidos.

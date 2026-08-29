@@ -60,9 +60,14 @@ function epResolvePageAccessToken(string $pageId, string $storedToken): string
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 10,
     ]);
     $response = curl_exec($ch);
+    $curlError = curl_error($ch);
     curl_close($ch);
+    if ($curlError !== '') {
+        error_log("entrega_publicacion.php: epResolvePageAccessToken curl fallo: {$curlError}");
+    }
 
     $decoded = is_string($response) ? json_decode($response, true) : null;
     $derivedToken = is_array($decoded) ? ($decoded['access_token'] ?? null) : null;
@@ -350,7 +355,14 @@ if ($action === 'publicar_facebook') {
         epJsonResponse(['success' => false, 'error' => 'La foto de esta publicacion ya no existe en el servidor.'], 404);
     }
 
+    // Logging defensivo: si el proceso muere a medias (timeout del servidor, worker matado
+    // por falta de memoria, etc.) un 502 de infraestructura no deja nada en app_error.log
+    // porque nuestro propio manejador de excepciones nunca llega a correr. Estas lineas se
+    // escriben ANTES de cada llamada de red riesgosa, asi que aunque el proceso muera despues,
+    // ya quedo registrado hasta donde alcanzo a llegar.
+    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} id_publicacion={$idPublicacion} - iniciando resolucion de page token");
     $pageToken = epResolvePageAccessToken($pageId, $storedToken);
+    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - page token resuelto, iniciando subida de foto a Facebook");
 
     $ch = curl_init("https://graph.facebook.com/v21.0/{$pageId}/photos");
     curl_setopt_array($ch, [
@@ -362,16 +374,20 @@ if ($action === 'publicar_facebook') {
             'access_token' => $pageToken,
         ],
         CURLOPT_TIMEOUT => 30,
+        CURLOPT_CONNECTTIMEOUT => 10,
     ]);
     $response = curl_exec($ch);
     $curlError = curl_error($ch);
+    $curlErrno = curl_errno($ch);
     curl_close($ch);
+    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - curl termino, errno={$curlErrno} error=" . ($curlError !== '' ? $curlError : '(ninguno)') . ' respuesta_len=' . (is_string($response) ? strlen($response) : 'null'));
 
     $decoded = is_string($response) ? json_decode($response, true) : null;
     $facebookPostId = $decoded['post_id'] ?? $decoded['id'] ?? null;
 
     if ($curlError !== '' || !is_array($decoded) || !$facebookPostId) {
         $errorMsg = $decoded['error']['message'] ?? ($curlError !== '' ? $curlError : 'Respuesta invalida de Facebook.');
+        error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - fallo: {$errorMsg}");
         $stmtErr = $pdo->prepare("UPDATE pedido_publicaciones SET facebook_error = :error WHERE id_publicacion = :id");
         $stmtErr->execute([':error' => (string)$errorMsg, ':id' => $idPublicacion]);
         epJsonResponse(['success' => false, 'error' => 'Facebook rechazo la publicacion: ' . $errorMsg], 502);
