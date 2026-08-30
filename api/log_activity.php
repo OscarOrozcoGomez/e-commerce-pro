@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
-require_once __DIR__ . '/../core/geo_lookup.php';
 require_once __DIR__ . '/../core/site_behavior.php';
 
 ignore_user_abort(true);
@@ -47,8 +46,8 @@ if (!in_array($tipo, ['visit', 'click', 'duration'], true)) {
 
 // 'duration' no es una visita nueva: es el navegador reportando, al salir de la
 // pagina, cuanto tiempo estuvo visible una visita 'visit' ya insertada -- se resuelve
-// con un UPDATE angostado por pageview_id, sin tocar el resto del pipeline (atribucion,
-// geo, etc. ya se guardaron en el evento 'visit' original).
+// con un UPDATE angostado por pageview_id, sin tocar el resto del pipeline (la
+// atribucion ya se guardo en el evento 'visit' original).
 if ($tipo === 'duration') {
     $pageviewId = sanitizePageviewId($data['pageview_id'] ?? null);
     $duracion = clampDurationSeconds($data['segundos'] ?? null);
@@ -109,15 +108,12 @@ $payload = [
     ':landing_page' => null,
     ':plataforma' => null,
     ':visitor_id' => getVisitorId(),
-    ':pais' => null,
-    ':region' => null,
     ':pageview_id' => null,
     ':id_producto' => sanitizeExplicitProductId($data['id_producto'] ?? null),
 ];
 
-// La atribucion de campana (UTM/gclid/referrer) y la geolocalizacion solo aplican
-// a visitas -- un click hereda la atribucion de su visita via visitor_id, no necesita
-// repetirla ni pagar el costo del lookup de geo en cada click.
+// La atribucion de campana (UTM/gclid/referrer) solo aplica a visitas -- un click
+// hereda la atribucion de su visita via visitor_id, no necesita repetirla.
 if ($tipo === 'visit') {
     $attributionFields = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'wbraid', 'gbraid', 'referrer', 'landing_page'];
     foreach ($attributionFields as $field) {
@@ -126,10 +122,6 @@ if ($tipo === 'visit') {
     }
 
     $payload[':plataforma'] = classifyPlatform($data);
-
-    $geo = lookupGeo($ip);
-    $payload[':pais'] = $geo['pais'];
-    $payload[':region'] = $geo['region'];
 
     $payload[':pageview_id'] = sanitizePageviewId($data['pageview_id'] ?? null);
     // La URL (product_detail.php?id=X) es la fuente por defecto de id_producto en una
@@ -149,10 +141,10 @@ $storeLog = static function () use ($payload): void {
         $sql = "INSERT INTO logs_actividad
                 (id_usuario, tipo_accion, url, elemento_id, elemento_texto, ip_address, user_agent,
                  utm_source, utm_medium, utm_campaign, utm_term, utm_content, gclid, wbraid, gbraid,
-                 referrer, landing_page, plataforma, visitor_id, pais, region, pageview_id, id_producto)
+                 referrer, landing_page, plataforma, visitor_id, pageview_id, id_producto)
                 VALUES (:id_usuario, :tipo, :url, :elemento_id, :elemento_texto, :ip, :ua,
                         :utm_source, :utm_medium, :utm_campaign, :utm_term, :utm_content, :gclid, :wbraid, :gbraid,
-                        :referrer, :landing_page, :plataforma, :visitor_id, :pais, :region, :pageview_id, :id_producto)";
+                        :referrer, :landing_page, :plataforma, :visitor_id, :pageview_id, :id_producto)";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($payload);

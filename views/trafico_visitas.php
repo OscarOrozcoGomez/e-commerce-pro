@@ -48,18 +48,6 @@ $porCampanaStmt = $pdo->prepare(
 $porCampanaStmt->execute($params);
 $porCampana = $porCampanaStmt->fetchAll();
 
-$porPaisStmt = $pdo->prepare(
-    "SELECT COALESCE(NULLIF(pais, ''), 'Desconocido') AS pais,
-            COUNT(*) AS total,
-            COUNT(DISTINCT visitor_id) AS unicos
-     FROM logs_actividad" . $whereClause . "
-     GROUP BY pais
-     ORDER BY total DESC
-     LIMIT 20"
-);
-$porPaisStmt->execute($params);
-$porPais = $porPaisStmt->fetchAll();
-
 $atribucionVentasActiva = ventasFeatureIsActive($pdo, 'atribucion_ventas');
 $ventasPorPlataforma = [];
 if ($atribucionVentasActiva) {
@@ -96,7 +84,7 @@ include __DIR__ . '/includes/header.php';
                 <h4 style="margin: 0;"><i class="material-icons left" style="font-size: 2.5rem;">public</i> Tráfico y Campañas</h4>
                 <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
             </div>
-            <p class="grey-text">De dónde vienen tus visitas: plataforma de origen, campaña y país.</p>
+            <p class="grey-text">De dónde vienen tus visitas: plataforma de origen y campaña.</p>
         </div>
     </div>
 
@@ -204,67 +192,32 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 
-    <div class="row">
-        <!-- Por campaña -->
-        <div class="col s12 m6">
-            <div class="card">
-                <div class="card-content">
-                    <span class="card-title">Top Campañas (utm_campaign)</span>
-                    <?php if (empty($porCampana)): ?>
-                        <p class="grey-text">No hay campañas con utm_campaign registradas en el rango seleccionado.</p>
-                    <?php else: ?>
-                        <table class="striped">
-                            <thead>
-                                <tr>
-                                    <th>Origen</th>
-                                    <th>Campaña</th>
-                                    <th>Visitas</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($porCampana as $row): ?>
-                                    <tr>
-                                        <td><small><?php echo esc($row['utm_source'] ?? ''); ?></small></td>
-                                        <td><small><?php echo esc($row['utm_campaign']); ?></small></td>
-                                        <td><?php echo number_format((int) $row['total']); ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <!-- Por país -->
-        <div class="col s12 m6">
-            <div class="card">
-                <div class="card-content">
-                    <span class="card-title">Por País</span>
-                    <?php if (empty($porPais)): ?>
-                        <p class="grey-text">No hay datos de país en el rango seleccionado.</p>
-                    <?php else: ?>
-                        <table class="striped">
-                            <thead>
-                                <tr>
-                                    <th>País</th>
-                                    <th>Visitas</th>
-                                    <th>Visitantes únicos</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($porPais as $row): ?>
-                                    <tr>
-                                        <td><?php echo esc($row['pais']); ?></td>
-                                        <td><?php echo number_format((int) $row['total']); ?></td>
-                                        <td><?php echo number_format((int) $row['unicos']); ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    <?php endif; ?>
-                </div>
-            </div>
+    <!-- Por campaña -->
+    <div class="card">
+        <div class="card-content">
+            <span class="card-title">Top Campañas (utm_campaign)</span>
+            <?php if (empty($porCampana)): ?>
+                <p class="grey-text">No hay campañas con utm_campaign registradas en el rango seleccionado.</p>
+            <?php else: ?>
+                <table class="striped">
+                    <thead>
+                        <tr>
+                            <th>Origen</th>
+                            <th>Campaña</th>
+                            <th>Visitas</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($porCampana as $row): ?>
+                            <tr>
+                                <td><small><?php echo esc($row['utm_source'] ?? ''); ?></small></td>
+                                <td><small><?php echo esc($row['utm_campaign']); ?></small></td>
+                                <td><?php echo number_format((int) $row['total']); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
         </div>
     </div>
 </div>

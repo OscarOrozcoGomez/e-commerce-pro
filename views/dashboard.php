@@ -435,7 +435,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card">
                     <div class="card-content">
                         <span class="card-title">Tráfico y Campañas</span>
-                        <p>De dónde llegan tus visitas: Google Ads, Facebook Ads, orgánico y país</p>
+                        <p>De dónde llegan tus visitas: Google Ads, Facebook Ads, orgánico, directo o referido</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/trafico_visitas.php" class="btn waves-effect waves-light indigo darken-3">Ver Tráfico</a>

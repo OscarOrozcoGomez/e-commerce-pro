@@ -6,10 +6,6 @@
 # Cache generado en runtime (indices de resolucion de imagenes, etc.)
 /core/cache/
 
-# Base de datos GeoLite2 (binario ~7MB, se actualiza manualmente cada cierto tiempo
-# via license key de MaxMind, no se versiona)
-/core/data/GeoLite2-Country.mmdb
-
 # Ignorar archivos de registro y temporales
 mail_log.txt
 mail_preview_last_order.html

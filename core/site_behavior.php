@@ -6,8 +6,8 @@ declare(strict_types=1);
  * se ven, cuanto tiempo, y que se clickea. Todo lo que entra aqui viene del body JSON
  * publico de api/log_activity.php (no confiable) o de la URL que el propio navegador
  * mando en el evento 'visit' -- ninguna funcion debe lanzar ante entradas hostiles,
- * solo degradar a null/valor por defecto (misma filosofia que core/attribution.php
- * y core/geo_lookup.php: el registro de actividad nunca debe romper al visitante).
+ * solo degradar a null/valor por defecto (misma filosofia que core/attribution.php:
+ * el registro de actividad nunca debe romper al visitante).
  */
 
 /**

@@ -168,7 +168,6 @@ include __DIR__ . '/includes/header.php';
                                                 <th>Acción</th>
                                                 <th>Detalle</th>
                                                 <th>Plataforma</th>
-                                                <th>País</th>
                                                 <th>IP</th>
                                             </tr>
                                         </thead>
@@ -194,7 +193,6 @@ include __DIR__ . '/includes/header.php';
                                                         <small class="grey-text"><?php echo esc(str_replace(BASE_URL, '/', $log['url'])); ?></small>
                                                     </td>
                                                     <td><small><?php echo esc($log['plataforma'] ?? ''); ?></small></td>
-                                                    <td><small><?php echo esc($log['pais'] ?? ''); ?></small></td>
                                                     <td><small><?php echo esc($log['ip_address']); ?></small></td>
                                                 </tr>
                                             <?php endforeach; ?>
@@ -242,10 +240,6 @@ include __DIR__ . '/includes/header.php';
                                             <div class="log-card-row">
                                                 <span class="log-card-label">Plataforma</span>
                                                 <span class="log-card-value"><small><?php echo esc($log['plataforma'] ?? ''); ?></small></span>
-                                            </div>
-                                            <div class="log-card-row">
-                                                <span class="log-card-label">País</span>
-                                                <span class="log-card-value"><small><?php echo esc($log['pais'] ?? ''); ?></small></span>
                                             </div>
                                             <div class="log-card-row">
                                                 <span class="log-card-label">IP</span>
