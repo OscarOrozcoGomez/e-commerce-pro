@@ -1688,6 +1688,29 @@ function resolveCheckoutWarehouse(mixed $requestedWarehouseId = null): int
 }
 
 /**
+ * ID(s) de almacen que determinan si un producto se muestra "Disponible" en el
+ * catalogo/ficha publica. Es SOLO el Almacen Central (id 1) -- el mismo destino por
+ * default de resolveCheckoutWarehouse() para un pedido a domicilio, que es el flujo
+ * de compra mas comun.
+ *
+ * Version anterior de esta funcion tambien sumaba las sucursales de pickup publicas
+ * (via isPublicPickupWarehouseName()) como "vendibles", asumiendo que si habia stock
+ * en cualquier sucursal el producto era "conseguible". En la practica eso produjo un
+ * falso "Disponible": un producto con 0 en Almacen Central pero con stock en, por
+ * ejemplo, "Papelería Liz", se mostraba disponible aunque un pedido a domicilio
+ * (que SIEMPRE se surte desde Almacen Central salvo que el cliente elija pickup)
+ * fallara al pagar. El stock de pickup ya se valida por separado y correctamente en
+ * su propio flujo (dbBuildPickupStockHint()/resolvePickupWarehouseId() en
+ * dbCreatePublicOrder()), asi que no hace falta -- ni conviene -- mezclarlo aqui.
+ *
+ * @return int[]
+ */
+function getPublicSellableWarehouseIds(PDO $pdo): array
+{
+    return [1];
+}
+
+/**
  * Obtiene la lista de productos para gestión (Admin/Encargado).
  */
 function dbGetProductsManaged(): array {

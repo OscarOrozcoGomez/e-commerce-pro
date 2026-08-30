@@ -97,13 +97,30 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
 
         if ($_POST['accion'] === 'entregar') {
             try {
-                // Confirma entrega y cobro simultaneamente (pago contra entrega)
-                $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
-                $stmt->execute([$id_pedido, $usuario['id_usuario']]);
-                if ($stmt->rowCount() > 0) {
-                    logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
-                    $success = 'Pedido entregado y cobrado correctamente.';
-                    $justDeliveredPedidoId = $id_pedido;
+                // Flujo nuevo: la foto de evidencia se sube ANTES de cobrar (mientras el pedido
+                // sigue en_reparto, ver boton "SUBIR EVIDENCIA" en la tarjeta). Esta comprobacion
+                // es la misma regla que ya oculta el boton "ENTREGADO Y COBRADO" en la interfaz,
+                // repetida aqui por si alguien intenta mandar el POST directo sin pasar por la UI.
+                $tieneEvidencia = true;
+                $stmtEvTabla = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedido_publicaciones'");
+                $stmtEvTabla->execute();
+                if (((int)$stmtEvTabla->fetchColumn()) > 0) {
+                    $stmtEv = $pdo->prepare("SELECT COUNT(*) FROM pedido_publicaciones WHERE id_pedido = ?");
+                    $stmtEv->execute([$id_pedido]);
+                    $tieneEvidencia = ((int)$stmtEv->fetchColumn()) > 0;
+                }
+
+                if (!$tieneEvidencia) {
+                    $error = 'Sube una foto de evidencia de la entrega antes de confirmar el cobro.';
+                } else {
+                    // Confirma entrega y cobro simultaneamente (pago contra entrega)
+                    $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
+                    $stmt->execute([$id_pedido, $usuario['id_usuario']]);
+                    if ($stmt->rowCount() > 0) {
+                        logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
+                        $success = 'Pedido entregado y cobrado correctamente.';
+                        $justDeliveredPedidoId = $id_pedido;
+                    }
                 }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
@@ -121,74 +138,14 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
             } else {
                 $motivoEtiqueta = $motivoKey === 'otro' ? mb_substr($motivoOtro, 0, 180) : $deliveryCancelReasonOptions[$motivoKey];
 
-                $pdo->beginTransaction();
-                try {
-                    $stmtPedido = $pdo->prepare("SELECT estado, id_almacen FROM pedidos WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor FOR UPDATE");
-                    $stmtPedido->execute([':id_pedido' => $id_pedido, ':id_repartidor' => $usuario['id_usuario']]);
-                    $pedido = $stmtPedido->fetch(PDO::FETCH_ASSOC) ?: null;
-
-                    if (!$pedido) {
-                        throw new RuntimeException('No se encontro el pedido o no esta asignado a ti.');
-                    }
-
-                    $estadoPedido = (string)($pedido['estado'] ?? '');
-                    if (!in_array($estadoPedido, ['pendiente_pago', 'pagado', 'en_reparto'], true)) {
-                        throw new RuntimeException('Este pedido ya no se puede cancelar (estado actual: ' . strtoupper($estadoPedido) . ').');
-                    }
-
-                    $idAlmacenPedido = (int)($pedido['id_almacen'] ?? 0);
-
-                    $stmtDetalle = $pdo->prepare("SELECT id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = :id_pedido AND cantidad > 0 FOR UPDATE");
-                    $stmtDetalle->execute([':id_pedido' => $id_pedido]);
-                    $items = $stmtDetalle->fetchAll(PDO::FETCH_ASSOC);
-
-                    $stmtResurtir = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
-                                                   VALUES (:id_producto, :id_almacen, :cantidad, 2, 5)
-                                                   ON DUPLICATE KEY UPDATE cantidad_actual = cantidad_actual + VALUES(cantidad_actual)");
-                    // Deja rastro de auditoria del movimiento, igual que 'salida' se registra al vender (api/ventas.php).
-                    $stmtMovEntrada = $pdo->prepare(
-                        "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
-                         VALUES (:producto, 'entrada', :almacen, :cantidad, :usuario, :observacion)"
-                    );
-                    foreach ($items as $it) {
-                        $idProducto = (int)($it['id_producto'] ?? 0);
-                        $cantidad = max(0, (int)($it['cantidad'] ?? 0));
-                        if ($idProducto <= 0 || $cantidad <= 0 || $idAlmacenPedido <= 0) {
-                            continue;
-                        }
-                        $stmtResurtir->execute([
-                            ':id_producto' => $idProducto,
-                            ':id_almacen' => $idAlmacenPedido,
-                            ':cantidad' => $cantidad,
-                        ]);
-                        $stmtMovEntrada->execute([
-                            ':producto' => $idProducto,
-                            ':almacen' => $idAlmacenPedido,
-                            ':cantidad' => $cantidad,
-                            ':usuario' => $usuario['id_usuario'],
-                            ':observacion' => 'Entrega no realizada, pedido #' . $id_pedido . ' cancelado por repartidor',
-                        ]);
-                    }
-
-                    $stmtCancelar = $pdo->prepare("UPDATE pedidos
-                                                    SET estado = 'cancelado',
-                                                        observaciones = CONCAT(COALESCE(observaciones, ''),
-                                                            ' | ENTREGA_NO_REALIZADA: ', :motivo)
-                                                    WHERE id_pedido = :id_pedido AND id_repartidor = :id_repartidor");
-                    $stmtCancelar->execute([
-                        ':motivo' => $motivoEtiqueta,
-                        ':id_pedido' => $id_pedido,
-                        ':id_repartidor' => $usuario['id_usuario'],
-                    ]);
-
-                    $pdo->commit();
+                // 'ENTREGA_NO_REALIZADA' preserva el marcador historico que ya buscaba
+                // alexInsightsGetRepartidorCancellations() (core/alex_insights_utils.php) en
+                // pedidos.observaciones; no cambiar sin actualizar esa consulta tambien.
+                $resultadoCancelar = dbCancelarPedidoCompleto($pdo, $id_pedido, (int)$usuario['id_usuario'], $motivoEtiqueta, (int)$usuario['id_usuario'], null, 'PEDIDO_ENTREGA_CANCELADA_REPARTIDOR', 'ENTREGA_NO_REALIZADA');
+                if ($resultadoCancelar['success']) {
                     $success = 'Entrega cancelada. El stock fue devuelto al inventario de la sucursal.';
-                    logAudit('PEDIDO_ENTREGA_CANCELADA_REPARTIDOR', 'pedidos', $id_pedido, 'Repartidor no pudo entregar. Motivo: ' . $motivoEtiqueta);
-                } catch (Throwable $txe) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    $error = $txe->getMessage();
+                } else {
+                    $error = $resultadoCancelar['message'];
                 }
             }
         }
@@ -355,15 +312,60 @@ try {
         ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = p.id_pedido)"
         : '';
 
+    $stmtMetaPublicaciones = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedido_publicaciones'");
+    $stmtMetaPublicaciones->execute();
+    $hasPedidoPublicacionesTable = ((int)$stmtMetaPublicaciones->fetchColumn()) > 0;
+    // Flujo nuevo: foto de evidencia ANTES de cobrar (mientras el pedido sigue en_reparto).
+    // Se toma la fila mas reciente por si el repartidor subio mas de una.
+    // publicado_facebook/compartido_manual (mismos flags que ya usa api/entrega_publicacion.php)
+    // determinan si YA se publico en ambas redes; mientras falte alguna, el pedido sigue
+    // apareciendo en esta lista aunque ya este "entregado" (ver WHERE mas abajo), en vez de
+    // depender de la sesion de un solo uso ($_SESSION['entregas_flash_entregado_id']) que se
+    // perdia al refrescar.
+    $publicacionCols = $hasPedidoPublicacionesTable
+        ? "(SELECT pp.id_publicacion FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1) AS id_publicacion_evidencia,
+           (SELECT pp.ruta_foto FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1) AS ruta_foto_evidencia,
+           (SELECT pp.publicado_facebook FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1) AS pub_facebook,
+           (SELECT pp.compartido_manual FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1) AS pub_whatsapp"
+        : "NULL AS id_publicacion_evidencia, NULL AS ruta_foto_evidencia, NULL AS pub_facebook, NULL AS pub_whatsapp";
+
+    // Un pedido "entregado" solo se queda en esta lista si ya tiene evidencia (o sea, ya paso
+    // por el flujo de cobro) pero AUN le falta publicar en Facebook o en WhatsApp. Solo aplica
+    // a la vista del repartidor: la vista admin es de planeacion de ruta y no necesita ver
+    // entregas ya completadas.
+    //
+    // IMPORTANTE: pedido_publicaciones existe desde ANTES de este flujo (commit 41190d1), asi
+    // que hay entregas reales, ya cerradas hace tiempo, con una fila de evidencia pero sin
+    // publicado_facebook/compartido_manual en 1 (el repartidor publico una sola red, o ninguna,
+    // porque antes eso era opcional). Sin este corte, TODAS esas entregas historicas
+    // reaparecerian de golpe como "pendientes" al desplegar este cambio (paso justo eso en
+    // produccion). ENTREGA_PUBLICACION_PERSISTENCIA_DESDE limita el comportamiento nuevo a
+    // evidencia subida a partir de este despliegue, dejando en paz el historial.
+    // TODO: una vez que ya no haya riesgo de confundir historial viejo, se puede quitar este
+    // corte y aplicar el filtro sin importar la fecha.
+    if (!defined('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE')) {
+        define('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE', '2026-08-26 22:00:00');
+    }
+    $entregadoPendientePublicarFilter = ($hasPedidoPublicacionesTable && $isRepartidorView)
+        ? " OR (p.estado = 'entregado' AND EXISTS (
+                SELECT 1 FROM pedido_publicaciones pp
+                WHERE pp.id_pedido = p.id_pedido AND pp.creado_en >= " . $pdo->quote(ENTREGA_PUBLICACION_PERSISTENCIA_DESDE) . "
+            ) AND (
+                COALESCE((SELECT pp.publicado_facebook FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1), 0) = 0
+                OR COALESCE((SELECT pp.compartido_manual FROM pedido_publicaciones pp WHERE pp.id_pedido = p.id_pedido ORDER BY pp.id_publicacion DESC LIMIT 1), 0) = 0
+            ))"
+        : '';
+
         $sql = "SELECT p.*, p.observaciones,
                    c.nombre as cliente, {$direccionExpr}, {$telefonoExpr}, {$mapExpr},
                    {$fechaLimiteExpr}, {$prioridadExpr},
                    ur.nombre AS repartidor_nombre,
-                   {$latitudExpr}, {$longitudExpr}
+                   {$latitudExpr}, {$longitudExpr},
+                   {$publicacionCols}
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN usuarios ur ON p.id_repartidor = ur.id_usuario
-            WHERE p.estado IN ('pendiente_pago','pagado','en_reparto')
+            WHERE (p.estado IN ('pendiente_pago','pagado','en_reparto'){$entregadoPendientePublicarFilter})
               AND p.id_repartidor IS NOT NULL{$notPickupFilter}";
 
     $params = [];
@@ -384,7 +386,9 @@ try {
             $sql .= ' AND DATE(p.fecha_entrega_programada) = :fecha_entrega';
             $params[':fecha_entrega'] = $selectedFechaEntrega;
         }
-        $sql .= ' ORDER BY p.fecha_entrega_programada ASC, p.fecha_creacion DESC';
+        // Las ya entregadas (solo pendientes de publicar) van al final: ya no son urgentes
+        // para la ruta del dia, solo falta el paso de redes sociales.
+        $sql .= " ORDER BY (p.estado = 'entregado') ASC, p.fecha_entrega_programada ASC, p.fecha_creacion DESC";
     }
 
     $stmt = $pdo->prepare($sql);
@@ -774,7 +778,10 @@ include __DIR__ . '/includes/header.php';
                             <div class="section-products grey lighten-4" style="padding: 10px; margin-top: 15px; border-radius: 4px;">
                                 <h6><strong>Productos a llevar:</strong></h6>
                                 <ul style="margin: 0; padding-left: 0; list-style: none;">
-                                    <?php $itemsPedidoTarjeta = $detallesPorPedido[(int)$ent['id_pedido']] ?? []; ?>
+                                    <?php
+                                        $itemsPedidoTarjeta = $detallesPorPedido[(int)$ent['id_pedido']] ?? [];
+                                        $entregadosRestantesTarjeta = count(array_filter($itemsPedidoTarjeta, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
+                                    ?>
                                     <?php foreach ($itemsPedidoTarjeta as $indexItemTarjeta => $d): ?>
                                         <?php
                                             $pName = $d['nombre'] . ($d['nombre_variante'] ? " - " . $d['nombre_variante'] : "");
@@ -789,6 +796,10 @@ include __DIR__ . '/includes/header.php';
                                                 </span>
                                                 <?php if ($estadoEntregaItem === 'rechazado'): ?>
                                                     <span class="new badge red" data-badge-caption="" style="margin:0; flex-shrink:0;">No entregado</span>
+                                                <?php elseif ($puedeEditarProductos && $idDetalleItem > 0 && $entregadosRestantesTarjeta <= 1): ?>
+                                                    <button type="button" class="btn-small waves-effect waves-light grey lighten-1" style="text-decoration:none; box-shadow:none; flex-shrink:0; cursor:not-allowed;" disabled title="No puedes quitar el ultimo producto; usa 'No pude entregar' para cancelar todo el pedido.">
+                                                        <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
+                                                    </button>
                                                 <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
                                                     <button type="button" class="btn-small waves-effect waves-light red lighten-1 toggle-reject-item" data-target="reject-item-<?php echo $idDetalleItem; ?>" style="text-decoration:none; box-shadow:none; flex-shrink:0;">
                                                         <i class="material-icons left" style="font-size:16px; line-height:24px; margin-right:3px;">delete_outline</i>No lo quiso
@@ -799,7 +810,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php if (!empty($d['motivo_rechazo'])): ?>
                                                     <div class="grey-text" style="font-size:0.78rem; text-decoration:none; margin-top:4px;">Motivo: <?php echo esc((string)$d['motivo_rechazo']); ?></div>
                                                 <?php endif; ?>
-                                            <?php elseif ($puedeEditarProductos && $idDetalleItem > 0): ?>
+                                            <?php elseif ($puedeEditarProductos && $idDetalleItem > 0 && $entregadosRestantesTarjeta > 1): ?>
                                                 <form method="POST" id="reject-item-<?php echo $idDetalleItem; ?>" class="reject-item-form" data-reject-form="1" style="display:none; margin-top:8px; text-decoration:none;">
                                                     <?php echo csrfInput(); ?>
                                                     <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
@@ -834,11 +845,36 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
-                                <?php $esAccionEntregar = !in_array($ent['estado'] ?? '', ['pendiente_pago', 'pagado']); ?>
-                                <form method="POST">
-                                    <?php echo csrfInput(); ?>
-                                    <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                    <?php if (!$esAccionEntregar): ?>
+                                <?php
+                                    $entregado = ($ent['estado'] ?? '') === 'entregado';
+                                    $enReparto = ($ent['estado'] ?? '') === 'en_reparto';
+                                    $tieneEvidencia = !empty($ent['id_publicacion_evidencia']);
+                                    $pubFacebookDone = !empty($ent['pub_facebook']);
+                                    $pubWhatsappDone = !empty($ent['pub_whatsapp']);
+                                ?>
+                                <?php if ($entregado): ?>
+                                    <!-- Ya se cobro: solo falta publicar en redes. Se queda aqui (no
+                                         desaparece de la lista) hasta que Facebook Y WhatsApp esten
+                                         confirmados, sin depender de la sesion de un solo uso de antes. -->
+                                    <p class="green-text text-darken-2" style="font-size:0.85rem; margin-bottom:8px;">
+                                        <i class="material-icons tiny">check_circle</i> Entregado y cobrado
+                                    </p>
+                                    <p style="font-size:0.8rem; margin-bottom:10px;">
+                                        <span class="<?php echo $pubFacebookDone ? 'green-text text-darken-2' : 'grey-text'; ?>">
+                                            <i class="material-icons tiny"><?php echo $pubFacebookDone ? 'check_circle' : 'radio_button_unchecked'; ?></i> Facebook
+                                        </span>
+                                        &nbsp;&nbsp;&nbsp;
+                                        <span class="<?php echo $pubWhatsappDone ? 'green-text text-darken-2' : 'grey-text'; ?>">
+                                            <i class="material-icons tiny"><?php echo $pubWhatsappDone ? 'check_circle' : 'radio_button_unchecked'; ?></i> WhatsApp
+                                        </span>
+                                    </p>
+                                    <button type="button" class="btn purple darken-1 waves-effect waves-light w-100 ep-btn-publicar-card" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>">
+                                        <i class="material-icons left">campaign</i> PUBLICAR EN REDES
+                                    </button>
+                                <?php elseif (!$enReparto): ?>
+                                    <form method="POST">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
                                         <input type="hidden" name="accion" value="en_camino">
                                         <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
                                             <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
@@ -848,36 +884,66 @@ include __DIR__ . '/includes/header.php';
                                         <button type="submit" class="btn orange darken-3 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Vas a salir a entregar este pedido?', 'orange darken-3', 'Sí, salir'); return false;">
                                             SALIR A ENTREGAR <i class="material-icons right">local_shipping</i>
                                         </button>
-                                    <?php else: ?>
+                                    </form>
+                                <?php elseif (!$tieneEvidencia): ?>
+                                    <!-- Flujo nuevo: la foto se sube ANTES de cobrar, mientras el pedido sigue
+                                         en_reparto. La venta se queda en esta lista (no desaparece) hasta que
+                                         el repartidor confirma "ENTREGADO Y COBRADO" mas abajo. -->
+                                    <p class="orange-text" style="font-size:0.85rem; margin-bottom:4px;">
+                                        <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                    </p>
+                                    <p class="blue-text text-darken-2" style="font-size:0.85rem; margin-bottom:8px;">
+                                        <i class="material-icons tiny">photo_camera</i> Sube una foto de evidencia antes de cobrar
+                                    </p>
+                                    <input type="file" accept="image/*" capture="environment" class="ev-foto-input" id="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
+                                    <input type="file" accept="image/*" class="ev-foto-input" id="ev-foto-input-galeria-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
+                                    <div class="ev-btn-row">
+                                        <button type="button" class="btn deep-purple waves-effect waves-light ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
+                                            <i class="material-icons left">photo_camera</i> TOMAR FOTO
+                                        </button>
+                                        <button type="button" class="btn indigo darken-1 waves-effect waves-light ev-btn-subir" data-input="ev-foto-input-galeria-<?php echo (int)$ent['id_pedido']; ?>">
+                                            <i class="material-icons left">photo_library</i> DESDE GALERIA
+                                        </button>
+                                    </div>
+                                    <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
+                                <?php else: ?>
+                                    <form method="POST">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
                                         <input type="hidden" name="accion" value="entregar">
+                                        <p class="green-text text-darken-2" style="font-size:0.8rem; margin-bottom:4px;">
+                                            <i class="material-icons tiny">check_circle</i> Evidencia subida
+                                        </p>
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                             <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
-                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro de este pedido? Despues podras subir la foto y publicarlo en redes.', 'green', 'Sí, confirmar'); return false;">
+                                        <button type="submit" class="btn green waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro de este pedido? Despues podras publicarlo en redes.', 'green', 'Sí, confirmar'); return false;">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
                                         </button>
-                                    <?php endif; ?>
-                                </form>
+                                    </form>
+                                <?php endif; ?>
 
-                                <button type="button" class="btn-flat red-text waves-effect toggle-cancel-entrega w-100" data-target="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px;">
-                                    <i class="material-icons left">cancel</i> No pude entregar
-                                </button>
-                                <form method="POST" id="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" class="cancel-entrega-form" data-cancel-form="1" style="display:none; margin-top:10px; text-align:left;">
-                                    <?php echo csrfInput(); ?>
-                                    <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
-                                    <input type="hidden" name="accion" value="cancelar_entrega">
-                                    <label class="active" style="font-size:0.78rem; color:#546e7a;">Motivo por el que no se pudo entregar</label>
-                                    <select name="motivo_cancelacion" data-cancel-reason="1" class="browser-default" required style="margin-bottom:8px; height:40px;">
-                                        <option value="" selected disabled>-- Selecciona un motivo --</option>
-                                        <?php foreach ($deliveryCancelReasonOptions as $reasonKey => $reasonLabel): ?>
-                                            <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
-                                    <button type="submit" class="btn red darken-2 waves-effect waves-light w-100" onclick="return confirm('Confirmar que no se pudo entregar este pedido? Se cancelara la venta y se devolvera el stock al inventario.')">
-                                        CONFIRMAR CANCELACION <i class="material-icons right">cancel</i>
+                                <?php if (!$entregado): ?>
+                                    <button type="button" class="btn-flat red-text waves-effect toggle-cancel-entrega w-100" data-target="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px;">
+                                        <i class="material-icons left">cancel</i> No pude entregar
                                     </button>
-                                </form>
+                                    <form method="POST" id="cancel-entrega-<?php echo (int)$ent['id_pedido']; ?>" class="cancel-entrega-form" data-cancel-form="1" style="display:none; margin-top:10px; text-align:left;">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
+                                        <input type="hidden" name="accion" value="cancelar_entrega">
+                                        <label class="active" style="font-size:0.78rem; color:#546e7a;">Motivo por el que no se pudo entregar</label>
+                                        <select name="motivo_cancelacion" data-cancel-reason="1" class="browser-default" required style="margin-bottom:8px; height:40px;">
+                                            <option value="" selected disabled>-- Selecciona un motivo --</option>
+                                            <?php foreach ($deliveryCancelReasonOptions as $reasonKey => $reasonLabel): ?>
+                                                <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
+                                        <button type="submit" class="btn red darken-2 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas que no se pudo entregar este pedido? Se cancelara la venta y se devolvera el stock al inventario.', 'red darken-2', 'Sí, cancelar'); return false;">
+                                            CONFIRMAR CANCELACION <i class="material-icons right">cancel</i>
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
                             <?php else: ?>
                                 <p class="grey-text" style="margin: 0; font-size: 0.9rem;">Vista administrativa: solo planeacion de ruta.</p>
                             <?php endif; ?>
@@ -1054,30 +1120,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const epEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
     const epRouteStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0), JSON_UNESCAPED_UNICODE); ?>;
 
-    if (!epJustDeliveredId) {
-        return;
-    }
-
-    // Busca en que posicion iba este pedido dentro de la ultima ruta optimizada generada
-    // (guardada en localStorage, ver routeSaveStoredRoute mas abajo) para poder anunciar
-    // "Primera/Segunda/... entrega" en el orden real de reparto. Si no hay ruta guardada o
-    // el pedido ya no esta en ella, regresa null y el backend cae a contar entregas del dia.
-    function epFindNumeroEntregaFromRoute(idPedido) {
-        try {
-            const raw = localStorage.getItem(epRouteStorageKey);
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
-            const stops = parsed && parsed.data && Array.isArray(parsed.data.orderedStops) ? parsed.data.orderedStops : null;
-            if (!stops) return null;
-            const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(idPedido));
-            return idx >= 0 ? idx + 1 : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    const epNumeroEntrega = epFindNumeroEntregaFromRoute(epJustDeliveredId);
-
     const modalEl = document.getElementById('modal-entrega-publicacion');
     const textoEl = document.getElementById('ep-texto');
     const coloniaInfoEl = document.getElementById('ep-colonia-info');
@@ -1098,71 +1140,40 @@ document.addEventListener('DOMContentLoaded', function() {
         return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true });
     }
 
-    // Sugiere marcar como "en camino" el siguiente pedido de la ruta guardada apenas se
-    // confirma la entrega, para no tener que volver a buscarlo manualmente en la lista. Ya
-    // no depende de abrir/cerrar el modal de publicar (que ahora es manual, ver boton
-    // "Publicar en Redes" en el aviso de exito), asi que se muestra directo.
-    (function setupSiguienteEnCaminoPrompt() {
-        const stops = (function () {
-            try {
-                const raw = localStorage.getItem(epRouteStorageKey);
-                if (!raw) return [];
-                const parsed = JSON.parse(raw);
-                return (parsed && parsed.data && Array.isArray(parsed.data.orderedStops)) ? parsed.data.orderedStops : [];
-            } catch (e) {
-                return [];
-            }
-        })();
+    // Cual pedido esta activo en el modal ahora mismo. Antes esto era una constante fija
+    // (epJustDeliveredId, solo el ultimo que se acababa de cobrar); ahora el modal es
+    // reutilizable para CUALQUIER pedido "entregado" que todavia le falte publicar en
+    // Facebook o WhatsApp (boton "PUBLICAR EN REDES" de su propia tarjeta, ver mas abajo),
+    // asi que necesita poder cambiar de pedido sin recargar la pagina.
+    let epCurrentIdPedido = epJustDeliveredId || null;
+    let epCurrentNumeroEntrega = null;
 
-        const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(epJustDeliveredId));
-        if (idx === -1) {
-            return;
+    // Busca en que posicion iba este pedido dentro de la ultima ruta optimizada generada
+    // (guardada en localStorage, ver routeSaveStoredRoute mas abajo) para poder anunciar
+    // "Primera/Segunda/... entrega" en el orden real de reparto. Si no hay ruta guardada o
+    // el pedido ya no esta en ella, regresa null y el backend cae a contar entregas del dia.
+    function epFindNumeroEntregaFromRoute(idPedido) {
+        try {
+            const raw = localStorage.getItem(epRouteStorageKey);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const stops = parsed && parsed.data && Array.isArray(parsed.data.orderedStops) ? parsed.data.orderedStops : null;
+            if (!stops) return null;
+            const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(idPedido));
+            return idx >= 0 ? idx + 1 : null;
+        } catch (e) {
+            return null;
         }
-
-        let nextStop = null;
-        for (let i = idx + 1; i < stops.length; i++) {
-            const candidateId = stops[i].id_pedido;
-            const checkbox = document.querySelector('.route-check[value="' + CSS.escape(String(candidateId)) + '"]');
-            if (!checkbox) {
-                continue; // ya no esta en la lista (entregado/cancelado/rechazado por otra via)
-            }
-            const estado = checkbox.dataset.estado || '';
-            if (estado === 'pendiente_pago' || estado === 'pagado') {
-                nextStop = stops[i];
-                break;
-            }
-        }
-
-        if (!nextStop) {
-            return;
-        }
-
-        const secModalEl = document.getElementById('modal-siguiente-en-camino');
-        const secInfoEl = document.getElementById('sec-siguiente-info');
-        const secBtnSi = document.getElementById('sec-btn-si');
-        const secFormEl = document.getElementById('sec-form-en-camino');
-        const secFormIdPedido = document.getElementById('sec-form-id-pedido');
-        if (!secModalEl || !secInfoEl || !secBtnSi || !secFormEl || !secFormIdPedido) {
-            return;
-        }
-
-        const nextLabel = 'Pedido ' + (nextStop.numero_pedido || nextStop.id_pedido)
-            + (nextStop.cliente ? ' - ' + nextStop.cliente : '');
-        secInfoEl.textContent = nextLabel + '. Segun tu ruta guardada, es tu siguiente parada. ¿Marcarlo como "en camino"?';
-        secBtnSi.addEventListener('click', function () {
-            secFormIdPedido.value = nextStop.id_pedido;
-            secFormEl.submit();
-        });
-
-        // Pequeno retraso para dejar que M.AutoInit() del footer termine de correr primero.
-        setTimeout(function () {
-            (M.Modal.getInstance(secModalEl) || M.Modal.init(secModalEl, { dismissible: true })).open();
-        }, 250);
-    })();
+    }
 
     let epUploadedId = null;
     let epUploadedForFile = null;
     let epServerPhotoFile = null; // foto ya subida en un intento anterior, reconstruida como File para poder compartirla
+    let epDidPublishSomething = false; // si se logro publicar algo en este pedido, recargar al cerrar
+    let epFacebookDone = false; // publicado en Facebook en ESTA sesion del modal
+    let epCompartirDone = false; // compartido/WhatsApp en ESTA sesion del modal
+    const btnFacebookDefaultHtml = btnFacebook.innerHTML;
+    const btnCompartirDefaultHtml = btnCompartir.innerHTML;
 
     // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
     // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
@@ -1181,53 +1192,155 @@ document.addEventListener('DOMContentLoaded', function() {
         statusEl.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
     }
 
-    function epSetButtonsDisabled(disabled) {
-        [btnFacebook, btnCompartir].forEach((btn) => {
-            btn.classList.toggle('disabled', disabled);
+    // A diferencia de antes, cada boton se habilita/deshabilita por su cuenta: publicar en
+    // Facebook no debe bloquear el boton de Compartir (y viceversa), para poder hacer ambas
+    // redes en la misma sesion del modal sin que una tape a la otra.
+    function epSetButtonBusy(btn, busy) {
+        btn.classList.toggle('disabled', busy);
+    }
+
+    // Prepara el modal para un pedido dado: pide texto/colonia sugeridos y precarga la foto si
+    // ya se habia subido antes (flujo nuevo: la foto se sube al "SUBIR EVIDENCIA", antes de
+    // cobrar). No abre el modal por si sola (ver epOpenPublishModalFor mas abajo).
+    function epPrepareModal(idPedido, numeroEntrega) {
+        epCurrentIdPedido = idPedido;
+        epCurrentNumeroEntrega = numeroEntrega || null;
+        epUploadedId = null;
+        epUploadedForFile = null;
+        epServerPhotoFile = null;
+        epDidPublishSomething = false;
+        epFacebookDone = false;
+        epCompartirDone = false;
+        btnFacebook.innerHTML = btnFacebookDefaultHtml;
+        btnCompartir.innerHTML = btnCompartirDefaultHtml;
+        epSetButtonBusy(btnFacebook, false);
+        epSetButtonBusy(btnCompartir, false);
+        epSetStatus('', false);
+        previewEl.style.display = 'none';
+        previewEl.src = '';
+
+        return fetch(epEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'preparar', id_pedido: idPedido, numero_entrega: epCurrentNumeroEntrega, csrf_token: epCsrfToken }),
+        })
+            .then(epParseJsonResponse)
+            .then((data) => {
+                if (data && data.success) {
+                    textoEl.value = data.texto || '';
+                    M.textareaAutoResize(textoEl);
+                    M.updateTextFields();
+                    const infoPartes = [];
+                    infoPartes.push(data.colonia_detectada
+                        ? 'Colonia detectada: ' + data.colonia_detectada
+                        : 'No se pudo detectar la colonia automaticamente.');
+                    if (data.numero_entrega) {
+                        infoPartes.push('Entrega #' + data.numero_entrega + ' del dia' + (epCurrentNumeroEntrega ? ' (segun tu ruta)' : ''));
+                    }
+                    coloniaInfoEl.textContent = infoPartes.join(' | ') + ' (puedes editar el texto arriba)';
+
+                    if (data.id_publicacion && data.foto_url) {
+                        epUploadedId = data.id_publicacion;
+                        previewEl.src = data.foto_url;
+                        previewEl.style.display = 'block';
+                        fetch(data.foto_url)
+                            .then((r) => r.blob())
+                            .then((blob) => {
+                                epServerPhotoFile = new File([blob], 'entrega.jpg', { type: blob.type || 'image/jpeg' });
+                            })
+                            .catch(() => {});
+                    }
+                }
+            })
+            .catch(() => {});
+    }
+
+    // Abre el modal para un pedido especifico (boton "PUBLICAR EN REDES" de su tarjeta). A
+    // diferencia del flujo del pedido recien cobrado (que solo prepara los datos y deja que el
+    // repartidor abra el modal cuando quiera, ver mas abajo), aqui la apertura es explicita:
+    // el click ya es la intencion de publicar ahora mismo.
+    function epOpenPublishModalFor(idPedido, numeroEntrega) {
+        epPrepareModal(idPedido, numeroEntrega).then(function () {
+            epGetModalInstance().open();
         });
     }
 
-    fetch(epEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'preparar', id_pedido: epJustDeliveredId, numero_entrega: epNumeroEntrega, csrf_token: epCsrfToken }),
-    })
-        .then(epParseJsonResponse)
-        .then((data) => {
-            if (data && data.success) {
-                textoEl.value = data.texto || '';
-                M.textareaAutoResize(textoEl);
-                M.updateTextFields();
-                const infoPartes = [];
-                infoPartes.push(data.colonia_detectada
-                    ? 'Colonia detectada: ' + data.colonia_detectada
-                    : 'No se pudo detectar la colonia automaticamente.');
-                if (data.numero_entrega) {
-                    infoPartes.push('Entrega #' + data.numero_entrega + ' del dia' + (epNumeroEntrega ? ' (segun tu ruta)' : ''));
-                }
-                coloniaInfoEl.textContent = infoPartes.join(' | ') + ' (puedes editar el texto arriba)';
+    document.querySelectorAll('.ep-btn-publicar-card').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const idPedido = btn.getAttribute('data-id-pedido');
+            if (idPedido) {
+                epOpenPublishModalFor(idPedido, null);
+            }
+        });
+    });
 
-                // Si ya se habia subido una foto antes para este pedido (p.ej. abrio el modal,
-                // eligio foto, y cerro sin compartir), se muestra de una vez en vez de pedirle
-                // al repartidor que la vuelva a seleccionar.
-                if (data.id_publicacion && data.foto_url) {
-                    epUploadedId = data.id_publicacion;
-                    previewEl.src = data.foto_url;
-                    previewEl.style.display = 'block';
-                    fetch(data.foto_url)
-                        .then((r) => r.blob())
-                        .then((blob) => {
-                            epServerPhotoFile = new File([blob], 'entrega.jpg', { type: blob.type || 'image/jpeg' });
-                        })
-                        .catch(() => {});
+    if (epJustDeliveredId) {
+        // Precarga en segundo plano: el repartidor decide cuando abrir el modal con el boton
+        // "Publicar en Redes" del aviso de exito (id="ep-btn-abrir-modal", modal-trigger de
+        // Materialize). Antes se forzaba a abrir de inmediato despues de cobrar, lo cual
+        // interrumpia el flujo.
+        epPrepareModal(epJustDeliveredId, epFindNumeroEntregaFromRoute(epJustDeliveredId));
+
+        // Sugiere marcar como "en camino" el siguiente pedido de la ruta guardada apenas se
+        // confirma la entrega, para no tener que volver a buscarlo manualmente en la lista.
+        (function setupSiguienteEnCaminoPrompt() {
+            const stops = (function () {
+                try {
+                    const raw = localStorage.getItem(epRouteStorageKey);
+                    if (!raw) return [];
+                    const parsed = JSON.parse(raw);
+                    return (parsed && parsed.data && Array.isArray(parsed.data.orderedStops)) ? parsed.data.orderedStops : [];
+                } catch (e) {
+                    return [];
+                }
+            })();
+
+            const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(epJustDeliveredId));
+            if (idx === -1) {
+                return;
+            }
+
+            let nextStop = null;
+            for (let i = idx + 1; i < stops.length; i++) {
+                const candidateId = stops[i].id_pedido;
+                const checkbox = document.querySelector('.route-check[value="' + CSS.escape(String(candidateId)) + '"]');
+                if (!checkbox) {
+                    continue; // ya no esta en la lista (entregado/cancelado/rechazado por otra via)
+                }
+                const estado = checkbox.dataset.estado || '';
+                if (estado === 'pendiente_pago' || estado === 'pagado') {
+                    nextStop = stops[i];
+                    break;
                 }
             }
-        })
-        .catch(() => {});
 
-    // Ya no se abre solo: el repartidor decide cuando publicar con el boton "Publicar en
-    // Redes" del aviso de exito (id="ep-btn-abrir-modal", modal-trigger de Materialize).
-    // Antes se forzaba a abrir de inmediato despues de cobrar, lo cual interrumpia el flujo.
+            if (!nextStop) {
+                return;
+            }
+
+            const secModalEl = document.getElementById('modal-siguiente-en-camino');
+            const secInfoEl = document.getElementById('sec-siguiente-info');
+            const secBtnSi = document.getElementById('sec-btn-si');
+            const secFormEl = document.getElementById('sec-form-en-camino');
+            const secFormIdPedido = document.getElementById('sec-form-id-pedido');
+            if (!secModalEl || !secInfoEl || !secBtnSi || !secFormEl || !secFormIdPedido) {
+                return;
+            }
+
+            const nextLabel = 'Pedido ' + (nextStop.numero_pedido || nextStop.id_pedido)
+                + (nextStop.cliente ? ' - ' + nextStop.cliente : '');
+            secInfoEl.textContent = nextLabel + '. Segun tu ruta guardada, es tu siguiente parada. ¿Marcarlo como "en camino"?';
+            secBtnSi.addEventListener('click', function () {
+                secFormIdPedido.value = nextStop.id_pedido;
+                secFormEl.submit();
+            });
+
+            // Pequeno retraso para dejar que M.AutoInit() del footer termine de correr primero.
+            setTimeout(function () {
+                (M.Modal.getInstance(secModalEl) || M.Modal.init(secModalEl, { dismissible: true })).open();
+            }, 250);
+        })();
+    }
 
     fotoInputEl.addEventListener('change', function () {
         epUploadedId = null;
@@ -1256,10 +1369,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const formData = new FormData();
         formData.append('foto', file);
-        formData.append('id_pedido', epJustDeliveredId);
+        formData.append('id_pedido', epCurrentIdPedido);
         formData.append('texto', textoEl.value || '');
-        if (epNumeroEntrega) {
-            formData.append('numero_entrega', epNumeroEntrega);
+        if (epCurrentNumeroEntrega) {
+            formData.append('numero_entrega', epCurrentNumeroEntrega);
         }
         formData.append('csrf_token', epCsrfToken);
 
@@ -1275,9 +1388,19 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     }
 
+    // No se recarga la pagina justo despues de publicar en Facebook o WhatsApp: eso sacaba al
+    // repartidor del modal a medio proceso (publicar Facebook recargaba la pagina y lo obligaba
+    // a volver a abrir el modal para hacer WhatsApp, y se sentia como si "se hubiera
+    // desmarcado"). Ahora puede hacer ambas dentro de la MISMA sesion del modal, cada boton
+    // se deshabilita solo por su cuenta al terminar (no el otro), y la pagina solo se recarga
+    // al cerrar el modal (boton OMITIR), para que la tarjeta refleje el estado final o
+    // desaparezca si ya quedo completo en ambas redes.
     btnFacebook.addEventListener('click', function (e) {
         e.preventDefault();
-        epSetButtonsDisabled(true);
+        if (epFacebookDone) {
+            return;
+        }
+        epSetButtonBusy(btnFacebook, true);
         epSetStatus('Publicando en Facebook...', false);
         epEnsureUploaded()
             .then((idPublicacion) => fetch(epEndpoint, {
@@ -1285,7 +1408,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action: 'publicar_facebook',
-                    id_pedido: epJustDeliveredId,
+                    id_pedido: epCurrentIdPedido,
                     id_publicacion: idPublicacion,
                     texto: textoEl.value,
                     csrf_token: epCsrfToken,
@@ -1296,20 +1419,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!data || !data.success) {
                     throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
                 }
-                epSetStatus('Publicado en Facebook correctamente.', false);
+                epSetStatus('Publicado en Facebook correctamente. Puedes seguir con WhatsApp o cerrar.', false);
+                epDidPublishSomething = true;
+                epFacebookDone = true;
+                btnFacebook.innerHTML = '<i class="material-icons left">check_circle</i> YA PUBLICADO EN FACEBOOK';
+                // Se queda deshabilitado (evita publicar dos veces); Compartir sigue disponible.
             })
-            .catch((err) => epSetStatus(err.message, true))
-            .finally(() => epSetButtonsDisabled(false));
+            .catch((err) => {
+                epSetStatus(err.message, true);
+                epSetButtonBusy(btnFacebook, false);
+            });
     });
 
     btnCompartir.addEventListener('click', function (e) {
         e.preventDefault();
+        if (epCompartirDone) {
+            return;
+        }
         const file = (fotoInputEl.files && fotoInputEl.files[0]) || epServerPhotoFile;
         if (!file && !epUploadedId) {
             epSetStatus('Selecciona una foto de la entrega primero.', true);
             return;
         }
-        epSetButtonsDisabled(true);
+        epSetButtonBusy(btnCompartir, true);
         epSetStatus('Preparando para compartir...', false);
         epEnsureUploaded()
             .then((idPublicacion) => {
@@ -1319,12 +1451,19 @@ document.addEventListener('DOMContentLoaded', function() {
                         .then(() => fetch(epEndpoint, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'marcar_compartido', id_pedido: epJustDeliveredId, id_publicacion: idPublicacion, csrf_token: epCsrfToken }),
+                            body: JSON.stringify({ action: 'marcar_compartido', id_pedido: epCurrentIdPedido, id_publicacion: idPublicacion, csrf_token: epCsrfToken }),
                         }))
-                        .then(() => epSetStatus('Listo, elige WhatsApp (Estado) o Facebook en el menu para publicar.', false))
+                        .then(() => {
+                            epSetStatus('Listo. Puedes seguir con Facebook o cerrar.', false);
+                            epDidPublishSomething = true;
+                            epCompartirDone = true;
+                            btnCompartir.innerHTML = '<i class="material-icons left">check_circle</i> YA COMPARTIDO';
+                            // Se queda deshabilitado; Facebook sigue disponible.
+                        })
                         .catch((err) => {
                             if (err && err.name === 'AbortError') {
                                 epSetStatus('', false);
+                                epSetButtonBusy(btnCompartir, false);
                                 return;
                             }
                             throw err;
@@ -1335,13 +1474,101 @@ document.addEventListener('DOMContentLoaded', function() {
                     navigator.clipboard.writeText(textoEl.value).catch(() => {});
                 }
                 epSetStatus('Tu navegador no soporta compartir directo. Se copio el texto; descarga la foto desde la vista previa y compartela manualmente.', true);
+                epSetButtonBusy(btnCompartir, false);
             })
-            .catch((err) => epSetStatus(err.message, true))
-            .finally(() => epSetButtonsDisabled(false));
+            .catch((err) => {
+                epSetStatus(err.message, true);
+                epSetButtonBusy(btnCompartir, false);
+            });
     });
 
     btnOmitir.addEventListener('click', function () {
         epGetModalInstance().close();
+        if (epDidPublishSomething) {
+            location.reload();
+        }
+    });
+});
+</script>
+
+<script>
+// Flujo nuevo: subir la foto de evidencia ANTES de cobrar, mientras el pedido sigue
+// en_reparto (boton "SUBIR EVIDENCIA" en la tarjeta). Independiente del script de arriba:
+// corre siempre, no solo justo despues de marcar una entrega (ver epJustDeliveredId), porque
+// aplica a cualquier tarjeta en_reparto sin evidencia todavia, sin importar cuando se cargo
+// la pagina.
+document.addEventListener('DOMContentLoaded', function () {
+    const evCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
+    const evEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+
+    function evParseJsonResponse(response) {
+        return response.text().then(function (text) {
+            try {
+                return text ? JSON.parse(text) : null;
+            } catch (e) {
+                throw new Error('El servidor no respondio correctamente (codigo ' + response.status + '). Intenta de nuevo en unos segundos.');
+            }
+        });
+    }
+
+    document.querySelectorAll('.ev-btn-subir').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const inputEl = document.getElementById(btn.getAttribute('data-input') || '');
+            if (inputEl) {
+                inputEl.click();
+            }
+        });
+    });
+
+    document.querySelectorAll('.ev-foto-input').forEach(function (inputEl) {
+        inputEl.addEventListener('change', function () {
+            const file = inputEl.files && inputEl.files[0];
+            if (!file) {
+                return;
+            }
+
+            const idPedido = inputEl.getAttribute('data-id-pedido');
+            const statusEl = document.querySelector('[data-status-for="' + idPedido + '"]');
+            const btnEl = document.querySelector('.ev-btn-subir[data-input="' + inputEl.id + '"]');
+
+            if (statusEl) {
+                statusEl.textContent = 'Subiendo evidencia...';
+                statusEl.className = 'ev-status grey-text';
+            }
+            if (btnEl) {
+                btnEl.classList.add('disabled');
+            }
+
+            const formData = new FormData();
+            formData.append('foto', file);
+            formData.append('id_pedido', idPedido);
+            formData.append('csrf_token', evCsrfToken);
+
+            fetch(evEndpoint, { method: 'POST', body: formData })
+                .then(evParseJsonResponse)
+                .then(function (data) {
+                    if (!data || !data.success) {
+                        throw new Error((data && data.error) || 'No se pudo subir la evidencia.');
+                    }
+                    if (statusEl) {
+                        statusEl.textContent = 'Evidencia subida. Actualizando...';
+                        statusEl.className = 'ev-status green-text';
+                    }
+                    // Recarga para que la tarjeta pase a mostrar "ENTREGADO Y COBRADO": el
+                    // servidor ya detecta la evidencia recien subida en pedido_publicaciones.
+                    setTimeout(function () { location.reload(); }, 500);
+                })
+                .catch(function (err) {
+                    if (statusEl) {
+                        statusEl.textContent = err.message;
+                        statusEl.className = 'ev-status red-text';
+                    }
+                    if (btnEl) {
+                        btnEl.classList.remove('disabled');
+                    }
+                    inputEl.value = '';
+                });
+        });
     });
 });
 </script>
@@ -2115,6 +2342,15 @@ document.addEventListener('DOMContentLoaded', () => {
         margin-right: 8px;
     }
     .w-100 { width: 100%; }
+    .ev-btn-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .ev-btn-row .btn {
+        width: 100%;
+        margin: 0;
+    }
     .delivery-value {
         margin-left: 4px;
     }
@@ -2154,14 +2390,34 @@ document.addEventListener('DOMContentLoaded', () => {
         background: #ffebee;
     }
 
-    /* Modal de publicar entrega / confirmar accion: legible y usable en pantallas de celular. */
+    /* Modal de publicar entrega / confirmar accion: legible y usable en pantallas de celular.
+       Layout en columna con footer de altura automatica (NO la altura fija que trae Materialize
+       por defecto): antes, cuando el footer apilaba 2-3 botones en pantallas chicas, el
+       contenedor del footer se quedaba con su altura original de una sola fila y los botones de
+       mas abajo quedaban renderizados fuera de la caja del modal (habia que hacer scroll de toda
+       la pagina, no del modal, para alcanzarlos). Con esto el modal mismo scrollea internamente
+       si hace falta y el footer siempre es 100% visible. */
     #modal-entrega-publicacion,
-    #modal-confirmar-entrega {
+    #modal-confirmar-entrega,
+    #modal-route-error {
         width: 90%;
         max-width: 560px;
+        display: flex;
+        flex-direction: column;
+        max-height: 85vh;
+    }
+    #modal-entrega-publicacion .modal-content,
+    #modal-confirmar-entrega .modal-content,
+    #modal-route-error .modal-content {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
     #modal-entrega-publicacion .modal-footer,
-    #modal-confirmar-entrega .modal-footer {
+    #modal-confirmar-entrega .modal-footer,
+    #modal-route-error .modal-footer {
+        flex: 0 0 auto;
+        height: auto;
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
@@ -2176,12 +2432,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     @media only screen and (max-width: 600px) {
         #modal-entrega-publicacion,
-        #modal-confirmar-entrega {
+        #modal-confirmar-entrega,
+        #modal-route-error {
             width: 96%;
-            max-height: 90%;
+            max-height: 92vh;
         }
         #modal-entrega-publicacion .modal-footer > a,
-        #modal-confirmar-entrega .modal-footer > a {
+        #modal-confirmar-entrega .modal-footer > a,
+        #modal-route-error .modal-footer > a {
             width: 100%;
             margin: 4px 0 !important;
             text-align: center;

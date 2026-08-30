@@ -212,6 +212,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                 } else {
                     $error = $resultadoQuitar['message'];
                 }
+            } elseif ($accion === 'cancelar_pedido_completo') {
+                $motivoCancelar = trim((string)($_POST['motivo'] ?? ''));
+                if ($motivoCancelar === '') {
+                    $motivoCancelar = 'Pedido cancelado por ' . (string)($usuario['nombre'] ?? 'administracion');
+                }
+                // A diferencia de quitar_producto_pedido, aqui no se permite cancelar un pedido
+                // ya entregado (seria una devolucion, no una cancelacion de entrega).
+                $resultadoCancelarPedido = dbCancelarPedidoCompleto($pdo, $id_pedido, null, $motivoCancelar, (int)($usuario['id_usuario'] ?? 0), null, 'PEDIDO_CANCELADO_ADMIN');
+                if ($resultadoCancelarPedido['success']) {
+                    $success = $resultadoCancelarPedido['message'];
+                } else {
+                    $error = $resultadoCancelarPedido['message'];
+                }
             }
         } catch (PDOException $e) {
             $error = 'Error al asignar: ' . $e->getMessage();
@@ -221,7 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
         // solo porque estuvo en segundo plano) reenvie el mismo POST y dispare el aviso
         // "Confirm Form Resubmission". El resultado viaja por sesion (flash) y se conserva
         // la pestana activa (Por Asignar / Asignadas) segun que accion se acaba de hacer.
-        $tabsDeAsignadas = ['agregar_producto_pedido', 'quitar_producto_pedido'];
+        $tabsDeAsignadas = ['agregar_producto_pedido', 'quitar_producto_pedido', 'cancelar_pedido_completo'];
         $_SESSION['asignar_entregas_flash'] = [
             'error' => $error,
             'success' => $success,
@@ -500,7 +513,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Entregas Ya Asignadas</span>
-                    <p class="grey-text" style="font-size:0.9rem; margin-top:0;">Consulta el estado real de cada pedido asignado. Puedes agregar o quitar productos aunque el pedido ya se haya entregado (queda como parte de la misma venta).</p>
+                    <p class="grey-text" style="font-size:0.9rem; margin-top:0;">Consulta el estado real de cada pedido asignado. Puedes agregar o quitar productos aunque el pedido ya se haya entregado (queda como parte de la misma venta), o cancelar el pedido completo mientras no se haya entregado (libera el inventario y ya no requiere asignacion).</p>
 
                     <?php if (empty($pedidosAsignados)): ?>
                         <p class="center-align grey-text">No hay pedidos asignados por ahora.</p>
@@ -520,6 +533,9 @@ include __DIR__ . '/includes/header.php';
                                     $estadoPa = (string)($pa['estado'] ?? '');
                                     [$estadoPaLabel, $estadoPaColor] = $estadoAsignadoLabels[$estadoPa] ?? [strtoupper($estadoPa), '#455a64'];
                                     $puedeEditarAsignado = $estadoPa !== 'cancelado';
+                                    // Cancelar el pedido completo (a diferencia de editar productos) no aplica a uno
+                                    // ya entregado: eso seria una devolucion, no una entrega que no se realizo.
+                                    $puedeCancelarAsignado = in_array($estadoPa, ['pendiente_pago', 'pagado', 'en_reparto'], true);
                                     $itemsPa = $detallesPorPedidoAsignado[(int)$pa['id_pedido']] ?? [];
                                     $entregadosRestantesPa = count(array_filter($itemsPa, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
                                 ?>
@@ -566,7 +582,7 @@ include __DIR__ . '/includes/header.php';
                                                                         <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
                                                                         <input type="hidden" name="id_detalle" value="<?php echo (int)$itemPa['id_detalle']; ?>">
                                                                         <input type="hidden" name="accion" value="quitar_producto_pedido">
-                                                                        <button type="submit" class="btn-flat red-text waves-effect" style="padding:0 4px; height:20px; line-height:20px; font-size:0.7rem; text-decoration:none;" <?php echo $entregadosRestantesPa <= 1 ? 'disabled title="No puedes quitar el ultimo producto; cancela el pedido completo si aplica."' : ''; ?>>
+                                                                        <button type="submit" class="btn-flat red-text waves-effect" style="padding:0 4px; height:20px; line-height:20px; font-size:0.7rem; text-decoration:none;" <?php echo $entregadosRestantesPa <= 1 ? 'disabled title="No puedes quitar el ultimo producto; usa Cancelar pedido completo abajo si aplica."' : ''; ?>>
                                                                         <i class="material-icons tiny" style="font-size:14px; vertical-align:middle;">close</i>Quitar
                                                                         </button>
                                                                     </form>
@@ -576,6 +592,28 @@ include __DIR__ . '/includes/header.php';
                                                     </ul>
                                                 <?php endif; ?>
                                             </div>
+
+                                            <?php if ($puedeCancelarAsignado): ?>
+                                                <?php $idCancelModalPa = 'cancel-pedido-modal-' . (int)$pa['id_pedido']; ?>
+                                                <form method="POST" id="cancelar-pedido-form-<?php echo (int)$pa['id_pedido']; ?>" style="margin-top:10px;">
+                                                    <?php echo csrfInput(); ?>
+                                                    <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
+                                                    <input type="hidden" name="accion" value="cancelar_pedido_completo">
+                                                    <button type="button" class="btn-flat red-text waves-effect w-100 modal-trigger" href="#<?php echo esc($idCancelModalPa); ?>" style="border:1px solid #ef9a9a; border-radius:4px; font-size:0.8rem; font-weight:600; text-decoration:none;">
+                                                        <i class="material-icons left" style="font-size:18px; vertical-align:middle;">cancel</i>Cancelar pedido completo
+                                                    </button>
+                                                </form>
+                                                <div id="<?php echo esc($idCancelModalPa); ?>" class="modal">
+                                                    <div class="modal-content">
+                                                        <h5><i class="material-icons left red-text text-darken-2">cancel</i>Cancelar pedido completo</h5>
+                                                        <p>¿Cancelar el pedido <strong><?php echo esc((string)$pa['numero_pedido']); ?></strong> por completo? Todos los productos volveran al inventario y ya no aparecera para asignacion.</p>
+                                                    </div>
+                                                    <div class="modal-footer">
+                                                        <a href="#!" class="modal-close waves-effect btn-flat">Volver</a>
+                                                        <a href="#!" class="modal-close waves-effect waves-light btn red darken-2" onclick="document.getElementById('cancelar-pedido-form-<?php echo (int)$pa['id_pedido']; ?>').submit(); return false;">Sí, cancelar pedido</a>
+                                                    </div>
+                                                </div>
+                                            <?php endif; ?>
 
                                             <?php if ($puedeEditarAsignado): ?>
                                                 <form method="POST" class="assign-add-product-form" style="margin-top:10px; border-top:1px solid #eceff1; padding-top:10px;">
