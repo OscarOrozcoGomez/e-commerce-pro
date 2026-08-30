@@ -896,9 +896,15 @@ include __DIR__ . '/includes/header.php';
                                         <i class="material-icons tiny">photo_camera</i> Sube una foto de evidencia antes de cobrar
                                     </p>
                                     <input type="file" accept="image/*" capture="environment" class="ev-foto-input" id="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
-                                    <button type="button" class="btn deep-purple waves-effect waves-light w-100 ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
-                                        <i class="material-icons left">photo_camera</i> SUBIR EVIDENCIA
-                                    </button>
+                                    <input type="file" accept="image/*" class="ev-foto-input" id="ev-foto-input-galeria-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
+                                    <div class="ev-btn-row">
+                                        <button type="button" class="btn deep-purple waves-effect waves-light ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
+                                            <i class="material-icons left">photo_camera</i> TOMAR FOTO
+                                        </button>
+                                        <button type="button" class="btn indigo darken-1 waves-effect waves-light ev-btn-subir" data-input="ev-foto-input-galeria-<?php echo (int)$ent['id_pedido']; ?>">
+                                            <i class="material-icons left">photo_library</i> DESDE GALERIA
+                                        </button>
+                                    </div>
                                     <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
                                 <?php else: ?>
                                     <form method="POST">
@@ -2336,6 +2342,15 @@ document.addEventListener('DOMContentLoaded', () => {
         margin-right: 8px;
     }
     .w-100 { width: 100%; }
+    .ev-btn-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .ev-btn-row .btn {
+        width: 100%;
+        margin: 0;
+    }
     .delivery-value {
         margin-left: 4px;
     }
@@ -2375,14 +2390,34 @@ document.addEventListener('DOMContentLoaded', () => {
         background: #ffebee;
     }
 
-    /* Modal de publicar entrega / confirmar accion: legible y usable en pantallas de celular. */
+    /* Modal de publicar entrega / confirmar accion: legible y usable en pantallas de celular.
+       Layout en columna con footer de altura automatica (NO la altura fija que trae Materialize
+       por defecto): antes, cuando el footer apilaba 2-3 botones en pantallas chicas, el
+       contenedor del footer se quedaba con su altura original de una sola fila y los botones de
+       mas abajo quedaban renderizados fuera de la caja del modal (habia que hacer scroll de toda
+       la pagina, no del modal, para alcanzarlos). Con esto el modal mismo scrollea internamente
+       si hace falta y el footer siempre es 100% visible. */
     #modal-entrega-publicacion,
-    #modal-confirmar-entrega {
+    #modal-confirmar-entrega,
+    #modal-route-error {
         width: 90%;
         max-width: 560px;
+        display: flex;
+        flex-direction: column;
+        max-height: 85vh;
+    }
+    #modal-entrega-publicacion .modal-content,
+    #modal-confirmar-entrega .modal-content,
+    #modal-route-error .modal-content {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
     #modal-entrega-publicacion .modal-footer,
-    #modal-confirmar-entrega .modal-footer {
+    #modal-confirmar-entrega .modal-footer,
+    #modal-route-error .modal-footer {
+        flex: 0 0 auto;
+        height: auto;
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
@@ -2397,12 +2432,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     @media only screen and (max-width: 600px) {
         #modal-entrega-publicacion,
-        #modal-confirmar-entrega {
+        #modal-confirmar-entrega,
+        #modal-route-error {
             width: 96%;
-            max-height: 90%;
+            max-height: 92vh;
         }
         #modal-entrega-publicacion .modal-footer > a,
-        #modal-confirmar-entrega .modal-footer > a {
+        #modal-confirmar-entrega .modal-footer > a,
+        #modal-route-error .modal-footer > a {
             width: 100%;
             margin: 4px 0 !important;
             text-align: center;
