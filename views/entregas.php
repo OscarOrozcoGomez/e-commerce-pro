@@ -622,6 +622,25 @@ include __DIR__ . '/includes/header.php';
                         $clienteNombre = (string)piiDecryptValue($clienteNombre);
                     }
 
+                    // Nunca mostrar ciphertext ENCv1 del nombre en la UI. Si el descifrado
+                    // fallo (tipicamente porque PII_ENCRYPTION_KEY no quedo cargada en este
+                    // proceso), preferir el nombre que venga en las observaciones del pedido
+                    // y, si tampoco sirve, un marcador con el numero de pedido. El teléfono
+                    // ya tiene esta misma red de seguridad mas abajo.
+                    if (is_string($clienteNombre) && $clienteNombre !== ''
+                        && function_exists('piiIsEncryptedValue')
+                        && piiIsEncryptedValue($clienteNombre)) {
+                        if (is_string($obsClienteNombre) && trim($obsClienteNombre) !== ''
+                            && !piiIsEncryptedValue($obsClienteNombre)) {
+                            $clienteNombre = trim($obsClienteNombre);
+                        } else {
+                            $numeroPedidoRef = trim((string)($ent['numero_pedido'] ?? ''));
+                            $clienteNombre = $numeroPedidoRef !== ''
+                                ? 'Cliente del pedido ' . $numeroPedidoRef
+                                : 'Cliente';
+                        }
+                    }
+
                     if (is_string($clienteTel) && $clienteTel !== ''
                         && function_exists('piiIsEncryptedValue')
                         && function_exists('piiDecryptValue')
@@ -2402,9 +2421,19 @@ document.addEventListener('DOMContentLoaded', () => {
     #modal-route-error {
         width: 90%;
         max-width: 560px;
+        max-height: 85vh;
+    }
+    /* display:flex debe aplicarse SOLO cuando Materialize marca el modal como abierto
+       (clase .open, agregada/quitada por M.Modal al abrir/cerrar). Antes esta regla no
+       tenia esa condicion: el selector por #id le gana en especificidad al ".modal
+       {display:none}" de Materialize, asi que el modal quedaba SIEMPRE en flex/visible
+       (aunque "cerrado" para Materialize) -- se veia como una franja/resto de modal
+       asomando detras del contenido de la pagina. */
+    #modal-entrega-publicacion.open,
+    #modal-confirmar-entrega.open,
+    #modal-route-error.open {
         display: flex;
         flex-direction: column;
-        max-height: 85vh;
     }
     #modal-entrega-publicacion .modal-content,
     #modal-confirmar-entrega .modal-content,
