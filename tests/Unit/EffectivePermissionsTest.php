@@ -127,6 +127,13 @@ final class EffectivePermissionsTest extends TestCase
     {
         $this->assertContains('gestionar_usuarios', PERMISOS_EN_USO);
         $this->assertContains('ver_entregas', PERMISOS_EN_USO);
-        $this->assertNotContains('inventario', PERMISOS_EN_USO, 'inventario aun no se comprueba en codigo (Fase 4)');
+        // Fase 4: estas claves ya controlan sus vistas (con el rol como respaldo).
+        $this->assertContains('inventario', PERMISOS_EN_USO);
+        $this->assertContains('transferir_stock', PERMISOS_EN_USO);
+        $this->assertContains('realizar_ventas', PERMISOS_EN_USO);
+        $this->assertContains('asignar_entregas', PERMISOS_EN_USO);
+        // Estas siguen sin consumidor en codigo (deuda para mas adelante).
+        $this->assertNotContains('ver_catalogo', PERMISOS_EN_USO);
+        $this->assertNotContains('agregar_carrito', PERMISOS_EN_USO);
     }
 }

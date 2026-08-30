@@ -20,6 +20,12 @@ const PERMISOS_EN_USO = [
     'gestionar_blogs',
     'apartar_productos',
     'gestionar_usuarios',
+    // Fase 4: activados en vistas que antes decidian solo por rol (con el helper de rol
+    // como respaldo, para no quitar acceso a nadie).
+    'asignar_entregas',
+    'realizar_ventas',
+    'inventario',
+    'transferir_stock',
 ];
 
 /**
