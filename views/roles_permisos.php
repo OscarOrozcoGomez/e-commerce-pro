@@ -1,0 +1,699 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../core/config.php';
+require_once __DIR__ . '/../core/auth.php';
+
+requireAuth();
+requirePermission('gestionar_usuarios', BASE_URL . 'views/dashboard.php');
+
+$pageTitle = 'Roles y Permisos';
+$pdo = getPDO();
+$error = '';
+$success = '';
+$selRol = 0;
+
+// Claves duplicadas conocidas (misma capacidad, dos claves). Se marcan en el catalogo.
+$RP_DUPLICADOS = ['venta', 'realizar_ventas'];
+$RP_ORDEN_CAT = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Administracion', 'Otros'];
+
+function rpGetRoles(PDO $pdo): array
+{
+    $sql = "SELECT r.id_rol, r.nombre, r.descripcion, r.estado,
+                   COALESCE(r.es_sistema, 0) AS es_sistema,
+                   (SELECT COUNT(*) FROM usuarios u WHERE u.id_rol = r.id_rol) AS num_usuarios
+            FROM roles r
+            ORDER BY COALESCE(r.es_sistema, 0) DESC, r.nombre";
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function rpGetPermisos(PDO $pdo): array
+{
+    $sql = "SELECT p.id_permiso, p.clave, p.nombre, p.descripcion,
+                   COALESCE(NULLIF(p.categoria, ''), 'Otros') AS categoria,
+                   (SELECT COUNT(*) FROM rol_permisos rp WHERE rp.id_permiso = p.id_permiso) AS num_roles
+            FROM permisos p
+            WHERE p.estado = 'activo'
+            ORDER BY p.clave";
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function rpRolePermisoIds(PDO $pdo, int $idRol): array
+{
+    $stmt = $pdo->prepare("SELECT id_permiso FROM rol_permisos WHERE id_rol = ?");
+    $stmt->execute([$idRol]);
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
+function rpCountOtrosAdminsActivos(PDO $pdo, int $exceptoIdUsuario = 0): int
+{
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol
+         WHERE u.estado = 'activo' AND r.nombre = 'admin' AND u.id_usuario <> ?"
+    );
+    $stmt->execute([$exceptoIdUsuario]);
+    return (int) $stmt->fetchColumn();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = 'Token CSRF inválido. Recarga la página e inténtalo de nuevo.';
+    } else {
+        $accion = (string) $_POST['accion'];
+        try {
+            if ($accion === 'crear_rol') {
+                $nombre = strtolower(trim((string) ($_POST['nombre'] ?? '')));
+                $descripcion = trim((string) ($_POST['descripcion'] ?? ''));
+                $copiarDe = (int) ($_POST['copiar_de'] ?? 0);
+
+                if (!preg_match('/^[a-z0-9_]{2,50}$/', $nombre)) {
+                    throw new Exception('El nombre del rol debe tener 2-50 caracteres: minúsculas, números y guion bajo.');
+                }
+
+                $pdo->beginTransaction();
+                $pdo->prepare("INSERT INTO roles (nombre, descripcion, estado, es_sistema) VALUES (?, ?, 'activo', 0)")
+                    ->execute([$nombre, $descripcion !== '' ? $descripcion : null]);
+                $nuevoId = (int) $pdo->lastInsertId();
+                if ($copiarDe > 0) {
+                    $pdo->prepare("INSERT INTO rol_permisos (id_rol, id_permiso)
+                                   SELECT ?, id_permiso FROM rol_permisos WHERE id_rol = ?")
+                        ->execute([$nuevoId, $copiarDe]);
+                }
+                $pdo->commit();
+                logAudit('ROL_CREADO', 'roles', $nuevoId, "Nombre: {$nombre}" . ($copiarDe ? " (copiado de rol #{$copiarDe})" : ''));
+                $success = 'Rol creado correctamente.';
+                $selRol = $nuevoId;
+            } elseif ($accion === 'guardar_rol') {
+                $idRol = (int) ($_POST['id_rol'] ?? 0);
+                $descripcion = trim((string) ($_POST['descripcion'] ?? ''));
+                $nombreNuevo = strtolower(trim((string) ($_POST['nombre'] ?? '')));
+                $permisosIds = array_values(array_unique(array_map('intval', (array) ($_POST['permisos'] ?? []))));
+
+                $stmt = $pdo->prepare("SELECT * FROM roles WHERE id_rol = ?");
+                $stmt->execute([$idRol]);
+                $rol = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$rol) {
+                    throw new Exception('Rol no encontrado.');
+                }
+                $esSistema = (int) ($rol['es_sistema'] ?? 0) === 1;
+
+                // Mejora 4: anti-autobloqueo.
+                $idPermGestion = (int) $pdo->query("SELECT id_permiso FROM permisos WHERE clave = 'gestionar_usuarios'")->fetchColumn();
+                $pierdeGestion = $idPermGestion > 0 && !in_array($idPermGestion, $permisosIds, true);
+                if (
+                    $pierdeGestion
+                    && (int) ($_SESSION['usuario']['id_rol'] ?? 0) === $idRol
+                    && !isAdmin()
+                    && rpCountOtrosAdminsActivos($pdo, (int) ($_SESSION['usuario']['id_usuario'] ?? 0)) === 0
+                ) {
+                    throw new Exception('No puedes quitar "gestionar_usuarios" de tu propio rol: quedarías sin acceso a esta pantalla y no hay ningún administrador activo para restaurarlo.');
+                }
+
+                $pdo->beginTransaction();
+                if (!$esSistema && $nombreNuevo !== '' && $nombreNuevo !== $rol['nombre']) {
+                    if (!preg_match('/^[a-z0-9_]{2,50}$/', $nombreNuevo)) {
+                        throw new Exception('Nombre de rol inválido.');
+                    }
+                    $pdo->prepare("UPDATE roles SET nombre = ? WHERE id_rol = ?")->execute([$nombreNuevo, $idRol]);
+                }
+                $pdo->prepare("UPDATE roles SET descripcion = ? WHERE id_rol = ?")
+                    ->execute([$descripcion !== '' ? $descripcion : null, $idRol]);
+                $pdo->prepare("DELETE FROM rol_permisos WHERE id_rol = ?")->execute([$idRol]);
+                if ($permisosIds) {
+                    $ins = $pdo->prepare("INSERT INTO rol_permisos (id_rol, id_permiso) VALUES (?, ?)");
+                    foreach ($permisosIds as $pid) {
+                        if ($pid > 0) {
+                            $ins->execute([$idRol, $pid]);
+                        }
+                    }
+                }
+                $pdo->commit();
+                logAudit('ROL_ACTUALIZADO', 'roles', $idRol, count($permisosIds) . ' permisos asignados');
+                $success = 'Rol actualizado. Los usuarios verán el cambio en menos de 1 minuto.';
+                $selRol = $idRol;
+            } elseif ($accion === 'eliminar_rol') {
+                $idRol = (int) ($_POST['id_rol'] ?? 0);
+                $stmt = $pdo->prepare("SELECT * FROM roles WHERE id_rol = ?");
+                $stmt->execute([$idRol]);
+                $rol = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$rol) {
+                    throw new Exception('Rol no encontrado.');
+                }
+                if ((int) ($rol['es_sistema'] ?? 0) === 1) {
+                    throw new Exception('No se puede eliminar un rol del sistema.');
+                }
+                $num = (int) $pdo->query("SELECT COUNT(*) FROM usuarios WHERE id_rol = " . (int) $idRol)->fetchColumn();
+                if ($num > 0) {
+                    throw new Exception("No se puede eliminar: {$num} usuario(s) tienen este rol. Reasígnalos a otro rol primero.");
+                }
+                $pdo->prepare("DELETE FROM roles WHERE id_rol = ?")->execute([$idRol]);
+                logAudit('ROL_ELIMINADO', 'roles', $idRol, "Nombre: {$rol['nombre']}");
+                $success = 'Rol eliminado.';
+            } elseif ($accion === 'crear_permiso' || $accion === 'guardar_permiso') {
+                if (!isSuperAdmin()) {
+                    throw new Exception('Solo un super admin puede editar el catálogo de permisos.');
+                }
+                $clave = strtolower(trim((string) ($_POST['clave'] ?? '')));
+                $nombre = trim((string) ($_POST['nombre'] ?? ''));
+                $descripcion = trim((string) ($_POST['descripcion'] ?? ''));
+                $categoria = trim((string) ($_POST['categoria'] ?? 'Otros'));
+                if ($categoria === '') {
+                    $categoria = 'Otros';
+                }
+                if (!preg_match('/^[a-z0-9_]{2,100}$/', $clave)) {
+                    throw new Exception('La clave debe ser minúsculas, números y guion bajo (2-100).');
+                }
+                if ($nombre === '') {
+                    throw new Exception('El nombre visible es obligatorio.');
+                }
+
+                if ($accion === 'crear_permiso') {
+                    $pdo->prepare("INSERT INTO permisos (clave, nombre, descripcion, categoria, estado) VALUES (?, ?, ?, ?, 'activo')")
+                        ->execute([$clave, $nombre, $descripcion !== '' ? $descripcion : null, $categoria]);
+                    logAudit('PERMISO_CREADO', 'permisos', (int) $pdo->lastInsertId(), "Clave: {$clave}");
+                    $success = 'Permiso creado.';
+                } else {
+                    $idPermiso = (int) ($_POST['id_permiso'] ?? 0);
+                    $pdo->prepare("UPDATE permisos SET nombre = ?, descripcion = ?, categoria = ? WHERE id_permiso = ?")
+                        ->execute([$nombre, $descripcion !== '' ? $descripcion : null, $categoria, $idPermiso]);
+                    logAudit('PERMISO_ACTUALIZADO', 'permisos', $idPermiso, "Clave: {$clave}");
+                    $success = 'Permiso actualizado.';
+                }
+            }
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $code = $e instanceof PDOException ? (int) $e->getCode() : 0;
+            $error = $code === 23000
+                ? 'Error: ya existe un rol o permiso con ese nombre/clave.'
+                : 'Error: ' . $e->getMessage();
+        }
+    }
+}
+
+$roles = rpGetRoles($pdo);
+$permisos = rpGetPermisos($pdo);
+
+$permisosPorCategoria = [];
+foreach ($permisos as $p) {
+    $permisosPorCategoria[$p['categoria']][] = $p;
+}
+uksort($permisosPorCategoria, static function ($a, $b) use ($RP_ORDEN_CAT) {
+    $ia = array_search($a, $RP_ORDEN_CAT, true);
+    $ib = array_search($b, $RP_ORDEN_CAT, true);
+    $ia = $ia === false ? 999 : $ia;
+    $ib = $ib === false ? 999 : $ib;
+    return $ia <=> $ib ?: strcmp($a, $b);
+});
+
+if ($selRol === 0) {
+    $selRol = (int) ($_GET['rol'] ?? 0);
+}
+$rolSel = null;
+foreach ($roles as $r) {
+    if ((int) $r['id_rol'] === $selRol) {
+        $rolSel = $r;
+    }
+}
+if ($rolSel === null && $roles) {
+    $rolSel = $roles[0];
+    $selRol = (int) $rolSel['id_rol'];
+}
+$permisosDelRol = $rolSel ? rpRolePermisoIds($pdo, $selRol) : [];
+$usuariosAfectados = $rolSel ? (int) $rolSel['num_usuarios'] : 0;
+$rolSelEsSistema = $rolSel ? ((int) ($rolSel['es_sistema'] ?? 0) === 1) : false;
+
+// Mejora 2: ¿quién puede...?
+$quienClave = trim((string) ($_GET['quien'] ?? ''));
+$quienRoles = [];
+$quienIndiv = [];
+if ($quienClave !== '') {
+    $st = $pdo->prepare(
+        "SELECT r.nombre FROM rol_permisos rp
+         JOIN roles r ON r.id_rol = rp.id_rol
+         JOIN permisos p ON p.id_permiso = rp.id_permiso
+         WHERE p.clave = ? ORDER BY r.nombre"
+    );
+    $st->execute([$quienClave]);
+    $quienRoles = $st->fetchAll(PDO::FETCH_COLUMN);
+
+    $st = $pdo->prepare(
+        "SELECT u.nombre, r.nombre AS rol, up.efecto, up.nota, up.expira_en
+         FROM usuario_permisos up
+         JOIN usuarios u ON u.id_usuario = up.id_usuario
+         JOIN roles r ON r.id_rol = u.id_rol
+         JOIN permisos p ON p.id_permiso = up.id_permiso
+         WHERE p.clave = ? ORDER BY up.efecto DESC, u.nombre"
+    );
+    $st->execute([$quienClave]);
+    $quienIndiv = $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Historial
+$historial = $pdo->query(
+    "SELECT l.accion, l.tabla_afectada, l.id_registro, l.detalles, l.fecha, u.nombre AS usuario
+     FROM logs_auditoria l
+     LEFT JOIN usuarios u ON u.id_usuario = l.id_usuario
+     WHERE l.accion IN ('ROL_CREADO','ROL_ACTUALIZADO','ROL_ELIMINADO','PERMISO_CREADO','PERMISO_ACTUALIZADO','USUARIO_PERMISOS_ACTUALIZADOS')
+     ORDER BY l.fecha DESC LIMIT 50"
+)->fetchAll(PDO::FETCH_ASSOC);
+
+$iconoCategoria = [
+    'Ventas' => 'shopping_cart',
+    'Inventario' => 'inventory_2',
+    'Entregas' => 'local_shipping',
+    'Catalogo' => 'storefront',
+    'Administracion' => 'admin_panel_settings',
+    'Otros' => 'label',
+];
+$iconoRol = [
+    'admin' => 'shield',
+    'encargado' => 'store',
+    'vendedor' => 'point_of_sale',
+    'repartidor' => 'local_shipping',
+    'cliente' => 'person',
+];
+$permisosSinEfecto = 0;
+foreach ($permisos as $p) {
+    if (!in_array($p['clave'], PERMISOS_EN_USO, true)) {
+        $permisosSinEfecto++;
+    }
+}
+
+include __DIR__ . '/includes/header.php';
+?>
+<style>
+    .rp-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+    .rp-header h4 { margin: 0; }
+    .rp-stats .chip { margin: 4px 4px 4px 0; }
+    .rp-grid { display: grid; grid-template-columns: 300px 1fr; gap: 0; }
+    @media (max-width: 900px) { .rp-grid { grid-template-columns: 1fr; } }
+    .rp-role-list { border-right: 1px solid #e0e0e0; }
+    @media (max-width: 900px) { .rp-role-list { border-right: none; border-bottom: 1px solid #e0e0e0; } }
+    .rp-role { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #f0f0f0; text-decoration: none; color: #37474f; }
+    .rp-role:hover { background: #f5f6ff; }
+    .rp-role.active { background: #e8eaf6; box-shadow: inset 4px 0 0 #1a237e; }
+    .rp-role.active .rp-role-name { color: #1a237e; }
+    .rp-role .material-icons { background: #5c6bc0; color: #fff; border-radius: 50%; padding: 8px; font-size: 20px; }
+    .rp-role.active .material-icons { background: #1a237e; }
+    .rp-role-name { font-weight: 600; }
+    .rp-role-meta { font-size: 11px; color: #90a4ae; }
+    .rp-editor { padding: 18px 22px; }
+    .rp-cat { margin: 18px 0 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #1a237e; font-size: 12px; border-bottom: 1px dashed #c5cae9; padding-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    .rp-perm { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid #f2f3f9; flex-wrap: wrap; }
+    .rp-perm .switch { flex: 0 0 auto; }
+    .rp-perm .pk { font-weight: 700; font-family: 'Roboto Mono', monospace; font-size: 13px; }
+    .rp-perm .pd { color: #90a4ae; font-size: 12px; display: block; }
+    .rp-perm .tags { margin-left: auto; }
+    .rp-perm .tags .chip { font-size: 10px; height: 20px; line-height: 20px; font-weight: 700; text-transform: uppercase; margin: 0 0 0 4px; }
+    .chip.rp-dead { background: #ffebee; color: #c62828; }
+    .chip.rp-dup { background: #fff8e1; color: #ff8f00; }
+    .chip.rp-live { background: #e8f5e9; color: #2e7d32; }
+    .chip.rp-add { background: #e8f5e9; color: #2e7d32; }
+    .chip.rp-del { background: #fff3e0; color: #e65100; }
+    .rp-actions { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .rp-diff-list { list-style: none; margin: 8px 0; padding: 0; }
+    .rp-diff-list li { padding: 7px 10px; border-radius: 8px; margin-bottom: 6px; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 13px; }
+    .rp-diff-list li.add { background: #e8f5e9; color: #2e7d32; }
+    .rp-diff-list li.del { background: #fff3e0; color: #e65100; }
+</style>
+
+<div class="container">
+    <div class="rp-header">
+        <h4>Roles y Permisos</h4>
+        <a href="<?php echo BASE_URL; ?>views/users.php" class="btn blue darken-4 waves-effect waves-light">
+            <i class="material-icons left">people</i> Usuarios
+        </a>
+    </div>
+
+    <div class="rp-stats" style="margin: 10px 0;">
+        <span class="chip"><?php echo count($roles); ?> roles</span>
+        <span class="chip"><?php echo count($permisos); ?> permisos</span>
+        <span class="chip <?php echo $permisosSinEfecto ? 'orange lighten-4 orange-text text-darken-4' : ''; ?>">
+            <?php echo $permisosSinEfecto; ?> sin efecto
+        </span>
+    </div>
+
+    <?php if ($error): ?>
+        <div class="card red lighten-2"><div class="card-content white-text"><p><?php echo esc($error); ?></p></div></div>
+    <?php endif; ?>
+    <?php if ($success): ?>
+        <div class="card green lighten-2"><div class="card-content white-text"><p><?php echo esc($success); ?></p></div></div>
+    <?php endif; ?>
+
+    <div class="card">
+        <div class="card-tabs">
+            <ul class="tabs tabs-fixed-width">
+                <li class="tab"><a class="active" href="#rp-tab-roles">Roles</a></li>
+                <li class="tab"><a href="#rp-tab-cat">Catálogo de permisos</a></li>
+                <li class="tab"><a href="#rp-tab-hist">Historial</a></li>
+            </ul>
+        </div>
+
+        <div class="card-content" style="padding: 0;">
+            <!-- ================= TAB ROLES ================= -->
+            <div id="rp-tab-roles">
+                <div class="rp-grid">
+                    <div class="rp-role-list">
+                        <?php foreach ($roles as $r): ?>
+                            <a class="rp-role <?php echo (int) $r['id_rol'] === $selRol ? 'active' : ''; ?>"
+                               href="?rol=<?php echo (int) $r['id_rol']; ?>#rp-tab-roles">
+                                <i class="material-icons"><?php echo esc($iconoRol[$r['nombre']] ?? 'supervisor_account'); ?></i>
+                                <span>
+                                    <span class="rp-role-name"><?php echo esc($r['nombre']); ?></span><br>
+                                    <span class="rp-role-meta">
+                                        <?php echo (int) $r['es_sistema'] === 1 ? 'sistema · ' : ''; ?>
+                                        <?php echo (int) $r['num_usuarios']; ?> usuario(s)
+                                    </span>
+                                </span>
+                            </a>
+                        <?php endforeach; ?>
+                        <a class="rp-role modal-trigger" href="#rpModalNuevoRol" style="color:#1a237e;font-weight:700;">
+                            <i class="material-icons" style="background:#00897b;">add</i>
+                            <span>Nuevo rol</span>
+                        </a>
+                    </div>
+
+                    <div class="rp-editor">
+                        <?php if ($rolSel): ?>
+                            <form method="POST" id="rpFormRol" data-afectados="<?php echo $usuariosAfectados; ?>">
+                                <?php echo csrfInput(); ?>
+                                <input type="hidden" name="accion" value="guardar_rol">
+                                <input type="hidden" name="id_rol" value="<?php echo (int) $rolSel['id_rol']; ?>">
+
+                                <h5 style="font-weight:700;margin-top:0;">
+                                    <?php echo esc($rolSel['nombre']); ?>
+                                    <?php if ($rolSelEsSistema): ?><span class="chip">sistema</span><?php endif; ?>
+                                </h5>
+                                <p class="grey-text" style="margin-top:-6px;"><?php echo $usuariosAfectados; ?> usuario(s) con este rol</p>
+
+                                <div class="row" style="margin-bottom:0;">
+                                    <div class="input-field col s12 m5">
+                                        <input id="rp_nombre" type="text" name="nombre"
+                                               value="<?php echo esc($rolSel['nombre']); ?>"
+                                               <?php echo $rolSelEsSistema ? 'disabled' : ''; ?>>
+                                        <label for="rp_nombre" class="active">Nombre<?php echo $rolSelEsSistema ? ' (rol del sistema, no editable)' : ''; ?></label>
+                                    </div>
+                                    <div class="input-field col s12 m7">
+                                        <input id="rp_desc" type="text" name="descripcion"
+                                               value="<?php echo esc((string) ($rolSel['descripcion'] ?? '')); ?>">
+                                        <label for="rp_desc" class="active">Descripción</label>
+                                    </div>
+                                </div>
+
+                                <p class="grey-text" style="font-size:13px;margin:4px 0 0;">
+                                    <i class="material-icons tiny" style="vertical-align:-3px;">toggle_on</i>
+                                    Activa los permisos que este rol otorga por defecto a todos sus usuarios.
+                                </p>
+
+                                <?php foreach ($permisosPorCategoria as $cat => $lista): ?>
+                                    <div class="rp-cat">
+                                        <i class="material-icons tiny"><?php echo esc($iconoCategoria[$cat] ?? 'label'); ?></i>
+                                        <?php echo esc($cat); ?>
+                                    </div>
+                                    <?php foreach ($lista as $p): ?>
+                                        <?php
+                                        $enRol = in_array((int) $p['id_permiso'], $permisosDelRol, true);
+                                        $viva = in_array($p['clave'], PERMISOS_EN_USO, true);
+                                        $dup = in_array($p['clave'], $RP_DUPLICADOS, true);
+                                        ?>
+                                        <div class="rp-perm">
+                                            <div class="switch">
+                                                <label>
+                                                    <input type="checkbox" name="permisos[]"
+                                                           value="<?php echo (int) $p['id_permiso']; ?>"
+                                                           data-clave="<?php echo esc($p['clave']); ?>"
+                                                           data-inrole="<?php echo $enRol ? '1' : '0'; ?>"
+                                                           <?php echo $enRol ? 'checked' : ''; ?>>
+                                                    <span class="lever"></span>
+                                                </label>
+                                            </div>
+                                            <div>
+                                                <span class="pk"><?php echo esc($p['clave']); ?></span>
+                                                <span class="pd"><?php echo esc((string) ($p['nombre'] ?? '')); ?></span>
+                                            </div>
+                                            <div class="tags">
+                                                <?php if ($dup): ?><span class="chip rp-dup">duplicado</span><?php endif; ?>
+                                                <span class="chip <?php echo $viva ? 'rp-live' : 'rp-dead'; ?>">
+                                                    <?php echo $viva ? 'activo' : 'sin efecto'; ?>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php endforeach; ?>
+
+                                <div class="rp-actions">
+                                    <button type="button" id="rpBtnGuardar" class="btn green darken-1 waves-effect">
+                                        <i class="material-icons left">save</i> Guardar cambios
+                                    </button>
+                                    <a href="?rol=<?php echo (int) $rolSel['id_rol']; ?>#rp-tab-roles" class="btn-flat">Cancelar</a>
+                                    <?php if (!$rolSelEsSistema): ?>
+                                        <button type="submit" form="rpFormEliminar" class="btn red darken-1 waves-effect" style="margin-left:auto;"
+                                                onclick="return confirm('¿Eliminar el rol <?php echo esc($rolSel['nombre']); ?>? Esta acción no se puede deshacer.');">
+                                            <i class="material-icons left">delete</i> Eliminar rol
+                                        </button>
+                                    <?php else: ?>
+                                        <button type="button" class="btn grey lighten-1 disabled" style="margin-left:auto;">
+                                            <i class="material-icons left">lock</i> Rol del sistema
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+
+                            <?php if (!$rolSelEsSistema): ?>
+                                <form method="POST" id="rpFormEliminar" style="display:none;">
+                                    <?php echo csrfInput(); ?>
+                                    <input type="hidden" name="accion" value="eliminar_rol">
+                                    <input type="hidden" name="id_rol" value="<?php echo (int) $rolSel['id_rol']; ?>">
+                                </form>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <p class="grey-text">No hay roles. Crea uno con el botón «Nuevo rol».</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= TAB CATALOGO ================= -->
+            <div id="rp-tab-cat" style="padding: 22px;">
+                <div class="row">
+                    <div class="col s12 m7">
+                        <h5 style="font-weight:700;margin-top:0;">Catálogo de permisos</h5>
+                        <p class="grey-text" style="font-size:13px;">
+                            <span class="chip rp-live">activo</span> alguna parte del código lo comprueba hoy ·
+                            <span class="chip rp-dead">sin efecto</span> aún se decide por rol ·
+                            <span class="chip rp-dup">duplicado</span> misma capacidad que otra clave
+                        </p>
+                        <table class="striped">
+                            <thead><tr><th>Clave</th><th>Categoría</th><th>Roles</th><th>Estado</th></tr></thead>
+                            <tbody>
+                                <?php foreach ($permisos as $p): ?>
+                                    <?php $viva = in_array($p['clave'], PERMISOS_EN_USO, true); $dup = in_array($p['clave'], $RP_DUPLICADOS, true); ?>
+                                    <tr>
+                                        <td><b><?php echo esc($p['clave']); ?></b><br><span class="grey-text" style="font-size:11px;"><?php echo esc((string) ($p['nombre'] ?? '')); ?></span></td>
+                                        <td><?php echo esc($p['categoria']); ?></td>
+                                        <td><?php echo (int) $p['num_roles']; ?></td>
+                                        <td>
+                                            <?php if ($dup): ?><span class="chip rp-dup">duplicado</span><br><?php endif; ?>
+                                            <span class="chip <?php echo $viva ? 'rp-live' : 'rp-dead'; ?>"><?php echo $viva ? 'activo' : 'sin efecto'; ?></span>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        <?php if (isSuperAdmin()): ?>
+                            <a class="btn-small indigo waves-effect modal-trigger" href="#rpModalNuevoPermiso" style="margin-top:10px;">
+                                <i class="material-icons left">add</i> Nueva clave de permiso
+                            </a>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="col s12 m5">
+                        <div class="card-panel grey lighten-4" style="border-radius:10px;">
+                            <h5 style="font-weight:700;margin-top:0;font-size:1.2rem;">¿Quién puede…?</h5>
+                            <form method="GET">
+                                <div class="input-field">
+                                    <select name="quien" onchange="this.form.submit()">
+                                        <option value="">-- Elige un permiso --</option>
+                                        <?php foreach ($permisos as $p): ?>
+                                            <option value="<?php echo esc($p['clave']); ?>" <?php echo $quienClave === $p['clave'] ? 'selected' : ''; ?>>
+                                                <?php echo esc($p['clave']); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <label>Permiso</label>
+                                </div>
+                            </form>
+                            <?php if ($quienClave !== ''): ?>
+                                <p style="font-weight:700;margin-bottom:2px;">Roles que lo otorgan</p>
+                                <?php if ($quienRoles): ?>
+                                    <?php foreach ($quienRoles as $rn): ?><span class="chip"><?php echo esc($rn); ?></span><?php endforeach; ?>
+                                <?php else: ?>
+                                    <p class="grey-text">Ningún rol.</p>
+                                <?php endif; ?>
+
+                                <p style="font-weight:700;margin:14px 0 2px;">Ajustes individuales</p>
+                                <?php if ($quienIndiv): ?>
+                                    <ul class="collection" style="border:none;">
+                                        <?php foreach ($quienIndiv as $qi): ?>
+                                            <li class="collection-item" style="padding:8px 4px;">
+                                                <?php echo esc($qi['nombre']); ?>
+                                                <span class="grey-text">(<?php echo esc($qi['rol']); ?>)</span>
+                                                <span class="chip <?php echo $qi['efecto'] === 'conceder' ? 'rp-add' : 'rp-del'; ?>">
+                                                    <?php echo $qi['efecto'] === 'conceder' ? 'añadido' : 'quitado'; ?>
+                                                </span>
+                                                <?php if (!empty($qi['expira_en'])): ?>
+                                                    <span class="grey-text" style="font-size:11px;">· expira <?php echo esc(date('d/m/Y', strtotime((string) $qi['expira_en']))); ?></span>
+                                                <?php endif; ?>
+                                                <?php if (!empty($qi['nota'])): ?>
+                                                    <br><span class="grey-text" style="font-size:11px;">nota: <?php echo esc((string) $qi['nota']); ?></span>
+                                                <?php endif; ?>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                <?php else: ?>
+                                    <p class="grey-text">Sin ajustes individuales.</p>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= TAB HISTORIAL ================= -->
+            <div id="rp-tab-hist" style="padding: 22px;">
+                <h5 style="font-weight:700;margin-top:0;">Últimos cambios de roles y permisos</h5>
+                <table class="striped">
+                    <thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($historial as $h): ?>
+                            <tr>
+                                <td style="white-space:nowrap;"><?php echo esc(date('d/m/Y H:i', strtotime((string) $h['fecha']))); ?></td>
+                                <td><?php echo esc((string) ($h['usuario'] ?? '—')); ?></td>
+                                <td><span class="chip"><?php echo esc($h['accion']); ?></span></td>
+                                <td><?php echo esc((string) ($h['detalles'] ?? '')); ?> <span class="grey-text" style="font-size:11px;">#<?php echo (int) $h['id_registro']; ?></span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (!$historial): ?>
+                            <tr><td colspan="4" class="grey-text">Sin registros todavía.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== MODAL NUEVO ROL ===== -->
+<div id="rpModalNuevoRol" class="modal">
+    <form method="POST">
+        <?php echo csrfInput(); ?>
+        <input type="hidden" name="accion" value="crear_rol">
+        <div class="modal-content">
+            <h5 style="font-weight:700;"><i class="material-icons left indigo-text">add_moderator</i> Nuevo rol</h5>
+            <div class="row" style="margin-top:14px;">
+                <div class="input-field col s12 m6">
+                    <input id="nr_nombre" type="text" name="nombre" required>
+                    <label for="nr_nombre">Nombre (minúsculas, sin espacios)</label>
+                </div>
+                <div class="input-field col s12 m6">
+                    <input id="nr_desc" type="text" name="descripcion">
+                    <label for="nr_desc">Descripción</label>
+                </div>
+                <div class="input-field col s12">
+                    <select name="copiar_de">
+                        <option value="0">Empezar vacío</option>
+                        <?php foreach ($roles as $r): ?>
+                            <option value="<?php echo (int) $r['id_rol']; ?>">Copiar permisos de: <?php echo esc($r['nombre']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label>Permisos por defecto</label>
+                </div>
+            </div>
+            <p class="grey-text" style="font-size:12px;"><i class="material-icons tiny">info</i> Podrás ajustar los permisos justo después de crearlo.</p>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Cancelar</a>
+            <button type="submit" class="btn indigo waves-effect"><i class="material-icons left">check</i> Crear rol</button>
+        </div>
+    </form>
+</div>
+
+<?php if (isSuperAdmin()): ?>
+<!-- ===== MODAL NUEVA CLAVE DE PERMISO ===== -->
+<div id="rpModalNuevoPermiso" class="modal">
+    <form method="POST">
+        <?php echo csrfInput(); ?>
+        <input type="hidden" name="accion" value="crear_permiso">
+        <div class="modal-content">
+            <h5 style="font-weight:700;"><i class="material-icons left indigo-text">vpn_key</i> Nueva clave de permiso</h5>
+            <div class="row" style="margin-top:14px;">
+                <div class="input-field col s12 m6"><input type="text" name="clave" required><label>clave (snake_case)</label></div>
+                <div class="input-field col s12 m6"><input type="text" name="nombre" required><label>Nombre visible</label></div>
+                <div class="input-field col s12 m6">
+                    <select name="categoria">
+                        <?php foreach (['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Administracion', 'Otros'] as $c): ?>
+                            <option value="<?php echo $c; ?>"><?php echo $c; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label>Categoría</label>
+                </div>
+                <div class="input-field col s12"><input type="text" name="descripcion"><label>Descripción</label></div>
+            </div>
+            <p class="grey-text" style="font-size:12px;"><i class="material-icons tiny">info</i> Las claves no se borran, se desactivan. Crear una clave no la conecta con el código: eso es trabajo de la Fase 4.</p>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Cancelar</a>
+            <button type="submit" class="btn indigo waves-effect">Crear</button>
+        </div>
+    </form>
+</div>
+<?php endif; ?>
+
+<!-- ===== MODAL DIFF (mejora 3) ===== -->
+<div id="rpModalDiff" class="modal">
+    <div class="modal-content">
+        <h5 style="font-weight:700;"><i class="material-icons left amber-text text-darken-2">rule</i> Confirmar cambios del rol</h5>
+        <p class="grey-text">Afecta a <b id="rpDiffAfectados">0</b> usuario(s) con este rol. Verán el cambio en menos de 1 minuto.</p>
+        <ul class="rp-diff-list" id="rpDiffLista"></ul>
+        <p id="rpDiffSinCambios" class="grey-text" style="display:none;">No hay cambios en los permisos.</p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close btn-flat">Volver a editar</a>
+        <button type="button" id="rpDiffAplicar" class="btn green darken-1 waves-effect"><i class="material-icons left">check</i> Aplicar cambios</button>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        M.Tabs.init(document.querySelectorAll('.tabs'));
+        M.Modal.init(document.querySelectorAll('.modal'));
+        M.FormSelect.init(document.querySelectorAll('select'));
+        M.updateTextFields();
+
+        var form = document.getElementById('rpFormRol');
+        var btn = document.getElementById('rpBtnGuardar');
+        if (form && btn) {
+            var diffModal = M.Modal.getInstance(document.getElementById('rpModalDiff'));
+            btn.addEventListener('click', function () {
+                var añadidos = [], quitados = [];
+                form.querySelectorAll('input[name="permisos[]"]').forEach(function (cb) {
+                    var enRol = cb.dataset.inrole === '1';
+                    if (cb.checked && !enRol) añadidos.push(cb.dataset.clave);
+                    if (!cb.checked && enRol) quitados.push(cb.dataset.clave);
+                });
+                var ul = document.getElementById('rpDiffLista');
+                ul.innerHTML = '';
+                añadidos.forEach(function (c) { ul.insertAdjacentHTML('beforeend', '<li class="add">+ ' + c + '</li>'); });
+                quitados.forEach(function (c) { ul.insertAdjacentHTML('beforeend', '<li class="del">− ' + c + '</li>'); });
+                document.getElementById('rpDiffSinCambios').style.display = (añadidos.length + quitados.length) ? 'none' : 'block';
+                document.getElementById('rpDiffAfectados').textContent = form.dataset.afectados || '0';
+                diffModal.open();
+            });
+            document.getElementById('rpDiffAplicar').addEventListener('click', function () { form.submit(); });
+        }
+    });
+</script>
+
+<?php include __DIR__ . '/includes/footer.php'; ?>

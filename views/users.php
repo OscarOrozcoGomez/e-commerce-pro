@@ -50,6 +50,21 @@ function getStaffUserById(PDO $pdo, int $id): ?array
     return $user !== false ? $user : null;
 }
 
+/**
+ * Chip que resume cuánto se ha personalizado un usuario respecto a su rol (mejora 1).
+ */
+function upPersonalizacionChip(array $user): string
+{
+    $c = (int) ($user['ov_conceder'] ?? 0);
+    $d = (int) ($user['ov_denegar'] ?? 0);
+    if ($c === 0 && $d === 0) {
+        return '<span class="chip grey lighten-3" style="font-size:11px;height:20px;line-height:20px;">rol</span>';
+    }
+    $txt = 'rol' . ($c > 0 ? ' +' . $c : '') . ($d > 0 ? ' −' . $d : '');
+    return '<span class="chip green lighten-4 green-text text-darken-2" style="font-size:11px;height:20px;line-height:20px;"'
+        . ' title="' . $c . ' permiso(s) añadido(s), ' . $d . ' quitado(s)">' . esc($txt) . '</span>';
+}
+
 // Procesar formulario
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -223,13 +238,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             } catch (Throwable $e) {
                 $error = 'No se pudo resetear la contraseña: ' . $e->getMessage();
             }
+        } elseif ($accion === 'guardar_permisos_usuario') {
+            try {
+                $id = intval($_POST['id_usuario'] ?? 0);
+                $nota = trim((string) ($_POST['nota'] ?? ''));
+                $deseados = array_values(array_unique(array_map('intval', (array) ($_POST['permisos'] ?? []))));
+
+                if ($id <= 0) {
+                    throw new Exception('ID de usuario inválido.');
+                }
+
+                $stmtT = $pdo->prepare("SELECT u.id_usuario, u.id_rol, u.estado, COALESCE(u.es_superadmin,0) AS es_superadmin, r.nombre AS rol
+                                        FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol
+                                        WHERE u.id_usuario = ? LIMIT 1");
+                $stmtT->execute([$id]);
+                $targetUser = $stmtT->fetch(PDO::FETCH_ASSOC);
+                if (!$targetUser) {
+                    throw new Exception('Usuario no encontrado.');
+                }
+                if (isAdminAccount($targetUser) && !isSuperAdmin()) {
+                    throw new Exception('Solo un super admin puede editar los permisos de una cuenta de administrador.');
+                }
+
+                // Permisos que otorga su rol.
+                $stmtR = $pdo->prepare("SELECT id_permiso FROM rol_permisos WHERE id_rol = ?");
+                $stmtR->execute([(int) $targetUser['id_rol']]);
+                $idsRol = array_map('intval', $stmtR->fetchAll(PDO::FETCH_COLUMN));
+
+                // Mejora 4: anti-autobloqueo. No puedes quitarte a ti mismo el permiso
+                // que da acceso a esta pantalla; que lo haga otro administrador si hace falta.
+                $idGestion = (int) $pdo->query("SELECT id_permiso FROM permisos WHERE clave = 'gestionar_usuarios'")->fetchColumn();
+                if (
+                    $idGestion > 0
+                    && $id === (int) ($_SESSION['usuario']['id_usuario'] ?? 0)
+                    && !in_array($idGestion, $deseados, true)
+                ) {
+                    throw new Exception('No puedes quitarte "gestionar_usuarios" a ti mismo. Pídele a otro administrador que lo haga si de verdad es necesario.');
+                }
+
+                $todos = $pdo->query("SELECT id_permiso FROM permisos WHERE estado = 'activo'")->fetchAll(PDO::FETCH_COLUMN);
+
+                $pdo->beginTransaction();
+                $del = $pdo->prepare("DELETE FROM usuario_permisos WHERE id_usuario = ? AND id_permiso = ?");
+                $ins = $pdo->prepare("INSERT INTO usuario_permisos (id_usuario, id_permiso, efecto, nota, asignado_por)
+                                      VALUES (?, ?, ?, ?, ?)
+                                      ON DUPLICATE KEY UPDATE efecto = VALUES(efecto), nota = VALUES(nota), asignado_por = VALUES(asignado_por), expira_en = NULL");
+                $nConceder = 0;
+                $nDenegar = 0;
+                $asignadoPor = (int) ($_SESSION['usuario']['id_usuario'] ?? 0) ?: null;
+                foreach ($todos as $pid) {
+                    $pid = (int) $pid;
+                    $enRol = in_array($pid, $idsRol, true);
+                    $marcado = in_array($pid, $deseados, true);
+                    if ($marcado === $enRol) {
+                        $del->execute([$id, $pid]);
+                    } elseif ($marcado && !$enRol) {
+                        $ins->execute([$id, $pid, 'conceder', $nota !== '' ? $nota : null, $asignadoPor]);
+                        $nConceder++;
+                    } else {
+                        $ins->execute([$id, $pid, 'denegar', $nota !== '' ? $nota : null, $asignadoPor]);
+                        $nDenegar++;
+                    }
+                }
+                $pdo->commit();
+
+                logAudit('USUARIO_PERMISOS_ACTUALIZADOS', 'usuario_permisos', $id,
+                    "conceder={$nConceder} denegar={$nDenegar}" . ($nota !== '' ? " | nota: {$nota}" : ''));
+                $success = 'Permisos del usuario actualizados. El cambio aplica en menos de 1 minuto.';
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $error = 'No se pudieron guardar los permisos: ' . $e->getMessage();
+            }
         }
     }
 }
 
 // Obtener usuarios
 try {
-    $sql = "SELECT u.id_usuario, u.nombre, u.email, r.nombre as rol, a.nombre as almacen, u.estado, u.es_superadmin, u.intentos_fallidos, u.bloqueado_hasta
+    $sql = "SELECT u.id_usuario, u.nombre, u.email, u.id_rol, r.nombre as rol, a.nombre as almacen, u.estado, u.es_superadmin, u.intentos_fallidos, u.bloqueado_hasta,
+                   (SELECT COUNT(*) FROM usuario_permisos up WHERE up.id_usuario = u.id_usuario AND up.efecto = 'conceder' AND (up.expira_en IS NULL OR up.expira_en > NOW())) AS ov_conceder,
+                   (SELECT COUNT(*) FROM usuario_permisos up WHERE up.id_usuario = u.id_usuario AND up.efecto = 'denegar' AND (up.expira_en IS NULL OR up.expira_en > NOW())) AS ov_denegar
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
             LEFT JOIN almacenes a ON u.id_almacen = a.id_almacen
@@ -241,6 +331,48 @@ try {
 } catch (PDOException $e) {
     $usuarios = [];
 }
+
+// Catalogo de permisos + mapa de permisos por usuario para el modal "Permisos".
+try {
+    $permisosCat = $pdo->query(
+        "SELECT id_permiso, clave, nombre, COALESCE(NULLIF(categoria,''),'Otros') AS categoria
+         FROM permisos WHERE estado = 'activo' ORDER BY clave"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $ordenCat = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Administracion', 'Otros'];
+    $permisosPorCat = [];
+    foreach ($permisosCat as $p) {
+        $permisosPorCat[$p['categoria']][] = $p;
+    }
+    uksort($permisosPorCat, static function ($a, $b) use ($ordenCat) {
+        $ia = array_search($a, $ordenCat, true);
+        $ib = array_search($b, $ordenCat, true);
+        return ($ia === false ? 999 : $ia) <=> ($ib === false ? 999 : $ib) ?: strcmp($a, $b);
+    });
+
+    // rol -> [id_permiso]
+    $rolPermMap = [];
+    foreach ($pdo->query("SELECT id_rol, id_permiso FROM rol_permisos") as $row) {
+        $rolPermMap[(int) $row['id_rol']][] = (int) $row['id_permiso'];
+    }
+    // id_usuario -> ['conceder'=>[ids], 'denegar'=>[ids]]
+    $userOverrideMap = [];
+    foreach ($pdo->query(
+        "SELECT id_usuario, id_permiso, efecto FROM usuario_permisos
+         WHERE expira_en IS NULL OR expira_en > NOW()"
+    ) as $row) {
+        $userOverrideMap[(int) $row['id_usuario']][$row['efecto']][] = (int) $row['id_permiso'];
+    }
+} catch (PDOException $e) {
+    $permisosPorCat = [];
+    $rolPermMap = [];
+    $userOverrideMap = [];
+}
+
+$iconoCategoria = [
+    'Ventas' => 'shopping_cart', 'Inventario' => 'inventory_2', 'Entregas' => 'local_shipping',
+    'Catalogo' => 'storefront', 'Administracion' => 'admin_panel_settings', 'Otros' => 'label',
+];
 
 // Obtener roles y almacenes
 try {
@@ -468,9 +600,21 @@ include __DIR__ . '/includes/header.php';
                                     <tr>
                                         <td><?php echo esc($user['nombre']); ?></td>
                                         <td><?php echo esc($user['email']); ?></td>
-                                        <td><?php echo esc($user['rol']); ?></td>
+                                        <td><?php echo esc($user['rol']); ?><br><?php echo upPersonalizacionChip($user); ?></td>
                                         <td><?php echo esc($user['almacen'] ?? 'N/A'); ?></td>
                                         <td>
+                                            <?php if (!isAdminAccount($user) || isSuperAdmin()): ?>
+                                            <button type="button" class="btn-small indigo waves-effect up-perm-btn"
+                                                    data-uid="<?php echo (int) $user['id_usuario']; ?>"
+                                                    data-uname="<?php echo esc($user['nombre']); ?>"
+                                                    data-urol="<?php echo esc($user['rol']); ?>"
+                                                    data-uidrol="<?php echo (int) $user['id_rol']; ?>"
+                                                    data-ualmacen="<?php echo esc($user['almacen'] ?? '—'); ?>"
+                                                    title="Editar permisos individuales">
+                                                <i class="material-icons">tune</i>
+                                            </button>
+                                            <?php endif; ?>
+
                                             <form method="POST" style="display:inline;">
                                                 <?php echo csrfInput(); ?>
                                                 <input type="hidden" name="accion" value="cambiar_estado">
@@ -534,7 +678,7 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                                 <div class="users-card-field">
                                     <span class="users-card-field-label">Rol</span>
-                                    <span class="users-card-field-value"><?php echo esc($user['rol']); ?></span>
+                                    <span class="users-card-field-value"><?php echo esc($user['rol']); ?> <?php echo upPersonalizacionChip($user); ?></span>
                                 </div>
                                 <div class="users-card-field">
                                     <span class="users-card-field-label">Almacén</span>
@@ -542,6 +686,18 @@ include __DIR__ . '/includes/header.php';
                                 </div>
 
                                 <div class="users-card-actions">
+                                    <?php if (!isAdminAccount($user) || isSuperAdmin()): ?>
+                                    <button type="button" class="btn-small indigo waves-effect up-perm-btn"
+                                            data-uid="<?php echo (int) $user['id_usuario']; ?>"
+                                            data-uname="<?php echo esc($user['nombre']); ?>"
+                                            data-urol="<?php echo esc($user['rol']); ?>"
+                                            data-uidrol="<?php echo (int) $user['id_rol']; ?>"
+                                            data-ualmacen="<?php echo esc($user['almacen'] ?? '—'); ?>"
+                                            title="Editar permisos individuales">
+                                        <i class="material-icons">tune</i>
+                                    </button>
+                                    <?php endif; ?>
+
                                     <form method="POST">
                                         <?php echo csrfInput(); ?>
                                         <input type="hidden" name="accion" value="cambiar_estado">
@@ -593,11 +749,111 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- ===== MODAL: Permisos individuales del usuario (Fase 3) ===== -->
+<div id="modalPermUser" class="modal modal-fixed-footer">
+    <form method="POST" id="upPermForm">
+        <?php echo csrfInput(); ?>
+        <input type="hidden" name="accion" value="guardar_permisos_usuario">
+        <input type="hidden" name="id_usuario" id="upUserId" value="">
+        <div class="modal-content">
+            <h5 style="font-weight:700;margin-top:0;">Permisos de <span id="upUserName"></span></h5>
+            <p class="grey-text" id="upUserMeta" style="margin-top:-4px;"></p>
+            <p class="grey-text" style="font-size:13px;">
+                Activa lo que quieres que tenga <b>esta persona</b>. Lo que viene de su rol ya está activo;
+                puedes quitar o añadir permisos individuales sin afectar a los demás usuarios con ese rol.
+            </p>
+            <div id="upPermBody"></div>
+            <div class="input-field" style="margin-top:10px;">
+                <input type="text" name="nota" id="upNota" maxlength="255">
+                <label for="upNota">Motivo del cambio (opcional, queda en la auditoría)</label>
+            </div>
+            <p class="grey-text" style="font-size:12px;">
+                <span class="chip grey lighten-3" style="font-size:10px;height:20px;line-height:20px;">por rol</span> viene del rol ·
+                <span class="chip green lighten-4 green-text text-darken-2" style="font-size:10px;height:20px;line-height:20px;">añadido</span> concesión individual ·
+                <span class="chip orange lighten-4 orange-text text-darken-4" style="font-size:10px;height:20px;line-height:20px;">quitado</span> revocado solo para esta persona
+            </p>
+        </div>
+        <div class="modal-footer">
+            <a href="#!" class="modal-close btn-flat">Cancelar</a>
+            <button type="submit" class="btn green darken-1 waves-effect"><i class="material-icons left">save</i> Guardar permisos</button>
+        </div>
+    </form>
+</div>
+
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        var selects = document.querySelectorAll('select');
-        M.FormSelect.init(selects);
+    window.UP_PERMS_CAT = <?php echo json_encode($permisosPorCat, JSON_UNESCAPED_UNICODE); ?>;
+    window.UP_ROLE_PERMS = <?php echo json_encode($rolPermMap); ?>;
+    window.UP_USER_OVERRIDES = <?php echo json_encode($userOverrideMap); ?>;
+    window.UP_LIVE = <?php echo json_encode(array_values(PERMISOS_EN_USO)); ?>;
+    window.UP_CAT_ICON = <?php echo json_encode($iconoCategoria); ?>;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        M.FormSelect.init(document.querySelectorAll('select'));
         M.updateTextFields();
+        var modalEl = document.getElementById('modalPermUser');
+        var modal = modalEl ? M.Modal.init(modalEl) : null;
+
+        function chip(kind) {
+            if (kind === 'rol') return '<span class="chip grey lighten-3" style="font-size:10px;height:20px;line-height:20px;">por rol</span>';
+            if (kind === 'add') return '<span class="chip green lighten-4 green-text text-darken-2" style="font-size:10px;height:20px;line-height:20px;">añadido</span>';
+            if (kind === 'del') return '<span class="chip orange lighten-4 orange-text text-darken-4" style="font-size:10px;height:20px;line-height:20px;">quitado</span>';
+            return '';
+        }
+
+        function buildBody(idRol, uid) {
+            var rolIds = (window.UP_ROLE_PERMS[idRol] || []).map(Number);
+            var ov = window.UP_USER_OVERRIDES[uid] || {};
+            var conceder = (ov.conceder || []).map(Number);
+            var denegar = (ov.denegar || []).map(Number);
+            var html = '';
+            Object.keys(window.UP_PERMS_CAT).forEach(function (cat) {
+                var icon = window.UP_CAT_ICON[cat] || 'label';
+                html += '<div style="margin:14px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#1a237e;font-size:12px;border-bottom:1px dashed #c5cae9;padding-bottom:4px;">'
+                     + '<i class="material-icons tiny" style="vertical-align:-3px;">' + icon + '</i> ' + cat + '</div>';
+                window.UP_PERMS_CAT[cat].forEach(function (p) {
+                    var pid = Number(p.id_permiso);
+                    var enRol = rolIds.indexOf(pid) !== -1;
+                    var checked = enRol;
+                    if (conceder.indexOf(pid) !== -1) checked = true;
+                    if (denegar.indexOf(pid) !== -1) checked = false;
+                    var sinEfecto = window.UP_LIVE.indexOf(p.clave) === -1;
+                    html += '<div class="up-row" data-inrole="' + (enRol ? 1 : 0) + '" style="display:flex;align-items:center;gap:12px;padding:9px 2px;border-bottom:1px solid #f2f3f9;">'
+                         + '<div class="switch"><label><input type="checkbox" name="permisos[]" value="' + pid + '" ' + (checked ? 'checked' : '') + '><span class="lever"></span></label></div>'
+                         + '<div style="flex:1;"><span style="font-weight:700;font-family:monospace;font-size:13px;">' + p.clave + '</span>'
+                         + '<span style="display:block;color:#90a4ae;font-size:11px;">' + (p.nombre || '') + (sinEfecto ? ' · <i>sin efecto aún</i>' : '') + '</span></div>'
+                         + '<span class="up-tag"></span></div>';
+                });
+            });
+            return html;
+        }
+
+        function refreshTags() {
+            document.querySelectorAll('#upPermBody .up-row').forEach(function (row) {
+                var enRol = row.dataset.inrole === '1';
+                var cb = row.querySelector('input[type=checkbox]');
+                var tag = row.querySelector('.up-tag');
+                if (cb.checked && enRol) tag.innerHTML = chip('rol');
+                else if (cb.checked && !enRol) tag.innerHTML = chip('add');
+                else if (!cb.checked && enRol) tag.innerHTML = chip('del');
+                else tag.innerHTML = '';
+            });
+        }
+
+        document.querySelectorAll('.up-perm-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var uid = btn.dataset.uid;
+                document.getElementById('upUserId').value = uid;
+                document.getElementById('upUserName').textContent = btn.dataset.uname;
+                document.getElementById('upUserMeta').textContent = 'Rol: ' + btn.dataset.urol + ' · Sucursal: ' + btn.dataset.ualmacen;
+                document.getElementById('upNota').value = '';
+                document.getElementById('upPermBody').innerHTML = buildBody(btn.dataset.uidrol, uid);
+                document.querySelectorAll('#upPermBody input[type=checkbox]').forEach(function (cb) {
+                    cb.addEventListener('change', refreshTags);
+                });
+                refreshTags();
+                if (modal) modal.open();
+            });
+        });
     });
 </script>
 

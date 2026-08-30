@@ -7,6 +7,22 @@ require_once __DIR__ . '/delivery_route_utils.php';
 require_once __DIR__ . '/order_cancel_utils.php';
 
 /**
+ * Claves de permiso que HOY se comprueban de verdad en el codigo
+ * (via requirePermission()/hasPermission()). El panel de Roles y Permisos usa
+ * esta lista para marcar como "sin efecto" las claves que aun no controlan nada
+ * (se gatean por rol). Al migrar una vista de rol -> permiso en la Fase 4,
+ * agrega aqui su clave.
+ */
+const PERMISOS_EN_USO = [
+    'gestionar_productos',
+    'ver_reportes',
+    'ver_entregas',
+    'gestionar_blogs',
+    'apartar_productos',
+    'gestionar_usuarios',
+];
+
+/**
  * Verifica si el usuario está autenticado.
  *
  * @return bool
@@ -129,6 +145,159 @@ function hasPermission(string $permiso): bool
     }
 
     return in_array($permiso, $usuario['permisos'], true);
+}
+
+/**
+ * Combina los permisos de un rol con los overrides individuales de un usuario.
+ * Funcion pura (sin BD) para poder testearla facilmente.
+ *
+ * @param string[] $permisosRol Claves que otorga el rol.
+ * @param array<int, array{clave?: string, efecto?: string}> $overrides Filas
+ *        vigentes de usuario_permisos (clave + efecto 'conceder'|'denegar').
+ * @return string[] Claves efectivas, unicas y ordenadas.
+ */
+function mergeEffectivePermissions(array $permisosRol, array $overrides): array
+{
+    $set = [];
+    foreach ($permisosRol as $clave) {
+        $clave = (string) $clave;
+        if ($clave !== '') {
+            $set[$clave] = true;
+        }
+    }
+
+    foreach ($overrides as $override) {
+        $clave = (string) ($override['clave'] ?? '');
+        if ($clave === '') {
+            continue;
+        }
+        if (($override['efecto'] ?? 'conceder') === 'denegar') {
+            unset($set[$clave]);
+        } else {
+            $set[$clave] = true;
+        }
+    }
+
+    $claves = array_keys($set);
+    sort($claves);
+    return $claves;
+}
+
+/**
+ * Permisos efectivos de un usuario = permisos del rol
+ *   ∪ overrides 'conceder' vigentes
+ *   − overrides 'denegar' vigentes.
+ *
+ * Tolera que la tabla usuario_permisos aun no exista (migracion sin correr):
+ * en ese caso devuelve solo los permisos del rol.
+ *
+ * @return string[]
+ */
+function getEffectivePermissions(PDO $pdo, int $idUsuario, int $idRol): array
+{
+    $permisosRol = [];
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT p.clave
+             FROM rol_permisos rp
+             JOIN permisos p ON p.id_permiso = rp.id_permiso
+             WHERE rp.id_rol = ? AND p.estado = 'activo'"
+        );
+        $stmt->execute([$idRol]);
+        $permisosRol = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+    } catch (Throwable $e) {
+        error_log('getEffectivePermissions (rol): ' . $e->getMessage());
+    }
+
+    $overrides = [];
+    if ($idUsuario > 0) {
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT p.clave, up.efecto
+                 FROM usuario_permisos up
+                 JOIN permisos p ON p.id_permiso = up.id_permiso
+                 WHERE up.id_usuario = ?
+                   AND p.estado = 'activo'
+                   AND (up.expira_en IS NULL OR up.expira_en > NOW())"
+            );
+            $stmt->execute([$idUsuario]);
+            $overrides = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            // La tabla puede no existir todavia en algun entorno; degradar a solo-rol.
+            error_log('getEffectivePermissions (overrides): ' . $e->getMessage());
+        }
+    }
+
+    return mergeEffectivePermissions($permisosRol, $overrides);
+}
+
+/**
+ * Re-lee rol, es_superadmin, id_almacen y permisos efectivos del usuario en sesion
+ * para que los cambios de roles/permisos apliquen sin necesidad de re-login.
+ *
+ * Throttled: como mucho una vez cada 30 s por sesion, y una sola consulta por
+ * request (guard estatico). Si la cuenta fue desactivada, limpia la sesion.
+ */
+function refreshSessionPermissions(bool $force = false): void
+{
+    static $ranThisRequest = false;
+    if ($ranThisRequest && !$force) {
+        return;
+    }
+    $ranThisRequest = true;
+
+    if (!isAuthenticated()) {
+        return;
+    }
+
+    $idUsuario = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
+    if ($idUsuario <= 0) {
+        return;
+    }
+
+    $ttlSegundos = 30;
+    $ultimo = (int) ($_SESSION['_perms_refreshed_at'] ?? 0);
+    if (!$force && (time() - $ultimo) < $ttlSegundos) {
+        return;
+    }
+
+    if (!function_exists('getPDO')) {
+        return;
+    }
+
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare(
+            "SELECT u.id_rol, u.id_almacen, COALESCE(u.es_superadmin, 0) AS es_superadmin,
+                    u.estado, r.nombre AS rol
+             FROM usuarios u
+             JOIN roles r ON r.id_rol = u.id_rol
+             WHERE u.id_usuario = ?
+             LIMIT 1"
+        );
+        $stmt->execute([$idUsuario]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('refreshSessionPermissions: ' . $e->getMessage());
+        return;
+    }
+
+    if (!$row) {
+        return;
+    }
+
+    if ((string) ($row['estado'] ?? 'activo') !== 'activo') {
+        // La cuenta fue desactivada: el proximo requireAuth() mandara al login.
+        $_SESSION['usuario'] = [];
+        return;
+    }
+
+    $_SESSION['usuario']['id_rol'] = (int) $row['id_rol'];
+    $_SESSION['usuario']['id_almacen'] = $row['id_almacen'];
+    $_SESSION['usuario']['es_superadmin'] = (int) $row['es_superadmin'];
+    $_SESSION['usuario']['rol'] = (string) $row['rol'];
+    $_SESSION['usuario']['permisos'] = getEffectivePermissions($pdo, $idUsuario, (int) $row['id_rol']);
+    $_SESSION['_perms_refreshed_at'] = time();
 }
 
 /**
@@ -316,6 +485,11 @@ function resolveSalesWarehouseId(PDO $pdo): int
  */
 function requireAuth(string $redirectUrl = ''): void
 {
+    if (isAuthenticated()) {
+        // Aplica cambios de rol/permisos hechos desde el panel sin re-login.
+        refreshSessionPermissions();
+    }
+
     if (!isAuthenticated()) {
         if ($redirectUrl === '') {
             $redirectUrl = BASE_URL . 'views/login.php';
@@ -334,6 +508,10 @@ function requireAuth(string $redirectUrl = ''): void
  */
 function requirePermission(string $permiso, string $redirectUrl = ''): void
 {
+    if (isAuthenticated()) {
+        refreshSessionPermissions();
+    }
+
     if (!hasPermission($permiso)) {
         if ($redirectUrl === '') {
             $redirectUrl = BASE_URL . 'index.php';
@@ -377,16 +555,14 @@ function authenticate(string $loginIdentifier, string $password): bool
         }
     }
 
-    // Se añadió u.contrasena a la lista de columnas seleccionadas
+    // Los permisos se calculan aparte con getEffectivePermissions() (rol + overrides
+    // individuales), por eso aqui ya no se hace el GROUP_CONCAT sobre rol_permisos.
     $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, u.es_superadmin, r.nombre as rol,
-                   GROUP_CONCAT(p.clave) as permisos,
                    c.id_cliente,
                    c.telefono as telefono_cliente,
                    u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
-            LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
-            LEFT JOIN permisos p ON rp.id_permiso = p.id_permiso
             LEFT JOIN clientes c ON u.id_usuario = c.id_usuario
             WHERE " . ($userId !== null ? 'u.id_usuario = :login_id' : 'u.email = :login') . " AND u.estado = 'activo'
             GROUP BY u.id_usuario";
@@ -429,8 +605,9 @@ function authenticate(string $loginIdentifier, string $password): bool
             error_log("DEBUG LOGIN ADVERTENCIA: El usuario no tiene un rol asignado.");
         }
 
-        $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
+        $user['permisos'] = getEffectivePermissions($pdo, (int)$user['id_usuario'], (int)$user['id_rol']);
         $_SESSION['usuario'] = $user;
+        $_SESSION['_perms_refreshed_at'] = time();
         session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
         $_SESSION['_session_id_rotated_at'] = time();
 
