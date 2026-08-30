@@ -5,7 +5,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/purchase_order_utils.php';
 
 header('Content-Type: application/json');
-if (!isAuthenticated() || (!isAdmin() && !isEncargado())) {
+// Fase 4: el permiso 'inventario' abre este endpoint; el rol se mantiene como respaldo.
+if (!isAuthenticated() || (!hasPermission('inventario') && !isAdmin() && !isEncargado())) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }
