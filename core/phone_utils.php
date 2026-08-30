@@ -91,7 +91,11 @@ function findClienteByPhone(PDO $pdo, string $phoneValue, ?int $excludeClientId 
         return null;
     }
 
-    $stmt = $pdo->query('SELECT id_cliente, id_usuario, telefono FROM clientes');
+    // nombre se incluye aqui porque views/complete_account.php precarga el campo
+    // "Nombre Completo" con $clientePendiente['nombre'] -- sin esta columna en el SELECT
+    // ese prefill siempre salia vacio (bug real, encontrado via E2E), forzando a cualquier
+    // usuario real a volver a escribir su nombre en ese flujo.
+    $stmt = $pdo->query('SELECT id_cliente, id_usuario, telefono, nombre FROM clientes');
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $idCliente = isset($row['id_cliente']) ? (int) $row['id_cliente'] : 0;
         if ($excludeClientId !== null && $idCliente === $excludeClientId) {

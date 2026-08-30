@@ -637,7 +637,8 @@ final class SecurityAndEdgeCasesTest extends TestCase
             'CREATE TABLE clientes (
                 id_cliente INTEGER PRIMARY KEY,
                 id_usuario INTEGER NULL,
-                telefono TEXT NULL
+                telefono TEXT NULL,
+                nombre TEXT NULL
             )'
         );
         $this->pdo->exec(
