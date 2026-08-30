@@ -65,29 +65,42 @@ $pdo = getPDO();
 try {
     $pdo->beginTransaction();
 
-    // Housekeeping: cada corrida de la suite crea una cuenta "Playwright QA"
-    // desechable (tests/e2e/helpers.ts::registerAndLogin). En una BD local que se
-    // reusa entre muchas corridas manuales, esto se acumula sin límite -- llegamos
-    // a tener 500+ clientes activos, lo que hizo que views/sales.php (que limita
-    // su lista de clientes a LIMIT 500 ordenados por nombre) dejara de encontrar
-    // nuestro cliente fijo de prueba. Sin foreign keys hacia `clientes` en este
-    // esquema, es seguro borrar las que no tienen ningún pedido asociado. No
-    // aplica en CI (base de datos efímera, nunca acumula) -- es higiene solo para
-    // desarrollo local repetido.
+    // Housekeeping: practicamente cada spec de tests/e2e/ crea una cuenta/cliente
+    // "Playwright ..." desechable (registerAndLogin crea "Playwright QA";
+    // admin-customers.staff.spec.ts crea "Playwright Cliente Admin/Editar/Estado/
+    // Buscar Unico ..."; sales-agendar-pedido*.staff.spec.ts crea "Playwright Sales
+    // ..."; register*.spec.ts crea "Playwright Registro ..."; etc.) y salvo el caso
+    // puntual que se borra a si mismo via la UI durante su propio test, ninguno se
+    // limpia despues. En una BD local que se reusa entre muchas corridas manuales
+    // esto se acumula sin limite -- llegamos a tener 880+ clientes activos (410 solo
+    // de "Playwright QA", verificado por muestreo), lo que hizo que views/sales.php
+    // (que limita su lista de clientes a LIMIT 500 ordenados por nombre) dejara de
+    // encontrar nuestro cliente fijo de prueba, y que views/manage_customers.php se
+    // volviera tan pesado que sus botones de accion dejaron de responder a tiempo en
+    // los tests (timeouts de click pese a que Playwright reportaba el elemento
+    // visible y estable -- la pagina misma tardaba en procesar el click con esa
+    // cantidad de filas).
+    // Se borran TODOS los clientes "Playwright *" (no solo los sin pedidos): a
+    // diferencia de categorias/sucursales/blogs, clientes SI tiene un pedido
+    // asociado en varios flujos (checkout, sales.php), pero fk_pedidos_cliente es
+    // "ON DELETE SET NULL" (ver database.sql) -- exactamente el mismo efecto que
+    // produce el propio boton "Eliminar cliente" de manage_customers.php ("Sus
+    // pedidos quedaran sin cliente asignado"), asi que no es mas destructivo que la
+    // funcionalidad ya expuesta en la UI. Se excluye por nombre exacto el cliente
+    // fijo E2E_SALES_CLIENTE_NOMBRE, que varios specs SI reutilizan intencionalmente
+    // entre corridas (no es desechable). No aplica en CI (base de datos efímera,
+    // nunca acumula) -- es higiene solo para desarrollo local repetido.
     // clientes.nombre esta cifrado (piiEncryptValue, no determinista), asi que no
-    // se puede filtrar por WHERE nombre = '...' en SQL -- hay que descifrar en PHP.
-    $sinPedidos = $pdo->query(
-        "SELECT id_cliente, nombre FROM clientes
-         WHERE id_cliente NOT IN (SELECT DISTINCT id_cliente FROM pedidos WHERE id_cliente IS NOT NULL)"
-    )->fetchAll(PDO::FETCH_ASSOC);
+    // se puede filtrar por WHERE nombre LIKE '...' en SQL -- hay que descifrar en PHP.
+    $todosClientes = $pdo->query('SELECT id_cliente, nombre FROM clientes')->fetchAll(PDO::FETCH_ASSOC);
 
     $idsDesechables = [];
-    foreach ($sinPedidos as $c) {
+    foreach ($todosClientes as $c) {
         $nombreRaw = trim((string) ($c['nombre'] ?? ''));
         $nombre = (function_exists('piiIsEncryptedValue') && piiIsEncryptedValue($nombreRaw))
             ? trim((string) piiDecryptValue($nombreRaw))
             : $nombreRaw;
-        if ($nombre === 'Playwright QA') {
+        if ($nombre !== E2E_SALES_CLIENTE_NOMBRE && strpos($nombre, 'Playwright ') === 0) {
             $idsDesechables[] = (int) $c['id_cliente'];
         }
     }
@@ -97,7 +110,7 @@ try {
         $pdo->prepare("DELETE FROM cliente_direcciones WHERE id_cliente IN ({$placeholders})")->execute($idsDesechables);
         $stmtDel = $pdo->prepare("DELETE FROM clientes WHERE id_cliente IN ({$placeholders})");
         $stmtDel->execute($idsDesechables);
-        echo 'Limpieza: ' . count($idsDesechables) . " cuentas 'Playwright QA' desechables sin pedidos eliminadas.\n";
+        echo 'Limpieza: ' . count($idsDesechables) . " clientes 'Playwright *' desechables eliminados (sus pedidos, si tenian, quedan sin cliente asignado).\n";
     }
 
     // Housekeeping: tests/e2e/bulk-assign-category.staff.spec.ts crea una categoria nueva
