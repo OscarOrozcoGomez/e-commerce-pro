@@ -1638,39 +1638,26 @@ function resolveCheckoutWarehouse(mixed $requestedWarehouseId = null): int
 }
 
 /**
- * IDs de los unicos almacenes que realmente pueden surtir un pedido del sitio publico:
- * el Almacen Central (id 1, destino por default de resolveCheckoutWarehouse() para
- * domicilio) mas cualquier sucursal de pickup publica (ver isPublicPickupWarehouseName()).
- * Existen otros almacenes activos en la tabla `almacenes` que NO son de este negocio
- * (ej. "Papelería Liz" via nombre matchea como pickup y si cuenta, pero "Luisa" y
- * cualquier otro almacen interno/de otro giro no deben contar como stock vendible online
- * -- sin este filtro, un producto agotado en Almacen Central/pickup podia mostrarse como
- * "Disponible" en el catalogo/ficha solo porque tenia existencia en un almacen que el
- * checkout jamas va a usar para surtir esa venta).
+ * ID(s) de almacen que determinan si un producto se muestra "Disponible" en el
+ * catalogo/ficha publica. Es SOLO el Almacen Central (id 1) -- el mismo destino por
+ * default de resolveCheckoutWarehouse() para un pedido a domicilio, que es el flujo
+ * de compra mas comun.
+ *
+ * Version anterior de esta funcion tambien sumaba las sucursales de pickup publicas
+ * (via isPublicPickupWarehouseName()) como "vendibles", asumiendo que si habia stock
+ * en cualquier sucursal el producto era "conseguible". En la practica eso produjo un
+ * falso "Disponible": un producto con 0 en Almacen Central pero con stock en, por
+ * ejemplo, "Papelería Liz", se mostraba disponible aunque un pedido a domicilio
+ * (que SIEMPRE se surte desde Almacen Central salvo que el cliente elija pickup)
+ * fallara al pagar. El stock de pickup ya se valida por separado y correctamente en
+ * su propio flujo (dbBuildPickupStockHint()/resolvePickupWarehouseId() en
+ * dbCreatePublicOrder()), asi que no hace falta -- ni conviene -- mezclarlo aqui.
  *
  * @return int[]
  */
 function getPublicSellableWarehouseIds(PDO $pdo): array
 {
-    // Sin cache estatico a proposito: es una tabla chica (una decena de filas) y esta
-    // funcion puede llamarse con distintas conexiones PDO en pruebas -- un cache aqui
-    // devolveria resultados de la primera conexion para todas las siguientes.
-    $ids = [1 => true];
-
-    try {
-        $stmt = $pdo->query("SELECT id_almacen, nombre FROM almacenes WHERE estado = 'activo'");
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $idAlmacen = (int)($row['id_almacen'] ?? 0);
-            $nombre = (string)($row['nombre'] ?? '');
-            if ($idAlmacen > 0 && isPublicPickupWarehouseName($nombre)) {
-                $ids[$idAlmacen] = true;
-            }
-        }
-    } catch (PDOException $e) {
-        error_log('getPublicSellableWarehouseIds: no se pudo consultar almacenes: ' . $e->getMessage());
-    }
-
-    return array_keys($ids);
+    return [1];
 }
 
 /**
