@@ -399,9 +399,9 @@ try {
             }
         }
         elseif ($action === 'bulk_assign_category') {
-            // Aunque toda la API ya exige 'gestionar_productos' arriba, esta accion en
-            // particular queda reservada solo a admin/encargado (a peticion expresa).
-            if (!canBulkAssignCategories()) {
+            // Fase 4: basta con 'gestionar_productos' (ya exigido arriba); el rol
+            // admin/encargado se mantiene como respaldo.
+            if (!hasPermission('gestionar_productos') && !canBulkAssignCategories()) {
                 throw new Exception("No tienes permiso para asignar categorías de forma masiva.");
             }
 
