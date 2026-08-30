@@ -164,6 +164,7 @@ try {
 }
 
 $productos = catalogCollapseProducts($productos);
+$productos = catalogAttachStockAvailability($pdo, $productos);
 
 if ($isAjaxLoadMore) {
     header('Content-Type: text/html; charset=UTF-8');
