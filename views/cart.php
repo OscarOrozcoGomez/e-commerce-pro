@@ -205,6 +205,15 @@ include __DIR__ . '/includes/header.php';
     // (a diferencia de latestPickupStockCheck, esto aplica a cualquier tipo de entrega).
     let orderSubmitSinStockIds = new Set();
 
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function getCheckoutSubmitButton() {
         return document.querySelector('#form-checkout button[type="submit"]');
     }
@@ -252,15 +261,6 @@ include __DIR__ . '/includes/header.php';
 
         if (!latestPickupStockCheck || latestPickupStockCheck.status !== 'sin_stock') {
             return new Set();
-        }
-
-        function escapeHtml(text) {
-            return String(text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
         }
 
         const faltantes = Array.isArray(latestPickupStockCheck.faltantes) ? latestPickupStockCheck.faltantes : [];
@@ -645,7 +645,7 @@ include __DIR__ . '/includes/header.php';
             }).join(', ');
 
             message.innerHTML = `<strong>En este momento no esta completo en stock de sucursal.</strong><br>
-                Hay existencia en inventario de respaldo; en aprox. <strong>2 a 3 horas</strong> podriamos moverlo y dejarlo listo para recoger.<br>
+                Hay existencia en inventario de respaldo; en aprox. <strong>1 a 2 horas</strong> podriamos moverlo y dejarlo listo para recoger.<br>
                 <small>Productos a surtir: ${detalles}</small>`;
             banner.style.display = 'block';
             setPickupSubmitBlocked(false);
