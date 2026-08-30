@@ -5,11 +5,17 @@ Options -Indexes
 # cada imagen del catalogo en cada visita/recarga (nunca la guarda), lo que hace que el
 # catalogo se sienta lento sobre todo en repaso/paginacion. Envuelto en <IfModule> para
 # no tronar si el modulo no esta cargado en algun entorno.
+# Algunas imagenes de producto se suben en AVIF; sin este AddType Apache las
+# sirve como application/octet-stream y ciertos navegadores no las pintan.
+<IfModule mod_mime.c>
+    AddType image/avif .avif
+</IfModule>
 <IfModule mod_expires.c>
     ExpiresActive On
     ExpiresByType image/jpeg "access plus 30 days"
     ExpiresByType image/png "access plus 30 days"
     ExpiresByType image/webp "access plus 30 days"
+    ExpiresByType image/avif "access plus 30 days"
     ExpiresByType image/gif "access plus 30 days"
     ExpiresByType image/svg+xml "access plus 30 days"
     ExpiresByType text/css "access plus 7 days"
@@ -17,7 +23,7 @@ Options -Indexes
     ExpiresByType text/javascript "access plus 7 days"
 </IfModule>
 <IfModule mod_headers.c>
-    <FilesMatch "\.(jpe?g|png|webp|gif|svg)$">
+    <FilesMatch "\.(jpe?g|png|webp|avif|gif|svg)$">
         Header set Cache-Control "public, max-age=2592000, immutable"
     </FilesMatch>
     <FilesMatch "\.(css|js)$">
