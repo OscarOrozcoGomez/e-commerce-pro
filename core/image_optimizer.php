@@ -26,9 +26,9 @@ function imageOptimizerAvailable(): bool
 }
 
 /**
- * @return array{resized: bool, reason: ?string}
+ * @return array{resized: bool, reason: ?string, would_resize?: bool, width?: int, height?: int, bytes_before?: int}
  */
-function optimizeUploadedProductImage(string $filePath): array
+function optimizeUploadedProductImage(string $filePath, bool $dryRun = false): array
 {
     if (!imageOptimizerAvailable()) {
         return ['resized' => false, 'reason' => 'gd_no_disponible'];
@@ -49,14 +49,26 @@ function optimizeUploadedProductImage(string $filePath): array
             return ['resized' => false, 'reason' => 'dimensiones_invalidas'];
         }
 
+        $bytesBefore = (int) (@filesize($filePath) ?: 0);
         $maxSide = max($width, $height);
         $needsResize = $maxSide > IMAGE_OPTIMIZER_MAX_DIMENSION;
-        $needsReencode = !$needsResize && (int) (@filesize($filePath) ?: 0) > IMAGE_OPTIMIZER_MAX_BYTES_WITHOUT_REENCODE;
+        $needsReencode = !$needsResize && $bytesBefore > IMAGE_OPTIMIZER_MAX_BYTES_WITHOUT_REENCODE;
 
         if (!$needsResize && !$needsReencode) {
             // Ya es razonable en dimension y peso: no reprocesar (evita perdida de
             // calidad innecesaria en imagenes que ya vienen bien optimizadas).
             return ['resized' => false, 'reason' => 'ya_dentro_del_limite'];
+        }
+
+        if ($dryRun) {
+            return [
+                'resized' => false,
+                'reason' => 'dry_run',
+                'would_resize' => true,
+                'width' => $width,
+                'height' => $height,
+                'bytes_before' => $bytesBefore,
+            ];
         }
 
         if ($needsResize) {
