@@ -9,7 +9,8 @@ requireAuth();
 
 header('Content-Type: application/json');
 
-if (!canScheduleSalesOrders()) {
+// Fase 4: el permiso 'realizar_ventas' abre este endpoint; el rol se mantiene como respaldo.
+if (!hasPermission('realizar_ventas') && !canScheduleSalesOrders()) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado para agendar pedidos a domicilio.']);
     exit;

@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
-if (!canScheduleSalesOrders()) {
+// Fase 4: el permiso 'realizar_ventas' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('realizar_ventas') && !canScheduleSalesOrders()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
