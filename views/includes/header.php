@@ -368,6 +368,10 @@
                             <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
                         <?php endif; ?>
 
+                        <?php if (isAdmin()): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
+                        <?php endif; ?>
+
                         <li class="divider"></li>
                         <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text text-darken-1"><i class="material-icons red-text">exit_to_app</i> Cerrar Sesión</a></li>
                     </ul>

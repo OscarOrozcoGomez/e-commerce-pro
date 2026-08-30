@@ -78,6 +78,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $nombre = htmlspecialchars($_POST['nombre'] ?? '');
                 $passwordRaw = $_POST['password'] ?? '';
 
+                // Mejora 8: alta por invitación. En vez de teclear una contraseña temporal
+                // y dictarla, se crea con una aleatoria que nadie ve y se le envía un código
+                // para que la persona fije su propia contraseña.
+                $invitar = ($_POST['invitar_password'] ?? '') === '1';
+                if ($invitar) {
+                    $passwordRaw = generateTemporarySecurePassword(20);
+                }
+
                 if (!isPasswordSecure($passwordRaw)) {
                     throw new Exception("La contraseña no cumple con los requisitos mínimos de seguridad (10 caracteres, mayúscula, número y símbolo).");
                 }
@@ -118,14 +126,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         $pdo->prepare("UPDATE usuarios SET nombre = ?, email = ?, contrasena = ?, id_rol = ?, id_almacen = ?, estado = 'activo', intentos_fallidos = 0, bloqueado_hasta = NULL, es_superadmin = 0 WHERE id_usuario = ?")
                             ->execute([$nombre, $email, $password, $id_rol, $id_almacen, $targetUserId]);
                         $pdo->commit();
-                        logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email");
+                        logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email" . ($invitar ? ' (invitación enviada)' : ''));
                         $success = 'Cuenta existente reactivada y actualizada correctamente.';
                     } catch (Throwable $e) {
                         $pdo->rollBack();
                         throw $e;
                     }
                 } else {
-                    $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
+                    $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado)
                             VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, 'activo')";
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute([
@@ -135,8 +143,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         ':id_rol' => $id_rol,
                         ':id_almacen' => $id_almacen,
                     ]);
-                    logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
+                    logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email" . ($invitar ? ' (invitación enviada)' : ''));
                     $success = 'Usuario creado correctamente.';
+                }
+
+                if ($invitar) {
+                    // La contraseña aleatoria no se comunica: se manda un código para que
+                    // la persona fije la suya en la pantalla de recuperar contraseña.
+                    $enviado = generatePasswordResetToken($email, true);
+                    $success .= $enviado
+                        ? ' Se envió un correo de invitación para que fije su contraseña.'
+                        : ' Aviso: no se pudo enviar el correo de invitación; usa "Restablecer contraseña" para reintentar.';
                 }
             } catch (Throwable $e) {
                 $error = 'Error: ' . $e->getMessage();
@@ -244,8 +261,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $nota = trim((string) ($_POST['nota'] ?? ''));
                 $deseados = array_values(array_unique(array_map('intval', (array) ($_POST['permisos'] ?? []))));
 
+                // Mejora 6: caducidad opcional por permiso concedido. expira[<id_permiso>] = 'YYYY-MM-DD'.
+                $expiraInput = (array) ($_POST['expira'] ?? []);
+                $expiraPorPermiso = [];
+                foreach ($expiraInput as $pidRaw => $fechaRaw) {
+                    $fechaRaw = trim((string) $fechaRaw);
+                    if ($fechaRaw === '') {
+                        continue;
+                    }
+                    $d = DateTime::createFromFormat('Y-m-d', $fechaRaw);
+                    if (!$d || $d->format('Y-m-d') !== $fechaRaw) {
+                        throw new Exception('La fecha de caducidad no es válida (formato AAAA-MM-DD).');
+                    }
+                    // Se guarda como fin del día para que el permiso dure toda la fecha elegida.
+                    $expiraPorPermiso[(int) $pidRaw] = $d->format('Y-m-d') . ' 23:59:59';
+                }
+
                 if ($id <= 0) {
                     throw new Exception('ID de usuario inválido.');
+                }
+
+                // Mejora 7: el motivo del cambio es obligatorio y queda en la auditoría.
+                if ($nota === '') {
+                    throw new Exception('Escribe el motivo del cambio: queda registrado en la auditoría.');
+                }
+                if (mb_strlen($nota) > 255) {
+                    $nota = mb_substr($nota, 0, 255);
                 }
 
                 $stmtT = $pdo->prepare("SELECT u.id_usuario, u.id_rol, u.estado, COALESCE(u.es_superadmin,0) AS es_superadmin, r.nombre AS rol
@@ -280,11 +321,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
                 $pdo->beginTransaction();
                 $del = $pdo->prepare("DELETE FROM usuario_permisos WHERE id_usuario = ? AND id_permiso = ?");
-                $ins = $pdo->prepare("INSERT INTO usuario_permisos (id_usuario, id_permiso, efecto, nota, asignado_por)
-                                      VALUES (?, ?, ?, ?, ?)
-                                      ON DUPLICATE KEY UPDATE efecto = VALUES(efecto), nota = VALUES(nota), asignado_por = VALUES(asignado_por), expira_en = NULL");
+                $ins = $pdo->prepare("INSERT INTO usuario_permisos (id_usuario, id_permiso, efecto, nota, expira_en, asignado_por)
+                                      VALUES (?, ?, ?, ?, ?, ?)
+                                      ON DUPLICATE KEY UPDATE efecto = VALUES(efecto), nota = VALUES(nota), expira_en = VALUES(expira_en), asignado_por = VALUES(asignado_por)");
                 $nConceder = 0;
                 $nDenegar = 0;
+                $nConCaducidad = 0;
                 $asignadoPor = (int) ($_SESSION['usuario']['id_usuario'] ?? 0) ?: null;
                 foreach ($todos as $pid) {
                     $pid = (int) $pid;
@@ -293,17 +335,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     if ($marcado === $enRol) {
                         $del->execute([$id, $pid]);
                     } elseif ($marcado && !$enRol) {
-                        $ins->execute([$id, $pid, 'conceder', $nota !== '' ? $nota : null, $asignadoPor]);
+                        $expira = $expiraPorPermiso[$pid] ?? null;
+                        $ins->execute([$id, $pid, 'conceder', $nota, $expira, $asignadoPor]);
                         $nConceder++;
+                        if ($expira !== null) {
+                            $nConCaducidad++;
+                        }
                     } else {
-                        $ins->execute([$id, $pid, 'denegar', $nota !== '' ? $nota : null, $asignadoPor]);
+                        // Un 'denegar' no caduca: quitarle algo a alguien no debería revertirse solo.
+                        $ins->execute([$id, $pid, 'denegar', $nota, null, $asignadoPor]);
                         $nDenegar++;
                     }
                 }
                 $pdo->commit();
 
                 logAudit('USUARIO_PERMISOS_ACTUALIZADOS', 'usuario_permisos', $id,
-                    "conceder={$nConceder} denegar={$nDenegar}" . ($nota !== '' ? " | nota: {$nota}" : ''));
+                    "conceder={$nConceder} denegar={$nDenegar} con_caducidad={$nConCaducidad} | nota: {$nota}");
                 $success = 'Permisos del usuario actualizados. El cambio aplica en menos de 1 minuto.';
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
@@ -355,13 +402,18 @@ try {
     foreach ($pdo->query("SELECT id_rol, id_permiso FROM rol_permisos") as $row) {
         $rolPermMap[(int) $row['id_rol']][] = (int) $row['id_permiso'];
     }
-    // id_usuario -> ['conceder'=>[ids], 'denegar'=>[ids]]
+    // id_usuario -> ['conceder'=>[ids], 'denegar'=>[ids], 'expira'=>[id_permiso=>'YYYY-MM-DD']]
     $userOverrideMap = [];
     foreach ($pdo->query(
-        "SELECT id_usuario, id_permiso, efecto FROM usuario_permisos
+        "SELECT id_usuario, id_permiso, efecto, expira_en FROM usuario_permisos
          WHERE expira_en IS NULL OR expira_en > NOW()"
     ) as $row) {
-        $userOverrideMap[(int) $row['id_usuario']][$row['efecto']][] = (int) $row['id_permiso'];
+        $uidRow = (int) $row['id_usuario'];
+        $pidRow = (int) $row['id_permiso'];
+        $userOverrideMap[$uidRow][$row['efecto']][] = $pidRow;
+        if ($row['efecto'] === 'conceder' && !empty($row['expira_en'])) {
+            $userOverrideMap[$uidRow]['expira'][$pidRow] = substr((string) $row['expira_en'], 0, 10);
+        }
     }
 } catch (PDOException $e) {
     $permisosPorCat = [];
@@ -545,11 +597,19 @@ include __DIR__ . '/includes/header.php';
                             <label for="email">Email</label>
                         </div>
                         
-                        <div class="input-field">
+                        <p style="margin:6px 0 0;">
+                            <label>
+                                <input type="checkbox" id="invitar_password" name="invitar_password" value="1" class="filled-in">
+                                <span>Enviar invitación para que fije su propia contraseña</span>
+                            </label>
+                        </p>
+
+                        <div class="input-field" id="password_field">
                             <input type="password" id="password" name="password" required>
                             <label for="password">Contraseña</label>
+                            <span class="helper-text" id="password_help"></span>
                         </div>
-                        
+
                         <div class="input-field">
                             <select name="id_rol" required>
                                 <option value="">-- Selecciona rol --</option>
@@ -764,13 +824,17 @@ include __DIR__ . '/includes/header.php';
             </p>
             <div id="upPermBody"></div>
             <div class="input-field" style="margin-top:10px;">
-                <input type="text" name="nota" id="upNota" maxlength="255">
-                <label for="upNota">Motivo del cambio (opcional, queda en la auditoría)</label>
+                <input type="text" name="nota" id="upNota" maxlength="255" required>
+                <label for="upNota">Motivo del cambio (obligatorio, queda en la auditoría)</label>
             </div>
             <p class="grey-text" style="font-size:12px;">
                 <span class="chip grey lighten-3" style="font-size:10px;height:20px;line-height:20px;">por rol</span> viene del rol ·
                 <span class="chip green lighten-4 green-text text-darken-2" style="font-size:10px;height:20px;line-height:20px;">añadido</span> concesión individual ·
                 <span class="chip orange lighten-4 orange-text text-darken-4" style="font-size:10px;height:20px;line-height:20px;">quitado</span> revocado solo para esta persona
+            </p>
+            <p class="grey-text" style="font-size:12px;">
+                En los permisos <b>añadidos</b> puedes fijar una fecha de «acceso hasta»: al pasar esa fecha el permiso
+                se retira solo. Déjalo vacío para que no caduque.
             </p>
         </div>
         <div class="modal-footer">
@@ -790,6 +854,29 @@ include __DIR__ . '/includes/header.php';
     document.addEventListener('DOMContentLoaded', function () {
         M.FormSelect.init(document.querySelectorAll('select'));
         M.updateTextFields();
+
+        // Mejora 8: al marcar "enviar invitación", la contraseña la fija la persona,
+        // así que se oculta y se deja de exigir en el formulario de alta.
+        var invitarCb = document.getElementById('invitar_password');
+        var passField = document.getElementById('password_field');
+        var passInput = document.getElementById('password');
+        var passHelp = document.getElementById('password_help');
+        if (invitarCb && passField && passInput) {
+            var syncInvitar = function () {
+                if (invitarCb.checked) {
+                    passField.style.display = 'none';
+                    passInput.required = false;
+                    passInput.value = '';
+                    if (passHelp) passHelp.textContent = '';
+                } else {
+                    passField.style.display = '';
+                    passInput.required = true;
+                }
+            };
+            invitarCb.addEventListener('change', syncInvitar);
+            syncInvitar();
+        }
+
         var modalEl = document.getElementById('modalPermUser');
         var modal = modalEl ? M.Modal.init(modalEl) : null;
 
@@ -800,11 +887,14 @@ include __DIR__ . '/includes/header.php';
             return '';
         }
 
+        var hoyISO = new Date().toISOString().slice(0, 10);
+
         function buildBody(idRol, uid) {
             var rolIds = (window.UP_ROLE_PERMS[idRol] || []).map(Number);
             var ov = window.UP_USER_OVERRIDES[uid] || {};
             var conceder = (ov.conceder || []).map(Number);
             var denegar = (ov.denegar || []).map(Number);
+            var expira = ov.expira || {};
             var html = '';
             Object.keys(window.UP_PERMS_CAT).forEach(function (cat) {
                 var icon = window.UP_CAT_ICON[cat] || 'label';
@@ -817,11 +907,15 @@ include __DIR__ . '/includes/header.php';
                     if (conceder.indexOf(pid) !== -1) checked = true;
                     if (denegar.indexOf(pid) !== -1) checked = false;
                     var sinEfecto = window.UP_LIVE.indexOf(p.clave) === -1;
-                    html += '<div class="up-row" data-inrole="' + (enRol ? 1 : 0) + '" style="display:flex;align-items:center;gap:12px;padding:9px 2px;border-bottom:1px solid #f2f3f9;">'
+                    var expVal = expira[pid] || '';
+                    html += '<div class="up-row" data-inrole="' + (enRol ? 1 : 0) + '" style="display:flex;align-items:center;gap:12px;padding:9px 2px;border-bottom:1px solid #f2f3f9;flex-wrap:wrap;">'
                          + '<div class="switch"><label><input type="checkbox" name="permisos[]" value="' + pid + '" ' + (checked ? 'checked' : '') + '><span class="lever"></span></label></div>'
-                         + '<div style="flex:1;"><span style="font-weight:700;font-family:monospace;font-size:13px;">' + p.clave + '</span>'
+                         + '<div style="flex:1;min-width:150px;"><span style="font-weight:700;font-family:monospace;font-size:13px;">' + p.clave + '</span>'
                          + '<span style="display:block;color:#90a4ae;font-size:11px;">' + (p.nombre || '') + (sinEfecto ? ' · <i>sin efecto aún</i>' : '') + '</span></div>'
-                         + '<span class="up-tag"></span></div>';
+                         + '<span class="up-tag"></span>'
+                         + '<label class="up-exp" style="display:none;font-size:11px;color:#78909c;white-space:nowrap;">acceso hasta '
+                         + '<input type="date" name="expira[' + pid + ']" min="' + hoyISO + '" value="' + expVal + '" style="height:1.6rem;font-size:12px;width:auto;margin:0 0 0 4px;padding:0 4px;border:1px solid #cfd8dc;border-radius:3px;"></label>'
+                         + '</div>';
                 });
             });
             return html;
@@ -832,10 +926,16 @@ include __DIR__ . '/includes/header.php';
                 var enRol = row.dataset.inrole === '1';
                 var cb = row.querySelector('input[type=checkbox]');
                 var tag = row.querySelector('.up-tag');
+                var exp = row.querySelector('.up-exp');
+                var esAnadido = cb.checked && !enRol;
                 if (cb.checked && enRol) tag.innerHTML = chip('rol');
-                else if (cb.checked && !enRol) tag.innerHTML = chip('add');
+                else if (esAnadido) tag.innerHTML = chip('add');
                 else if (!cb.checked && enRol) tag.innerHTML = chip('del');
                 else tag.innerHTML = '';
+                if (exp) {
+                    exp.style.display = esAnadido ? 'inline-block' : 'none';
+                    if (!esAnadido) exp.querySelector('input').value = '';
+                }
             });
         }
 

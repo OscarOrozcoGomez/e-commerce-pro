@@ -522,16 +522,177 @@ function requirePermission(string $permiso, string $redirectUrl = ''): void
 }
 
 /**
+ * Establece la sesión de un usuario ya verificado (contraseña correcta y, si aplica,
+ * segundo factor superado). Centraliza el bloque de "login exitoso" para que lo
+ * compartan authenticate() y verifyStaffLoginOtp().
+ */
+function establishUserSession(PDO $pdo, array $user): void
+{
+    $user['permisos'] = getEffectivePermissions($pdo, (int) $user['id_usuario'], (int) $user['id_rol']);
+    $_SESSION['usuario'] = $user;
+    $_SESSION['_perms_refreshed_at'] = time();
+    unset($_SESSION['_pending_otp']);
+    session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
+    $_SESSION['_session_id_rotated_at'] = time();
+}
+
+/**
+ * ¿Este usuario necesita el segundo factor por correo para entrar?
+ * Solo staff sensible (admin/encargado) y solo si STAFF_OTP_ENABLED está activo.
+ */
+function staffOtpRequiredForUser(array $user): bool
+{
+    if (!defined('STAFF_OTP_ENABLED') || !STAFF_OTP_ENABLED) {
+        return false;
+    }
+    return in_array((string) ($user['rol'] ?? ''), ['admin', 'encargado'], true);
+}
+
+/**
+ * Genera un código de 6 dígitos, lo guarda hasheado (invalidando los anteriores del
+ * usuario) y lo envía por correo. No lanza: si el correo falla se registra y se sigue,
+ * el usuario podrá pedir reenvío.
+ */
+function issueStaffLoginOtp(PDO $pdo, array $user): bool
+{
+    $idUsuario = (int) $user['id_usuario'];
+    $email = (string) $user['email'];
+    $code = (string) random_int(100000, 999999);
+    $hash = hash('sha256', $code);
+    $expira = date('Y-m-d H:i:s', time() + 600); // 10 minutos
+
+    try {
+        $pdo->prepare("UPDATE staff_login_otp SET usado = 1 WHERE id_usuario = ? AND usado = 0")
+            ->execute([$idUsuario]);
+        $pdo->prepare("INSERT INTO staff_login_otp (id_usuario, codigo_hash, expira_en) VALUES (?, ?, ?)")
+            ->execute([$idUsuario, $hash, $expira]);
+    } catch (Throwable $e) {
+        error_log('issueStaffLoginOtp: ' . $e->getMessage());
+        return false;
+    }
+
+    $subject = 'Tu código para iniciar sesión';
+    $message = "Alguien inició sesión con tu cuenta de staff.\n\n" .
+               "Tu código de verificación es: {$code}\n\n" .
+               "Escríbelo en la pantalla de acceso para terminar de entrar.\n" .
+               "El código caduca en 10 minutos. Si no fuiste tú, cambia tu contraseña.\n";
+
+    return appSendPlainTextEmail($email, $subject, $message);
+}
+
+/**
+ * Reenvía un código nuevo para el login en curso (hay un _pending_otp en sesión).
+ */
+function resendStaffLoginOtp(?string &$errorMessage = null): bool
+{
+    $errorMessage = null;
+    $pending = $_SESSION['_pending_otp'] ?? null;
+    if (!is_array($pending) || empty($pending['id_usuario'])) {
+        $errorMessage = 'No hay un inicio de sesión pendiente. Vuelve a introducir tu correo y contraseña.';
+        return false;
+    }
+
+    $pdo = getPDO();
+    $stmt = $pdo->prepare("SELECT id_usuario, nombre, email, id_rol, id_almacen, es_superadmin,
+                                  (SELECT nombre FROM roles WHERE roles.id_rol = usuarios.id_rol) AS rol
+                           FROM usuarios WHERE id_usuario = ? AND estado = 'activo' LIMIT 1");
+    $stmt->execute([(int) $pending['id_usuario']]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        unset($_SESSION['_pending_otp']);
+        $errorMessage = 'La cuenta ya no está disponible.';
+        return false;
+    }
+
+    return issueStaffLoginOtp($pdo, $user);
+}
+
+/**
+ * Valida el código OTP del login en curso. Misma política de 5 intentos que el reset
+ * de contraseña. Si acierta, establece la sesión y limpia _pending_otp.
+ */
+function verifyStaffLoginOtp(string $code, ?string &$errorMessage = null): bool
+{
+    $errorMessage = null;
+    $code = trim($code);
+
+    $pending = $_SESSION['_pending_otp'] ?? null;
+    if (!is_array($pending) || empty($pending['id_usuario'])) {
+        $errorMessage = 'No hay un inicio de sesión pendiente. Vuelve a introducir tu correo y contraseña.';
+        return false;
+    }
+    if ($code === '' || !preg_match('/^\d{6}$/', $code)) {
+        $errorMessage = 'El código debe tener 6 dígitos.';
+        return false;
+    }
+
+    $idUsuario = (int) $pending['id_usuario'];
+    $pdo = getPDO();
+
+    $stmt = $pdo->prepare("SELECT * FROM staff_login_otp
+                           WHERE id_usuario = ? AND usado = 0
+                           ORDER BY id_otp DESC LIMIT 1");
+    $stmt->execute([$idUsuario]);
+    $record = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$record || strtotime((string) $record['expira_en']) < time()) {
+        $errorMessage = 'El código expiró. Pide uno nuevo.';
+        return false;
+    }
+
+    if ((int) $record['intentos'] >= 5) {
+        $pdo->prepare("UPDATE staff_login_otp SET usado = 1 WHERE id_otp = ?")->execute([$record['id_otp']]);
+        $errorMessage = 'Demasiados intentos fallidos. Pide un código nuevo.';
+        return false;
+    }
+
+    if (!hash_equals((string) $record['codigo_hash'], hash('sha256', $code))) {
+        $nuevos = (int) $record['intentos'] + 1;
+        $usado = $nuevos >= 5 ? 1 : 0;
+        $pdo->prepare("UPDATE staff_login_otp SET intentos = ?, usado = ? WHERE id_otp = ?")
+            ->execute([$nuevos, $usado, $record['id_otp']]);
+        $errorMessage = $usado
+            ? 'Demasiados intentos fallidos. Pide un código nuevo.'
+            : 'Código incorrecto. Te quedan ' . (5 - $nuevos) . ' intento(s).';
+        return false;
+    }
+
+    // Código correcto: cargar el usuario y establecer la sesión.
+    $stmtU = $pdo->prepare("SELECT u.id_usuario, u.nombre, u.email, u.id_rol, u.id_almacen, u.es_superadmin,
+                                   r.nombre AS rol, c.id_cliente
+                            FROM usuarios u
+                            JOIN roles r ON r.id_rol = u.id_rol
+                            LEFT JOIN clientes c ON c.id_usuario = u.id_usuario
+                            WHERE u.id_usuario = ? AND u.estado = 'activo' LIMIT 1");
+    $stmtU->execute([$idUsuario]);
+    $user = $stmtU->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        unset($_SESSION['_pending_otp']);
+        $errorMessage = 'La cuenta ya no está disponible.';
+        return false;
+    }
+
+    $pdo->prepare("UPDATE staff_login_otp SET usado = 1 WHERE id_otp = ?")->execute([$record['id_otp']]);
+
+    establishUserSession($pdo, $user);
+    logAudit('LOGIN_EXITOSO', 'usuarios', $idUsuario, "Inició sesión (verificación por correo)");
+    return true;
+}
+
+/**
  * Intenta autenticar al usuario.
  *
  * Acepta email o telefono como identificador de acceso.
  *
  * @param string $loginIdentifier
  * @param string $password
- * @return bool
+ * @param string|null $challenge  Salida: 'otp_required' si la contraseña es correcta
+ *        pero falta el segundo factor por correo (staff con STAFF_OTP_ENABLED).
+ * @return bool  true solo si la sesión quedó establecida.
  */
-function authenticate(string $loginIdentifier, string $password): bool
+function authenticate(string $loginIdentifier, string $password, ?string &$challenge = null): bool
 {
+    $challenge = null;
     $pdo = getPDO();
     $loginIdentifier = trim($loginIdentifier);
     $loginDigits = normalizePhoneDigitsMx($loginIdentifier);
@@ -600,25 +761,35 @@ function authenticate(string $loginIdentifier, string $password): bool
 
     if (password_verify($password, $user['contrasena'])) {
         error_log("DEBUG LOGIN: Contraseña CORRECTA para ID " . $user['id_usuario']);
-        
+
         if (empty($user['rol'])) {
             error_log("DEBUG LOGIN ADVERTENCIA: El usuario no tiene un rol asignado.");
         }
 
-        $user['permisos'] = getEffectivePermissions($pdo, (int)$user['id_usuario'], (int)$user['id_rol']);
-        $_SESSION['usuario'] = $user;
-        $_SESSION['_perms_refreshed_at'] = time();
-        session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
-        $_SESSION['_session_id_rotated_at'] = time();
-
-        // ÉXITO: limpiar intentos es importante, pero no debe bloquear el login.
+        // La contraseña ya es correcta: limpiar el contador de intentos (no debe bloquear el login).
         try {
             $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
                 ->execute([$user['id_usuario']]);
         } catch (Throwable $e) {
             error_log("LOGIN_WARN: No se pudo limpiar intentos_fallidos: " . $e->getMessage());
         }
-        
+
+        // Mejora 9: segundo factor por correo para staff admin/encargado.
+        if (staffOtpRequiredForUser($user)) {
+            if (!issueStaffLoginOtp($pdo, $user)) {
+                error_log('LOGIN_WARN: no se pudo enviar el OTP de staff a ' . $user['email'] . '; el usuario puede pedir reenvío.');
+            }
+            $_SESSION['_pending_otp'] = [
+                'id_usuario' => (int) $user['id_usuario'],
+                'email'      => (string) $user['email'],
+                'ts'         => time(),
+            ];
+            $challenge = 'otp_required';
+            logAudit('LOGIN_OTP_ENVIADO', 'usuarios', (int)$user['id_usuario'], "Código de verificación enviado por correo");
+            return false;
+        }
+
+        establishUserSession($pdo, $user);
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
     }
@@ -696,7 +867,7 @@ function logout(): void
     exit;
 }
 
-function generatePasswordResetToken(string $email): bool
+function generatePasswordResetToken(string $email, bool $bienvenida = false): bool
 {
     $pdo = getPDO();
     $sql = "SELECT id_usuario FROM usuarios WHERE email = :email AND estado = 'activo' LIMIT 1";
@@ -728,7 +899,7 @@ function generatePasswordResetToken(string $email): bool
         ':expires_at' => $expiresAt,
     ]);
 
-    return sendPasswordResetEmail($email, $code);
+    return sendPasswordResetEmail($email, $code, $bienvenida);
 }
 
 /**
@@ -829,8 +1000,19 @@ function resetPasswordWithToken(string $email, string $token, string $newPasswor
     }
 }
 
-function sendPasswordResetEmail(string $email, string $token): bool
+function sendPasswordResetEmail(string $email, string $token, bool $bienvenida = false): bool
 {
+    if ($bienvenida) {
+        $subject = 'Bienvenido/a: activa tu cuenta de staff';
+        $message = "Se creó una cuenta de staff para ti.\n\n" .
+                   "Tu código de activación es: {$token}\n\n" .
+                   "Entra a la página de recuperar contraseña, escribe tu correo y este código, " .
+                   "y elige tu propia contraseña para poder iniciar sesión.\n" .
+                   "El código caduca en 1 hora. Si no esperabas esto, ignora este mensaje.\n";
+
+        return appSendPlainTextEmail($email, $subject, $message);
+    }
+
     $subject = 'Código de recuperación de contraseña';
     $message = "Tu código de seguridad es: {$token}\n\n" .
                "Ingrésalo en la página para restablecer tu contraseña.\n" .

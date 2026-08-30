@@ -460,6 +460,14 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
 // Configurable por entorno para no dejarla fija en el código.
 define('SALE_INVENTORY_BYPASS_KEYWORD', getEnvVar('SALE_INVENTORY_BYPASS_KEYWORD', 'SININVENTARIO'));
 
+// Segundo factor por correo (código de 6 dígitos) para el login de staff admin/encargado.
+// Apagado por defecto: actívalo con STAFF_OTP_ENABLED=1 en el entorno cuando el envío de
+// correo esté disponible en el host.
+if (!defined('STAFF_OTP_ENABLED')) {
+    $staffOtpEnv = strtolower((string) (getEnvVar('STAFF_OTP_ENABLED', '0') ?? '0'));
+    define('STAFF_OTP_ENABLED', in_array($staffOtpEnv, ['1', 'true', 'on', 'yes'], true));
+}
+
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
 const PRODUCTS_IMG_DIR = __DIR__ . '/../assets/img/products/';
