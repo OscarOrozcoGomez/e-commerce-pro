@@ -622,6 +622,25 @@ include __DIR__ . '/includes/header.php';
                         $clienteNombre = (string)piiDecryptValue($clienteNombre);
                     }
 
+                    // Nunca mostrar ciphertext ENCv1 del nombre en la UI. Si el descifrado
+                    // fallo (tipicamente porque PII_ENCRYPTION_KEY no quedo cargada en este
+                    // proceso), preferir el nombre que venga en las observaciones del pedido
+                    // y, si tampoco sirve, un marcador con el numero de pedido. El teléfono
+                    // ya tiene esta misma red de seguridad mas abajo.
+                    if (is_string($clienteNombre) && $clienteNombre !== ''
+                        && function_exists('piiIsEncryptedValue')
+                        && piiIsEncryptedValue($clienteNombre)) {
+                        if (is_string($obsClienteNombre) && trim($obsClienteNombre) !== ''
+                            && !piiIsEncryptedValue($obsClienteNombre)) {
+                            $clienteNombre = trim($obsClienteNombre);
+                        } else {
+                            $numeroPedidoRef = trim((string)($ent['numero_pedido'] ?? ''));
+                            $clienteNombre = $numeroPedidoRef !== ''
+                                ? 'Cliente del pedido ' . $numeroPedidoRef
+                                : 'Cliente';
+                        }
+                    }
+
                     if (is_string($clienteTel) && $clienteTel !== ''
                         && function_exists('piiIsEncryptedValue')
                         && function_exists('piiDecryptValue')

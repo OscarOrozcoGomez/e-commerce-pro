@@ -9,6 +9,7 @@ declare(strict_types=1);
 // autenticacion que api/run_migrations.php (MIGRATIONS_DEPLOY_TOKEN) para no duplicar secretos.
 
 require_once __DIR__ . '/../core/migrations.php';
+require_once __DIR__ . '/../core/google_secret_manager.php';
 
 header('Content-Type: application/json');
 
@@ -44,11 +45,20 @@ $cleared = [
     'session' => false,
     'apcu_keys_borradas' => 0,
     'archivos_borrados' => 0,
+    'epoch' => 0,
 ];
 
 if (function_exists('clear_secrets_cache')) {
+    // Ademas de limpiar esta sesion, clear_secrets_cache() sube el "epoch" global en disco:
+    // las sesiones de otros usuarios y el APCu de otros pools de PHP-FPM comparan contra el
+    // y se auto-invalidan en su siguiente peticion, sin necesitar que cada quien cierre
+    // sesion ni tener acceso a su memoria.
     clear_secrets_cache();
     $cleared['session'] = true;
+}
+
+if (function_exists('gsmGetCacheEpoch')) {
+    $cleared['epoch'] = gsmGetCacheEpoch();
 }
 
 // APCu es por proceso/pool de PHP-FPM: correr esto como peticion web (no CLI) es lo que permite
