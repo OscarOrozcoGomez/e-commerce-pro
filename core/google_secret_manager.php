@@ -12,12 +12,68 @@ function clear_secrets_cache(): void
 {
     gsmEnsureSessionStarted();
     unset($_SESSION['app_secrets'], $_SESSION['app_secrets_cached_at']);
+
+    // Ademas de limpiar la copia de ESTA sesion, subimos un "epoch" global en disco. Las
+    // demas capas (sesiones de otros usuarios, APCu de otros pools de PHP-FPM, cache de
+    // archivo) comparan su fecha de creacion contra este epoch en la siguiente peticion y
+    // se descartan solas si son mas viejas. Sin esto, actualizar un secreto en Secret
+    // Manager (p. ej. FB_PAGE_ACCESS_TOKEN o PII_ENCRYPTION_KEY) podia seguir sirviendo el
+    // valor viejo por dias desde la sesion de cada repartidor ya logueado.
+    gsmBumpCacheEpoch();
+}
+
+function gsmCacheEpochFilePath(): string
+{
+    return rtrim((string) sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'gsm_cache_epoch';
+}
+
+/**
+ * Marca de tiempo (epoch UNIX) de la ultima limpieza forzada de cache de secretos. 0 si
+ * nunca se ha forzado una. Cualquier entrada de cache creada ANTES de este valor se
+ * considera obsoleta.
+ */
+function gsmGetCacheEpoch(): int
+{
+    $raw = @file_get_contents(gsmCacheEpochFilePath());
+    if (!is_string($raw) || trim($raw) === '') {
+        return 0;
+    }
+
+    return (int) trim($raw);
+}
+
+function gsmBumpCacheEpoch(): int
+{
+    $now = time();
+    @file_put_contents(gsmCacheEpochFilePath(), (string) $now, LOCK_EX);
+
+    return $now;
+}
+
+/**
+ * @param array<string, mixed> $cacheEntry Entrada con clave 'created_at' (gsmWrite*Cache).
+ */
+function gsmCacheEntryIsFresherThanEpoch(array $cacheEntry): bool
+{
+    $createdAt = isset($cacheEntry['created_at']) ? (int) $cacheEntry['created_at'] : 0;
+
+    return $createdAt >= gsmGetCacheEpoch();
 }
 
 function gsmGetSessionSecretsCache(): ?array
 {
     gsmEnsureSessionStarted();
     if (!isset($_SESSION['app_secrets']) || !is_array($_SESSION['app_secrets']) || empty($_SESSION['app_secrets'])) {
+        return null;
+    }
+
+    // Si se forzo una limpieza de cache (clear_secrets_cache / api/clear_secrets_cache.php)
+    // DESPUES de que esta sesion guardo sus secretos, la copia de sesion quedo obsoleta:
+    // la descartamos para que la peticion vuelva a leer de Secret Manager. Solo aplica
+    // cuando la copia trae su marca de tiempo (la escribe gsmSetSessionSecretsCache).
+    if (isset($_SESSION['app_secrets_cached_at'])
+        && gsmGetCacheEpoch() > (int) $_SESSION['app_secrets_cached_at']) {
+        unset($_SESSION['app_secrets'], $_SESSION['app_secrets_cached_at']);
         return null;
     }
 
@@ -509,7 +565,7 @@ function gsmLoadSecretsCached(array $mapping, array &$debug, int $ttlSeconds = 3
     $now = time();
 
     $apcuCached = gsmReadApcuCache($cacheKey);
-    if (is_array($apcuCached) && (int)$apcuCached['expires_at'] >= $now) {
+    if (is_array($apcuCached) && (int)$apcuCached['expires_at'] >= $now && gsmCacheEntryIsFresherThanEpoch($apcuCached)) {
         $debug = [
             'project_id' => gsmGetEnvValue('GCP_PROJECT_ID') ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT') ?? gsmGetEnvValue('GCLOUD_PROJECT') ?? gsmGetEnvValue('PROJECT_ID'),
             'token_source' => 'cache:apcu',
@@ -523,7 +579,7 @@ function gsmLoadSecretsCached(array $mapping, array &$debug, int $ttlSeconds = 3
 
     $fileCachePath = gsmGetFileCachePath($cacheKey);
     $fileCached = gsmReadFileCache($fileCachePath);
-    if (is_array($fileCached) && (int)$fileCached['expires_at'] >= $now) {
+    if (is_array($fileCached) && (int)$fileCached['expires_at'] >= $now && gsmCacheEntryIsFresherThanEpoch($fileCached)) {
         gsmWriteApcuCache($cacheKey, $fileCached['secrets'], (int)$fileCached['expires_at'] - $now);
         $debug = [
             'project_id' => gsmGetEnvValue('GCP_PROJECT_ID') ?? gsmGetEnvValue('GOOGLE_CLOUD_PROJECT') ?? gsmGetEnvValue('GCLOUD_PROJECT') ?? gsmGetEnvValue('PROJECT_ID'),
@@ -546,8 +602,12 @@ function gsmLoadSecretsCached(array $mapping, array &$debug, int $ttlSeconds = 3
         return $secrets;
     }
 
-    // Fallback de resiliencia: si falla GSM, usar cache expirado reciente (hasta 24h).
-    if (is_array($fileCached) && isset($fileCached['expires_at']) && ($now - (int)$fileCached['expires_at']) <= 86400) {
+    // Fallback de resiliencia: si falla GSM, usar cache expirado reciente (hasta 24h). No
+    // aplica si el cache es anterior a una limpieza forzada: en ese caso justamente se
+    // quiso descartar ese valor.
+    if (is_array($fileCached) && isset($fileCached['expires_at'])
+        && ($now - (int)$fileCached['expires_at']) <= 86400
+        && gsmCacheEntryIsFresherThanEpoch($fileCached)) {
         $debug['errors'][] = 'Se usaron secretos en cache expirado por fallo temporal en Google Secret Manager.';
         $debug['token_source'] = 'cache:file-stale';
         $debug['from_cache'] = true;
