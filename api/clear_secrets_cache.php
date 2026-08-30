@@ -91,4 +91,39 @@ foreach (glob($pattern) ?: [] as $file) {
     }
 }
 
+// Verificacion: con las 3 capas ya limpias, forzamos una recarga real de secretos (la
+// MISMA ruta que corre en cada peticion de produccion) y reportamos QUE claves quedaron
+// disponibles -- solo presencia (bool), nunca el valor. Asi este endpoint, y el workflow
+// de GitHub Actions que lo dispara, confirma si FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN / etc.
+// de verdad llegaron desde Secret Manager, en vez de tener que ir a probarlo a mano en la
+// vista del repartidor.
+$secretosPresentes = [];
+if (function_exists('preloadSecretSources')) {
+    try {
+        preloadSecretSources();
+    } catch (Throwable $e) {
+        error_log('clear_secrets_cache.php: recarga de verificacion fallo: ' . $e->getMessage());
+    }
+
+    $clavesImportantes = [
+        'DB_HOST', 'DB_NAME', 'DB_USER',
+        'PII_ENCRYPTION_KEY',
+        'FB_PAGE_ID', 'FB_PAGE_ACCESS_TOKEN',
+        'MAPS_KEY',
+        'TELEGRAM_BOT_TOKEN',
+        'WA_WEBHOOK_TOKEN',
+    ];
+    foreach ($clavesImportantes as $clave) {
+        $valor = getenv($clave);
+        if ($valor === false) {
+            $valor = $_SERVER[$clave] ?? $_ENV[$clave] ?? null;
+        }
+        $secretosPresentes[$clave] = is_string($valor) && trim($valor) !== '';
+    }
+}
+
+$cleared['secretos_presentes'] = $secretosPresentes;
+$cleared['facebook_configurado'] =
+    ($secretosPresentes['FB_PAGE_ID'] ?? false) && ($secretosPresentes['FB_PAGE_ACCESS_TOKEN'] ?? false);
+
 echo json_encode(['success' => true, 'limpiado' => $cleared]);
