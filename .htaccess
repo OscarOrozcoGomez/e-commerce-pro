@@ -1,6 +1,30 @@
 # Impedir que el servidor muestre la lista de archivos en cualquier carpeta
 Options -Indexes
 
+# Cache de navegador para imagenes/CSS/JS estaticos: sin esto, el navegador re-descarga
+# cada imagen del catalogo en cada visita/recarga (nunca la guarda), lo que hace que el
+# catalogo se sienta lento sobre todo en repaso/paginacion. Envuelto en <IfModule> para
+# no tronar si el modulo no esta cargado en algun entorno.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg "access plus 30 days"
+    ExpiresByType image/png "access plus 30 days"
+    ExpiresByType image/webp "access plus 30 days"
+    ExpiresByType image/gif "access plus 30 days"
+    ExpiresByType image/svg+xml "access plus 30 days"
+    ExpiresByType text/css "access plus 7 days"
+    ExpiresByType application/javascript "access plus 7 days"
+    ExpiresByType text/javascript "access plus 7 days"
+</IfModule>
+<IfModule mod_headers.c>
+    <FilesMatch "\.(jpe?g|png|webp|gif|svg)$">
+        Header set Cache-Control "public, max-age=2592000, immutable"
+    </FilesMatch>
+    <FilesMatch "\.(css|js)$">
+        Header set Cache-Control "public, max-age=604800"
+    </FilesMatch>
+</IfModule>
+
 # Redirecciones de error personalizadas
 ErrorDocument 403 /views/error.php
 ErrorDocument 404 /views/error.php

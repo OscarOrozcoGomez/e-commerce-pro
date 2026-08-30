@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/image_optimizer.php';
 
 header('Content-Type: application/json');
 
@@ -224,6 +225,7 @@ try {
                         $targetFile = $targetDir . $fileName;
                         
                         if (move_uploaded_file($files['tmp_name'][$i], $targetFile)) {
+                            optimizeUploadedProductImage($targetFile);
                             $uploadedPaths[$i] = $folderName . '/' . $fileName;
                         } else {
                             throw new Exception("Error al mover el archivo subido al servidor. Revisa permisos de escritura en: " . $targetDir);
@@ -263,6 +265,7 @@ try {
                                 // Solo guardar si el servidor respondió 200 OK y es una imagen real
                                 if ($httpCode === 200 && strpos($contentType, 'image/') !== false && $imgRaw) {
                                     file_put_contents($targetFile, $imgRaw);
+                                    optimizeUploadedProductImage($targetFile);
                                     $remoteDownloaded[$url] = $dbPath;
                                 }
                         }

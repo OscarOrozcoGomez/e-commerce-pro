@@ -1638,6 +1638,42 @@ function resolveCheckoutWarehouse(mixed $requestedWarehouseId = null): int
 }
 
 /**
+ * IDs de los unicos almacenes que realmente pueden surtir un pedido del sitio publico:
+ * el Almacen Central (id 1, destino por default de resolveCheckoutWarehouse() para
+ * domicilio) mas cualquier sucursal de pickup publica (ver isPublicPickupWarehouseName()).
+ * Existen otros almacenes activos en la tabla `almacenes` que NO son de este negocio
+ * (ej. "Papelería Liz" via nombre matchea como pickup y si cuenta, pero "Luisa" y
+ * cualquier otro almacen interno/de otro giro no deben contar como stock vendible online
+ * -- sin este filtro, un producto agotado en Almacen Central/pickup podia mostrarse como
+ * "Disponible" en el catalogo/ficha solo porque tenia existencia en un almacen que el
+ * checkout jamas va a usar para surtir esa venta).
+ *
+ * @return int[]
+ */
+function getPublicSellableWarehouseIds(PDO $pdo): array
+{
+    // Sin cache estatico a proposito: es una tabla chica (una decena de filas) y esta
+    // funcion puede llamarse con distintas conexiones PDO en pruebas -- un cache aqui
+    // devolveria resultados de la primera conexion para todas las siguientes.
+    $ids = [1 => true];
+
+    try {
+        $stmt = $pdo->query("SELECT id_almacen, nombre FROM almacenes WHERE estado = 'activo'");
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $idAlmacen = (int)($row['id_almacen'] ?? 0);
+            $nombre = (string)($row['nombre'] ?? '');
+            if ($idAlmacen > 0 && isPublicPickupWarehouseName($nombre)) {
+                $ids[$idAlmacen] = true;
+            }
+        }
+    } catch (PDOException $e) {
+        error_log('getPublicSellableWarehouseIds: no se pudo consultar almacenes: ' . $e->getMessage());
+    }
+
+    return array_keys($ids);
+}
+
+/**
  * Obtiene la lista de productos para gestión (Admin/Encargado).
  */
 function dbGetProductsManaged(): array {
