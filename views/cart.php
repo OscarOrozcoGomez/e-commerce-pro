@@ -2,11 +2,13 @@
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/pickup_offer_utils.php';
+require_once __DIR__ . '/../core/ventas_features.php';
 
 $pageTitle = 'Mi Carrito de Compras';
 $usuarioLogueado = $_SESSION['usuario'] ?? null;
 $isUserAuthenticated = isAuthenticated(); // Obtener el estado de autenticación de PHP
 $isClienteRole = $isUserAuthenticated && isCliente();
+$referidosActivos = ventasFeatureIsActive(getPDO(), 'programa_referidos');
 
 $direcciones = [];
 if ($isUserAuthenticated && isCliente()) {
@@ -173,6 +175,12 @@ include __DIR__ . '/includes/header.php';
                                 </span>
                             <?php endif; ?>
                         </div>
+                        <?php if ($referidosActivos): ?>
+                            <div class="input-field">
+                                <input type="text" id="codigo_referido" name="codigo_referido" style="text-transform: uppercase;">
+                                <label for="codigo_referido">Código de referido (opcional)</label>
+                            </div>
+                        <?php endif; ?>
                         <div id="direccion-container">
                             <div class="input-field">
                                 <textarea id="direccion" name="direccion" class="materialize-textarea" required><?php echo esc($direcciones[0]['direccion'] ?? ''); ?></textarea>
@@ -845,6 +853,7 @@ include __DIR__ . '/includes/header.php';
                 direccion: document.getElementById('direccion').value
             },
             maps_link: document.getElementById('maps_link')?.value || '',
+            codigo_referido: (document.getElementById('codigo_referido')?.value || '').trim(),
             items: cart
         };
 

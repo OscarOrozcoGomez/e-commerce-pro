@@ -604,7 +604,11 @@ function handleAddToCart(event, id, nombre, precio) {
     
     localStorage.setItem('cart', JSON.stringify(cart));
     M.toast({html: '🛒 <b>' + nombre + '</b> añadido al carrito', classes: 'green rounded'});
-    
+
+    if (typeof window.bbTrackEvent === 'function') {
+        window.bbTrackEvent({ tipo: 'click', url: window.location.href, id: 'add_to_cart', texto: 'Agregar al Carrito', id_producto: id });
+    }
+
     if (typeof updateCartBadge === 'function') {
         updateCartBadge();
     }

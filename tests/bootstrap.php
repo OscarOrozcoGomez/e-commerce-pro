@@ -28,3 +28,8 @@ require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
 require_once __DIR__ . '/../core/alex_insights_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
+require_once __DIR__ . '/../core/stock_prediction.php';
+require_once __DIR__ . '/../core/ventas_features.php';
+require_once __DIR__ . '/../core/attribution.php';
+require_once __DIR__ . '/../core/referrals.php';
+require_once __DIR__ . '/../core/site_behavior.php';
