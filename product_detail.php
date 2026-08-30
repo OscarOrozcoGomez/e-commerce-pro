@@ -503,7 +503,7 @@ include __DIR__ . '/views/includes/header.php';
                 let score = 3;
                 if (principal && url === principal) {
                     score = 0;
-                } else if (/([\\/]|^)principal\.(webp|jpg|jpeg|png|gif|svg)(\?|$)/i.test(low)) {
+                } else if (/([\\/]|^)principal\.(webp|jpg|jpeg|png|gif|svg|avif)(\?|$)/i.test(low)) {
                     score = 1;
                 } else if (low.includes('/gal_') || low.includes('gal_')) {
                     score = 2;

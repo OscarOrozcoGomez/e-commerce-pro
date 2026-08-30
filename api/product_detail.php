@@ -97,7 +97,7 @@ try {
 
         $relativeImages = [];
         foreach ($folderMatches as $folderPath) {
-            $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{webp,jpg,jpeg,png,gif,svg}', GLOB_BRACE);
+            $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{webp,jpg,jpeg,png,gif,svg,avif}', GLOB_BRACE);
             if (!is_array($files) || empty($files)) {
                 continue;
             }
