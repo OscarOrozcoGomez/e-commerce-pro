@@ -2421,9 +2421,19 @@ document.addEventListener('DOMContentLoaded', () => {
     #modal-route-error {
         width: 90%;
         max-width: 560px;
+        max-height: 85vh;
+    }
+    /* display:flex debe aplicarse SOLO cuando Materialize marca el modal como abierto
+       (clase .open, agregada/quitada por M.Modal al abrir/cerrar). Antes esta regla no
+       tenia esa condicion: el selector por #id le gana en especificidad al ".modal
+       {display:none}" de Materialize, asi que el modal quedaba SIEMPRE en flex/visible
+       (aunque "cerrado" para Materialize) -- se veia como una franja/resto de modal
+       asomando detras del contenido de la pagina. */
+    #modal-entrega-publicacion.open,
+    #modal-confirmar-entrega.open,
+    #modal-route-error.open {
         display: flex;
         flex-direction: column;
-        max-height: 85vh;
     }
     #modal-entrega-publicacion .modal-content,
     #modal-confirmar-entrega .modal-content,
