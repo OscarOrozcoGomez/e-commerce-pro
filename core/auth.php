@@ -2118,7 +2118,7 @@ function findProductImageById(int $productId, string $preferredFileName = ''): ?
             }
         }
 
-        $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{jpg,jpeg,png,webp,gif,svg}', GLOB_BRACE);
+        $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{jpg,jpeg,png,webp,gif,svg,avif}', GLOB_BRACE);
         if (is_array($files)) {
             foreach ($files as $match) {
                 if (is_file($match)) {
@@ -2240,7 +2240,7 @@ function getProductImageUrl(?string $imgData, ?int $productId = null): string {
     }
 
     // Si no es ninguna de las anteriores, intentar resolver una ruta local robusta
-    if (strpos($imgData, '/') !== false || strpos($imgData, '\\') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
+    if (strpos($imgData, '/') !== false || strpos($imgData, '\\') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg|avif)$/i', $imgData)) {
         $base = rtrim(BASE_URL, '/') . '/';
         $resolvedLocalPath = resolveLocalProductImagePath($imgData);
         if ($resolvedLocalPath !== null) {
