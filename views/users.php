@@ -386,7 +386,7 @@ try {
          FROM permisos WHERE estado = 'activo' ORDER BY clave"
     )->fetchAll(PDO::FETCH_ASSOC);
 
-    $ordenCat = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Administracion', 'Otros'];
+    $ordenCat = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Metricas', 'Administracion', 'Otros'];
     $permisosPorCat = [];
     foreach ($permisosCat as $p) {
         $permisosPorCat[$p['categoria']][] = $p;
@@ -423,7 +423,8 @@ try {
 
 $iconoCategoria = [
     'Ventas' => 'shopping_cart', 'Inventario' => 'inventory_2', 'Entregas' => 'local_shipping',
-    'Catalogo' => 'storefront', 'Administracion' => 'admin_panel_settings', 'Otros' => 'label',
+    'Catalogo' => 'storefront', 'Metricas' => 'insights',
+    'Administracion' => 'admin_panel_settings', 'Otros' => 'label',
 ];
 
 // Obtener roles y almacenes

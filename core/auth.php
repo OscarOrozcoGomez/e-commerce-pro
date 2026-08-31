@@ -29,6 +29,14 @@ const PERMISOS_EN_USO = [
     'realizar_ventas',
     'inventario',
     'transferir_stock',
+    // Metricas y campanas (vistas nuevas, antes solo-admin por codigo; admin sigue
+    // entrando por short-circuit).
+    'ver_analitica_negocio',
+    'ver_trafico_campanas',
+    'ver_comportamiento_sitio',
+    'gestionar_campanas',
+    'configurar_iniciativas_ventas',
+    'ver_auditoria',
 ];
 
 /**

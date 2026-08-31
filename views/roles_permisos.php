@@ -15,7 +15,7 @@ $selRol = 0;
 
 // Claves duplicadas conocidas (misma capacidad, dos claves). Se marcan en el catalogo.
 $RP_DUPLICADOS = ['venta', 'realizar_ventas'];
-$RP_ORDEN_CAT = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Administracion', 'Otros'];
+$RP_ORDEN_CAT = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Metricas', 'Administracion', 'Otros'];
 
 function rpGetRoles(PDO $pdo): array
 {
@@ -264,6 +264,7 @@ $iconoCategoria = [
     'Inventario' => 'inventory_2',
     'Entregas' => 'local_shipping',
     'Catalogo' => 'storefront',
+    'Metricas' => 'insights',
     'Administracion' => 'admin_panel_settings',
     'Otros' => 'label',
 ];
