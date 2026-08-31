@@ -141,33 +141,6 @@ jobs:
           PHP_CLI_SERVER_WORKERS: 4
         run: php -S 127.0.0.1:8000 -t . &
 
-      # Diagnostico temporal: el job de E2E ha estado colgandose ~30s en practicamente cada
-      # navegacion (page.waitForURL/goto nunca resuelven), incluso en paginas sin login ni
-      # llamadas externas -- sin reproducirse igual localmente. Antes de gastar otra corrida
-      # completa de Playwright (10-70+ min) adivinando la causa, esto mide en segundos si el
-      # server integrado esta sirviendo requests en paralelo de verdad (PHP_CLI_SERVER_WORKERS)
-      # o si se estan encolando uno detras de otro.
-      - name: Diagnostico -- pcntl, concurrencia real de php -S, y CDNs externos que carga cada pagina
-        run: |
-          echo "--- pcntl cargado? ---"
-          php -m | grep -i pcntl || echo "pcntl NO esta en la lista de modulos"
-          sleep 1
-          echo "--- 1 request simple al server local (baseline) ---"
-          time curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8000/views/login.php
-          echo "--- 4 requests concurrentes al server local (si el total es ~4x el baseline, se estan encolando) ---"
-          time (curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & wait)
-          echo "--- CDNs externos que cada pagina carga sin condicion (resultado descartaria/confirmaria un recurso externo colgado, ya que el server local resulto no ser el cuello de botella) ---"
-          for url in \
-            "https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js" \
-            "https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" \
-            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" \
-            "https://www.googletagmanager.com/gtm.js?id=GTM-TPZG9NDT" \
-            "https://fonts.googleapis.com/icon?family=Material+Icons" \
-            "https://static.cloudflareinsights.com/beacon.min.js"; do
-            echo "-> $url"
-            curl -s -o /dev/null --max-time 10 -w "  namelookup=%{time_namelookup}s connect=%{time_connect}s total=%{time_total}s HTTP=%{http_code}\n" "$url" || echo "  FALLO/TIMEOUT (>10s)"
-          done
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -180,26 +153,18 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # Diagnostico temporal: los descartes anteriores (server local, CDNs externos) dejan
-      # como sospechoso mas probable algo dentro del propio navegador (sandbox de Chromium en
-      # el runner/contenedor de GitHub Actions es la causa mas comun y conocida de este patron
-      # exacto -- page.goto/waitForURL colgandose sin error, en vez de fallar rapido). Corre
-      # UN solo test simple (pagina publica, sin login) con logging verboso de Playwright en
-      # vez de las 128 pruebas, para dar una senal en segundos/1 minuto en vez de esperar otra
-      # hora completa adivinando.
-      - name: Diagnostico -- 1 test simple con logging verboso del navegador
+      - name: Run Playwright tests
         env:
           BASE_URL: http://127.0.0.1:8000/
-          DEBUG: pw:browser,pw:api
-        run: npx playwright test catalog-product-detail.spec.ts --workers=1 --retries=0 --timeout=15000 --reporter=list
+        run: npx playwright test
 
-      # Diagnostico temporal: catalogo.php atrapa PDOException de su query principal y la
-      # deja muda (solo error_log(), $productos = []) -- el test de arriba fallo porque el
-      # catalogo salio vacio SIN colgarse (page.goto/load resolvieron normal), asi que el
-      # sospechoso real es un error SQL en esa query, no un cuelgue de red/navegador. Este
-      # error_log() cae en app_error.log (ver core/config.php), no en el stdout de este job.
-      - name: Diagnostico -- contenido de app_error.log
-        if: always()
+      # Ayuda a diagnosticar sin depender de reproducir localmente: views/catalogo.php (y
+      # cualquier otra vista) atrapa PDOException de sus queries en silencio (error_log(),
+      # sigue mostrando la pagina vacia en vez de un error visible) -- eso fue justo lo que
+      # escondio por mas tiempo el bug real de productos.precio_comparacion faltante. Si algo
+      # similar vuelve a pasar, este log queda en el job en vez de tener que adivinar.
+      - name: Mostrar app_error.log si el job fallo
+        if: failure()
         run: |
           if [ -f app_error.log ]; then
             echo "--- app_error.log ---"
@@ -207,12 +172,6 @@ jobs:
           else
             echo "app_error.log no existe (no se registro ningun error via error_log)"
           fi
-
-      - name: Run Playwright tests
-        if: false # deshabilitado temporalmente mientras se diagnostica el cuelgue de arriba
-        env:
-          BASE_URL: http://127.0.0.1:8000/
-        run: npx playwright test
 
       - name: Upload Playwright report
         if: failure()
