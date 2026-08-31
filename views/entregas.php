@@ -1000,13 +1000,13 @@ include __DIR__ . '/includes/header.php';
         <p id="ep-status" class="center-align" style="min-height: 1.2em;"></p>
     </div>
     <div class="modal-footer">
-        <a href="#!" id="ep-btn-omitir" class="modal-close waves-effect btn-flat">Omitir</a>
-        <a href="#!" id="ep-btn-compartir" class="waves-effect waves-light btn green">
-            <i class="material-icons left">share</i> Compartir
-        </a>
         <a href="#!" id="ep-btn-facebook" class="waves-effect waves-light btn blue darken-3">
             <i class="material-icons left">facebook</i> Publicar en Facebook
         </a>
+        <a href="#!" id="ep-btn-compartir" class="waves-effect waves-light btn green">
+            <i class="material-icons left">share</i> Compartir
+        </a>
+        <a href="#!" id="ep-btn-omitir" class="modal-close waves-effect btn-flat">Omitir</a>
     </div>
 </div>
 
@@ -2464,14 +2464,42 @@ document.addEventListener('DOMContentLoaded', () => {
         #modal-confirmar-entrega,
         #modal-route-error {
             width: 96%;
-            max-height: 92vh;
         }
-        #modal-entrega-publicacion .modal-footer > a,
-        #modal-confirmar-entrega .modal-footer > a,
-        #modal-route-error .modal-footer > a {
+        /* En celular: fijar el modal cerca del borde superior y volverlo UN SOLO
+           contenedor scrolleable (contenido + botones juntos). Antes: Materialize
+           ponia top:10% inline y con max-height:92vh el modal llegaba al 102% de la
+           pantalla, asi que el ultimo boton ("Publicar en Facebook") quedaba abajo
+           del borde y el titulo se cortaba arriba. El split content/footer solo
+           scrolleaba el contenido, no el footer. */
+        #modal-entrega-publicacion.open,
+        #modal-confirmar-entrega.open,
+        #modal-route-error.open {
+            top: 1.5vh !important;
+            max-height: 97vh;
+            display: block;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        #modal-entrega-publicacion.open .modal-content,
+        #modal-confirmar-entrega.open .modal-content,
+        #modal-route-error.open .modal-content {
+            overflow: visible;
+        }
+        #modal-entrega-publicacion .modal-footer > a.btn,
+        #modal-confirmar-entrega .modal-footer > a.btn,
+        #modal-route-error .modal-footer > a.btn {
             width: 100%;
             margin: 4px 0 !important;
             text-align: center;
+        }
+        /* "Omitir" no ocupa una fila completa: es la accion secundaria. */
+        #modal-entrega-publicacion .modal-footer > #ep-btn-omitir {
+            display: block;
+            width: auto;
+            margin: 8px auto 4px !important;
+        }
+        #modal-entrega-publicacion #ep-foto-preview {
+            max-height: 38vh;
         }
         #modal-entrega-publicacion .file-field.input-field .btn {
             width: 100%;
