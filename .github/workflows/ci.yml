@@ -51,8 +51,17 @@ jobs:
       # `mysql` en la linea de importacion, dejando esa otra BD vacia (asi fallo la primera
       # corrida de este job: "Table 'test_db.clientes' doesn't exist"). Se usa el mismo
       # nombre que trae el dump para que ambos coincidan.
+      #
+      # Imagen mariadb (no mysql): la app corre sobre MariaDB en local (XAMPP) y en
+      # produccion -- nunca sobre MySQL real. Usar `mysql:8.0` aqui rompio la segunda
+      # corrida de este job: database/migrations/20260702_000003_...sql usa
+      # "ADD COLUMN IF NOT EXISTS ... AFTER col", sintaxis que MariaDB soporta desde hace
+      # anios pero que el parser de MySQL 8 rechazo. Esa migracion ya esta aplicada en BDs
+      # reales (checksum fijo, no se puede editar -- ver migrate.php), asi que el fix
+      # correcto es que CI use el mismo motor que el resto del proyecto, no reescribir la
+      # migracion.
       mysql:
-        image: mysql:8.0
+        image: mariadb:10.4
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
           MYSQL_DATABASE: beautyandwell_prod
