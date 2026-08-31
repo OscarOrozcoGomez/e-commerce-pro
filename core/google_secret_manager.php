@@ -187,40 +187,76 @@ function gsmLoadServiceAccount(string $path): ?array
     return $decoded;
 }
 
-function gsmGetServiceAccountPath(): ?string
+/**
+ * Rutas candidatas para la llave JSON de la service account, en orden de preferencia.
+ * Separado de gsmGetServiceAccountPath() para poder probar la generacion sin depender
+ * de que exista un archivo real.
+ *
+ * @return list<string>
+ */
+function gsmServiceAccountPathCandidates(): array
 {
+    $candidates = [];
+
     $envPath = gsmGetEnvValue('GCP_SA_KEY_FILE')
         ?? gsmGetEnvValue('GOOGLE_APPLICATION_CREDENTIALS')
         ?? gsmGetEnvValue('GCP_SERVICE_ACCOUNT_FILE');
-
-    $candidates = [];
     if ($envPath !== null) {
         $candidates[] = $envPath;
     }
 
-    $homePath = getenv('HOME');
-    if ($homePath === false || trim($homePath) === '') {
-        $homePath = $_SERVER['HOME'] ?? '';
+    // Directorios "home" a probar: la variable HOME (si Apache/PHP-FPM la expone) y,
+    // como respaldo, el home deducido del DOCUMENT_ROOT quitando el sufijo tipico del
+    // webroot (public_html / htdocs / www / html). En hostings cPanel HOME suele NO
+    // estar puesta para el proceso web, y ahi es donde vive .gcp/sa.json (un nivel
+    // arriba del webroot), asi que sin esta deduccion nunca se encontraba la llave.
+    $homeDirs = [];
+
+    $homeEnv = getenv('HOME');
+    if ($homeEnv === false || trim((string) $homeEnv) === '') {
+        $homeEnv = $_SERVER['HOME'] ?? '';
+    }
+    if (is_string($homeEnv) && trim($homeEnv) !== '') {
+        $homeDirs[] = rtrim($homeEnv, '/\\');
     }
 
-    if (is_string($homePath) && trim($homePath) !== '') {
-        $homePath = rtrim($homePath, '/\\');
-        $candidates[] = $homePath . '/.gcp/sa.json';
-        $candidates[] = $homePath . '/.gcp/service-account.json';
-        $candidates[] = $homePath . '/public_html/.gcp/sa.json';
-        $candidates[] = $homePath . '/public_html/.gcp/service-account.json';
+    $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+    if (is_string($docRoot) && trim($docRoot) !== '') {
+        $docRoot = rtrim(str_replace('\\', '/', $docRoot), '/');
+        foreach (['public_html', 'htdocs', 'www', 'html'] as $webrootDir) {
+            if (substr($docRoot, -(strlen($webrootDir) + 1)) === '/' . $webrootDir) {
+                $homeDirs[] = substr($docRoot, 0, -(strlen($webrootDir) + 1));
+                break;
+            }
+        }
     }
 
-    $checked = [];
+    foreach (array_unique($homeDirs) as $homeDir) {
+        if ($homeDir === '') {
+            continue;
+        }
+        $candidates[] = $homeDir . '/.gcp/sa.json';
+        $candidates[] = $homeDir . '/.gcp/service-account.json';
+        $candidates[] = $homeDir . '/public_html/.gcp/sa.json';
+        $candidates[] = $homeDir . '/public_html/.gcp/service-account.json';
+    }
+
+    $seen = [];
+    $unique = [];
     foreach ($candidates as $candidate) {
-        if (!is_string($candidate) || trim($candidate) === '') {
+        if (!is_string($candidate) || trim($candidate) === '' || isset($seen[$candidate])) {
             continue;
         }
-        if (isset($checked[$candidate])) {
-            continue;
-        }
-        $checked[$candidate] = true;
+        $seen[$candidate] = true;
+        $unique[] = $candidate;
+    }
 
+    return $unique;
+}
+
+function gsmGetServiceAccountPath(): ?string
+{
+    foreach (gsmServiceAccountPathCandidates() as $candidate) {
         if (is_readable($candidate)) {
             return $candidate;
         }
