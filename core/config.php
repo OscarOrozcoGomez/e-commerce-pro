@@ -70,12 +70,21 @@ sendSecurityHeaders();
 
 // Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
 if (!defined('BASE_URL')) {
-    // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
-    $host = $_SERVER['HTTP_HOST'] ?? '';
-    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
-        define('BASE_URL', '/e-commerce-pro/');
+    // APP_BASE_URL: override explicito para entornos donde ni "localhost" ni "127.0.0.1"
+    // implican la subcarpeta /e-commerce-pro/ -- p.ej. CI, donde `php -S 127.0.0.1:8000 -t .`
+    // sirve el repo directo en la raiz (sin esa subcarpeta), asi que la deteccion automatica
+    // de abajo pondria un BASE_URL equivocado y cada link/redirect de la app 404earia.
+    $envBaseUrl = getenv('APP_BASE_URL');
+    if ($envBaseUrl !== false && trim($envBaseUrl) !== '') {
+        define('BASE_URL', $envBaseUrl);
     } else {
-        define('BASE_URL', '/');
+        // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+            define('BASE_URL', '/e-commerce-pro/');
+        } else {
+            define('BASE_URL', '/');
+        }
     }
 }
 

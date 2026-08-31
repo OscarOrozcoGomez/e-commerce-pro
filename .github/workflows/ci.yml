@@ -44,11 +44,18 @@ jobs:
       contents: read
 
     services:
+      # database.sql trae su propio "CREATE DATABASE IF NOT EXISTS beautyandwell_prod; USE
+      # beautyandwell_prod;" al principio -- si el servicio de MySQL crea una BD con otro
+      # nombre (p.ej. "test_db"), ese USE la ignora por completo y todas las tablas del
+      # schema terminan creandose en beautyandwell_prod en vez de en la BD que le pasamos a
+      # `mysql` en la linea de importacion, dejando esa otra BD vacia (asi fallo la primera
+      # corrida de este job: "Table 'test_db.clientes' doesn't exist"). Se usa el mismo
+      # nombre que trae el dump para que ambos coincidan.
       mysql:
         image: mysql:8.0
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
-          MYSQL_DATABASE: test_db
+          MYSQL_DATABASE: beautyandwell_prod
         ports:
           - 3306:3306
         options: >-
@@ -72,13 +79,13 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist
 
       - name: Import base schema (database.sql)
-        run: mysql -h 127.0.0.1 -u root test_db < database.sql
+        run: mysql -h 127.0.0.1 -u root beautyandwell_prod < database.sql
 
       - name: Run database migrations
         env:
           APP_ENV: qa
           DB_HOST: 127.0.0.1
-          DB_NAME: test_db
+          DB_NAME: beautyandwell_prod
           DB_USER: root
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
@@ -88,7 +95,7 @@ jobs:
         env:
           APP_ENV: qa
           DB_HOST: 127.0.0.1
-          DB_NAME: test_db
+          DB_NAME: beautyandwell_prod
           DB_USER: root
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
@@ -98,7 +105,7 @@ jobs:
         env:
           APP_ENV: qa
           DB_HOST: 127.0.0.1
-          DB_NAME: test_db
+          DB_NAME: beautyandwell_prod
           DB_USER: root
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
@@ -108,10 +115,14 @@ jobs:
         env:
           APP_ENV: qa
           DB_HOST: 127.0.0.1
-          DB_NAME: test_db
+          DB_NAME: beautyandwell_prod
           DB_USER: root
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
+          # A diferencia de XAMPP local (htdocs/e-commerce-pro/), este server sirve el repo
+          # directo en la raiz -- sin este override, core/config.php detectaria "127.0.0.1" y
+          # asumiria la subcarpeta /e-commerce-pro/ para cada link/redirect, todos 404eando.
+          APP_BASE_URL: /
         run: php -S 127.0.0.1:8000 -t . &
 
       - name: Setup Node
