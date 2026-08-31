@@ -66,6 +66,20 @@ function sanitizePageviewId($value): ?string
 }
 
 /**
+ * Marca si el rol de la sesion es personal interno (cualquiera que no sea 'cliente'
+ * ni sesion anonima). Lo usa api/log_activity.php para sellar es_interno en la fila
+ * de logs_actividad: el log guarda la actividad igual, pero los reportes de marketing
+ * (Trafico y Campanas, Comportamiento en el Sitio) filtran es_interno = 0 para no
+ * medir sobre la navegacion del propio equipo. Entrada tolerante: null/'' -> no
+ * interno (un visitante anonimo o un cliente logueado cuenta como trafico real).
+ */
+function sessionRoleIsInternal(?string $rol): bool
+{
+    $rol = strtolower(trim((string) $rol));
+    return $rol !== '' && $rol !== 'cliente';
+}
+
+/**
  * Clampea la duracion (segundos visibles en pagina) que reporta el cliente. Rechaza
  * negativos/no-numericos y limita el techo a 30 minutos: mas que eso es casi siempre
  * una pestaña olvidada abierta, no atencion real, y no queremos que un solo outlier

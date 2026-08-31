@@ -17,7 +17,10 @@ $pdo = getPDO();
 $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
 $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
 
-$whereClause = " WHERE tipo_accion = 'visit' AND DATE(fecha_creacion) >= :inicio AND DATE(fecha_creacion) <= :fin";
+// es_interno = 0: excluye la navegacion del personal (admin/encargado/vendedor/
+// repartidor). Su actividad se sigue registrando en logs_actividad y se ve en el log
+// de auditoria, pero no debe contar como trafico de campana ni inflar los totales.
+$whereClause = " WHERE tipo_accion = 'visit' AND es_interno = 0 AND DATE(fecha_creacion) >= :inicio AND DATE(fecha_creacion) <= :fin";
 $params = [':inicio' => $fecha_inicio, ':fin' => $fecha_fin];
 
 $totalStmt = $pdo->prepare("SELECT COUNT(*) AS total, COUNT(DISTINCT visitor_id) AS unicos FROM logs_actividad" . $whereClause);

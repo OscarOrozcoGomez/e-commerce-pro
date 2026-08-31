@@ -16,6 +16,11 @@ $pdo = getPDO();
 $filtro_usuario = isset($_GET['usuario']) ? intval($_GET['usuario']) : 0;
 $filtro_tipo = isset($_GET['tipo']) ? $_GET['tipo'] : '';
 $filtro_plataforma = $_GET['plataforma'] ?? '';
+// Origen: 'interno' = actividad del personal (admin/encargado/vendedor/repartidor)
+// navegando el sistema; 'externo' = visitantes anonimos y clientes. El log guarda
+// las dos; este filtro solo cambia lo que se lista. Los reportes de marketing
+// (Trafico y Campanas, Comportamiento en el Sitio) siempre miden solo 'externo'.
+$filtro_origen = $_GET['origen'] ?? '';
 $fecha_inicio = $_GET['fecha_inicio'] ?? '';
 $fecha_fin = $_GET['fecha_fin'] ?? '';
 
@@ -45,6 +50,11 @@ if ($filtro_tipo !== '') {
 if ($filtro_plataforma !== '') {
     $query .= " AND l.plataforma = :plataforma";
     $params[':plataforma'] = $filtro_plataforma;
+}
+if ($filtro_origen === 'interno') {
+    $query .= " AND l.es_interno = 1";
+} elseif ($filtro_origen === 'externo') {
+    $query .= " AND l.es_interno = 0";
 }
 if ($fecha_inicio) {
     $query .= " AND DATE(l.fecha_creacion) >= :inicio";
@@ -91,7 +101,7 @@ include __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-content">
             <form method="GET" class="row" style="margin-bottom: 0;">
-                <div class="input-field col s12 m3">
+                <div class="input-field col s12 m2">
                     <select name="usuario" class="browser-default">
                         <option value="0">Todos los usuarios</option>
                         <option value="-1" <?php echo $filtro_usuario === -1 ? 'selected' : ''; ?>>Solo invitados (sin login)</option>
@@ -107,6 +117,13 @@ include __DIR__ . '/includes/header.php';
                         <option value="">Todos los tipos</option>
                         <option value="visit" <?php echo $filtro_tipo == 'visit' ? 'selected' : ''; ?>>Visitas</option>
                         <option value="click" <?php echo $filtro_tipo == 'click' ? 'selected' : ''; ?>>Clics</option>
+                    </select>
+                </div>
+                <div class="input-field col s12 m2">
+                    <select name="origen" class="browser-default">
+                        <option value="">Interno y externo</option>
+                        <option value="externo" <?php echo $filtro_origen === 'externo' ? 'selected' : ''; ?>>Solo externo (visitantes y clientes)</option>
+                        <option value="interno" <?php echo $filtro_origen === 'interno' ? 'selected' : ''; ?>>Solo interno (personal)</option>
                     </select>
                 </div>
                 <div class="input-field col s12 m2">
@@ -128,7 +145,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="col s12 m1" style="padding-top: 15px;">
                     <button type="submit" class="btn indigo waves-effect waves-light">Filtrar</button>
                 </div>
-                <div class="col s12 m2 right-align" style="padding-top: 15px;">
+                <div class="col s12 m1 right-align" style="padding-top: 15px;">
                     <a href="?" class="btn-flat grey-text">Limpiar</a>
                 </div>
             </form>
@@ -180,6 +197,9 @@ include __DIR__ . '/includes/header.php';
                                                         <?php if (empty($log['usuario_nombre'])): ?>
                                                             <small class="grey-text" style="display:block;">sin sesión</small>
                                                         <?php endif; ?>
+                                                        <?php if (!empty($log['es_interno'])): ?>
+                                                            <small class="orange-text text-darken-3" style="display:block;">personal interno</small>
+                                                        <?php endif; ?>
                                                     </td>
                                                     <td>
                                                         <span class="badge <?php echo $log['tipo_accion'] === 'visit' ? 'blue' : 'green'; ?> white-text" style="float: none;">
@@ -217,6 +237,9 @@ include __DIR__ . '/includes/header.php';
                                                     <?php echo esc($log['usuario_nombre'] ?? 'Invitado'); ?>
                                                     <?php if (empty($log['usuario_nombre'])): ?>
                                                         <small class="grey-text" style="display:block;">sin sesión</small>
+                                                    <?php endif; ?>
+                                                    <?php if (!empty($log['es_interno'])): ?>
+                                                        <small class="orange-text text-darken-3" style="display:block;">personal interno</small>
                                                     <?php endif; ?>
                                                 </span>
                                             </div>
