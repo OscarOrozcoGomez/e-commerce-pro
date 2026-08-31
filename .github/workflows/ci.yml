@@ -193,6 +193,21 @@ jobs:
           DEBUG: pw:browser,pw:api
         run: npx playwright test catalog-product-detail.spec.ts --workers=1 --retries=0 --timeout=15000 --reporter=list
 
+      # Diagnostico temporal: catalogo.php atrapa PDOException de su query principal y la
+      # deja muda (solo error_log(), $productos = []) -- el test de arriba fallo porque el
+      # catalogo salio vacio SIN colgarse (page.goto/load resolvieron normal), asi que el
+      # sospechoso real es un error SQL en esa query, no un cuelgue de red/navegador. Este
+      # error_log() cae en app_error.log (ver core/config.php), no en el stdout de este job.
+      - name: Diagnostico -- contenido de app_error.log
+        if: always()
+        run: |
+          if [ -f app_error.log ]; then
+            echo "--- app_error.log ---"
+            cat app_error.log
+          else
+            echo "app_error.log no existe (no se registro ningun error via error_log)"
+          fi
+
       - name: Run Playwright tests
         if: false # deshabilitado temporalmente mientras se diagnostica el cuelgue de arriba
         env:
