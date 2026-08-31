@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
+require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
@@ -72,6 +73,11 @@ $productRejectReasonOptions = [
     'otro' => 'Otro',
 ];
 
+// Motivos preestablecidos para cuando el repartidor confirma la entrega SIN foto de
+// evidencia (se le olvido, fallo la camara, etc). Definidos en core/entrega_cambio_utils.php
+// junto con deliveryValidateSinEvidencia() para poder cubrirlos con pruebas unitarias.
+$sinEvidenciaReasonOptions = deliverySinEvidenciaReasonOptions();
+
 // Estados de pedido en los que el repartidor todavia puede editar la lista de productos
 // (definidos junto a dbMarkProductoNoEntregado en core/entrega_item_utils.php).
 $pedidoEntregaEditableEstados = PEDIDO_ENTREGA_EDITABLE_ESTADOS;
@@ -110,15 +116,35 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                     $tieneEvidencia = ((int)$stmtEv->fetchColumn()) > 0;
                 }
 
-                if (!$tieneEvidencia) {
-                    $error = 'Sube una foto de evidencia de la entrega antes de confirmar el cobro.';
+                // Si no hay foto, el repartidor puede continuar SOLO si marca explicitamente
+                // "entregar sin evidencia" y da un motivo (se le olvido, fallo la camara, etc).
+                // La validacion vive en deliveryValidateSinEvidencia() (con pruebas unitarias).
+                $sinEv = deliveryValidateSinEvidencia($_POST);
+
+                if (!$tieneEvidencia && !$sinEv['omitir']) {
+                    $error = 'Sube una foto de evidencia de la entrega, o marca "Entregar sin evidencia" e indica el motivo.';
+                } elseif (!$tieneEvidencia && !$sinEv['valid']) {
+                    $error = $sinEv['error'];
                 } else {
+                    $entregaSinEvidencia = !$tieneEvidencia && $sinEv['omitir'];
                     // Confirma entrega y cobro simultaneamente (pago contra entrega)
                     $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                     $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                     if ($stmt->rowCount() > 0) {
-                        logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
-                        $success = 'Pedido entregado y cobrado correctamente.';
+                        if ($entregaSinEvidencia) {
+                            // Marcador en observaciones para que admin/encargado lo vea sin abrir
+                            // el log de auditoria (mismo estilo que otros marcadores de esta pantalla).
+                            $marcadorSinEv = ' | SIN_EVIDENCIA_ENTREGA: ' . date('Y-m-d H:i')
+                                . ' por ' . (string)($usuario['nombre'] ?? 'repartidor')
+                                . ' | Motivo: ' . $sinEv['motivo_etiqueta'];
+                            $stmtObs = $pdo->prepare("UPDATE pedidos SET observaciones = CONCAT(COALESCE(observaciones, ''), ?) WHERE id_pedido = ?");
+                            $stmtObs->execute([$marcadorSinEv, $id_pedido]);
+                            logAudit('PEDIDO_ENTREGADO_SIN_EVIDENCIA', 'pedidos', $id_pedido, 'Pedido entregado y pagado SIN foto de evidencia. Motivo: ' . $sinEv['motivo_etiqueta']);
+                            $success = 'Pedido entregado y cobrado (sin evidencia fotografica). Quedo registrado el motivo.';
+                        } else {
+                            logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
+                            $success = 'Pedido entregado y cobrado correctamente.';
+                        }
                         $justDeliveredPedidoId = $id_pedido;
                     }
                 }
@@ -861,6 +887,23 @@ include __DIR__ . '/includes/header.php';
                                     <i class="material-icons tiny">event_busy</i> Sin dia programado
                                 </p>
                             <?php endif; ?>
+
+                            <?php if ($isRepartidorView && ($ent['estado'] ?? '') !== 'entregado'): ?>
+                                <?php $cambioTotal = number_format((float)($ent['total'] ?? 0), 2, '.', ''); ?>
+                                <div class="cambio-box" data-total="<?php echo esc($cambioTotal); ?>">
+                                    <div class="cambio-box-head">
+                                        <i class="material-icons tiny">payments</i>
+                                        <span>Calcular cambio</span>
+                                        <span class="cambio-box-total">Total $<?php echo number_format((float)($ent['total'] ?? 0), 2); ?></span>
+                                    </div>
+                                    <label class="cambio-box-label" for="cambio-paga-<?php echo (int)$ent['id_pedido']; ?>">¿Con cuánto paga el cliente?</label>
+                                    <div class="cambio-input-wrap">
+                                        <span class="cambio-input-prefix">$</span>
+                                        <input type="number" inputmode="decimal" min="0" step="0.50" id="cambio-paga-<?php echo (int)$ent['id_pedido']; ?>" class="cambio-paga" placeholder="0.00" autocomplete="off">
+                                    </div>
+                                    <div class="cambio-result" aria-live="polite"></div>
+                                </div>
+                            <?php endif; ?>
                         </div>
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
@@ -925,6 +968,30 @@ include __DIR__ . '/includes/header.php';
                                         </button>
                                     </div>
                                     <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
+
+                                    <button type="button" class="btn-flat grey-text text-darken-1 waves-effect toggle-omitir-evidencia w-100" data-target="omitir-evidencia-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px; font-size:0.8rem;">
+                                        <i class="material-icons left" style="font-size:18px;">no_photography</i> No tengo fotos de esta entrega
+                                    </button>
+                                    <form method="POST" id="omitir-evidencia-<?php echo (int)$ent['id_pedido']; ?>" class="omitir-evidencia-form" data-omitir-form="1" style="display:none; margin-top:10px; text-align:left;">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
+                                        <input type="hidden" name="accion" value="entregar">
+                                        <input type="hidden" name="omitir_evidencia" value="1">
+                                        <p class="grey-text" style="font-size:0.78rem; margin:0 0 8px;">
+                                            La entrega se cerrara sin foto. Quedara registrado el motivo en el historial del pedido.
+                                        </p>
+                                        <label class="active" style="font-size:0.78rem; color:#546e7a;">Motivo por el que no hay evidencia</label>
+                                        <select name="motivo_sin_evidencia" data-omitir-reason="1" class="browser-default" required style="margin-bottom:8px; height:40px;">
+                                            <option value="" selected disabled>-- Selecciona un motivo --</option>
+                                            <?php foreach ($sinEvidenciaReasonOptions as $reasonKey => $reasonLabel): ?>
+                                                <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <input type="text" name="motivo_sin_evidencia_otro" data-omitir-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
+                                        <button type="submit" class="btn blue-grey darken-1 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro SIN foto de evidencia? Quedara registrado el motivo.', 'blue-grey darken-1', 'Sí, entregar sin foto'); return false;">
+                                            ENTREGAR SIN EVIDENCIA <i class="material-icons right">done_all</i>
+                                        </button>
+                                    </form>
                                 <?php else: ?>
                                     <form method="POST">
                                         <?php echo csrfInput(); ?>
@@ -1082,6 +1149,83 @@ document.addEventListener('DOMContentLoaded', function() {
                 ? '<i class="material-icons left">expand_less</i> Cancelar'
                 : '<i class="material-icons left">cancel</i> No pude entregar';
         });
+    });
+
+    document.querySelectorAll('.toggle-omitir-evidencia').forEach((btn) => {
+        const originalHtml = btn.innerHTML;
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (!target) return;
+            const isHidden = target.style.display === 'none' || target.style.display === '';
+            target.style.display = isHidden ? 'block' : 'none';
+            btn.innerHTML = isHidden
+                ? '<i class="material-icons left" style="font-size:18px;">expand_less</i> Cerrar'
+                : originalHtml;
+        });
+    });
+
+    document.querySelectorAll('form.omitir-evidencia-form[data-omitir-form="1"]').forEach((formEl) => {
+        const reasonSelect = formEl.querySelector('select[data-omitir-reason="1"]');
+        const otherInput = formEl.querySelector('input[data-omitir-other="1"]');
+        if (!reasonSelect || !otherInput) return;
+
+        const syncOtherFieldVisibility = () => {
+            const mustShow = reasonSelect.value === 'otro';
+            otherInput.style.display = mustShow ? 'block' : 'none';
+            otherInput.required = mustShow;
+            if (!mustShow) {
+                otherInput.value = '';
+            }
+        };
+
+        reasonSelect.addEventListener('change', syncOtherFieldVisibility);
+        syncOtherFieldVisibility();
+    });
+
+    // Calculadora de cambio: mismo criterio que deliveryCalcularCambio() en PHP
+    // (core/entrega_cambio_utils.php). La coma se trata como separador de miles.
+    document.querySelectorAll('.cambio-box').forEach((box) => {
+        const input = box.querySelector('.cambio-paga');
+        const result = box.querySelector('.cambio-result');
+        const total = parseFloat(box.getAttribute('data-total')) || 0;
+        if (!input || !result) return;
+
+        const parseMonto = (txt) => {
+            const limpio = String(txt == null ? '' : txt).replace(/[,$\s ]/g, '');
+            if (limpio === '' || !/^-?\d*\.?\d+$/.test(limpio)) return null;
+            return parseFloat(limpio);
+        };
+        const money = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        const render = () => {
+            const paga = parseMonto(input.value);
+            if (paga === null) {
+                result.textContent = '';
+                result.className = 'cambio-result';
+                return;
+            }
+            if (paga < 0) {
+                result.textContent = 'El monto no puede ser negativo.';
+                result.className = 'cambio-result is-error';
+                return;
+            }
+            const diff = Math.round((paga - total) * 100) / 100;
+            if (diff >= -0.005) {
+                if (diff <= 0.005) {
+                    result.textContent = 'Pago exacto, no hay que dar cambio.';
+                    result.className = 'cambio-result is-ok';
+                } else {
+                    result.textContent = 'Cambio a devolver: $' + money(diff);
+                    result.className = 'cambio-result is-ok';
+                }
+            } else {
+                result.textContent = 'Falta: $' + money(Math.round((total - paga) * 100) / 100);
+                result.className = 'cambio-result is-error';
+            }
+        };
+
+        input.addEventListener('input', render);
     });
 
     document.querySelectorAll('form.cancel-entrega-form[data-cancel-form="1"]').forEach((formEl) => {
@@ -2373,6 +2517,62 @@ document.addEventListener('DOMContentLoaded', () => {
     .delivery-value {
         margin-left: 4px;
     }
+    .cambio-box {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid #cfd8dc;
+        border-radius: 6px;
+        background: #fafafa;
+        text-align: left;
+    }
+    .cambio-box-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #37474f;
+    }
+    .cambio-box-head i { color: #2e7d32; }
+    .cambio-box-total {
+        margin-left: auto;
+        font-weight: 700;
+        color: #2e7d32;
+        white-space: nowrap;
+    }
+    .cambio-box-label {
+        display: block;
+        font-size: 0.78rem;
+        color: #546e7a;
+        margin: 8px 0 4px;
+    }
+    .cambio-input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid #cfd8dc;
+        border-radius: 4px;
+        background: #fff;
+        padding: 0 8px;
+    }
+    .cambio-input-prefix { color: #78909c; font-weight: 700; }
+    input.cambio-paga {
+        flex: 1;
+        border: 0 !important;
+        box-shadow: none !important;
+        height: 40px !important;
+        margin: 0 !important;
+        font-size: 1rem;
+    }
+    input.cambio-paga:focus { border: 0 !important; box-shadow: none !important; }
+    .cambio-result {
+        min-height: 1.2em;
+        margin-top: 6px;
+        font-size: 0.95rem;
+        font-weight: 700;
+    }
+    .cambio-result.is-ok { color: #2e7d32; }
+    .cambio-result.is-error { color: #c62828; }
     .route-select-wrap {
         display: flex;
         align-items: center;
