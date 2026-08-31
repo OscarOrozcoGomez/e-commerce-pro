@@ -5,6 +5,9 @@ require_once __DIR__ . '/pickup_offer_utils.php';
 require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/delivery_route_utils.php';
 require_once __DIR__ . '/order_cancel_utils.php';
+require_once __DIR__ . '/attribution.php';
+require_once __DIR__ . '/ventas_features.php';
+require_once __DIR__ . '/referrals.php';
 
 /**
  * Claves de permiso que HOY se comprueban de verdad en el codigo
@@ -1404,6 +1407,8 @@ function dbCreatePublicOrder(array $data): array {
         $hasPedidosMapsLinkEntrega = $columnExists($pdo, 'pedidos', 'maps_link_entrega');
         $hasPedidosLatitud = $columnExists($pdo, 'pedidos', 'latitud');
         $hasPedidosLongitud = $columnExists($pdo, 'pedidos', 'longitud');
+        $hasPedidosVisitorId = $columnExists($pdo, 'pedidos', 'visitor_id');
+        $hasPedidosPlataforma = $columnExists($pdo, 'pedidos', 'plataforma');
 
         $entrega = $data['tipo_entrega'] ?? 'No especificado';
         $esPickupSucursal = strcasecmp((string)$entrega, 'Sucursal') === 0;
@@ -1485,6 +1490,23 @@ function dbCreatePublicOrder(array $data): array {
             && ((float)($pickupOffer['ahorro'] ?? 0.0) > 0.0);
 
         $descuentoTotal = $aplicarIncentivoSucursal ? round((float)$pickupOffer['ahorro'], 2) : 0.0;
+
+        $referidoValidacion = null;
+        $telefonoDigitsReferido = normalizePhoneDigitsMx($telefonoEntrega) ?? '';
+        if (ventasFeatureIsActive($pdo, 'programa_referidos') && !empty($data['codigo_referido'])) {
+            $referidoValidacion = referralValidate(
+                $pdo,
+                (string) $data['codigo_referido'],
+                $id_cliente !== null ? (int) $id_cliente : null,
+                $telefonoDigitsReferido,
+                $subtotal
+            );
+            if (!empty($referidoValidacion['valido'])) {
+                $descuentoTotal = round($descuentoTotal + (float) $referidoValidacion['descuento'], 2);
+                $infoCliente .= ' | REFERIDO: ' . strtoupper((string) $data['codigo_referido']) . ' (-$' . number_format((float) $referidoValidacion['descuento'], 2, '.', '') . ')';
+            }
+        }
+
         $totalPedido = round(max(0.0, $subtotal - $descuentoTotal), 2);
 
         if ($aplicarIncentivoSucursal) {
@@ -1578,6 +1600,22 @@ function dbCreatePublicOrder(array $data): array {
             $pedidoParams[':longitud'] = $coordsEntrega['lng'];
         }
 
+        if ($hasPedidosVisitorId && $hasPedidosPlataforma && ventasFeatureIsActive($pdo, 'atribucion_ventas')) {
+            $atribucion = getLastTouchAttribution($pdo, function_exists('getVisitorId') ? getVisitorId() : null);
+            $pedidoColumns[] = 'visitor_id';
+            $pedidoColumns[] = 'plataforma';
+            $pedidoColumns[] = 'utm_source';
+            $pedidoColumns[] = 'utm_campaign';
+            $pedidoPlaceholders[] = ':visitor_id';
+            $pedidoPlaceholders[] = ':plataforma';
+            $pedidoPlaceholders[] = ':utm_source';
+            $pedidoPlaceholders[] = ':utm_campaign';
+            $pedidoParams[':visitor_id'] = $atribucion['visitor_id'];
+            $pedidoParams[':plataforma'] = $atribucion['plataforma'];
+            $pedidoParams[':utm_source'] = $atribucion['utm_source'];
+            $pedidoParams[':utm_campaign'] = $atribucion['utm_campaign'];
+        }
+
         $sqlPedido = sprintf(
             'INSERT INTO pedidos (%s) VALUES (%s)',
             implode(', ', $pedidoColumns),
@@ -1586,6 +1624,18 @@ function dbCreatePublicOrder(array $data): array {
         $stmt = $pdo->prepare($sqlPedido);
         $stmt->execute($pedidoParams);
         $id_pedido = $pdo->lastInsertId();
+
+        if ($referidoValidacion !== null && !empty($referidoValidacion['valido'])) {
+            referralRecordUsage(
+                $pdo,
+                (int) $id_pedido,
+                (string) $data['codigo_referido'],
+                (int) $referidoValidacion['id_cliente_referidor'],
+                $id_cliente !== null ? (int) $id_cliente : null,
+                $telefonoDigitsReferido,
+                (float) $referidoValidacion['descuento']
+            );
+        }
 
         if (strcasecmp((string)$entrega, 'Sucursal') === 0) {
             dbCreatePickupNotification($pdo, [
@@ -2003,6 +2053,29 @@ function resolveCheckoutWarehouse(mixed $requestedWarehouseId = null): int
 }
 
 /**
+ * ID(s) de almacen que determinan si un producto se muestra "Disponible" en el
+ * catalogo/ficha publica. Es SOLO el Almacen Central (id 1) -- el mismo destino por
+ * default de resolveCheckoutWarehouse() para un pedido a domicilio, que es el flujo
+ * de compra mas comun.
+ *
+ * Version anterior de esta funcion tambien sumaba las sucursales de pickup publicas
+ * (via isPublicPickupWarehouseName()) como "vendibles", asumiendo que si habia stock
+ * en cualquier sucursal el producto era "conseguible". En la practica eso produjo un
+ * falso "Disponible": un producto con 0 en Almacen Central pero con stock en, por
+ * ejemplo, "Papelería Liz", se mostraba disponible aunque un pedido a domicilio
+ * (que SIEMPRE se surte desde Almacen Central salvo que el cliente elija pickup)
+ * fallara al pagar. El stock de pickup ya se valida por separado y correctamente en
+ * su propio flujo (dbBuildPickupStockHint()/resolvePickupWarehouseId() en
+ * dbCreatePublicOrder()), asi que no hace falta -- ni conviene -- mezclarlo aqui.
+ *
+ * @return int[]
+ */
+function getPublicSellableWarehouseIds(PDO $pdo): array
+{
+    return [1];
+}
+
+/**
  * Obtiene la lista de productos para gestión (Admin/Encargado).
  */
 function dbGetProductsManaged(): array {
@@ -2410,7 +2483,7 @@ function findProductImageById(int $productId, string $preferredFileName = ''): ?
             }
         }
 
-        $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{jpg,jpeg,png,webp,gif,svg}', GLOB_BRACE);
+        $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{jpg,jpeg,png,webp,gif,svg,avif}', GLOB_BRACE);
         if (is_array($files)) {
             foreach ($files as $match) {
                 if (is_file($match)) {
@@ -2532,7 +2605,7 @@ function getProductImageUrl(?string $imgData, ?int $productId = null): string {
     }
 
     // Si no es ninguna de las anteriores, intentar resolver una ruta local robusta
-    if (strpos($imgData, '/') !== false || strpos($imgData, '\\') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg)$/i', $imgData)) {
+    if (strpos($imgData, '/') !== false || strpos($imgData, '\\') !== false || preg_match('/\.(jpg|jpeg|png|webp|gif|svg|avif)$/i', $imgData)) {
         $base = rtrim(BASE_URL, '/') . '/';
         $resolvedLocalPath = resolveLocalProductImagePath($imgData);
         if ($resolvedLocalPath !== null) {

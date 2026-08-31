@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/phone_utils.php';
+require_once __DIR__ . '/../core/ventas_features.php';
+require_once __DIR__ . '/../core/referrals.php';
 
 requireAuth();
 if (!isCliente()) {
@@ -198,6 +200,16 @@ if ($displayName !== '') {
     }
 }
 
+$referidosActivos = ventasFeatureIsActive($pdo, 'programa_referidos');
+$miCodigoReferido = null;
+if ($referidosActivos && !empty($perfil['id_cliente'])) {
+    try {
+        $miCodigoReferido = referralGetOrCreateCode($pdo, (int) $perfil['id_cliente']);
+    } catch (Throwable $e) {
+        error_log('No se pudo generar codigo de referido: ' . $e->getMessage());
+    }
+}
+
 $pageTitle = 'Mi Perfil';
 include __DIR__ . '/includes/header.php';
 ?>
@@ -205,6 +217,15 @@ include __DIR__ . '/includes/header.php';
 <div class="container" style="margin-top: 30px; margin-bottom: 30px;">
     <div class="row">
         <div class="col s12 m8 offset-m2 l6 offset-l3">
+            <?php if ($miCodigoReferido !== null): ?>
+                <div class="card indigo darken-3">
+                    <div class="card-content white-text">
+                        <span class="card-title"><i class="material-icons left">card_giftcard</i>Tu Código de Referido</span>
+                        <p>Compártelo con tus amigos: cuando compren usando tu código, ellos obtienen un descuento.</p>
+                        <p style="font-size: 1.8rem; font-weight: bold; letter-spacing: 4px; margin: 10px 0;"><?php echo esc($miCodigoReferido); ?></p>
+                    </div>
+                </div>
+            <?php endif; ?>
             <div class="card">
                 <div class="card-content">
                     <div class="profile-avatar-preview-wrap">

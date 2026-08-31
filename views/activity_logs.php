@@ -15,11 +15,15 @@ $pdo = getPDO();
 
 $filtro_usuario = isset($_GET['usuario']) ? intval($_GET['usuario']) : 0;
 $filtro_tipo = isset($_GET['tipo']) ? $_GET['tipo'] : '';
+$filtro_plataforma = $_GET['plataforma'] ?? '';
 $fecha_inicio = $_GET['fecha_inicio'] ?? '';
 $fecha_fin = $_GET['fecha_fin'] ?? '';
 
 // Obtener lista de usuarios para el filtro
 $usuarios = $pdo->query("SELECT id_usuario, nombre, email FROM usuarios ORDER BY nombre")->fetchAll();
+
+// Plataformas presentes en los datos, para poblar el filtro sin hardcodear valores.
+$plataformas = $pdo->query("SELECT DISTINCT plataforma FROM logs_actividad WHERE plataforma IS NOT NULL AND plataforma != '' ORDER BY plataforma")->fetchAll(PDO::FETCH_COLUMN);
 
 // Construir consulta de logs
 $query = "SELECT l.*, u.nombre as usuario_nombre, u.email as usuario_email 
@@ -37,6 +41,10 @@ if ($filtro_usuario > 0) {
 if ($filtro_tipo !== '') {
     $query .= " AND l.tipo_accion = :tipo";
     $params[':tipo'] = $filtro_tipo;
+}
+if ($filtro_plataforma !== '') {
+    $query .= " AND l.plataforma = :plataforma";
+    $params[':plataforma'] = $filtro_plataforma;
 }
 if ($fecha_inicio) {
     $query .= " AND DATE(l.fecha_creacion) >= :inicio";
@@ -101,11 +109,19 @@ include __DIR__ . '/includes/header.php';
                         <option value="click" <?php echo $filtro_tipo == 'click' ? 'selected' : ''; ?>>Clics</option>
                     </select>
                 </div>
-                <div class="input-field col s6 m2">
+                <div class="input-field col s12 m2">
+                    <select name="plataforma" class="browser-default">
+                        <option value="">Todas las plataformas</option>
+                        <?php foreach ($plataformas as $p): ?>
+                            <option value="<?php echo esc($p); ?>" <?php echo $filtro_plataforma === $p ? 'selected' : ''; ?>><?php echo esc($p); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="input-field col s6 m1">
                     <input type="date" name="fecha_inicio" id="fecha_inicio" value="<?php echo esc($fecha_inicio); ?>">
                     <label for="fecha_inicio" class="active">Desde</label>
                 </div>
-                <div class="input-field col s6 m2">
+                <div class="input-field col s6 m1">
                     <input type="date" name="fecha_fin" id="fecha_fin" value="<?php echo esc($fecha_fin); ?>">
                     <label for="fecha_fin" class="active">Hasta</label>
                 </div>
@@ -141,43 +157,97 @@ include __DIR__ . '/includes/header.php';
                                 </span>
                                 <span class="new badge blue darken-1" data-badge-caption="acciones"><?php echo count($dayLogs); ?></span>
                             </div>
-                            <div class="collapsible-body white" style="padding: 0; overflow-x: auto; -webkit-overflow-scrolling: touch;">
-                                <table class="striped highlight responsive-table" style="min-width: 560px;">
-                                    <thead>
-                                        <tr>
-                                            <th>Hora</th>
-                                            <th>Usuario</th>
-                                            <th>Acción</th>
-                                            <th>Detalle</th>
-                                            <th>IP</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($dayLogs as $log): ?>
+                            <div class="collapsible-body white" style="padding: 0;">
+                                <!-- Vista de tabla: pantallas medianas/grandes. -->
+                                <div class="logs-table-wrap" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                                    <table class="striped highlight" style="min-width: 560px;">
+                                        <thead>
                                             <tr>
-                                                <td><?php echo date('H:i:s', strtotime($log['fecha_creacion'])); ?></td>
-                                                <td>
-                                                    <span style="font-weight: 500;"><?php echo esc($log['usuario_nombre'] ?? 'Invitado'); ?></span>
+                                                <th>Hora</th>
+                                                <th>Usuario</th>
+                                                <th>Acción</th>
+                                                <th>Detalle</th>
+                                                <th>Plataforma</th>
+                                                <th>IP</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($dayLogs as $log): ?>
+                                                <tr>
+                                                    <td><?php echo date('H:i:s', strtotime($log['fecha_creacion'])); ?></td>
+                                                    <td>
+                                                        <span style="font-weight: 500;"><?php echo esc($log['usuario_nombre'] ?? 'Invitado'); ?></span>
+                                                        <?php if (empty($log['usuario_nombre'])): ?>
+                                                            <small class="grey-text" style="display:block;">sin sesión</small>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td>
+                                                        <span class="badge <?php echo $log['tipo_accion'] === 'visit' ? 'blue' : 'green'; ?> white-text" style="float: none;">
+                                                            <?php echo strtoupper($log['tipo_accion']); ?>
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <?php if ($log['tipo_accion'] === 'click'): ?>
+                                                            <strong>"<?php echo esc($log['elemento_texto']); ?>"</strong><br>
+                                                        <?php endif; ?>
+                                                        <small class="grey-text"><?php echo esc(str_replace(BASE_URL, '/', $log['url'])); ?></small>
+                                                    </td>
+                                                    <td><small><?php echo esc($log['plataforma'] ?? ''); ?></small></td>
+                                                    <td><small><?php echo esc($log['ip_address']); ?></small></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <!-- Vista de tarjetas: pantallas de celular. Se evita el modo
+                                     "responsive-table" de Materialize a proposito: en vez de
+                                     apilar cada registro como tarjeta, volteaba la tabla y
+                                     obligaba a hacer scroll horizontal por cada fila para ver
+                                     el resto de los registros. -->
+                                <div class="logs-cards-wrap">
+                                    <?php foreach ($dayLogs as $log): ?>
+                                        <div class="log-card">
+                                            <div class="log-card-row">
+                                                <span class="log-card-label">Hora</span>
+                                                <span class="log-card-value"><?php echo date('H:i:s', strtotime($log['fecha_creacion'])); ?></span>
+                                            </div>
+                                            <div class="log-card-row">
+                                                <span class="log-card-label">Usuario</span>
+                                                <span class="log-card-value">
+                                                    <?php echo esc($log['usuario_nombre'] ?? 'Invitado'); ?>
                                                     <?php if (empty($log['usuario_nombre'])): ?>
                                                         <small class="grey-text" style="display:block;">sin sesión</small>
                                                     <?php endif; ?>
-                                                </td>
-                                                <td>
+                                                </span>
+                                            </div>
+                                            <div class="log-card-row">
+                                                <span class="log-card-label">Acción</span>
+                                                <span class="log-card-value">
                                                     <span class="badge <?php echo $log['tipo_accion'] === 'visit' ? 'blue' : 'green'; ?> white-text" style="float: none;">
                                                         <?php echo strtoupper($log['tipo_accion']); ?>
                                                     </span>
-                                                </td>
-                                                <td>
+                                                </span>
+                                            </div>
+                                            <div class="log-card-row log-card-row-block">
+                                                <span class="log-card-label">Detalle</span>
+                                                <span class="log-card-value log-card-value-block">
                                                     <?php if ($log['tipo_accion'] === 'click'): ?>
                                                         <strong>"<?php echo esc($log['elemento_texto']); ?>"</strong><br>
                                                     <?php endif; ?>
                                                     <small class="grey-text"><?php echo esc(str_replace(BASE_URL, '/', $log['url'])); ?></small>
-                                                </td>
-                                                <td><small><?php echo esc($log['ip_address']); ?></small></td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
+                                                </span>
+                                            </div>
+                                            <div class="log-card-row">
+                                                <span class="log-card-label">Plataforma</span>
+                                                <span class="log-card-value"><small><?php echo esc($log['plataforma'] ?? ''); ?></small></span>
+                                            </div>
+                                            <div class="log-card-row">
+                                                <span class="log-card-label">IP</span>
+                                                <span class="log-card-value"><small><?php echo esc($log['ip_address']); ?></small></span>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
                             </div>
                         </li>
                     <?php 
@@ -194,6 +264,54 @@ include __DIR__ . '/includes/header.php';
     .collapsible-body table { font-size: 0.9rem; }
     .badge { border-radius: 4px; min-width: 60px; font-weight: bold; }
     input[type="date"] { margin-bottom: 0 !important; }
+
+    /* Tabla en pantallas medianas/grandes, tarjetas apiladas en celular (ver comentario
+       junto al markup de .logs-cards-wrap arriba). */
+    .logs-cards-wrap { display: none; }
+
+    @media only screen and (max-width: 600px) {
+        .logs-table-wrap { display: none; }
+        .logs-cards-wrap { display: block; }
+
+        .log-card {
+            padding: 12px 16px;
+            border-bottom: 1px solid #eee;
+        }
+        .log-card:last-child { border-bottom: none; }
+        .log-card-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 3px 0;
+            font-size: 0.85rem;
+        }
+        .log-card-row-block {
+            flex-direction: column;
+            gap: 2px;
+        }
+        .log-card-label {
+            color: #757575;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .log-card-value {
+            text-align: right;
+            word-break: break-word;
+        }
+        .log-card-value-block {
+            text-align: left;
+        }
+
+        /* Encabezado y filtros: botones/enlaces con area de toque completa en vez de
+           quedar apretados junto al texto. */
+        .collapsible-header {
+            padding: 12px 16px;
+        }
+        .collapsible-header strong {
+            font-size: 0.95rem;
+        }
+    }
 </style>
 
 <script>
