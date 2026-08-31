@@ -141,6 +141,22 @@ jobs:
           PHP_CLI_SERVER_WORKERS: 4
         run: php -S 127.0.0.1:8000 -t . &
 
+      # Diagnostico temporal: el job de E2E ha estado colgandose ~30s en practicamente cada
+      # navegacion (page.waitForURL/goto nunca resuelven), incluso en paginas sin login ni
+      # llamadas externas -- sin reproducirse igual localmente. Antes de gastar otra corrida
+      # completa de Playwright (10-70+ min) adivinando la causa, esto mide en segundos si el
+      # server integrado esta sirviendo requests en paralelo de verdad (PHP_CLI_SERVER_WORKERS)
+      # o si se estan encolando uno detras de otro.
+      - name: Diagnostico -- pcntl y concurrencia real de php -S
+        run: |
+          echo "--- pcntl cargado? ---"
+          php -m | grep -i pcntl || echo "pcntl NO esta en la lista de modulos"
+          sleep 1
+          echo "--- 1 request simple (baseline) ---"
+          time curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8000/views/login.php
+          echo "--- 4 requests concurrentes (si el total es ~4x el baseline, se estan encolando) ---"
+          time (curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & curl -s -o /dev/null http://127.0.0.1:8000/views/login.php & wait)
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
