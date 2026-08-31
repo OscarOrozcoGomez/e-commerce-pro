@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/ventas_features.php';
 
 requireAuth();
-if (!isAdmin()) {
+// Permiso 'configurar_iniciativas_ventas' abre esta vista; el admin entra siempre (short-circuit).
+if (!hasPermission('configurar_iniciativas_ventas') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/ventas_features.php';
 
 requireAuth();
-if (!isAdmin()) {
+// Permiso 'ver_comportamiento_sitio' abre esta vista; el admin entra siempre (short-circuit).
+if (!hasPermission('ver_comportamiento_sitio') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
