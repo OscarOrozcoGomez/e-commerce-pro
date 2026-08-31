@@ -180,7 +180,21 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      # Diagnostico temporal: los descartes anteriores (server local, CDNs externos) dejan
+      # como sospechoso mas probable algo dentro del propio navegador (sandbox de Chromium en
+      # el runner/contenedor de GitHub Actions es la causa mas comun y conocida de este patron
+      # exacto -- page.goto/waitForURL colgandose sin error, en vez de fallar rapido). Corre
+      # UN solo test simple (pagina publica, sin login) con logging verboso de Playwright en
+      # vez de las 128 pruebas, para dar una senal en segundos/1 minuto en vez de esperar otra
+      # hora completa adivinando.
+      - name: Diagnostico -- 1 test simple con logging verboso del navegador
+        env:
+          BASE_URL: http://127.0.0.1:8000/
+          DEBUG: pw:browser,pw:api
+        run: npx playwright test catalog-product-detail.spec.ts --workers=1 --retries=0 --timeout=15000 --reporter=list
+
       - name: Run Playwright tests
+        if: false # deshabilitado temporalmente mientras se diagnostica el cuelgue de arriba
         env:
           BASE_URL: http://127.0.0.1:8000/
         run: npx playwright test
