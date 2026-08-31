@@ -132,6 +132,13 @@ jobs:
           # directo en la raiz -- sin este override, core/config.php detectaria "127.0.0.1" y
           # asumiria la subcarpeta /e-commerce-pro/ para cada link/redirect, todos 404eando.
           APP_BASE_URL: /
+          # `php -S` sin esto atiende un request a la vez (de verdad, no solo "lento") --
+          # Playwright corre con workers:2 en CI (mas retries:2 sobre cualquier timeout),
+          # asi que sin concurrencia real cada request se encola detras del anterior y el
+          # job termina tardando muchisimo mas que localmente contra Apache (que si maneja
+          # requests en paralelo). PHP_CLI_SERVER_WORKERS (soportado desde PHP 7.4) hace que
+          # el server integrado pre-forkee varios procesos para atender requests en paralelo.
+          PHP_CLI_SERVER_WORKERS: 4
         run: php -S 127.0.0.1:8000 -t . &
 
       - name: Setup Node
