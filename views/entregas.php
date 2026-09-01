@@ -141,11 +141,12 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                             $stmtObs->execute([$marcadorSinEv, $id_pedido]);
                             logAudit('PEDIDO_ENTREGADO_SIN_EVIDENCIA', 'pedidos', $id_pedido, 'Pedido entregado y pagado SIN foto de evidencia. Motivo: ' . $sinEv['motivo_etiqueta']);
                             $success = 'Pedido entregado y cobrado (sin evidencia fotografica). Quedo registrado el motivo.';
+                            // Sin foto no hay nada que publicar en redes: no se ofrece ese paso.
                         } else {
                             logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
                             $success = 'Pedido entregado y cobrado correctamente.';
+                            $justDeliveredPedidoId = $id_pedido;
                         }
-                        $justDeliveredPedidoId = $id_pedido;
                     }
                 }
             } catch (PDOException $e) {
