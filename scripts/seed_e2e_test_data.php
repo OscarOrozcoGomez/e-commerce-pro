@@ -205,6 +205,8 @@ try {
     echo 'Seed OK: sucursal pickup -> id_almacen=' . $idAlmacenPickup . "\n";
 
     $idProductoPrincipal = 0;
+    $idProductoLowStock = 0;
+    $idProductoOutOfStock = 0;
 
     foreach ($productsToSeed as $p) {
         $stmt = $pdo->prepare(
@@ -241,6 +243,10 @@ try {
 
         if ($p['nombre'] === E2E_PRODUCT_NAME) {
             $idProductoPrincipal = $idProducto;
+        } elseif ($p['nombre'] === E2E_LOW_STOCK_PRODUCT_NAME) {
+            $idProductoLowStock = $idProducto;
+        } elseif ($p['nombre'] === E2E_OUT_OF_STOCK_PRODUCT_NAME) {
+            $idProductoOutOfStock = $idProducto;
         }
     }
 
@@ -257,6 +263,30 @@ try {
         );
         $stmt->execute(['id_producto' => $idProductoPrincipal, 'id_almacen' => $idAlmacenPickup]);
         echo 'Seed OK: ' . E2E_PRODUCT_NAME . " -> stock=9999 tambien en la sucursal de pickup (id_almacen={$idAlmacenPickup})\n";
+    }
+
+    // El bucle de arriba solo escribe cantidad_actual en $idAlmacen (el almacen principal) --
+    // "se deja SIN existencia ahi a proposito" (comentario de arriba) describe la intencion,
+    // pero nunca se hacia cumplir: nada evitaba que otro proceso le metiera stock a estos
+    // productos en OTRO almacen. Eso paso de verdad: dbCancelarPedidoCompleto() (limpieza de
+    // pedidos huerfanos de prueba) le devolvio 1 unidad a Low Stock Product en el almacen de
+    // pickup porque algun pedido viejo lo habia pedido desde ahi, rompiendo la garantia de
+    // "1 unidad en TODO el sistema" de la que dependen los tests de
+    // checkout-sucursal.authenticated.spec.ts -- silencioso hasta que esos tests fallaron sin
+    // razon aparente. Se pone a 0 en cualquier otro almacen en cada corrida para que sea
+    // realmente idempotente/autocorregible sin importar que otro proceso le haya hecho al
+    // inventario mientras tanto.
+    foreach ([$idProductoLowStock => E2E_LOW_STOCK_PRODUCT_NAME, $idProductoOutOfStock => E2E_OUT_OF_STOCK_PRODUCT_NAME] as $idProductoCero => $nombreProductoCero) {
+        if ($idProductoCero <= 0) {
+            continue;
+        }
+        $stmt = $pdo->prepare(
+            'UPDATE inventario_almacen SET cantidad_actual = 0 WHERE id_producto = :id_producto AND id_almacen != :id_almacen'
+        );
+        $filas = $stmt->execute(['id_producto' => $idProductoCero, 'id_almacen' => $idAlmacen]) ? $stmt->rowCount() : 0;
+        if ($filas > 0) {
+            echo "Correccion: {$nombreProductoCero} tenia stock fuera de su almacen principal ({$filas} almacen(es)) -- puesto en 0.\n";
+        }
     }
 
     $stmt = $pdo->prepare(

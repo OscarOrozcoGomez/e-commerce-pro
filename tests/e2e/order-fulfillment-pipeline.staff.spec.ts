@@ -39,8 +39,16 @@ test.describe('Pipeline de cumplimiento de pedidos (cliente -> encargado -> repa
     await page.waitForURL(/entregas\.php/);
     await expect(page.getByText('Pedido marcado como en camino.')).toBeVisible();
 
+    // Con el pedido ya "en camino", la tarjeta pide subir una foto de evidencia antes de
+    // ofrecer "ENTREGADO Y COBRADO" (api/entrega_publicacion.php) -- el input de archivo esta
+    // oculto (dispara con el boton "SUBIR EVIDENCIA"), pero setInputFiles() no necesita que
+    // sea visible. Tras subir con exito, el propio JS hace location.reload() ~500ms despues.
+    const deliveryCardEnCamino = page.locator(`[data-pedido-id="${idPedido}"]`);
+    await deliveryCardEnCamino.locator('input.ev-foto-input').setInputFiles('assets/img/logo.png');
+    await expect(deliveryCardEnCamino.locator('.ev-status')).toHaveText(/Evidencia subida/, { timeout: 10000 });
+
     const deliveryCardAfter = page.locator(`[data-pedido-id="${idPedido}"]`);
-    await deliveryCardAfter.getByRole('button', { name: 'ENTREGADO Y COBRADO' }).click();
+    await deliveryCardAfter.getByRole('button', { name: 'ENTREGADO Y COBRADO' }).click({ timeout: 15000 });
     await page.locator('#mce-btn-confirmar').click();
     await page.waitForURL(/entregas\.php/);
     await expect(page.getByText('Pedido entregado y cobrado correctamente.')).toBeVisible();

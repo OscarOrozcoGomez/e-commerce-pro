@@ -57,8 +57,12 @@ test.describe('Entregas Asignadas (entregas.php): casos negativos', () => {
     await expect(otroInput).toHaveJSProperty('required', true);
 
     await otroInput.fill('El cliente no contesto el telefono en la direccion');
-    page.once('dialog', (dialog) => dialog.accept());
+    // A diferencia del rechazo de un solo producto (mas abajo, que si usa confirm() nativo),
+    // este formulario pasa por mceConfirmarFormulario() -- abre el modal Materialize
+    // #modal-confirmar-entrega en vez de un dialog nativo del navegador; el submit real
+    // ocurre hasta que se hace click en su boton de confirmar.
     await cancelForm.getByRole('button', { name: 'CONFIRMAR CANCELACION' }).click();
+    await page.locator('#mce-btn-confirmar').click();
 
     await page.waitForURL(/entregas\.php/);
     await expect(page.getByText('Entrega cancelada. El stock fue devuelto al inventario de la sucursal.')).toBeVisible();
