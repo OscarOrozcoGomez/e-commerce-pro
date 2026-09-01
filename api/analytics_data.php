@@ -92,6 +92,10 @@ try {
         'top_productos' => $top_productos,
         'predicciones' => $predicciones
     ]);
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    // Throwable, no solo Exception: un \Error/\TypeError sin atrapar se escaparia al
+    // set_exception_handler global (redirect HTML a views/error.php) y el fetch() del
+    // cliente lo recibiria como "Unexpected token '<'" al hacer r.json().
+    http_response_code(200);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }

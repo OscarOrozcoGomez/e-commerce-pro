@@ -10,8 +10,6 @@ if (!isAdmin() && !isEncargado()) {
 }
 
 $pageTitle = 'Lista de Compra Sugerida';
-$pdo = getPDO();
-$pageTitle = 'Lista de Compra Sugerida';
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -100,25 +98,57 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
-</div>
 
 <!-- Incluimos librerías necesarias -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 
 <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        fetch('<?php echo BASE_URL; ?>api/purchase_orders_data.php')
-            .then(r => r.json())
-            .then(res => {
-                if (!res.success) throw new Error(res.message);
-                
-                document.getElementById('po-app').style.display = 'block';
-                document.getElementById('po-list-container').style.display = 'none';
+    function escHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[c]);
+    }
 
-                if (res.listaCompra.length === 0) {
-                    document.getElementById('po-list-container').style.display = 'block';
-                    document.getElementById('po-list-container').innerHTML = `
+    document.addEventListener('DOMContentLoaded', () => {
+        const listContainer = document.getElementById('po-list-container');
+
+        const showError = (msg) => {
+            document.getElementById('po-app').style.display = 'block';
+            listContainer.style.display = 'block';
+            listContainer.innerHTML = `
+                <div class="center-align" style="padding: 40px;">
+                    <i class="material-icons large red-text">error_outline</i>
+                    <h5>No se pudieron calcular las sugerencias</h5>
+                    <p class="grey-text">${escHtml(msg)}</p>
+                    <button class="btn blue darken-2" onclick="location.reload()">Reintentar</button>
+                </div>`;
+            if (typeof M !== 'undefined' && M.toast) {
+                M.toast({html: 'Error: ' + msg, classes: 'red'});
+            }
+        };
+
+        fetch('<?php echo BASE_URL; ?>api/purchase_orders_data.php', { headers: { 'Accept': 'application/json' } })
+            .then(async (r) => {
+                const text = await r.text();
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    // El servidor devolvió HTML (p. ej. redirect a views/error.php o sesión expirada).
+                    throw new Error(`Respuesta no válida del servidor (HTTP ${r.status}). Recarga la página o vuelve a iniciar sesión.`);
+                }
+            })
+            .then(res => {
+                if (!res.success) throw new Error(res.message || 'Error desconocido');
+
+                const listaCompra = Array.isArray(res.listaCompra) ? res.listaCompra : [];
+
+                document.getElementById('po-app').style.display = 'block';
+                listContainer.style.display = 'none';
+
+                if (listaCompra.length === 0) {
+                    listContainer.style.display = 'block';
+                    listContainer.innerHTML = `
                         <div class="center-align" style="padding: 40px;">
                             <i class="material-icons large green-text">check_circle</i>
                             <h5>¡Inventario saludable!</h5>
@@ -126,16 +156,14 @@ include __DIR__ . '/includes/header.php';
                         </div>`;
                 } else {
                     document.getElementById('po-form-wrapper').style.display = 'block';
-                    renderTable(res.listaCompra);
+                    renderTable(listaCompra);
                     if (res.chartData && res.chartData.length > 0) {
                         document.getElementById('chart-po-row').style.display = 'block';
                         renderChart(res.chartData);
                     }
                 }
             })
-            .catch(err => {
-                M.toast({html: 'Error: ' + err.message, classes: 'red'});
-            });
+            .catch(err => showError(err.message));
     });
 
     function renderTable(items) {
@@ -143,30 +171,35 @@ include __DIR__ . '/includes/header.php';
         tbody.innerHTML = '';
 
         items.forEach((item, index) => {
-            const aComprar = Math.max(0, parseInt(item.stock_maximo) - parseInt(item.cantidad_actual));
-            const costoFila = aComprar * parseFloat(item.precio_costo);
+            const stockMax = parseInt(item.stock_maximo, 10) || 0;
+            const stockActual = parseInt(item.cantidad_actual, 10) || 0;
+            const precioCosto = parseFloat(item.precio_costo) || 0;
+            const aComprar = Math.max(0, stockMax - stockActual);
+            const costoFila = aComprar * precioCosto;
+            const idProducto = Number(item.id_producto) || 0;
+            const idAlmacen = Number(item.id_almacen) || 0;
 
             tbody.innerHTML += `
                 <tr id="po-row-${index}">
-                    <td><strong>${item.nombre}</strong><br><small class="grey-text">SKU: ${item.sku}</small></td>
-                    <td>${item.sucursal}</td>
-                    <td>$${parseFloat(item.precio_venta).toFixed(2)}</td>
-                    <td class="red-text center-align"><strong>${item.cantidad_actual}</strong></td>
+                    <td><strong>${escHtml(item.nombre)}</strong><br><small class="grey-text">SKU: ${escHtml(item.sku)}</small></td>
+                    <td>${escHtml(item.sucursal)}</td>
+                    <td>$${(parseFloat(item.precio_venta) || 0).toFixed(2)}</td>
+                    <td class="red-text center-align"><strong>${stockActual}</strong></td>
                     <td class="center-align">
                         <div style="display: flex; gap: 5px;">
-                            <input type="number" name="items[${index}][stock_minimo]" value="${item.stock_minimo}" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
-                            <input type="number" name="items[${index}][stock_maximo]" value="${item.stock_maximo}" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
+                            <input type="number" name="items[${index}][stock_minimo]" value="${escHtml(item.stock_minimo)}" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
+                            <input type="number" name="items[${index}][stock_maximo]" value="${escHtml(item.stock_maximo)}" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
                         </div>
                     </td>
                     <td class="blue lighten-5">
-                        <input type="hidden" name="items[${index}][id_producto]" value="${item.id_producto}">
-                        <input type="hidden" name="items[${index}][id_almacen]" value="${item.id_almacen}">
-                        <input type="hidden" name="items[${index}][precio_costo]" value="${parseFloat(item.precio_costo)}">
+                        <input type="hidden" name="items[${index}][id_producto]" value="${idProducto}">
+                        <input type="hidden" name="items[${index}][id_almacen]" value="${idAlmacen}">
+                        <input type="hidden" name="items[${index}][precio_costo]" value="${precioCosto}">
                         <input type="number" name="items[${index}][cantidad]" value="${aComprar}" min="0" class="browser-default qty-input" style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
                     </td>
                     <td class="right-align po-subtotal">$${costoFila.toFixed(2)}</td>
                     <td class="center-align">
-                        <button type="button" class="btn-flat red-text" onclick="posponerItem(${index}, ${item.id_producto}, ${item.id_almacen})">
+                        <button type="button" class="btn-flat red-text" aria-label="Posponer producto" title="Posponer para el siguiente pedido" onclick="posponerItem(${index}, ${idProducto}, ${idAlmacen})">
                             <i class="material-icons">schedule</i>
                         </button>
                     </td>
@@ -255,6 +288,9 @@ include __DIR__ . '/includes/header.php';
                 }
 
                 M.toast({html: res.message, classes: 'blue'});
+            })
+            .catch(() => {
+                M.toast({html: 'Error de conexión. Inténtalo de nuevo.', classes: 'red'});
             });
         });
     }
@@ -264,7 +300,7 @@ include __DIR__ . '/includes/header.php';
         new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: data.map(d => d.categoria),
+                labels: data.map(d => String(d.categoria ?? '')),
                 datasets: [{
                     data: data.map(d => d.total),
                     backgroundColor: ['#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5', '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6']
@@ -325,6 +361,9 @@ include __DIR__ . '/includes/header.php';
                     } else {
                         M.toast({html: 'Error: ' + res.message, classes: 'red'});
                     }
+                })
+                .catch(() => {
+                    M.toast({html: 'Error de conexión. Inténtalo de nuevo.', classes: 'red'});
                 });
             }
         });
@@ -352,6 +391,11 @@ include __DIR__ . '/includes/header.php';
         }
         data.items = Object.values(itemsMap);
 
+        if (data.items.length === 0) {
+            M.toast({html: 'No hay productos para actualizar', classes: 'orange'});
+            return;
+        }
+
         Swal.fire({
             title: '¿Actualizar reglas de stock?',
             text: "Se guardarán los nuevos niveles mínimos y máximos para estos productos.",
@@ -369,6 +413,9 @@ include __DIR__ . '/includes/header.php';
                 .then(res => {
                     M.toast({html: res.message, classes: res.success ? 'green' : 'red'});
                     if(res.success) setTimeout(() => location.reload(), 1000);
+                })
+                .catch(() => {
+                    M.toast({html: 'Error de conexión. Inténtalo de nuevo.', classes: 'red'});
                 });
             }
         });
