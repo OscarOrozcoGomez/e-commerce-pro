@@ -172,6 +172,55 @@ function purchaseOrderPostponeItems(PDO $pdo, array $items, int $userId): int
 }
 
 /**
+ * Procesa una entrada individual de inventario (usada por api/inventory_handler.php,
+ * tanto el formulario "Entrada Individual" como la "Carga Rápida" fila por fila).
+ *
+ * Valida los datos, verifica que el producto exista en el inventario de la sucursal
+ * indicada y —dentro de una transacción— incrementa el stock y registra el movimiento.
+ * Sin la verificación previa, un producto no asignado a la sucursal dejaba el UPDATE
+ * sin efecto pero igual insertaba el movimiento de inventario.
+ *
+ * @throws InvalidArgumentException si los datos son inválidos.
+ * @throws RuntimeException si el producto no pertenece a esa sucursal.
+ */
+function purchaseOrderProcessSingleInbound(
+    PDO $pdo,
+    int $idProducto,
+    int $idAlmacen,
+    int $cantidad,
+    int $userId,
+    string $observacion = 'Entrada manual'
+): void {
+    if ($idProducto <= 0 || $cantidad <= 0 || $idAlmacen <= 0) {
+        throw new InvalidArgumentException('Datos de entrada inválidos.');
+    }
+
+    $stmtCheck = $pdo->prepare('SELECT 1 FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?');
+    $stmtCheck->execute([$idProducto, $idAlmacen]);
+    if ($stmtCheck->fetchColumn() === false) {
+        throw new RuntimeException('El producto no está asignado a esta sucursal.');
+    }
+
+    $pdo->beginTransaction();
+
+    try {
+        $stmtStock = $pdo->prepare('UPDATE inventario_almacen SET cantidad_actual = cantidad_actual + ? WHERE id_producto = ? AND id_almacen = ?');
+        $stmtStock->execute([$cantidad, $idProducto, $idAlmacen]);
+
+        $stmtMov = $pdo->prepare("INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion) VALUES (?, 'entrada', ?, ?, ?, ?)");
+        $stmtMov->execute([$idProducto, $idAlmacen, $cantidad, $userId, $observacion]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $e;
+    }
+}
+
+/**
  * Procesa entradas a inventario y libera pospuestos del almacén para el siguiente ciclo.
  */
 function purchaseOrderProcessInbound(PDO $pdo, array $items, int $userId): int
