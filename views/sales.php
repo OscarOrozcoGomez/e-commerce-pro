@@ -81,11 +81,14 @@ try {
     $stmtMeta->execute();
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
 
+    // Sin ORDER BY/LIMIT aqui a proposito: c.nombre esta cifrado (ENCv1:...) en la BD, y
+    // ordenar/limitar en SQL sobre el texto cifrado da un orden esencialmente arbitrario
+    // (no alfabetico) -- con suficientes clientes, eso deja clientes reales fuera del
+    // LIMIT de forma impredecible aunque su nombre real empiece con "A". Se ordena y se
+    // recorta a 500 mas abajo, ya con el nombre descifrado.
     $sql = "SELECT c.id_cliente, c.nombre, COALESCE(c.telefono, '') AS telefono
             FROM clientes c
-            WHERE c.estado = 'activo'
-            ORDER BY c.nombre ASC
-            LIMIT 500";
+            WHERE c.estado = 'activo'";
     $stmt = $pdo->prepare($sql);
     $stmt->execute();
     $clientesActivos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -101,6 +104,11 @@ try {
         $cliente['es_frecuente'] = in_array((int)($cliente['id_cliente'] ?? 0), $clientesFrecuentesIds, true);
     }
     unset($cliente);
+
+    usort($clientesActivos, static function (array $a, array $b): int {
+        return strcasecmp((string)($a['nombre'] ?? ''), (string)($b['nombre'] ?? ''));
+    });
+    $clientesActivos = array_slice($clientesActivos, 0, 500);
 
     if ($hasClienteDireccionesTable && !empty($clientesActivos)) {
         $idsCliente = array_values(array_filter(array_map(static function (array $cliente): int {
@@ -582,13 +590,23 @@ include __DIR__ . '/includes/header.php';
     let salesDraftSaveTimer = null;
     let isRestoringDrafts = false;
     let pendingCloseVentaId = null;
-    let closeVentaModalInstance = null;
     let googlePlacesReadySales = false;
     let pendingNewClienteContext = null;
-    let nuevoClienteModalInstance = null;
     let pendingPhoneContext = null;
     let pendingPhoneClienteId = null;
-    let agregarTelefonoModalInstance = null;
+
+    // footer.php llama M.AutoInit() en su propio DOMContentLoaded (que corre despues del de
+    // esta vista) y reinicializa CUALQUIER .modal que ya se haya inicializado aqui, creando una
+    // segunda instancia de M.Modal desincronizada sobre el mismo elemento -- el sintoma es que
+    // cerrar/cancelar el modal deja de funcionar porque la instancia que este script sigue
+    // usando ya no es la que el DOM tiene registrada. En vez de cachear la instancia una sola
+    // vez en DOMContentLoaded, se resuelve con M.Modal.getInstance() al momento de usarla, que
+    // para entonces ya corrio tanto este init como el AutoInit del footer y siempre apunta a la
+    // instancia final vigente.
+    function getModalInstance(elementId) {
+        const node = document.getElementById(elementId);
+        return node ? M.Modal.getInstance(node) : null;
+    }
 
     function resolveProductImageSrc(rawImage) {
         if (!rawImage) return '../assets/img/no-product.png';
@@ -978,7 +996,8 @@ include __DIR__ . '/includes/header.php';
     }
 
     function openNuevoClienteModal(context) {
-        if (!nuevoClienteModalInstance) return;
+        const modalInstance = getModalInstance('modal-nuevo-cliente');
+        if (!modalInstance) return;
         pendingNewClienteContext = context;
 
         const form = document.getElementById('form-nuevo-cliente');
@@ -989,7 +1008,7 @@ include __DIR__ . '/includes/header.php';
             errorBox.textContent = '';
         }
 
-        nuevoClienteModalInstance.open();
+        modalInstance.open();
         M.updateTextFields();
         setTimeout(() => document.getElementById('nuevo-cliente-nombre')?.focus(), 200);
     }
@@ -1036,7 +1055,7 @@ include __DIR__ . '/includes/header.php';
 
             const context = pendingNewClienteContext;
             pendingNewClienteContext = null;
-            if (nuevoClienteModalInstance) nuevoClienteModalInstance.close();
+            getModalInstance('modal-nuevo-cliente')?.close();
 
             if (context && customerRecord) {
                 const clienteTelefonoInput = context.querySelector('.cliente_telefono');
@@ -1067,7 +1086,8 @@ include __DIR__ . '/includes/header.php';
     }
 
     function openAgregarTelefonoModal(context, clienteId, clienteNombre) {
-        if (!agregarTelefonoModalInstance || !clienteId) return;
+        const modalInstance = getModalInstance('modal-agregar-telefono');
+        if (!modalInstance || !clienteId) return;
         pendingPhoneContext = context;
         pendingPhoneClienteId = clienteId;
 
@@ -1081,7 +1101,7 @@ include __DIR__ . '/includes/header.php';
             errorBox.textContent = '';
         }
 
-        agregarTelefonoModalInstance.open();
+        modalInstance.open();
         M.updateTextFields();
         setTimeout(() => document.getElementById('agregar-telefono-input')?.focus(), 200);
     }
@@ -1131,7 +1151,7 @@ include __DIR__ . '/includes/header.php';
             const context = pendingPhoneContext;
             pendingPhoneContext = null;
             pendingPhoneClienteId = null;
-            if (agregarTelefonoModalInstance) agregarTelefonoModalInstance.close();
+            getModalInstance('modal-agregar-telefono')?.close();
 
             if (context && customerRecord) {
                 setSelectedCustomer(context, customerRecord);
@@ -1509,28 +1529,28 @@ include __DIR__ . '/includes/header.php';
 
         M.FormSelect.init(document.querySelectorAll('select'));
         const closeModalNode = document.getElementById('modal-cerrar-venta');
-        closeVentaModalInstance = closeModalNode ? M.Modal.init(closeModalNode, { dismissible: true }) : null;
+        if (closeModalNode) M.Modal.init(closeModalNode, { dismissible: true });
 
         document.getElementById('btn-confirmar-cerrar-venta')?.addEventListener('click', () => {
             if (!pendingCloseVentaId) return;
             const targetId = pendingCloseVentaId;
             pendingCloseVentaId = null;
-            if (closeVentaModalInstance) closeVentaModalInstance.close();
+            getModalInstance('modal-cerrar-venta')?.close();
             ejecutarCierreVenta(targetId);
         });
 
         const nuevoClienteModalNode = document.getElementById('modal-nuevo-cliente');
-        nuevoClienteModalInstance = nuevoClienteModalNode ? M.Modal.init(nuevoClienteModalNode, { dismissible: true }) : null;
+        if (nuevoClienteModalNode) M.Modal.init(nuevoClienteModalNode, { dismissible: true });
         document.getElementById('btn-guardar-nuevo-cliente')?.addEventListener('click', guardarNuevoCliente);
 
         const agregarTelefonoModalNode = document.getElementById('modal-agregar-telefono');
-        agregarTelefonoModalInstance = agregarTelefonoModalNode ? M.Modal.init(agregarTelefonoModalNode, { dismissible: true }) : null;
+        if (agregarTelefonoModalNode) M.Modal.init(agregarTelefonoModalNode, { dismissible: true });
         document.getElementById('btn-guardar-agregar-telefono')?.addEventListener('click', guardarTelefonoCliente);
         document.getElementById('btn-cancelar-agregar-telefono')?.addEventListener('click', (e) => {
             e.preventDefault();
             pendingPhoneContext = null;
             pendingPhoneClienteId = null;
-            if (agregarTelefonoModalInstance) agregarTelefonoModalInstance.close();
+            getModalInstance('modal-agregar-telefono')?.close();
         });
 
         window.addEventListener('beforeunload', prevenirCierre);
@@ -1754,8 +1774,9 @@ include __DIR__ . '/includes/header.php';
 
     function abrirModalCerrarVenta(id) {
         pendingCloseVentaId = id;
-        if (closeVentaModalInstance) {
-            closeVentaModalInstance.open();
+        const modalInstance = getModalInstance('modal-cerrar-venta');
+        if (modalInstance) {
+            modalInstance.open();
             return;
         }
         if (confirm('Esta pestaña tiene datos del pedido. Si la cierras, perderás esa información. ¿Deseas continuar?')) {

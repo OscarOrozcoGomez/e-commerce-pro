@@ -1932,7 +1932,7 @@ function routeBuildWaMessage(stop) {
     const productos = Array.isArray(stop.productos) ? stop.productos : [];
     const totalTexto = routeFormatMoney(stop.total);
 
-    let msg = 'Hola! Tu pedido va en camino';
+    let msg = 'Hola! Tu pedido es el siguiente:';
     if (productos.length > 0) {
         const lista = productos
             .map((p) => `• ${routeSafeText(p.cantidad) || '1'}x ${routeSafeText(p.nombre) || 'Producto'}`)

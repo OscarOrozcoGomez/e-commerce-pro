@@ -85,12 +85,21 @@ sendSecurityHeaders();
 
 // Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
 if (!defined('BASE_URL')) {
-    // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
-    $host = $_SERVER['HTTP_HOST'] ?? '';
-    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
-        define('BASE_URL', '/e-commerce-pro/');
+    // APP_BASE_URL: override explicito para entornos donde ni "localhost" ni "127.0.0.1"
+    // implican la subcarpeta /e-commerce-pro/ -- p.ej. CI, donde `php -S 127.0.0.1:8000 -t .`
+    // sirve el repo directo en la raiz (sin esa subcarpeta), asi que la deteccion automatica
+    // de abajo pondria un BASE_URL equivocado y cada link/redirect de la app 404earia.
+    $envBaseUrl = getenv('APP_BASE_URL');
+    if ($envBaseUrl !== false && trim($envBaseUrl) !== '') {
+        define('BASE_URL', $envBaseUrl);
     } else {
-        define('BASE_URL', '/');
+        // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+            define('BASE_URL', '/e-commerce-pro/');
+        } else {
+            define('BASE_URL', '/');
+        }
     }
 }
 
@@ -404,9 +413,22 @@ preloadSecretSources();
 // o en el entorno de ejecución en lugar de dejar valores en el código.
 function getEnvVar(string $name, ?string $default = null, bool $required = false): ?string
 {
-    $value = getenv($name);
-    if ($value === false) {
-        $value = $_SERVER[$name] ?? $_ENV[$name] ?? $_SERVER['REDIRECT_' . $name] ?? null;
+    // $_SERVER/$_ENV se leen primero porque son aislados por request; putenv()
+    // (usado por applySecretValue() para publicar los secretos que carga esta
+    // funcion) escribe una variable de entorno compartida por TODO el proceso de
+    // Apache, y bajo el MPM con hilos de Windows (mpm_winnt) eso puede hacer que
+    // un request lea a mitad de escritura el putenv() de otro request concurrente
+    // -- causaba, por ejemplo, que PII_ENCRYPTION_KEY se leyera corrupta bajo
+    // carga concurrente y el descifrado de datos de clientes fallara de forma
+    // intermitente. getenv() se deja como respaldo para variables que sí vienen
+    // del entorno real del proceso (p.ej. las que setea CI vía `env:`) y que
+    // nunca pasan por applySecretValue().
+    $value = $_SERVER[$name] ?? $_ENV[$name] ?? null;
+    if ($value === null) {
+        $value = getenv($name);
+        if ($value === false) {
+            $value = $_SERVER['REDIRECT_' . $name] ?? null;
+        }
     }
     if ($value !== null) {
         $value = trim((string) $value);
@@ -640,7 +662,13 @@ function sendSecurityHeaders(): void
     // en entregas.php para planear rutas). Un allowlist vacio "()" bloquea incluso al propio
     // origen, por lo que el permiso del navegador/telefono nunca llegaba a evaluarse.
     header('Permissions-Policy: geolocation=(self), microphone=(), camera=()');
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
+    // cdn.tiny.cloud: views/manage_blogs.php carga el editor TinyMCE desde ahi. Sin este
+    // dominio en script-src/script-src-elem, el <script src="https://cdn.tiny.cloud/..."> se
+    // bloquea por CSP y el tinymce.init() que le sigue en la misma etiqueta <script> lanza
+    // "tinymce is not defined", lo que aborta el resto de ese bloque -- incluido el listener de
+    // autogeneracion de slug -- para todo admin/encargado real, no solo en pruebas.
+    // googleads.g.doubleclick.net / googleadservices.com: tag de Google Ads (ver PR #74).
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 
     // Evitar que páginas autenticadas queden en cache del navegador/proxies compartidos.

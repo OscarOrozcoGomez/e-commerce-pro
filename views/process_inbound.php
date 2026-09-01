@@ -66,7 +66,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php foreach ($items as $item): ?>
                                     <tr id="row_<?php echo $item['id_detalle']; ?>">
                                         <td><?php echo esc($item['nombre']); ?></td>
-                                        <td><?php echo esc($item['sku']); ?></td>
+                                        <td><?php echo esc($item['sku'] ?? ''); ?></td>
                                         <td><?php echo $item['cantidad_solicitada']; ?></td>
                                         <td>
                                             <input type="number" name="recibido_<?php echo $item['id_producto']; ?>" 

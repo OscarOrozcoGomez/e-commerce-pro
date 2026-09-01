@@ -38,7 +38,8 @@ try {
 
     $pdo->commit();
     echo json_encode(['success' => true, 'message' => 'Reglas de stock actualizadas correctamente']);
-} catch (Exception $e) {
+} catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
+    http_response_code(200);
     echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
 }

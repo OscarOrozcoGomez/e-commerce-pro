@@ -98,6 +98,17 @@ jobs:
             **/.git*/**
             **/.github/**
             .ftp-deploy-sync-state.json
+            node_modules/**
+            package.json
+            package-lock.json
+            playwright.config.ts
+            tsconfig.json
+            playwright-report/**
+            test-results/**
+            tests/**
+            .mcp.json
+            scripts/seed_e2e_test_data.php
+            scripts/seed_e2e_staff_accounts.php
 
       - name: Wait before FTP retry
         if: steps.ftp_attempt_1.outcome == 'failure'
@@ -120,6 +131,17 @@ jobs:
             **/.git*/**
             **/.github/**
             .ftp-deploy-sync-state.json
+            node_modules/**
+            package.json
+            package-lock.json
+            playwright.config.ts
+            tsconfig.json
+            playwright-report/**
+            test-results/**
+            tests/**
+            .mcp.json
+            scripts/seed_e2e_test_data.php
+            scripts/seed_e2e_staff_accounts.php
 
       - name: Wait before FTP retry (final)
         if: steps.ftp_attempt_1.outcome == 'failure' && steps.ftp_attempt_2.outcome == 'failure'
@@ -141,6 +163,17 @@ jobs:
             **/.git*/**
             **/.github/**
             .ftp-deploy-sync-state.json
+            node_modules/**
+            package.json
+            package-lock.json
+            playwright.config.ts
+            tsconfig.json
+            playwright-report/**
+            test-results/**
+            tests/**
+            .mcp.json
+            scripts/seed_e2e_test_data.php
+            scripts/seed_e2e_staff_accounts.php
 
       - name: Trigger remote migrations
         env:

@@ -22,9 +22,17 @@ function piiGetEncryptionKey(): string
 
 function piiGetEncryptionKeyOrNull(): ?string
 {
-    $key = getenv('PII_ENCRYPTION_KEY');
-    if ($key === false || trim((string)$key) === '') {
-        $key = $_SERVER['PII_ENCRYPTION_KEY'] ?? $_ENV['PII_ENCRYPTION_KEY'] ?? '';
+    // $_SERVER/$_ENV primero: son aislados por request. getenv() lee una variable
+    // de entorno compartida por todo el proceso de Apache, y bajo el MPM con
+    // hilos de Windows (mpm_winnt) un request puede leerla a mitad de que OTRO
+    // request concurrente la esté sobreescribiendo con putenv() (ver
+    // applySecretValue() en core/config.php) -- eso hacía que esta llave se
+    // leyera corrupta de forma intermitente bajo carga concurrente, y con ella
+    // corrupta, el descifrado de PII de clientes fallaba silenciosamente.
+    $key = $_SERVER['PII_ENCRYPTION_KEY'] ?? $_ENV['PII_ENCRYPTION_KEY'] ?? '';
+    if (trim((string)$key) === '') {
+        $key = getenv('PII_ENCRYPTION_KEY');
+        $key = $key === false ? '' : $key;
     }
 
     $key = trim((string)$key);

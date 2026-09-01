@@ -36,3 +36,155 @@ jobs:
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
         run: composer test
+
+  e2e-smoke-tests:
+    # Solo un subconjunto pequeño y curado (11 tests, amplitud entre superficies del sitio en
+    # vez de profundidad en una sola) -- la suite completa (128 tests) sigue existiendo y
+    # pasando en verde, pero ya NO corre aqui: el runner gratuito de GitHub Actions tiene solo
+    # 2 nucleos compartidos, y correr ahi MariaDB + el server de PHP + Playwright/Chromium en
+    # paralelo hacia que la misma suite que tarda ~3 min localmente tardara 40 min a mas de 1h
+    # en CI (con fallas por contencion de recursos que no se reproducian localmente, no bugs
+    # reales). La suite completa se corre a mano cuando se quiere confianza exhaustiva:
+    #   php scripts/seed_e2e_test_data.php && npx playwright test --workers=2
+    name: E2E smoke tests (Playwright)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      # database.sql trae su propio "CREATE DATABASE IF NOT EXISTS beautyandwell_prod; USE
+      # beautyandwell_prod;" al principio -- si el servicio de MySQL crea una BD con otro
+      # nombre (p.ej. "test_db"), ese USE la ignora por completo y todas las tablas del
+      # schema terminan creandose en beautyandwell_prod en vez de en la BD que le pasamos a
+      # `mysql` en la linea de importacion, dejando esa otra BD vacia (asi fallo la primera
+      # corrida de este job: "Table 'test_db.clientes' doesn't exist"). Se usa el mismo
+      # nombre que trae el dump para que ambos coincidan.
+      #
+      # Imagen mariadb (no mysql): la app corre sobre MariaDB en local (XAMPP) y en
+      # produccion -- nunca sobre MySQL real. Usar `mysql:8.0` aqui rompio la segunda
+      # corrida de este job: database/migrations/20260702_000003_...sql usa
+      # "ADD COLUMN IF NOT EXISTS ... AFTER col", sintaxis que MariaDB soporta desde hace
+      # anios pero que el parser de MySQL 8 rechazo. Esa migracion ya esta aplicada en BDs
+      # reales (checksum fijo, no se puede editar -- ver migrate.php), asi que el fix
+      # correcto es que CI use el mismo motor que el resto del proyecto, no reescribir la
+      # migracion.
+      mysql:
+        image: mariadb:10.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: beautyandwell_prod
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Import base schema (database.sql)
+        run: mysql -h 127.0.0.1 -u root beautyandwell_prod < database.sql
+
+      - name: Run database migrations
+        env:
+          APP_ENV: qa
+          DB_HOST: 127.0.0.1
+          DB_NAME: beautyandwell_prod
+          DB_USER: root
+          DB_PASSWORD: ""
+          DB_CHARSET: utf8mb4
+        run: php scripts/migrate.php
+
+      - name: Seed E2E test data
+        env:
+          APP_ENV: qa
+          DB_HOST: 127.0.0.1
+          DB_NAME: beautyandwell_prod
+          DB_USER: root
+          DB_PASSWORD: ""
+          DB_CHARSET: utf8mb4
+        run: php scripts/seed_e2e_test_data.php
+
+      - name: Seed E2E staff accounts
+        env:
+          APP_ENV: qa
+          DB_HOST: 127.0.0.1
+          DB_NAME: beautyandwell_prod
+          DB_USER: root
+          DB_PASSWORD: ""
+          DB_CHARSET: utf8mb4
+        run: php scripts/seed_e2e_staff_accounts.php
+
+      - name: Start PHP built-in server
+        env:
+          APP_ENV: qa
+          DB_HOST: 127.0.0.1
+          DB_NAME: beautyandwell_prod
+          DB_USER: root
+          DB_PASSWORD: ""
+          DB_CHARSET: utf8mb4
+          # A diferencia de XAMPP local (htdocs/e-commerce-pro/), este server sirve el repo
+          # directo en la raiz -- sin este override, core/config.php detectaria "127.0.0.1" y
+          # asumiria la subcarpeta /e-commerce-pro/ para cada link/redirect, todos 404eando.
+          APP_BASE_URL: /
+          # `php -S` sin esto atiende un request a la vez (de verdad, no solo "lento") --
+          # Playwright corre con workers:2 en CI (mas retries:2 sobre cualquier timeout),
+          # asi que sin concurrencia real cada request se encola detras del anterior y el
+          # job termina tardando muchisimo mas que localmente contra Apache (que si maneja
+          # requests en paralelo). PHP_CLI_SERVER_WORKERS (soportado desde PHP 7.4) hace que
+          # el server integrado pre-forkee varios procesos para atender requests en paralelo.
+          PHP_CLI_SERVER_WORKERS: 4
+        run: php -S 127.0.0.1:8000 -t . &
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright smoke tests
+        env:
+          BASE_URL: http://127.0.0.1:8000/
+        run: npx playwright test --grep @smoke
+
+      # Ayuda a diagnosticar sin depender de reproducir localmente: views/catalogo.php (y
+      # cualquier otra vista) atrapa PDOException de sus queries en silencio (error_log(),
+      # sigue mostrando la pagina vacia en vez de un error visible) -- eso fue justo lo que
+      # escondio por mas tiempo el bug real de productos.precio_comparacion faltante. Si algo
+      # similar vuelve a pasar, este log queda en el job en vez de tener que adivinar.
+      - name: Mostrar app_error.log si el job fallo
+        if: failure()
+        run: |
+          if [ -f app_error.log ]; then
+            echo "--- app_error.log ---"
+            cat app_error.log
+          else
+            echo "app_error.log no existe (no se registro ningun error via error_log)"
+          fi
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
