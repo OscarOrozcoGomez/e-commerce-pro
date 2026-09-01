@@ -354,9 +354,10 @@ include __DIR__ . '/includes/header.php';
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
-let clienteActivo = <?php echo $soyCliente ? $usuario['id_usuario'] : 'null'; ?>;
-const currentUserId = <?php echo $usuario['id_usuario']; ?>;
+let clienteActivo = <?php echo $soyCliente ? (int)$usuario['id_usuario'] : 'null'; ?>;
+const currentUserId = <?php echo (int)$usuario['id_usuario']; ?>;
 const esStaff = <?php echo !$soyCliente ? 'true' : 'false'; ?>;
+const CHAT_CSRF = '<?php echo htmlspecialchars(getCsrfToken(), ENT_QUOTES, 'UTF-8'); ?>';
 let ultimoConteoMensajes = 0;
 let primeraCarga = true;
 let productosData = {};
@@ -368,6 +369,20 @@ let diasExpandidos = new Set(); // Guardar qué días ha abierto el usuario
 let quickResponses = [];
 let primeraCargaListaClientes = true;
 let chatsSinAsignarPrevios = new Set();
+
+function escHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
+
+// Inyecta el token CSRF en las llamadas de api/chat_handler.php que mutan estado
+// (send/start/close/transfer/save_quick/delete_quick). Las de solo lectura usan fetch normal.
+function chatFetch(url, opts = {}) {
+    const merged = { ...opts };
+    merged.headers = { ...(opts.headers || {}), 'X-CSRF-Token': CHAT_CSRF };
+    return fetch(url, merged);
+}
 
 function syncQuickFormLabels() {
     const titleLabel = document.getElementById('quick-titulo-label');
@@ -593,11 +608,11 @@ function renderListaClientes(clientes) {
         const unassignedBadge = sinAsignar ? `<span class="chat-unassigned-badge">Sin asignar</span>` : '';
 
         html += `
-            <a href="#!" onclick="seleccionarChat(${c.id_usuario}, '${c.nombre.replace(/'/g, "\\'")}')" 
-               class="collection-item black-text chat-user-item ${activeClass}" id="user-item-${c.id_usuario}">
+            <a href="#!" data-nombre="${escHtml(c.nombre)}" onclick="seleccionarChat(${Number(c.id_usuario) || 0}, this.dataset.nombre)"
+               class="collection-item black-text chat-user-item ${activeClass}" id="user-item-${Number(c.id_usuario) || 0}">
                 <span class="chat-user-main" style="${textStyle}">
                     <span>${alertPrefix}</span>
-                    <span class="chat-user-name">${c.nombre}</span>
+                    <span class="chat-user-name">${escHtml(c.nombre)}</span>
                 </span>
                 <span class="chat-user-indicators">
                     ${unassignedBadge}
@@ -666,7 +681,7 @@ function confirmarTransferencia() {
     const idDestino = document.getElementById('select-staff').value;
     if(!idDestino) return;
     
-    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=transfer&id_cliente=${clienteActivo}&id_destino=${idDestino}`)
+    chatFetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=transfer&id_cliente=${clienteActivo}&id_destino=${idDestino}`)
         .then(r => r.json())
         .then(data => {
             if(data.success) {
@@ -701,7 +716,7 @@ function renderQuickPickers() {
         const div = document.createElement('div');
         div.className = 'collection-item';
         div.style = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #f5f5f5;';
-        div.innerHTML = `<strong class="purple-text text-darken-4">${r.titulo}</strong><br><small class="grey-text truncate">${r.mensaje}</small>`;
+        div.innerHTML = `<strong class="purple-text text-darken-4">${escHtml(r.titulo)}</strong><br><small class="grey-text truncate">${escHtml(r.mensaje)}</small>`;
         div.onclick = () => {
             const input = document.getElementById('msg-input');
             input.value = r.mensaje;
@@ -713,10 +728,10 @@ function renderQuickPickers() {
         // Para el modal de gestión
         const li = document.createElement('li');
         li.className = 'collection-item';
-        li.innerHTML = `<div><strong>${r.titulo}</strong>: ${r.mensaje}
+        li.innerHTML = `<div><strong>${escHtml(r.titulo)}</strong>: ${escHtml(r.mensaje)}
             <div class="secondary-content">
-                <a href="#!" onclick="cargarQuickForm(${r.id_respuesta}, '${r.titulo.replace(/'/g, "\\'")}', '${r.mensaje.replace(/'/g, "\\'")}')"><i class="material-icons blue-text">edit</i></a>
-                <a href="#!" onclick="borrarQuick(${r.id_respuesta})"><i class="material-icons red-text">delete</i></a>
+                <a href="#!" data-t="${escHtml(r.titulo)}" data-m="${escHtml(r.mensaje)}" onclick="cargarQuickForm(${Number(r.id_respuesta) || 0}, this.dataset.t, this.dataset.m)"><i class="material-icons blue-text">edit</i></a>
+                <a href="#!" onclick="borrarQuick(${Number(r.id_respuesta) || 0})"><i class="material-icons red-text">delete</i></a>
             </div></div>`;
         manageList.appendChild(li);
     });
@@ -735,7 +750,7 @@ function guardarQuickRes() {
 
     if (!titulo || !mensaje) return M.toast({html: 'Completa todos los campos'});
 
-    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=save_quick`, {
+    chatFetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=save_quick`, {
         method: 'POST',
         body: JSON.stringify({ id_respuesta: id, titulo, mensaje })
     }).then(r => r.json()).then(data => {
@@ -768,12 +783,12 @@ function limpiarFormQuick() {
 
 function borrarQuick(id) {
     if (!confirm('¿Eliminar esta respuesta?')) return;
-    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=delete_quick&id_respuesta=${id}`)
+    chatFetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=delete_quick&id_respuesta=${id}`)
         .then(() => loadQuickResponses());
 }
 
 function iniciarChat() {
-    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=start`)
+    chatFetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=start`)
         .then(r => r.json())
         .then(data => {
             if (data.success) {
@@ -803,7 +818,7 @@ function terminarChat() {
         cancelButtonText: 'Cancelar'
     }).then((result) => {
         if (result.isConfirmed) {
-            fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=close&id_cliente=${targetId}`, { cache: 'no-cache' })
+            chatFetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=close&id_cliente=${targetId}`, { cache: 'no-cache' })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
@@ -861,9 +876,12 @@ function cargarMensajes() {
 
                     // Si el soporte está inactivo, siempre volver a la pantalla de bienvenida
                     if (!data.soporte_activo) {
-                        document.getElementById('chat-welcome').style.display = 'block';
-                        document.getElementById('chat-box').style.display = 'none';
-                        document.querySelector('.chat-input-area').style.display = 'none';
+                        const cw = document.getElementById('chat-welcome');
+                        if (cw) cw.style.display = 'block';
+                        const cb = document.getElementById('chat-box');
+                        if (cb) cb.style.display = 'none';
+                        const cia = document.querySelector('.chat-input-area');
+                        if (cia) cia.style.display = 'none';
                         return;
                     }
                     
@@ -952,8 +970,10 @@ function cargarMensajes() {
                     div.className = `msg ${isMe ? 'me' : 'other'}`;
                     
                     if (m.tipo_mensaje === 'producto') {
-                        const p = JSON.parse(m.mensaje);
-                        div.innerHTML = renderProductCard(p, isMe) + `<span class="time">${m.fecha_envio.substring(11,16)}</span>`;
+                        let p = null;
+                        try { p = JSON.parse(m.mensaje); } catch (e) { p = null; }
+                        div.innerHTML = (p ? renderProductCard(p, isMe) : '<em class="grey-text">[producto no disponible]</em>')
+                            + `<span class="time">${m.fecha_envio.substring(11,16)}</span>`;
                     } else {
                         // Sanitización y wrap de emojis para duplicar su tamaño
                         let textoEscapado = m.mensaje.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1033,25 +1053,27 @@ function getProductImgUrl(imgData) {
 
 function renderProductCard(p, isMe) {
     const img = getProductImgUrl(p.imagen_resuelta || p.imagen);
-    const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${p.id_producto}`;
-    // Escapar comillas simples para evitar que rompan el atributo onclick
-    const safeName = p.nombre.replace(/'/g, "\\'");
+    const idProd = Number(p.id_producto) || 0;
+    const detailUrl = `<?php echo BASE_URL; ?>product_detail.php?id=${idProd}`;
+    const nombre = String(p.nombre ?? '');
+    const precio = Number(p.precio_venta) || 0;
     const stock = Math.max(0, parseInt(p.stock ?? p.chat_stock ?? p.total_stock ?? p.cantidad_actual) || 0);
     const isAvailable = stock > 0;
 
     return `
         <div class="chat-product-card">
-            <a href="${detailUrl}" target="_blank" title="Ver detalles del producto">
-                <img src="${img}" style="cursor: pointer;">
+            <a href="${escHtml(detailUrl)}" target="_blank" rel="noopener noreferrer" title="Ver detalles del producto">
+                <img src="${escHtml(img)}" style="cursor: pointer;">
             </a>
             <div class="info">
-                <a href="${detailUrl}" target="_blank" class="black-text" title="Ver detalles del producto">
-                    <div class="truncate" style="font-weight:bold; font-size:0.85rem; cursor: pointer;">${p.nombre}</div>
+                <a href="${escHtml(detailUrl)}" target="_blank" rel="noopener noreferrer" class="black-text" title="Ver detalles del producto">
+                    <div class="truncate" style="font-weight:bold; font-size:0.85rem; cursor: pointer;">${escHtml(nombre)}</div>
                 </a>
-                <div class="blue-text" style="font-weight:bold;">$${parseFloat(p.precio_venta).toFixed(2)}</div>
+                <div class="blue-text" style="font-weight:bold;">$${precio.toFixed(2)}</div>
                 ${isAvailable ? `
-                <button class="btn-small green darken-1 waves-effect" style="width:100%; margin-top:5px; height:28px; line-height:28px; font-size:0.7rem;" 
-                        onclick="addToCartFromChat(${p.id_producto}, '${safeName}', ${p.precio_venta}, '${img}', ${stock})">
+                <button class="btn-small green darken-1 waves-effect" style="width:100%; margin-top:5px; height:28px; line-height:28px; font-size:0.7rem;"
+                        data-id="${idProd}" data-nombre="${escHtml(nombre)}" data-precio="${precio}" data-img="${escHtml(img)}" data-stock="${stock}"
+                        onclick="addToCartFromChat(this.dataset.id, this.dataset.nombre, this.dataset.precio, this.dataset.img, Number(this.dataset.stock))">
                     AGREGAR
                 </button>
                 ` : `
@@ -1069,7 +1091,7 @@ function enviarMensaje(tipo = 'texto', contenido = null) {
     const txt = contenido || input.value.trim();
     if (!txt || !clienteActivo) return;
 
-    fetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=send`, {
+    chatFetch(`<?php echo BASE_URL; ?>api/chat_handler.php?action=send`, {
         method: 'POST',
         body: JSON.stringify({ mensaje: txt, id_cliente: clienteActivo, tipo_mensaje: tipo })
     })
