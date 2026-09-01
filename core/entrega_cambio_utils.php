@@ -122,6 +122,42 @@ function deliveryValidateSinEvidencia(array $post): array
 }
 
 /**
+ * Token que se busca en pedidos.observaciones para saber que el repartidor dio por
+ * terminada una entrega ya cobrada SIN publicarla en redes (entregas viejas, sin foto, etc).
+ * Mientras este marcador este presente, la tarjeta ya no reaparece en la lista del repartidor.
+ */
+const DELIVERY_PUBLICACION_OMITIDA_TOKEN = 'PUBLICACION_OMITIDA';
+
+/**
+ * Construye el marcador que se agrega (concatena) a pedidos.observaciones cuando el
+ * repartidor termina una entrega sin publicarla en redes.
+ *
+ * @param ?string $nombre Nombre del repartidor (o quien haga la accion).
+ * @param ?string $fecha  Fecha/hora de referencia (para pruebas); null = ahora.
+ */
+function deliveryBuildPublicacionOmitidaMarker(?string $nombre = null, ?string $fecha = null): string
+{
+    $nombre = trim((string) $nombre);
+    if ($nombre === '') {
+        $nombre = 'repartidor';
+    }
+    $ts = $fecha !== null ? strtotime($fecha) : time();
+    if ($ts === false) {
+        $ts = time();
+    }
+    return ' | ' . DELIVERY_PUBLICACION_OMITIDA_TOKEN . ': ' . date('Y-m-d H:i', $ts)
+        . ' por ' . mb_substr($nombre, 0, 80);
+}
+
+/**
+ * True si las observaciones ya traen el marcador de "terminada sin publicar".
+ */
+function deliveryPublicacionFueOmitida(?string $observaciones): bool
+{
+    return mb_strpos((string) $observaciones, DELIVERY_PUBLICACION_OMITIDA_TOKEN) !== false;
+}
+
+/**
  * Convierte un texto (de un input) a monto. Acepta "$", espacios y comas de miles
  * ("$ 1,250.50" -> 1250.5). La coma se trata SIEMPRE como separador de miles (convencion
  * MXN, punto decimal); "1,50" se interpreta como 150, no como 1.5.

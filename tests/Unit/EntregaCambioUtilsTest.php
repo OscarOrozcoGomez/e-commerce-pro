@@ -129,6 +129,44 @@ final class EntregaCambioUtilsTest extends TestCase
         }
     }
 
+    // ---- publicacion omitida ------------------------------------------------------
+
+    public function testBuildPublicacionOmitidaMarkerContainsTokenNameAndDate(): void
+    {
+        $marca = deliveryBuildPublicacionOmitidaMarker('Hector', '2026-08-26 22:30:00');
+        $this->assertStringContainsString(DELIVERY_PUBLICACION_OMITIDA_TOKEN, $marca);
+        $this->assertStringContainsString('2026-08-26 22:30', $marca);
+        $this->assertStringContainsString('por Hector', $marca);
+        $this->assertStringStartsWith(' | ', $marca);
+    }
+
+    public function testBuildPublicacionOmitidaMarkerFallsBackWhenNameBlank(): void
+    {
+        $marca = deliveryBuildPublicacionOmitidaMarker('   ', '2026-01-01 00:00:00');
+        $this->assertStringContainsString('por repartidor', $marca);
+    }
+
+    public function testPublicacionFueOmitidaDetectsMarker(): void
+    {
+        $obs = 'ENTREGA: Domicilio | Cliente: Hector'
+            . deliveryBuildPublicacionOmitidaMarker('Hector', '2026-08-27 09:00:00');
+        $this->assertTrue(deliveryPublicacionFueOmitida($obs));
+    }
+
+    public function testPublicacionFueOmitidaFalseWhenAbsentOrNull(): void
+    {
+        $this->assertFalse(deliveryPublicacionFueOmitida(null));
+        $this->assertFalse(deliveryPublicacionFueOmitida(''));
+        $this->assertFalse(deliveryPublicacionFueOmitida('ENTREGA: Domicilio | Cliente: Hector'));
+    }
+
+    public function testMarkerIsPickedUpByNotLikeQueryPattern(): void
+    {
+        // El filtro de la vista usa: observaciones NOT LIKE '%PUBLICACION_OMITIDA%'
+        $obs = 'algo' . deliveryBuildPublicacionOmitidaMarker('X', '2026-09-01 10:00:00');
+        $this->assertMatchesRegularExpression('/' . preg_quote(DELIVERY_PUBLICACION_OMITIDA_TOKEN, '/') . '/', $obs);
+    }
+
     // ---- deliveryParseMonto ---------------------------------------------------
 
     public function testParseMontoAcceptsNumbersAndCleansCurrencyText(): void
