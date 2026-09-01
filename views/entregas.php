@@ -154,6 +154,31 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
             }
         }
 
+        if ($_POST['accion'] === 'omitir_publicacion') {
+            // El pedido ya esta entregado y cobrado; el repartidor solo quiere quitarlo de su
+            // lista sin publicarlo en redes (entrega vieja, sin foto, etc). Se deja un marcador
+            // en observaciones y el filtro de "pendientes de publicar" deja de traerlo.
+            try {
+                $stmt = $pdo->prepare("SELECT observaciones FROM pedidos WHERE id_pedido = ? AND id_repartidor = ? AND estado = 'entregado'");
+                $stmt->execute([$id_pedido, $usuario['id_usuario']]);
+                $obsActual = $stmt->fetchColumn();
+
+                if ($obsActual === false) {
+                    $error = 'No se pudo terminar la entrega. Verifica que sea tuya y ya este entregada.';
+                } elseif (deliveryPublicacionFueOmitida((string)$obsActual)) {
+                    $success = 'Esta entrega ya estaba terminada.';
+                } else {
+                    $marca = deliveryBuildPublicacionOmitidaMarker((string)($usuario['nombre'] ?? 'repartidor'));
+                    $stmtUpd = $pdo->prepare("UPDATE pedidos SET observaciones = CONCAT(COALESCE(observaciones, ''), ?) WHERE id_pedido = ? AND id_repartidor = ?");
+                    $stmtUpd->execute([$marca, $id_pedido, $usuario['id_usuario']]);
+                    logAudit('PEDIDO_PUBLICACION_OMITIDA', 'pedidos', $id_pedido, 'Repartidor termino la entrega sin publicarla en redes');
+                    $success = 'Entrega terminada. Ya no aparece en tu lista.';
+                }
+            } catch (PDOException $e) {
+                $error = 'Error al terminar la entrega.';
+            }
+        }
+
         if ($_POST['accion'] === 'cancelar_entrega') {
             $motivoKey = trim((string)($_POST['motivo_cancelacion'] ?? ''));
             $motivoOtro = trim((string)($_POST['motivo_cancelacion_otro'] ?? ''));
@@ -373,8 +398,12 @@ try {
     if (!defined('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE')) {
         define('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE', '2026-08-26 22:00:00');
     }
+    // El repartidor puede dar por terminada una entrega ya cobrada sin publicarla en redes
+    // (entregas viejas, sin foto, etc): deja un marcador PUBLICACION_OMITIDA en observaciones
+    // y la tarjeta deja de reaparecer aqui.
+    $noPublicacionOmitida = ' AND p.observaciones NOT LIKE ' . $pdo->quote('%' . DELIVERY_PUBLICACION_OMITIDA_TOKEN . '%');
     $entregadoPendientePublicarFilter = ($hasPedidoPublicacionesTable && $isRepartidorView)
-        ? " OR (p.estado = 'entregado' AND EXISTS (
+        ? " OR (p.estado = 'entregado'{$noPublicacionOmitida} AND EXISTS (
                 SELECT 1 FROM pedido_publicaciones pp
                 WHERE pp.id_pedido = p.id_pedido AND pp.creado_en >= " . $pdo->quote(ENTREGA_PUBLICACION_PERSISTENCIA_DESDE) . "
             ) AND (
@@ -934,6 +963,14 @@ include __DIR__ . '/includes/header.php';
                                     <button type="button" class="btn purple darken-1 waves-effect waves-light w-100 ep-btn-publicar-card" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>">
                                         <i class="material-icons left">campaign</i> PUBLICAR EN REDES
                                     </button>
+                                    <form method="POST" id="omitir-publicacion-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px;">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
+                                        <input type="hidden" name="accion" value="omitir_publicacion">
+                                        <button type="submit" class="btn-flat grey-text text-darken-1 waves-effect w-100" style="font-size:0.8rem;" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Terminar esta entrega sin publicarla en redes? Se quitara de tu lista.', 'blue-grey darken-1', 'Sí, terminar'); return false;">
+                                            <i class="material-icons left" style="font-size:18px;">done_all</i> No voy a publicar, terminar
+                                        </button>
+                                    </form>
                                 <?php elseif (!$enReparto): ?>
                                     <form method="POST">
                                         <?php echo csrfInput(); ?>
