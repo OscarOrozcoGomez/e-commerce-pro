@@ -18,11 +18,17 @@ function respondNoContent(): void
 }
 
 $idUsuario = null;
+$esInterno = 0;
 if (isAuthenticated()) {
     $idUsuario = (int)($_SESSION['usuario']['id_usuario'] ?? 0);
     if ($idUsuario <= 0) {
         $idUsuario = null;
     }
+    // El personal interno (cualquier rol de sesion distinto de 'cliente') navegando
+    // la tienda o el panel no es trafico real de campana: se marca la fila para que
+    // los reportes de marketing la excluyan, pero se guarda igual (el log de
+    // auditoria la sigue mostrando). Un cliente logueado SI cuenta como trafico real.
+    $esInterno = sessionRoleIsInternal($_SESSION['usuario']['rol'] ?? null) ? 1 : 0;
 }
 
 if (session_status() === PHP_SESSION_ACTIVE) {
@@ -90,6 +96,7 @@ $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
 
 $payload = [
     ':id_usuario' => $idUsuario,
+    ':es_interno' => $esInterno,
     ':tipo' => $tipo,
     ':url' => (string)($data['url'] ?? $_SERVER['HTTP_REFERER'] ?? ''),
     ':elemento_id' => $data['id'] ?? null,
@@ -139,10 +146,10 @@ $storeLog = static function () use ($payload): void {
         $pdo->exec('SET SESSION innodb_lock_wait_timeout = 2');
 
         $sql = "INSERT INTO logs_actividad
-                (id_usuario, tipo_accion, url, elemento_id, elemento_texto, ip_address, user_agent,
+                (id_usuario, es_interno, tipo_accion, url, elemento_id, elemento_texto, ip_address, user_agent,
                  utm_source, utm_medium, utm_campaign, utm_term, utm_content, gclid, wbraid, gbraid,
                  referrer, landing_page, plataforma, visitor_id, pageview_id, id_producto)
-                VALUES (:id_usuario, :tipo, :url, :elemento_id, :elemento_texto, :ip, :ua,
+                VALUES (:id_usuario, :es_interno, :tipo, :url, :elemento_id, :elemento_texto, :ip, :ua,
                         :utm_source, :utm_medium, :utm_campaign, :utm_term, :utm_content, :gclid, :wbraid, :gbraid,
                         :referrer, :landing_page, :plataforma, :visitor_id, :pageview_id, :id_producto)";
 

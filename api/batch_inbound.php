@@ -32,6 +32,8 @@ try {
     }
 
     echo json_encode(['success' => true, 'message' => 'Inventario actualizado correctamente']);
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    http_response_code(200);
     echo json_encode(['success' => false, 'message' => 'Error en el servidor: ' . $e->getMessage()]);
 }

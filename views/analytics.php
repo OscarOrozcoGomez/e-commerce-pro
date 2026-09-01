@@ -88,15 +88,40 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Scripts para Gráficos -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
+    function escHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[c]);
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
-        fetch('<?php echo BASE_URL; ?>api/analytics_data.php')
-            .then(r => r.json())
+        const loader = document.getElementById('loader-analytics');
+
+        const showError = (msg) => {
+            loader.innerHTML = `
+                <i class="material-icons large red-text">error_outline</i>
+                <p class="grey-text">${escHtml(msg)}</p>
+                <button class="btn blue darken-2" onclick="location.reload()">Reintentar</button>`;
+            if (typeof M !== 'undefined' && M.toast) {
+                M.toast({html: 'Error: ' + msg, classes: 'red'});
+            }
+        };
+
+        fetch('<?php echo BASE_URL; ?>api/analytics_data.php', { headers: { 'Accept': 'application/json' } })
+            .then(async (r) => {
+                const text = await r.text();
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    throw new Error(`Respuesta no válida del servidor (HTTP ${r.status}). Recarga la página o vuelve a iniciar sesión.`);
+                }
+            })
             .then(res => {
-                if (!res.success) throw new Error(res.message);
-                
-                document.getElementById('loader-analytics').style.display = 'none';
+                if (!res.success) throw new Error(res.message || 'Error desconocido');
+
+                loader.style.display = 'none';
                 document.getElementById('analytics-app').style.display = 'block';
                 document.getElementById('prediccion-desc').textContent = `Estimación basada en la velocidad de venta histórica (Promedio desde hace ${res.total_dias_historial} días).`;
 
@@ -104,9 +129,7 @@ include __DIR__ . '/includes/header.php';
                 renderTopChart(res.top_productos);
                 renderTable(res.predicciones);
             })
-            .catch(err => {
-                M.toast({html: 'Error: ' + err.message, classes: 'red'});
-            });
+            .catch(err => showError(err.message));
     });
 
     function renderVentasChart(data) {
@@ -136,7 +159,7 @@ include __DIR__ . '/includes/header.php';
         new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: items.map(i => i.nombre),
+                labels: items.map(i => String(i.nombre ?? '')),
                 datasets: [{
                     data: items.map(i => i.cantidad),
                     backgroundColor: ['#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5', '#5c6bc0', '#7986cb', '#9fa8da', '#c5cae9', '#e8eaf6']
@@ -151,7 +174,8 @@ include __DIR__ . '/includes/header.php';
 
     function renderTable(list) {
         const tbody = document.getElementById('table-predicciones');
-        list.forEach(p => {
+        let html = '';
+        (Array.isArray(list) ? list : []).forEach(p => {
             let color = 'green-text';
             let label = p.estado || 'Abastecido';
             let rowClass = p.sin_configuracion ? 'red lighten-5' : '';
@@ -170,21 +194,22 @@ include __DIR__ . '/includes/header.php';
                 else if (p.dias_restantes < 15) { color = 'orange-text'; label = 'Reabastecer pronto'; }
             }
 
-            tbody.innerHTML += `
+            html += `
                 <tr class="${rowClass}">
-                    <td><strong>${p.nombre}</strong>${p.sin_configuracion ? '<br><small class="red-text">Falta configurar precio/costo</small>' : ''}</td>
-                    <td>${p.stock}</td>
-                    <td>${p.ventas}</td>
-                    <td>${p.promedio}</td>
-                    <td class="center-align ${color}" style="font-weight: bold; font-size: 1.2rem;">${p.dias_restantes}</td>
-                    <td class="${color} font-weight-bold">${label}</td>
+                    <td><strong>${escHtml(p.nombre)}</strong>${p.sin_configuracion ? '<br><small class="red-text">Falta configurar precio/costo</small>' : ''}</td>
+                    <td>${escHtml(p.stock)}</td>
+                    <td>${escHtml(p.ventas)}</td>
+                    <td>${escHtml(p.promedio)}</td>
+                    <td class="center-align ${color}" style="font-weight: bold; font-size: 1.2rem;">${escHtml(p.dias_restantes)}</td>
+                    <td class="${color} font-weight-bold">${escHtml(label)}</td>
                     <td class="center-align">
-                        <a href="<?php echo BASE_URL; ?>views/products.php?id_producto=${p.id_producto}" class="btn-small blue darken-3 waves-effect waves-light" title="Abrir en productos">
+                        <a href="<?php echo BASE_URL; ?>views/products.php?id_producto=${Number(p.id_producto) || 0}" class="btn-small blue darken-3 waves-effect waves-light" title="Abrir en productos">
                             <i class="material-icons" style="font-size: 1rem;">edit</i>
                         </a>
                     </td>
                 </tr>`;
         });
+        tbody.innerHTML = html;
     }
 </script>
 

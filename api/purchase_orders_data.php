@@ -23,6 +23,10 @@ try {
         'chartData' => $result['chartData']
     ]);
 
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    // Throwable (no solo Exception): un \Error/\TypeError sin atrapar se escaparia al
+    // set_exception_handler global, que responde con un redirect HTML a views/error.php
+    // -- y el fetch() del cliente lo recibe como "Unexpected token '<'" al hacer r.json().
+    http_response_code(200);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }
