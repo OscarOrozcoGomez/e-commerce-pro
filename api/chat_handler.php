@@ -18,6 +18,29 @@ $soyStaff = !isCliente();
 
 $action = $_GET['action'] ?? '';
 
+// CSRF: las acciones que mutan estado exigen token valido. Se acepta desde el
+// header X-CSRF-Token (chatFetch en views/chat.php), ?csrf_token o el cuerpo JSON.
+// Las de solo lectura (fetch*, get_staff, chat_products, staff_alerts_summary,
+// fetch_quick, typing) no lo requieren.
+$CSRF_REQUIRED_ACTIONS = ['send', 'start', 'close', 'transfer', 'save_quick', 'delete_quick'];
+if (in_array($action, $CSRF_REQUIRED_ACTIONS, true)) {
+    $csrfToken = (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_GET['csrf_token'] ?? ''));
+    if ($csrfToken === '') {
+        $rawBody = file_get_contents('php://input');
+        if (is_string($rawBody) && $rawBody !== '') {
+            $bodyJson = json_decode($rawBody, true);
+            if (is_array($bodyJson) && isset($bodyJson['csrf_token'])) {
+                $csrfToken = (string)$bodyJson['csrf_token'];
+            }
+        }
+    }
+    if (!validateCsrfToken($csrfToken)) {
+        http_response_code(200);
+        echo json_encode(['success' => false, 'message' => 'Token de seguridad inválido']);
+        exit;
+    }
+}
+
 // Función auxiliar para enviar notificaciones Push ruidosas al celular vía Telegram
 function enviarNotificacionTelegram(string $nombreCliente, string $textoMensaje): void {
     $enabledRaw = strtolower((string) (getEnvVar('TELEGRAM_NOTIFICATIONS_ENABLED', '1') ?? '1'));
