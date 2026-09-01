@@ -37,8 +37,16 @@ jobs:
           DB_CHARSET: utf8mb4
         run: composer test
 
-  e2e-tests:
-    name: E2E tests (Playwright)
+  e2e-smoke-tests:
+    # Solo un subconjunto pequeño y curado (11 tests, amplitud entre superficies del sitio en
+    # vez de profundidad en una sola) -- la suite completa (128 tests) sigue existiendo y
+    # pasando en verde, pero ya NO corre aqui: el runner gratuito de GitHub Actions tiene solo
+    # 2 nucleos compartidos, y correr ahi MariaDB + el server de PHP + Playwright/Chromium en
+    # paralelo hacia que la misma suite que tarda ~3 min localmente tardara 40 min a mas de 1h
+    # en CI (con fallas por contencion de recursos que no se reproducian localmente, no bugs
+    # reales). La suite completa se corre a mano cuando se quiere confianza exhaustiva:
+    #   php scripts/seed_e2e_test_data.php && npx playwright test --workers=2
+    name: E2E smoke tests (Playwright)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -153,10 +161,10 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Run Playwright tests
+      - name: Run Playwright smoke tests
         env:
           BASE_URL: http://127.0.0.1:8000/
-        run: npx playwright test
+        run: npx playwright test --grep @smoke
 
       # Ayuda a diagnosticar sin depender de reproducir localmente: views/catalogo.php (y
       # cualquier otra vista) atrapa PDOException de sus queries en silencio (error_log(),

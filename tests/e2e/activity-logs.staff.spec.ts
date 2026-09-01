@@ -2,7 +2,7 @@ import { test, expect } from './fixtures';
 import { loginAsStaff } from './helpers';
 
 test.describe('Logs de Actividad (activity_logs.php)', () => {
-  test('un encargado no puede ver los logs de actividad', async ({ page }) => {
+  test('un encargado no puede ver los logs de actividad', { tag: '@smoke' }, async ({ page }) => {
     await loginAsStaff(page, 'encargado');
     await page.goto('views/activity_logs.php');
     await expect(page).toHaveURL(/views\/dashboard\.php/);

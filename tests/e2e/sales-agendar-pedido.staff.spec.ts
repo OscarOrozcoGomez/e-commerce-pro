@@ -6,7 +6,7 @@ import { loginAsStaff, E2E_PRODUCT_NAME, E2E_SALES_CLIENTE_NOMBRE } from './help
 // eso usamos el cliente fijo con domicilio guardado que siembra seed_e2e_test_data.php,
 // en vez de registrar uno nuevo por test como en el resto de la suite.
 test.describe('Vendedor: agendar pedido (sales.php)', () => {
-  test('agendar un pedido para un cliente existente con producto en stock', async ({ page }) => {
+  test('agendar un pedido para un cliente existente con producto en stock', { tag: '@smoke' }, async ({ page }) => {
     await loginAsStaff(page, 'vendedor');
     await page.goto('views/sales.php');
 

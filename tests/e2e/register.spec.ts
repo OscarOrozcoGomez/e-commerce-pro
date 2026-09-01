@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 
 test.describe('Registro de cuenta', () => {
-  test('crear cuenta con datos válidos redirige a login con mensaje de éxito', async ({ page }) => {
+  test('crear cuenta con datos válidos redirige a login con mensaje de éxito', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('views/register.php');
 
     await page.locator('#nombre').fill('Playwright Registro QA');

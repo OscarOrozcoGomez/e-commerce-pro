@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 
 test.describe('Catálogo', () => {
-  test('lista productos y cada uno enlaza a su detalle', async ({ page }) => {
+  test('lista productos y cada uno enlaza a su detalle', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('views/catalogo.php');
 
     const firstCard = page.locator('.product-card-container').first();
@@ -11,7 +11,7 @@ test.describe('Catálogo', () => {
     await expect(detailLink).toHaveAttribute('href', /product_detail\.php\?id=\d+/);
   });
 
-  test('agregar un producto al carrito desde el catálogo actualiza el carrito', async ({ page }) => {
+  test('agregar un producto al carrito desde el catálogo actualiza el carrito', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('views/catalogo.php');
 
     const firstCard = page.locator('.product-card-container').first();

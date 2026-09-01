@@ -7,7 +7,7 @@ import { completeDomicilioCheckout, getNumeroPedido, loginAsStaff } from './help
 // sitio y el más fácil de romper en silencio con un cambio en cualquiera de los
 // 3 roles, así que vale la pena probarlo de punta a punta aunque sea más largo.
 test.describe('Pipeline de cumplimiento de pedidos (cliente -> encargado -> repartidor)', () => {
-  test('un pedido a domicilio se puede asignar y entregar de punta a punta', async ({ page }) => {
+  test('un pedido a domicilio se puede asignar y entregar de punta a punta', { tag: '@smoke' }, async ({ page }) => {
     const idPedido = await completeDomicilioCheckout(page);
     const numeroPedido = await getNumeroPedido(page, idPedido);
 

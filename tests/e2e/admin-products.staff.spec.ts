@@ -2,7 +2,7 @@ import { test, expect } from './fixtures';
 import { loginAsStaff } from './helpers';
 
 test.describe('Admin: alta de producto', () => {
-  test('agregar un producto nuevo lo muestra en la tabla', async ({ page }) => {
+  test('agregar un producto nuevo lo muestra en la tabla', { tag: '@smoke' }, async ({ page }) => {
     await loginAsStaff(page, 'admin');
     await page.goto('views/products.php');
 

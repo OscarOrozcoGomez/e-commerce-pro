@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 
 test.describe('Login', () => {
-  test('shows the login form', async ({ page }) => {
+  test('shows the login form', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('views/login.php');
 
     await expect(page.locator('span.card-title')).toHaveText('Iniciar Sesión');
@@ -9,7 +9,7 @@ test.describe('Login', () => {
     await expect(page.locator('#password')).toBeVisible();
   });
 
-  test('rejects invalid credentials', async ({ page }) => {
+  test('rejects invalid credentials', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('views/login.php');
 
     await page.locator('#email').fill('no-existe@example.com');

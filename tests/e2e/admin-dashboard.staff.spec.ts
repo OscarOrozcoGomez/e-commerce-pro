@@ -2,7 +2,7 @@ import { test, expect } from './fixtures';
 import { loginAsStaff } from './helpers';
 
 test.describe('Admin: dashboard', () => {
-  test('carga con el saludo y los KPIs resueltos', async ({ page }) => {
+  test('carga con el saludo y los KPIs resueltos', { tag: '@smoke' }, async ({ page }) => {
     await loginAsStaff(page, 'admin');
     await page.goto('views/dashboard.php');
 
