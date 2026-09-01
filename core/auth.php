@@ -37,6 +37,13 @@ const PERMISOS_EN_USO = [
     'gestionar_campanas',
     'configurar_iniciativas_ventas',
     'ver_auditoria',
+    // Vistas admin/staff enganchadas al panel (sucursales, cancelaciones, clientes,
+    // asistente de IA / Alex Insights). El helper de rol sigue como respaldo.
+    'gestionar_clientes',
+    'gestionar_sucursales',
+    'gestionar_cancelaciones',
+    'gestionar_asistente_ia',
+    'ver_insights_ia',
 ];
 
 /**
