@@ -89,6 +89,8 @@ final class PurchaseOrderFlowTest extends TestCase
         $this->pdo->exec("CREATE TABLE movimientos_inventario (id_movimiento INTEGER PRIMARY KEY AUTOINCREMENT, id_producto INTEGER NOT NULL, tipo_movimiento TEXT NOT NULL, id_almacen_destino INTEGER NULL, cantidad INTEGER NOT NULL, id_usuario INTEGER NULL, observacion TEXT NULL)");
         $this->pdo->exec("CREATE TABLE purchase_order_postponed_items (id_postergacion INTEGER PRIMARY KEY AUTOINCREMENT, id_producto INTEGER NOT NULL, id_almacen INTEGER NOT NULL, estado TEXT NOT NULL DEFAULT 'pendiente', motivo TEXT NULL, pospuesto_por INTEGER NULL, pospuesto_en TEXT DEFAULT CURRENT_TIMESTAMP, reactivado_en TEXT NULL)");
         $this->pdo->exec('CREATE UNIQUE INDEX uq_po_postergado_producto_almacen ON purchase_order_postponed_items(id_producto, id_almacen)');
+        $this->pdo->exec("CREATE TABLE ordenes_compra (id_orden_compra INTEGER PRIMARY KEY AUTOINCREMENT, id_usuario INTEGER NOT NULL, id_almacen INTEGER NOT NULL, referencia TEXT NOT NULL, fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP, estado TEXT NOT NULL DEFAULT 'borrador', total_estimado REAL NOT NULL DEFAULT 0, observaciones TEXT NULL)");
+        $this->pdo->exec('CREATE TABLE detalle_orden_compra (id_detalle INTEGER PRIMARY KEY AUTOINCREMENT, id_orden_compra INTEGER NOT NULL, id_producto INTEGER NOT NULL, cantidad_solicitada INTEGER NOT NULL, cantidad_recibida INTEGER NOT NULL DEFAULT 0, costo_unitario REAL NOT NULL DEFAULT 0)');
     }
 
     private function seedWarehouse(int $id, string $nombre): void
