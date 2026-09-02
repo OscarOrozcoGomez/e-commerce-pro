@@ -28,3 +28,5 @@ require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
 require_once __DIR__ . '/../core/alex_insights_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
+require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+require_once __DIR__ . '/../core/lote_ocr_utils.php';

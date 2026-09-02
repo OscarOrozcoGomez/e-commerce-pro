@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/purchase_order_utils.php';
+require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 
 header('Content-Type: application/json');
 
@@ -37,7 +38,27 @@ try {
             $observacion
         );
 
-        echo json_encode(['success' => true, 'message' => 'Stock actualizado correctamente']);
+        // Si se capturó lote + caducidad, registrarlo/sumarlo (no bloquea la entrada).
+        $codigoLote = trim((string)($data['codigo_lote'] ?? ''));
+        $fechaCaducidad = trim((string)($data['fecha_caducidad'] ?? ''));
+        $avisoLote = '';
+        if ($codigoLote !== '' && $fechaCaducidad !== '' && loteTablaExiste($pdo, 'lotes_inventario')) {
+            try {
+                loteRegistrarEntrada($pdo, [
+                    'id_producto' => $id_producto,
+                    'id_almacen' => $almacenId,
+                    'codigo_lote' => $codigoLote,
+                    'fecha_caducidad' => $fechaCaducidad,
+                    'caducidad_aproximada' => !empty($data['caducidad_aproximada']) ? 1 : 0,
+                    'cantidad' => $cantidad,
+                ], (int)$usuario['id_usuario']);
+            } catch (Throwable $eLote) {
+                error_log('inventory_handler lote: ' . $eLote->getMessage());
+                $avisoLote = ' (el stock entró, pero no se pudo registrar el lote: ' . $eLote->getMessage() . ')';
+            }
+        }
+
+        echo json_encode(['success' => true, 'message' => 'Stock actualizado correctamente' . $avisoLote]);
     } else {
         throw new Exception("Acción no permitida");
     }

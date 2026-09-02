@@ -4,6 +4,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/finance_utils.php';
 require_once __DIR__ . '/../core/settlement_utils.php';
+require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 
 header('Content-Type: application/json');
 if (!isAuthenticated()) {
@@ -168,6 +169,13 @@ try {
         
         // Auditoría
         $stats['incompletos'] = $pdo->query("SELECT COUNT(DISTINCT p.id_producto) as total FROM productos p LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto WHERE p.precio_venta <= 0 OR p.precio_costo <= 0 OR ia.id_producto IS NULL")->fetch();
+
+        // Caducidades por lote (tolera que la tabla aún no exista)
+        try {
+            $stats['caducidades'] = loteContarAlertas($pdo);
+        } catch (Throwable $eLote) {
+            error_log('dashboard_data caducidades: ' . $eLote->getMessage());
+        }
 
         // Blogs
         $stats['blogs'] = $pdo->query("SELECT COUNT(*) as total FROM blogs")->fetch();
