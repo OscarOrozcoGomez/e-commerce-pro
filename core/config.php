@@ -88,7 +88,15 @@ if (!defined('BASE_URL')) {
     // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
     $host = $_SERVER['HTTP_HOST'] ?? '';
     if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
-        define('BASE_URL', '/e-commerce-pro/');
+        // Deriva la subcarpeta del propio script para que un git worktree servido en
+        // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
+        // local; cae a /e-commerce-pro/ si no se puede determinar.
+        $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
+        if (preg_match('#^/([^/]+)#', $scriptDir, $m) && $m[1] !== 'views' && $m[1] !== 'api') {
+            define('BASE_URL', '/' . $m[1] . '/');
+        } else {
+            define('BASE_URL', '/e-commerce-pro/');
+        }
     } else {
         define('BASE_URL', '/');
     }
