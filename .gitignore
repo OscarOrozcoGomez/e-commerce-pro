@@ -21,6 +21,11 @@ app_error.log
 /vendor/
 composer.phar
 
+# Dependencias y artefactos de las pruebas E2E de Playwright (viven en la rama automation)
+/node_modules/
+/test-results/
+/playwright-report/
+
 # Cache local de PHPUnit
 .phpunit.cache/
 

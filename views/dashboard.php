@@ -131,10 +131,10 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Productos sin configuración</span>
                         <p class="display-metric" id="stat-incompletos">0</p>
-                        <p class="text-small">Sin precio, costo o inventario base</p>
+                        <p class="text-small">Sin precio, costo, SKU, código de barras o inventario base</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/analytics.php" class="white-text">Ver Detalles</a>
+                        <a href="<?php echo BASE_URL; ?>views/productos_incompletos.php" class="white-text">Ver Detalles</a>
                     </div>
                 </div>
             </div>

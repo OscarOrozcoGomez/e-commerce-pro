@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/social_post_utils.php';
+require_once __DIR__ . '/../core/entrega_publicacion_utils.php';
 
 header('Content-Type: application/json');
 
@@ -73,6 +74,33 @@ function epResolvePageAccessToken(string $pageId, string $storedToken): string
     $derivedToken = is_array($decoded) ? ($decoded['access_token'] ?? null) : null;
 
     return is_string($derivedToken) && $derivedToken !== '' ? $derivedToken : $storedToken;
+}
+
+/**
+ * POST multipart a la Graph API de Facebook. Devuelve [respuestaDecodificada|null, mensajeError].
+ * $mensajeError viene vacio cuando curl no fallo a nivel de transporte (el llamador aun debe
+ * revisar si la respuesta trae error['message'] de Facebook).
+ *
+ * @param array<string, mixed> $fields
+ * @return array{0: array<mixed>|null, 1: string}
+ */
+function epGraphPost(string $url, array $fields, int $timeout = 30): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POSTFIELDS => $fields,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 10,
+    ]);
+    $response = curl_exec($ch);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    $decoded = is_string($response) ? json_decode($response, true) : null;
+
+    return [is_array($decoded) ? $decoded : null, $curlError];
 }
 
 // Todo lo que sigue (incluida la conexion a BD) va dentro del try: si algo truena aqui sin
@@ -221,23 +249,16 @@ if (isset($_FILES['foto'])) {
         epJsonResponse(['success' => false, 'error' => 'Pedido no encontrado o no disponible para publicar.'], 404);
     }
 
-    $foto = $_FILES['foto'];
-    if (($foto['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        epJsonResponse(['success' => false, 'error' => 'Error al recibir la foto.'], 400);
+    // El repartidor puede adjuntar VARIAS fotos a la misma entrega (input con `multiple`).
+    // epNormalizeFotoUploads() aplana el caso simple (una foto) y el multiple (arrays
+    // paralelos) a una sola lista, ya recortada a ENTREGA_PUBLICACION_MAX_FOTOS.
+    $fotos = epNormalizeFotoUploads($_FILES['foto']);
+    if ($fotos === []) {
+        epJsonResponse(['success' => false, 'error' => 'No se recibio ninguna foto.'], 400);
     }
 
     $maxBytes = 8 * 1024 * 1024;
-    if ((int)($foto['size'] ?? 0) > $maxBytes) {
-        epJsonResponse(['success' => false, 'error' => 'La foto excede el tamano maximo de 8MB.'], 400);
-    }
-
-    $imageInfo = @getimagesize($foto['tmp_name']);
     $allowedMimes = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-    $detectedMime = $imageInfo['mime'] ?? null;
-    if (!$imageInfo || !isset($allowedMimes[$detectedMime])) {
-        epJsonResponse(['success' => false, 'error' => 'La foto debe ser JPG, PNG o WEBP valida.'], 400);
-    }
-    $ext = $allowedMimes[$detectedMime];
 
     $baseDir = rtrim(dirname(__DIR__), '/\\') . '/assets/img/entregas/';
     $targetDir = $baseDir . $idPedido . '/';
@@ -245,13 +266,6 @@ if (isset($_FILES['foto'])) {
         epJsonResponse(['success' => false, 'error' => 'No se pudo crear la carpeta de destino.'], 500);
     }
 
-    $fileName = bin2hex(random_bytes(8)) . '.' . $ext;
-    $targetFile = $targetDir . $fileName;
-    if (!move_uploaded_file($foto['tmp_name'], $targetFile)) {
-        epJsonResponse(['success' => false, 'error' => 'No se pudo guardar la foto en el servidor.'], 500);
-    }
-
-    $rutaRelativa = $idPedido . '/' . $fileName;
     $colonia = extractColoniaFromAddress($pedido['direccion']);
     $texto = trim((string)($_POST['texto'] ?? '')) ?: buildDeliveryPostText(
         $colonia,
@@ -262,20 +276,71 @@ if (isset($_FILES['foto'])) {
         "INSERT INTO pedido_publicaciones (id_pedido, id_repartidor, colonia_detectada, texto, ruta_foto)
          VALUES (:id_pedido, :id_repartidor, :colonia, :texto, :ruta_foto)"
     );
-    $stmtInsert->execute([
-        ':id_pedido' => $idPedido,
-        ':id_repartidor' => (int)$pedido['id_repartidor'],
-        ':colonia' => $colonia !== '' ? $colonia : null,
-        ':texto' => $texto,
-        ':ruta_foto' => $rutaRelativa,
-    ]);
 
-    logAudit('PEDIDO_PUBLICACION_FOTO_SUBIDA', 'pedido_publicaciones', (int)$pdo->lastInsertId(), 'Foto de entrega subida para pedido #' . $idPedido);
+    // Cada foto valida se guarda como su propia fila. Si UNA falla la validacion no se
+    // aborta el lote entero (comun en movil: un HEIC o una foto corrupta entre varias
+    // buenas); se reporta aparte en `errores` y se guardan las que si sirvieron.
+    $subidas = [];
+    $errores = [];
+    foreach ($fotos as $indice => $foto) {
+        $etiqueta = $foto['name'] !== '' ? $foto['name'] : ('foto ' . ($indice + 1));
+
+        if ($foto['error'] !== UPLOAD_ERR_OK) {
+            $errores[] = "{$etiqueta}: error al recibir la foto.";
+            continue;
+        }
+        if ($foto['size'] > $maxBytes) {
+            $errores[] = "{$etiqueta}: excede el tamano maximo de 8MB.";
+            continue;
+        }
+
+        $imageInfo = @getimagesize($foto['tmp_name']);
+        $detectedMime = $imageInfo['mime'] ?? null;
+        if (!$imageInfo || !isset($allowedMimes[$detectedMime])) {
+            $errores[] = "{$etiqueta}: debe ser JPG, PNG o WEBP valida.";
+            continue;
+        }
+
+        $fileName = bin2hex(random_bytes(8)) . '.' . $allowedMimes[$detectedMime];
+        $targetFile = $targetDir . $fileName;
+        if (!move_uploaded_file($foto['tmp_name'], $targetFile)) {
+            $errores[] = "{$etiqueta}: no se pudo guardar en el servidor.";
+            continue;
+        }
+
+        $rutaRelativa = $idPedido . '/' . $fileName;
+        $stmtInsert->execute([
+            ':id_pedido' => $idPedido,
+            ':id_repartidor' => (int)$pedido['id_repartidor'],
+            ':colonia' => $colonia !== '' ? $colonia : null,
+            ':texto' => $texto,
+            ':ruta_foto' => $rutaRelativa,
+        ]);
+        $idPublicacion = (int)$pdo->lastInsertId();
+
+        logAudit('PEDIDO_PUBLICACION_FOTO_SUBIDA', 'pedido_publicaciones', $idPublicacion, 'Foto de entrega subida para pedido #' . $idPedido);
+
+        $subidas[] = [
+            'id_publicacion' => $idPublicacion,
+            'foto_url' => BASE_URL . 'assets/img/entregas/' . $rutaRelativa,
+        ];
+    }
+
+    if ($subidas === []) {
+        epJsonResponse([
+            'success' => false,
+            'error' => 'No se pudo guardar ninguna foto. ' . implode(' ', $errores),
+        ], 400);
+    }
 
     epJsonResponse([
         'success' => true,
-        'id_publicacion' => (int)$pdo->lastInsertId(),
-        'foto_url' => BASE_URL . 'assets/img/entregas/' . $rutaRelativa,
+        // Campos en plural para el flujo nuevo (varias fotos)...
+        'fotos' => $subidas,
+        'errores' => $errores,
+        // ...y en singular = la primera, por compatibilidad con clientes viejos.
+        'id_publicacion' => $subidas[0]['id_publicacion'],
+        'foto_url' => $subidas[0]['foto_url'],
         'colonia_detectada' => $colonia,
         'texto' => $texto,
     ]);
@@ -300,48 +365,110 @@ if ($action === 'preparar') {
     $colonia = extractColoniaFromAddress($pedido['direccion']);
     $numeroEntrega = epResolverNumeroEntrega($pdo, (int)$pedido['id_repartidor'], $payload['numero_entrega'] ?? null);
 
-    // Si ya se subio una foto para este pedido (flujo nuevo: foto antes de cobrar), la
-    // reusamos en vez de pedirsela de nuevo al repartidor.
-    $stmtFotoExistente = $pdo->prepare(
-        "SELECT id_publicacion, ruta_foto FROM pedido_publicaciones WHERE id_pedido = :id_pedido ORDER BY id_publicacion DESC LIMIT 1"
+    // Todas las fotos ya subidas para este pedido (flujo nuevo: el repartidor pudo adjuntar
+    // varias antes de cobrar). El modal las muestra como miniaturas y deja agregar mas.
+    $stmtFotos = $pdo->prepare(
+        "SELECT id_publicacion, ruta_foto, publicado_facebook, compartido_manual
+         FROM pedido_publicaciones WHERE id_pedido = :id_pedido ORDER BY id_publicacion ASC"
     );
-    $stmtFotoExistente->execute([':id_pedido' => $idPedido]);
-    $fotoExistente = $stmtFotoExistente->fetch(PDO::FETCH_ASSOC) ?: null;
+    $stmtFotos->execute([':id_pedido' => $idPedido]);
+    $fotos = [];
+    foreach ($stmtFotos->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $fotos[] = [
+            'id_publicacion' => (int)$row['id_publicacion'],
+            'foto_url' => BASE_URL . 'assets/img/entregas/' . $row['ruta_foto'],
+            'publicado_facebook' => (int)$row['publicado_facebook'] === 1,
+            'compartido_manual' => (int)$row['compartido_manual'] === 1,
+        ];
+    }
+    $ultimaFoto = $fotos !== [] ? $fotos[count($fotos) - 1] : null;
 
     epJsonResponse([
         'success' => true,
         'colonia_detectada' => $colonia,
         'numero_entrega' => $numeroEntrega,
         'texto' => buildDeliveryPostText($colonia, $numeroEntrega),
-        'id_publicacion' => $fotoExistente['id_publicacion'] ?? null,
-        'foto_url' => $fotoExistente ? BASE_URL . 'assets/img/entregas/' . $fotoExistente['ruta_foto'] : null,
+        'fotos' => $fotos,
+        // Singular = la mas reciente, por compatibilidad con clientes viejos.
+        'id_publicacion' => $ultimaFoto['id_publicacion'] ?? null,
+        'foto_url' => $ultimaFoto['foto_url'] ?? null,
     ]);
 }
 
 if ($action === 'marcar_compartido') {
-    $idPublicacion = (int)($payload['id_publicacion'] ?? 0);
-    $stmt = $pdo->prepare("UPDATE pedido_publicaciones SET compartido_manual = 1 WHERE id_publicacion = :id AND id_pedido = :id_pedido");
-    $stmt->execute([':id' => $idPublicacion, ':id_pedido' => $idPedido]);
+    // Acepta `id_publicaciones` (lista) o `id_publicacion` suelto. Si no viene ninguno, se
+    // marcan TODAS las fotos del pedido (la tarjeta publica sin manejar ids uno por uno).
+    $ids = epNormalizeIdPublicaciones($payload['id_publicaciones'] ?? null, $payload['id_publicacion'] ?? null);
+    if ($ids !== []) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare(
+            "UPDATE pedido_publicaciones SET compartido_manual = 1
+             WHERE id_pedido = ? AND id_publicacion IN ($placeholders)"
+        );
+        $stmt->execute(array_merge([$idPedido], $ids));
+    } else {
+        $stmt = $pdo->prepare("UPDATE pedido_publicaciones SET compartido_manual = 1 WHERE id_pedido = ?");
+        $stmt->execute([$idPedido]);
+    }
     epJsonResponse(['success' => true]);
 }
 
 if ($action === 'publicar_facebook') {
-    $idPublicacion = (int)($payload['id_publicacion'] ?? 0);
-    $texto = trim((string)($payload['texto'] ?? ''));
-    if ($texto === '') {
-        epJsonResponse(['success' => false, 'error' => 'El texto de la publicacion no puede estar vacio.'], 400);
-    }
-
     $pedido = epFindPedidoEntregado($pdo, $idPedido, $idUsuario, $esAdmin);
     if (!$pedido) {
         epJsonResponse(['success' => false, 'error' => 'Pedido no encontrado o no disponible para publicar.'], 404);
     }
 
-    $stmtPub = $pdo->prepare("SELECT id_publicacion, ruta_foto FROM pedido_publicaciones WHERE id_publicacion = :id AND id_pedido = :id_pedido LIMIT 1");
-    $stmtPub->execute([':id' => $idPublicacion, ':id_pedido' => $idPedido]);
-    $publicacion = $stmtPub->fetch(PDO::FETCH_ASSOC) ?: null;
-    if (!$publicacion) {
+    // El texto es opcional: si el cliente (la tarjeta) no manda uno, se arma el sugerido.
+    $texto = trim((string)($payload['texto'] ?? ''));
+    if ($texto === '') {
+        $colonia = extractColoniaFromAddress($pedido['direccion']);
+        $texto = buildDeliveryPostText(
+            $colonia,
+            epResolverNumeroEntrega($pdo, (int)$pedido['id_repartidor'], $payload['numero_entrega'] ?? null)
+        );
+    }
+
+    // Si no viene lista de ids (la tarjeta publica "todas las fotos de este pedido"), se toman
+    // todas las de pedido_publicaciones; el filtro de pendientes mas abajo descarta las ya subidas.
+    $ids = epNormalizeIdPublicaciones($payload['id_publicaciones'] ?? null, $payload['id_publicacion'] ?? null);
+    if ($ids === []) {
+        $stmtAll = $pdo->prepare('SELECT id_publicacion FROM pedido_publicaciones WHERE id_pedido = ? ORDER BY id_publicacion ASC');
+        $stmtAll->execute([$idPedido]);
+        $ids = array_map('intval', $stmtAll->fetchAll(PDO::FETCH_COLUMN));
+    }
+    if ($ids === []) {
         epJsonResponse(['success' => false, 'error' => 'Primero sube una foto para este pedido.'], 400);
+    }
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmtPub = $pdo->prepare(
+        "SELECT id_publicacion, ruta_foto, publicado_facebook FROM pedido_publicaciones
+         WHERE id_pedido = ? AND id_publicacion IN ($placeholders) ORDER BY id_publicacion ASC"
+    );
+    $stmtPub->execute(array_merge([$idPedido], $ids));
+    $filas = $stmtPub->fetchAll(PDO::FETCH_ASSOC);
+    if ($filas === []) {
+        epJsonResponse(['success' => false, 'error' => 'Primero sube una foto para este pedido.'], 400);
+    }
+
+    // Solo las que aun no se publicaron y cuyo archivo sigue en disco (si el repartidor
+    // reabre el modal despues de publicar, no se re-postean).
+    $baseFotos = rtrim(dirname(__DIR__), '/\\') . '/assets/img/entregas/';
+    $pendientes = [];
+    foreach ($filas as $fila) {
+        if ((int)$fila['publicado_facebook'] === 1) {
+            continue;
+        }
+        $ruta = $baseFotos . $fila['ruta_foto'];
+        if (is_file($ruta)) {
+            $pendientes[] = ['id' => (int)$fila['id_publicacion'], 'path' => $ruta];
+        }
+    }
+
+    if ($pendientes === []) {
+        // Ya estaban todas publicadas: no es un error, solo no hay nada que hacer.
+        epJsonResponse(['success' => true, 'ya_publicado' => true]);
     }
 
     $pageId = getEnvVar('FB_PAGE_ID');
@@ -350,59 +477,79 @@ if ($action === 'publicar_facebook') {
         epJsonResponse(['success' => false, 'error' => 'Facebook no esta configurado (falta FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN). Usa "Compartir" mientras tanto.'], 500);
     }
 
-    $fotoPath = rtrim(dirname(__DIR__), '/\\') . '/assets/img/entregas/' . $publicacion['ruta_foto'];
-    if (!is_file($fotoPath)) {
-        epJsonResponse(['success' => false, 'error' => 'La foto de esta publicacion ya no existe en el servidor.'], 404);
-    }
+    $idsPendientes = array_map(static fn (array $p): int => $p['id'], $pendientes);
+    $placeholdersPend = implode(',', array_fill(0, count($idsPendientes), '?'));
 
-    // Logging defensivo: si el proceso muere a medias (timeout del servidor, worker matado
-    // por falta de memoria, etc.) un 502 de infraestructura no deja nada en app_error.log
-    // porque nuestro propio manejador de excepciones nunca llega a correr. Estas lineas se
-    // escriben ANTES de cada llamada de red riesgosa, asi que aunque el proceso muera despues,
-    // ya quedo registrado hasta donde alcanzo a llegar.
-    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} id_publicacion={$idPublicacion} - iniciando resolucion de page token");
+    // Logging defensivo: si el proceso muere a medias (timeout, worker sin memoria...) un 502
+    // de infraestructura no dispara nuestro manejador de excepciones. Estas lineas se escriben
+    // ANTES de cada llamada de red, asi queda registrado hasta donde alcanzo a llegar.
+    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} ids=" . implode(',', $idsPendientes) . ' - resolviendo page token');
     $pageToken = epResolvePageAccessToken($pageId, $storedToken);
-    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - page token resuelto, iniciando subida de foto a Facebook");
 
-    $ch = curl_init("https://graph.facebook.com/v21.0/{$pageId}/photos");
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POSTFIELDS => [
-            'source' => new CURLFile($fotoPath),
+    $marcarError = static function (string $mensaje) use ($pdo, $idsPendientes, $placeholdersPend): void {
+        $stmt = $pdo->prepare("UPDATE pedido_publicaciones SET facebook_error = ? WHERE id_publicacion IN ($placeholdersPend)");
+        $stmt->execute(array_merge([$mensaje], $idsPendientes));
+    };
+
+    if (count($pendientes) === 1) {
+        // Una sola foto: post directo a /photos con caption (igual que siempre).
+        error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - 1 foto, subiendo a /photos");
+        [$decoded, $curlError] = epGraphPost("https://graph.facebook.com/v21.0/{$pageId}/photos", [
+            'source' => new CURLFile($pendientes[0]['path']),
             'caption' => $texto,
             'access_token' => $pageToken,
-        ],
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_CONNECTTIMEOUT => 10,
-    ]);
-    $response = curl_exec($ch);
-    $curlError = curl_error($ch);
-    $curlErrno = curl_errno($ch);
-    curl_close($ch);
-    error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - curl termino, errno={$curlErrno} error=" . ($curlError !== '' ? $curlError : '(ninguno)') . ' respuesta_len=' . (is_string($response) ? strlen($response) : 'null'));
+        ]);
+        $facebookPostId = $decoded['post_id'] ?? $decoded['id'] ?? null;
+        if ($curlError !== '' || $decoded === null || !$facebookPostId) {
+            $errorMsg = $decoded['error']['message'] ?? ($curlError !== '' ? $curlError : 'Respuesta invalida de Facebook.');
+            error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - fallo: {$errorMsg}");
+            $marcarError((string)$errorMsg);
+            epJsonResponse(['success' => false, 'error' => 'Facebook rechazo la publicacion: ' . $errorMsg], 502);
+        }
+    } else {
+        // Varias fotos: se suben una por una con published=false para obtener su media_fbid y
+        // luego se crea UN post de feed que las adjunta todas (album).
+        error_log('entrega_publicacion.php: publicar_facebook id_pedido=' . $idPedido . ' - ' . count($pendientes) . ' fotos, subiendo album');
+        $fbids = [];
+        foreach ($pendientes as $p) {
+            [$decoded, $curlError] = epGraphPost("https://graph.facebook.com/v21.0/{$pageId}/photos", [
+                'source' => new CURLFile($p['path']),
+                'published' => 'false',
+                'access_token' => $pageToken,
+            ]);
+            $mediaId = $decoded['id'] ?? null;
+            if ($curlError !== '' || $decoded === null || !$mediaId) {
+                $errorMsg = $decoded['error']['message'] ?? ($curlError !== '' ? $curlError : 'Respuesta invalida de Facebook.');
+                error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - fallo subiendo foto del album: {$errorMsg}");
+                $marcarError((string)$errorMsg);
+                epJsonResponse(['success' => false, 'error' => 'Facebook rechazo una de las fotos: ' . $errorMsg], 502);
+            }
+            $fbids[] = (string)$mediaId;
+        }
 
-    $decoded = is_string($response) ? json_decode($response, true) : null;
-    $facebookPostId = $decoded['post_id'] ?? $decoded['id'] ?? null;
-
-    if ($curlError !== '' || !is_array($decoded) || !$facebookPostId) {
-        $errorMsg = $decoded['error']['message'] ?? ($curlError !== '' ? $curlError : 'Respuesta invalida de Facebook.');
-        error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - fallo: {$errorMsg}");
-        $stmtErr = $pdo->prepare("UPDATE pedido_publicaciones SET facebook_error = :error WHERE id_publicacion = :id");
-        $stmtErr->execute([':error' => (string)$errorMsg, ':id' => $idPublicacion]);
-        epJsonResponse(['success' => false, 'error' => 'Facebook rechazo la publicacion: ' . $errorMsg], 502);
+        [$decoded, $curlError] = epGraphPost("https://graph.facebook.com/v21.0/{$pageId}/feed", array_merge(
+            ['message' => $texto, 'access_token' => $pageToken],
+            epBuildAttachedMediaFields($fbids)
+        ));
+        $facebookPostId = $decoded['id'] ?? $decoded['post_id'] ?? null;
+        if ($curlError !== '' || $decoded === null || !$facebookPostId) {
+            $errorMsg = $decoded['error']['message'] ?? ($curlError !== '' ? $curlError : 'Respuesta invalida de Facebook.');
+            error_log("entrega_publicacion.php: publicar_facebook id_pedido={$idPedido} - fallo creando post de album: {$errorMsg}");
+            $marcarError((string)$errorMsg);
+            epJsonResponse(['success' => false, 'error' => 'Facebook rechazo el album: ' . $errorMsg], 502);
+        }
     }
 
     $stmtOk = $pdo->prepare(
         "UPDATE pedido_publicaciones
-         SET publicado_facebook = 1, facebook_post_id = :post_id, facebook_error = NULL, texto = :texto
-         WHERE id_publicacion = :id"
+         SET publicado_facebook = 1, facebook_post_id = ?, facebook_error = NULL, texto = ?
+         WHERE id_publicacion IN ($placeholdersPend)"
     );
-    $stmtOk->execute([':post_id' => (string)$facebookPostId, ':texto' => $texto, ':id' => $idPublicacion]);
+    $stmtOk->execute(array_merge([(string)$facebookPostId, $texto], $idsPendientes));
 
-    logAudit('PEDIDO_PUBLICACION_FACEBOOK', 'pedido_publicaciones', $idPublicacion, 'Publicado en Facebook, post_id=' . $facebookPostId);
+    logAudit('PEDIDO_PUBLICACION_FACEBOOK', 'pedido_publicaciones', $pendientes[0]['id'], 'Publicado en Facebook (' . count($pendientes) . ' foto(s)), post_id=' . $facebookPostId);
 
-    epJsonResponse(['success' => true, 'facebook_post_id' => (string)$facebookPostId]);
+    epJsonResponse(['success' => true, 'facebook_post_id' => (string)$facebookPostId, 'fotos_publicadas' => count($pendientes)]);
 }
 
 epJsonResponse(['success' => false, 'error' => 'Accion no reconocida.'], 400);
