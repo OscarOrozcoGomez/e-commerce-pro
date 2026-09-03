@@ -62,14 +62,15 @@ jobs:
 
       - name: Configurar clave SSH
         env:
-          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KEY_B64: ${{ secrets.SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s' "$SSH_KEY_B64" | base64 -d > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 644 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null && echo "clave SSH decodificada OK"
 
       - name: Rsync al VPS
         env:
@@ -80,7 +81,7 @@ jobs:
         run: |
           rsync -rlptz --delete \
             --exclude-from=deploy-exclude.txt \
-            -e "ssh -i $HOME/.ssh/deploy_key -p ${SSH_PORT} -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
+            -e "ssh -i $HOME/.ssh/deploy_key -p ${SSH_PORT} -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
             ./ "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/"
 
       - name: Post-deploy en el VPS (permisos + migraciones)
@@ -91,5 +92,6 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
           ssh -i "$HOME/.ssh/deploy_key" -p "${SSH_PORT}" \
+            -o IdentitiesOnly=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "${SSH_USER}@${SSH_HOST}" "DEPLOY_PATH='${DEPLOY_PATH}' bash -s" < scripts/deploy_remote.sh
