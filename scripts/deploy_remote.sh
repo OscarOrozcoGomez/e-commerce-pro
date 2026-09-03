@@ -25,7 +25,19 @@ mkdir -p core/uploads core/cache logs \
 chmod -R u+rwX core/uploads core/cache logs assets/img 2>/dev/null || true
 
 echo ">> Corriendo migraciones (idempotente, con lock + checksum)..."
-APP_ENV=production "$PHP" scripts/migrate.php
+if APP_ENV=production "$PHP" scripts/migrate.php; then
+  echo ">> migraciones OK"
+else
+  rc=$?
+  # ¿La BD todavía no tiene el esquema base? (primer deploy, datos de Neubox sin importar)
+  n_tablas=$(APP_ENV=production "$PHP" -r 'try{require "core/config.php";$p=getPDO();echo (int)$p->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()")->fetchColumn();}catch(Throwable $e){echo 0;}' 2>/dev/null)
+  if [ "${n_tablas:-0}" -lt 5 ]; then
+    echo "::warning::BD sin esquema base aun (import de Neubox pendiente); se omiten migraciones en este deploy."
+  else
+    echo "::error::migraciones fallaron (rc=$rc) con esquema ya presente."
+    exit "$rc"
+  fi
+fi
 
 echo ">> Recargando PHP-FPM (si hay regla sudo; si no, opcache se revalida solo)..."
 sudo -n systemctl reload php8.2-fpm 2>/dev/null || echo "   (sin sudo para reload; ok)"
