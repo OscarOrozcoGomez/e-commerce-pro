@@ -62,15 +62,26 @@ jobs:
 
       - name: Configurar clave SSH
         env:
-          SSH_KEY_B64: ${{ secrets.SSH_KEY }}
+          SSH_KEY_RAW: ${{ secrets.SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p "$HOME/.ssh"
-          printf '%s' "$SSH_KEY_B64" | base64 -d > "$HOME/.ssh/deploy_key"
-          chmod 600 "$HOME/.ssh/deploy_key"
+          KEY="$HOME/.ssh/deploy_key"
+          if printf '%s' "$SSH_KEY_RAW" | base64 -d > "$KEY" 2>/dev/null \
+             && ssh-keygen -y -f "$KEY" >/dev/null 2>&1; then
+            echo "clave SSH: decodificada de base64"
+          else
+            printf '%s\n' "$SSH_KEY_RAW" > "$KEY"
+            echo "clave SSH: tratada como PEM crudo"
+          fi
+          chmod 600 "$KEY"
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 644 "$HOME/.ssh/known_hosts"
-          ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null && echo "clave SSH decodificada OK"
+          if ! ssh-keygen -y -f "$KEY" >/dev/null 2>&1; then
+            echo "::error::SSH_KEY invalida (ni base64 ni PEM validos). Regenera la llave y re-sube el secret."
+            exit 1
+          fi
+          echo "clave SSH valida"
 
       - name: Rsync al VPS
         env:
