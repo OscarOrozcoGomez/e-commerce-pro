@@ -64,6 +64,8 @@ jobs:
         env:
           SSH_KEY_RAW: ${{ secrets.SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
         run: |
           mkdir -p "$HOME/.ssh"
           KEY="$HOME/.ssh/deploy_key"
@@ -75,13 +77,22 @@ jobs:
             echo "clave SSH: tratada como PEM crudo"
           fi
           chmod 600 "$KEY"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 644 "$HOME/.ssh/known_hosts"
           if ! ssh-keygen -y -f "$KEY" >/dev/null 2>&1; then
             echo "::error::SSH_KEY invalida (ni base64 ni PEM validos). Regenera la llave y re-sube el secret."
             exit 1
           fi
           echo "clave SSH valida"
+
+          KH="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$KH"
+          if ssh-keygen -l -f "$KH" >/dev/null 2>&1; then
+            echo "known_hosts: desde secret"
+          else
+            ssh-keyscan -t ed25519,rsa,ecdsa -p "${SSH_PORT}" "${SSH_HOST}" > "$KH" 2>/dev/null
+            echo "known_hosts: via ssh-keyscan"
+          fi
+          chmod 644 "$KH"
+          test -s "$KH" || { echo "::error::known_hosts quedo vacio"; exit 1; }
 
       - name: Rsync al VPS
         env:
