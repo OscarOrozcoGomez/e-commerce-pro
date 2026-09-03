@@ -98,11 +98,18 @@ try {
             $codigoBarras = trim((string)($data['codigo_barras'] ?? ''));
             $codigoBarras = $codigoBarras === '' ? null : $codigoBarras;
 
+            $capsulasPorEnvase = isset($data['capsulas_por_envase']) && $data['capsulas_por_envase'] !== ''
+                ? max(0, (int)$data['capsulas_por_envase']) : null;
+            $porcionCapsulas = isset($data['porcion_capsulas']) && $data['porcion_capsulas'] !== ''
+                ? max(0, (int)$data['porcion_capsulas']) : null;
+
             if ($id > 0) {
                 // EDITAR
                 $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras,
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
-                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo,
+                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad,
+                        `capsulas_por_envase` = :capsulas_por_envase, `porcion_capsulas` = :porcion_capsulas,
+                        `id_padre` = :id_padre, `precio_costo` = :precio_costo,
                         `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
@@ -112,15 +119,17 @@ try {
                     ':descripcion' => $data['descripcion'] ?? '', ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '', ':tabla' => $data['tabla_nutrimental'] ?? '[]',
                     ':mostrar_tabla' => $mostrar_tabla,
-                    ':unidad' => $data['unidad'] ?? null, ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
+                    ':unidad' => $data['unidad'] ?? null,
+                    ':capsulas_por_envase' => $capsulasPorEnvase, ':porcion_capsulas' => $porcionCapsulas,
+                    ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0, ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
                     ':estado' => $estado, ':id' => $id
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
-                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `capsulas_por_envase`, `porcion_capsulas`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`)
+                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :capsulas_por_envase, :porcion_capsulas, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '',
@@ -133,6 +142,8 @@ try {
                     ':tabla' => $data['tabla_nutrimental'] ?? '[]',
                     ':mostrar_tabla' => $mostrar_tabla,
                     ':unidad' => $data['unidad'] ?? null,
+                    ':capsulas_por_envase' => $capsulasPorEnvase,
+                    ':porcion_capsulas' => $porcionCapsulas,
                     ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0,

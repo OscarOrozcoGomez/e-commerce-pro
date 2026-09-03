@@ -363,6 +363,19 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
+                        <span class="card-title">Control de Caducidades</span>
+                        <p>Lotes que no alcanzarán a venderse antes de caducar</p>
+                        <p class="display-metric red-text text-darken-2" id="stat-caducidades">0</p>
+                        <p class="text-small" id="stat-caducidades-breakdown">Críticas: 0 | Urgentes: 0 | Planificar: 0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="btn waves-effect waves-light orange darken-3">Revisar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
                         <span class="card-title">Analítica Inteligente</span>
                         <p>Predecir stock y analizar tendencias de venta mensuales</p>
                     </div>
@@ -713,6 +726,19 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/inventario_entradas.php" class="btn waves-effect waves-light green darken-2">Surtir</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Control de Caducidades</span>
+                        <p>Lotes que no alcanzarán a venderse antes de caducar</p>
+                        <p class="display-metric red-text text-darken-2" id="stat-caducidades">0</p>
+                        <p class="text-small" id="stat-caducidades-breakdown">Críticas: 0 | Urgentes: 0 | Planificar: 0</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="btn waves-effect waves-light orange darken-3">Revisar</a>
                     </div>
                 </div>
             </div>
@@ -1485,6 +1511,15 @@ include __DIR__ . '/includes/header.php';
                 if (d.finanzas_mes) updateEl('stat-margen-mes', (parseFloat(d.finanzas_mes.margen || 0)).toFixed(2) + '%');
                 if (d.blogs) updateEl('stat-blogs', d.blogs.total || 0);
                 if (d.incompletos) updateEl('stat-incompletos', d.incompletos.total || 0);
+                if (d.caducidades) {
+                    updateEl('stat-caducidades', (d.caducidades.critico || 0) + (d.caducidades.urgente || 0));
+                    updateEl(
+                        'stat-caducidades-breakdown',
+                        'Críticas: ' + (d.caducidades.critico || 0)
+                        + ' | Urgentes: ' + (d.caducidades.urgente || 0)
+                        + ' | Planificar: ' + (d.caducidades.planificar || 0)
+                    );
+                }
                 if (d.stock_bajo) updateEl('stat-stock-bajo', d.stock_bajo.total || 0);
                 if (d.por_entregar) updateEl('stat-por-entregar', d.por_entregar.total || 0);
                 if (d.entregas_hoy) updateEl('stat-entregas-hoy', d.entregas_hoy.total || 0);

@@ -133,6 +133,32 @@ include __DIR__ . '/includes/header.php';
                             <span class="helper-text">Ej: Cápsulas, Gramos (g), Mililitros (ml)...</span>
                         </div>
 
+                        <div class="row" style="margin-bottom:0;">
+                            <div class="input-field col s6">
+                                <input type="number" min="0" id="capsulas_por_envase" name="capsulas_por_envase">
+                                <label for="capsulas_por_envase">Cápsulas por envase</label>
+                            </div>
+                            <div class="input-field col s6">
+                                <input type="number" min="0" id="porcion_capsulas" name="porcion_capsulas">
+                                <label for="porcion_capsulas">Cápsulas por porción</label>
+                            </div>
+                            <span class="helper-text col s12" style="margin-top:-10px;">Opcional. Se usa en el Control de Caducidades para capturar lotes "en cápsulas" y para calcular cuánto rinde un envase.</span>
+                            <span class="col s12 teal-text" id="rinde-hint" style="font-size:.85rem;"></span>
+                        </div>
+                        <script>
+                        (function(){
+                          function rinde(){
+                            var c = parseInt(document.getElementById('capsulas_por_envase').value || '0', 10);
+                            var p = parseInt(document.getElementById('porcion_capsulas').value || '0', 10) || 1;
+                            var el = document.getElementById('rinde-hint');
+                            el.textContent = c > 0 ? ('Rinde ≈ ' + Math.floor(c / p) + ' días por envase (' + c + ' ÷ ' + p + '/toma)') : '';
+                          }
+                          ['capsulas_por_envase','porcion_capsulas'].forEach(function(id){
+                            document.getElementById(id).addEventListener('input', rinde);
+                          });
+                        })();
+                        </script>
+
                         <div class="input-field">
                             <i class="material-icons prefix">account_tree</i>
                             <input type="text" id="search_padre" class="autocomplete" autocomplete="off" placeholder="Escribe el nombre del padre (ej: Creatina)...">
@@ -926,6 +952,8 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('ingredientes').value = prod.ingredientes || '';
         document.getElementById('tabla_nutrimental').value = prod.tabla_nutrimental || '';
         document.getElementById('unidad').value = prod.unidad || '';
+        document.getElementById('capsulas_por_envase').value = prod.capsulas_por_envase || '';
+        document.getElementById('porcion_capsulas').value = prod.porcion_capsulas || '';
         document.getElementById('mostrar_tabla').checked = (prod.mostrar_tabla == 1);
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
@@ -1031,6 +1059,8 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('search_padre').value = '';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
+        document.getElementById('capsulas_por_envase').value = '';
+        document.getElementById('porcion_capsulas').value = '';
 
         document.getElementById('search_padre').value = '';
 
