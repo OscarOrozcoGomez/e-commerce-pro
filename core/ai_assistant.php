@@ -947,8 +947,12 @@ function aiLoadConversationHistory(PDO $pdo, int $idConversacion, int $maxTurns 
                 'content' => (string)($row['contenido'] ?? ''),
             ];
         } else {
+            // DeepSeek (API compatible con OpenAI) solo acepta los roles system/user/assistant/tool.
+            // 'humano' es un rol interno (mensaje mandado por un asesor humano desde el celular o la
+            // respuesta automatica fuera de horario) que para el LLM juega el mismo papel que 'assistant'.
+            $rolParaLlm = $rol === 'humano' ? 'assistant' : $rol;
             $messages[] = [
-                'role' => $rol,
+                'role' => $rolParaLlm,
                 'content' => (string)($row['contenido'] ?? ''),
             ];
         }
