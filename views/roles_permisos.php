@@ -13,9 +13,32 @@ $error = '';
 $success = '';
 $selRol = 0;
 
-// Claves duplicadas conocidas (misma capacidad, dos claves). Se marcan en el catalogo.
-$RP_DUPLICADOS = ['venta', 'realizar_ventas'];
+// Grupos de claves que representan la misma capacidad. Una clave solo se marca
+// "duplicado" si TODAVIA hay otra activa en su mismo grupo -- si desactivas una de
+// las dos, la que queda deja de ser un duplicado (ya es la unica). Ver rpEsDuplicado().
+$RP_GRUPOS_DUPLICADOS = [
+    ['venta', 'realizar_ventas'],
+];
 $RP_ORDEN_CAT = ['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Metricas', 'Administracion', 'Otros'];
+
+/**
+ * ¿"$clave" sigue teniendo un duplicado real? Solo si otro miembro de su mismo
+ * grupo está en $clavesActivas (permisos con estado='activo').
+ */
+function rpEsDuplicado(string $clave, array $grupos, array $clavesActivas): bool
+{
+    foreach ($grupos as $grupo) {
+        if (!in_array($clave, $grupo, true)) {
+            continue;
+        }
+        foreach ($grupo as $otra) {
+            if ($otra !== $clave && in_array($otra, $clavesActivas, true)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 function rpGetRoles(PDO $pdo): array
 {
@@ -310,6 +333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 $roles = rpGetRoles($pdo);
 $arbol = rpBuildArbol($pdo);
 $permisos = rpGetPermisos($pdo);
+$RP_CLAVES_ACTIVAS = array_column($permisos, 'clave');
 
 $permisosPorCategoria = [];
 foreach ($permisos as $p) {
@@ -612,7 +636,7 @@ include __DIR__ . '/includes/header.php';
                                         <?php
                                         $enRol = in_array((int) $p['id_permiso'], $permisosDelRol, true);
                                         $viva = in_array($p['clave'], PERMISOS_EN_USO, true);
-                                        $dup = in_array($p['clave'], $RP_DUPLICADOS, true);
+                                        $dup = rpEsDuplicado($p['clave'], $RP_GRUPOS_DUPLICADOS, $RP_CLAVES_ACTIVAS);
                                         ?>
                                         <div class="rp-perm">
                                             <div class="switch">
@@ -796,7 +820,7 @@ include __DIR__ . '/includes/header.php';
                             <thead><tr><th>Clave</th><th>Categoría</th><th>Roles</th><th>Estado</th><?php if (isSuperAdmin()): ?><th></th><?php endif; ?></tr></thead>
                             <tbody>
                                 <?php foreach ($permisos as $p): ?>
-                                    <?php $viva = in_array($p['clave'], PERMISOS_EN_USO, true); $dup = in_array($p['clave'], $RP_DUPLICADOS, true); ?>
+                                    <?php $viva = in_array($p['clave'], PERMISOS_EN_USO, true); $dup = rpEsDuplicado($p['clave'], $RP_GRUPOS_DUPLICADOS, $RP_CLAVES_ACTIVAS); ?>
                                     <tr>
                                         <td><b><?php echo esc($p['clave']); ?></b><br><span class="grey-text" style="font-size:11px;"><?php echo esc((string) ($p['nombre'] ?? '')); ?></span></td>
                                         <td><?php echo esc($p['categoria']); ?></td>
