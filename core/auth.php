@@ -44,6 +44,7 @@ const PERMISOS_EN_USO = [
     'gestionar_cancelaciones',
     'gestionar_asistente_ia',
     'ver_insights_ia',
+    'ver_notificaciones_pickup',
 ];
 
 /**
