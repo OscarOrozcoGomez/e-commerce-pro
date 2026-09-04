@@ -217,54 +217,43 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-content">
                     <span class="card-title">Conversaciones recientes de WhatsApp</span>
                     <p class="grey-text" style="margin-top: 0;">Cuando Alex transfiere a un cliente, la conversacion queda pausada hasta que un asesor la reactiva aqui.</p>
-                    <table class="responsive-table">
-                        <thead>
-                            <tr>
-                                <th>WhatsApp</th>
-                                <th>Estado</th>
-                                <th>Motivo</th>
-                                <th>Etiquetas</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($conversaciones)): ?>
-                                <tr><td colspan="5">Sin conversaciones todavia.</td></tr>
-                            <?php else: ?>
-                                <?php foreach ($conversaciones as $conv): ?>
-                                    <tr>
-                                        <td>
-                                            <?php echo esc((string)($conv['nombre_perfil'] ?: $conv['wa_id'])); ?><br>
-                                            <span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc((string)$conv['wa_id']); ?></span>
-                                        </td>
-                                        <td><?php echo esc((string)$conv['estado_bot']); ?></td>
-                                        <td><?php echo esc((string)($conv['motivo_transferencia'] ?? '')); ?></td>
-                                        <td>
-                                            <div class="conv-tags" data-id="<?php echo (int)$conv['id_conversacion']; ?>" style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
-                                                <?php foreach ($conv['tags'] as $tag): ?>
-                                                    <div class="chip <?php echo esc((string)$tag['color']); ?> lighten-4" style="margin: 2px;">
-                                                        <?php echo esc((string)$tag['nombre']); ?>
-                                                        <i class="close material-icons btn-quitar-etiqueta" data-id-etiqueta="<?php echo (int)$tag['id_etiqueta']; ?>">close</i>
-                                                    </div>
-                                                <?php endforeach; ?>
-                                                <select class="select-agregar-etiqueta browser-default" style="width: auto; height: 26px; font-size: 12px; display:inline-block;">
-                                                    <option value="">+ etiqueta</option>
-                                                    <?php foreach ($allTags as $tag): ?>
-                                                        <option value="<?php echo esc((string)$tag['nombre']); ?>"><?php echo esc((string)$tag['nombre']); ?></option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <?php if ($conv['estado_bot'] !== 'activo'): ?>
-                                                <button type="button" class="btn-small green darken-1 btn-reactivar-bot" data-id="<?php echo (int)$conv['id_conversacion']; ?>">Reactivar bot</button>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+                    <?php if (empty($conversaciones)): ?>
+                        <p class="grey-text">Sin conversaciones todavia.</p>
+                    <?php else: ?>
+                        <?php foreach ($conversaciones as $conv): ?>
+                            <div style="border-bottom: 1px solid #e0e0e0; padding: 12px 0;">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                                    <div>
+                                        <strong><?php echo esc((string)($conv['nombre_perfil'] ?: $conv['wa_id'])); ?></strong><br>
+                                        <span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc((string)$conv['wa_id']); ?></span>
+                                    </div>
+                                    <span class="chip <?php echo $conv['estado_bot'] === 'activo' ? 'green lighten-4' : 'orange lighten-4'; ?>" style="margin: 0;">
+                                        <?php echo esc((string)$conv['estado_bot']); ?>
+                                    </span>
+                                </div>
+                                <?php if (!empty($conv['motivo_transferencia'])): ?>
+                                    <p class="grey-text text-darken-1" style="font-size: 13px; margin: 6px 0;"><?php echo esc((string)$conv['motivo_transferencia']); ?></p>
+                                <?php endif; ?>
+                                <div class="conv-tags" data-id="<?php echo (int)$conv['id_conversacion']; ?>" style="display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin: 8px 0;">
+                                    <?php foreach ($conv['tags'] as $tag): ?>
+                                        <div class="chip <?php echo esc((string)$tag['color']); ?> lighten-4" style="margin: 2px;">
+                                            <?php echo esc((string)$tag['nombre']); ?>
+                                            <i class="close material-icons btn-quitar-etiqueta" data-id-etiqueta="<?php echo (int)$tag['id_etiqueta']; ?>">close</i>
+                                        </div>
+                                    <?php endforeach; ?>
+                                    <select class="select-agregar-etiqueta browser-default" style="width: auto; height: 26px; font-size: 12px; display:inline-block;">
+                                        <option value="">+ etiqueta</option>
+                                        <?php foreach ($allTags as $tag): ?>
+                                            <option value="<?php echo esc((string)$tag['nombre']); ?>"><?php echo esc((string)$tag['nombre']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <?php if ($conv['estado_bot'] !== 'activo'): ?>
+                                    <button type="button" class="btn-small green darken-1 btn-reactivar-bot" data-id="<?php echo (int)$conv['id_conversacion']; ?>">Reactivar bot</button>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
