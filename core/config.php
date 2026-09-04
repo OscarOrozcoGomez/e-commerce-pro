@@ -71,7 +71,17 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     enforceSessionInactivityTimeout($sessionIdleTimeout);
 }
 
-if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario'])) {
+// Los endpoints de sondeo en segundo plano (pings de actividad, chat, dashboard) se disparan
+// con mucha frecuencia y en paralelo; si coinciden con el momento de rotar el ID de sesion,
+// pueden pisar/perder la sesion de otra peticion en vuelo (condicion de carrera). Se excluyen
+// de la rotacion -- esta igual ocurre en la siguiente peticion normal a una vista.
+$scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+$isBackgroundPollingEndpoint = (bool) preg_match(
+    '#/api/(log_activity|chat_handler|dashboard_data)\.php$#',
+    $scriptName
+);
+
+if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario']) && !$isBackgroundPollingEndpoint) {
     rotateSessionIdIfNeeded($sessionRotateInterval);
 }
 

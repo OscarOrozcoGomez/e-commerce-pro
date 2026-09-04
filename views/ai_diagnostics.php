@@ -271,7 +271,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
     var csrfToken = <?php echo json_encode(getCsrfToken()); ?>;
 
     var ayudaElem = document.getElementById('ayuda-diagnostico');
@@ -391,7 +391,7 @@ include __DIR__ . '/includes/header.php';
                 });
         });
     });
-})();
+});
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
