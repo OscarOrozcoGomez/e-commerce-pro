@@ -46,6 +46,21 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// Cookie de visitante anonimo (independiente de la sesion) para poder correlacionar
+// varias visitas de un mismo invitado y atribuirlas a la misma campana/origen.
+if (!headers_sent() && (!isset($_COOKIE['visitor_id']) || !preg_match('/^[a-f0-9]{32}$/', (string) $_COOKIE['visitor_id']))) {
+    $visitorId = bin2hex(random_bytes(16));
+    setcookie('visitor_id', $visitorId, [
+        'expires' => time() + 63072000,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isHttpsRequest,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    $_COOKIE['visitor_id'] = $visitorId;
+}
+
 $sessionRotateIntervalEnv = getenv('SESSION_ROTATE_INTERVAL');
 if ($sessionRotateIntervalEnv === false) {
     $sessionRotateIntervalEnv = $_SERVER['SESSION_ROTATE_INTERVAL'] ?? $_ENV['SESSION_ROTATE_INTERVAL'] ?? null;
@@ -56,7 +71,17 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     enforceSessionInactivityTimeout($sessionIdleTimeout);
 }
 
-if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario'])) {
+// Los endpoints de sondeo en segundo plano (pings de actividad, chat, dashboard) se disparan
+// con mucha frecuencia y en paralelo; si coinciden con el momento de rotar el ID de sesion,
+// pueden pisar/perder la sesion de otra peticion en vuelo (condicion de carrera). Se excluyen
+// de la rotacion -- esta igual ocurre en la siguiente peticion normal a una vista.
+$scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+$isBackgroundPollingEndpoint = (bool) preg_match(
+    '#/api/(log_activity|chat_handler|dashboard_data)\.php$#',
+    $scriptName
+);
+
+if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['usuario']) && !$isBackgroundPollingEndpoint) {
     rotateSessionIdIfNeeded($sessionRotateInterval);
 }
 
@@ -81,7 +106,15 @@ if (!defined('BASE_URL')) {
         // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
         $host = $_SERVER['HTTP_HOST'] ?? '';
         if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
-            define('BASE_URL', '/e-commerce-pro/');
+            // Deriva la subcarpeta del propio script para que un git worktree servido en
+            // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
+            // local; cae a /e-commerce-pro/ si no se puede determinar.
+            $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
+            if (preg_match('#^/([^/]+)#', $scriptDir, $m) && $m[1] !== 'views' && $m[1] !== 'api') {
+                define('BASE_URL', '/' . $m[1] . '/');
+            } else {
+                define('BASE_URL', '/e-commerce-pro/');
+            }
         } else {
             define('BASE_URL', '/');
         }
@@ -482,6 +515,14 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
 // Configurable por entorno para no dejarla fija en el código.
 define('SALE_INVENTORY_BYPASS_KEYWORD', getEnvVar('SALE_INVENTORY_BYPASS_KEYWORD', 'SININVENTARIO'));
 
+// Segundo factor por correo (código de 6 dígitos) para el login de staff admin/encargado.
+// Apagado por defecto: actívalo con STAFF_OTP_ENABLED=1 en el entorno cuando el envío de
+// correo esté disponible en el host.
+if (!defined('STAFF_OTP_ENABLED')) {
+    $staffOtpEnv = strtolower((string) (getEnvVar('STAFF_OTP_ENABLED', '0') ?? '0'));
+    define('STAFF_OTP_ENABLED', in_array($staffOtpEnv, ['1', 'true', 'on', 'yes'], true));
+}
+
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';
 const PRODUCTS_IMG_DIR = __DIR__ . '/../assets/img/products/';
@@ -557,6 +598,19 @@ function esc(string $value): string
         $value = (string)piiDecryptValue($value);
     }
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/**
+ * Devuelve el visitor_id anonimo persistido en cookie, o null si no existe
+ * (por ejemplo, si config.php se cargo despues de headers_sent()).
+ */
+function getVisitorId(): ?string
+{
+    $visitorId = $_COOKIE['visitor_id'] ?? null;
+    if (!is_string($visitorId) || !preg_match('/^[a-f0-9]{32}$/', $visitorId)) {
+        return null;
+    }
+    return $visitorId;
 }
 
 function rotateSessionIdIfNeeded(int $intervalSeconds = 600): void

@@ -5,7 +5,8 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-if (!isEncargado() && !isAdmin() && !isVendedor()) {
+// Permiso 'ver_notificaciones_pickup' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('ver_notificaciones_pickup') && !isEncargado() && !isAdmin() && !isVendedor()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -576,7 +577,7 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
+            <div class="pickup-notifs-header" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
                 <h4 style="margin:0;"><i class="material-icons left">notifications_active</i> Notificaciones Pickup</h4>
                 <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light">
                     <i class="material-icons left">dashboard</i> Volver al Dashboard
@@ -601,46 +602,25 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <div class="row">
-        <div class="col s6 m3">
-            <div class="card deep-orange lighten-1 white-text">
-                <div class="card-content">
-                    <span class="card-title">Nuevas</span>
-                    <p style="font-size:2.4rem; margin:0;"><?php echo (int)$counts['nueva']; ?></p>
+        <?php
+            $countCards = [
+                ['Nuevas', 'nueva', 'deep-orange lighten-1'],
+                ['Vistas', 'vista', 'amber darken-2'],
+                ['Apartadas', 'apartada', 'blue darken-2'],
+                ['Atendidas', 'atendida', 'green darken-2'],
+                ['Canceladas', 'cancelada', 'grey darken-2'],
+            ];
+        ?>
+        <?php foreach ($countCards as [$label, $key, $colorClass]): ?>
+            <div class="col s6 m4 l2">
+                <div class="card pickup-count-card <?php echo $colorClass; ?> white-text">
+                    <div class="card-content">
+                        <span class="card-title"><?php echo esc($label); ?></span>
+                        <p class="display-count" style="margin:0;"><?php echo (int)$counts[$key]; ?></p>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="col s6 m3">
-            <div class="card amber darken-2 white-text">
-                <div class="card-content">
-                    <span class="card-title">Vistas</span>
-                    <p style="font-size:2.4rem; margin:0;"><?php echo (int)$counts['vista']; ?></p>
-                </div>
-            </div>
-        </div>
-        <div class="col s6 m3">
-            <div class="card blue darken-2 white-text">
-                <div class="card-content">
-                    <span class="card-title">Apartadas</span>
-                    <p style="font-size:2.4rem; margin:0;"><?php echo (int)$counts['apartada']; ?></p>
-                </div>
-            </div>
-        </div>
-        <div class="col s6 m3">
-            <div class="card green darken-2 white-text">
-                <div class="card-content">
-                    <span class="card-title">Atendidas</span>
-                    <p style="font-size:2.4rem; margin:0;"><?php echo (int)$counts['atendida']; ?></p>
-                </div>
-            </div>
-        </div>
-        <div class="col s6 m3">
-            <div class="card grey darken-2 white-text">
-                <div class="card-content">
-                    <span class="card-title">Canceladas</span>
-                    <p style="font-size:2.4rem; margin:0;"><?php echo (int)$counts['cancelada']; ?></p>
-                </div>
-            </div>
-        </div>
+        <?php endforeach; ?>
     </div>
 
     <div class="row">
@@ -677,8 +657,8 @@ include __DIR__ . '/includes/header.php';
                     <?php if (empty($notificaciones)): ?>
                         <p class="center grey-text">No hay notificaciones pickup registradas.</p>
                     <?php else: ?>
-                    <div style="overflow-x:auto; -webkit-overflow-scrolling: touch;">
-                        <table class="striped highlight responsive-table">
+                    <div class="pickup-table-scroll">
+                        <table class="striped highlight pickup-list-table">
                             <thead>
                                 <tr>
                                     <th>Pedido</th>
@@ -722,7 +702,7 @@ include __DIR__ . '/includes/header.php';
                                         <td><?php echo esc((string)($n['cliente'] ?? 'N/A')); ?></td>
                                         <td>
                                             <span class="badge <?php echo $n['estado'] === 'nueva' ? 'deep-orange' : ($n['estado'] === 'vista' ? 'amber darken-2' : ($n['estado'] === 'apartada' ? 'blue darken-2' : ($n['estado'] === 'cancelada' ? 'grey darken-2' : 'green'))); ?> white-text" style="float:none;">
-                                                <?php echo strtoupper((string)$n['estado']); ?>
+                                                <?php echo esc(strtoupper((string)$n['estado'])); ?>
                                             </span>
                                             <?php if (stripos((string)($n['notas_seguimiento'] ?? ''), 'TRASLADO_INTERNO_2_3H') !== false): ?>
                                                 <div class="amber lighten-5 amber-text text-darken-4" style="margin-top:6px; padding:6px 8px; border-radius:6px; border-left:4px solid #ff8f00; font-size:.82rem;">
@@ -755,7 +735,7 @@ include __DIR__ . '/includes/header.php';
                                             <span class="grey-text">Hora automatica por estatus</span>
                                         </td>
                                         <td>
-                                            <div style="display:flex; gap:6px; flex-wrap:wrap; min-width:260px;">
+                                            <div class="pickup-seguimiento-actions">
                                                 <?php if ((string)$n['estado'] === 'nueva'): ?>
                                                     <form method="POST" style="margin:0;">
                                                         <?php echo csrfInput(); ?>
@@ -787,17 +767,17 @@ include __DIR__ . '/includes/header.php';
                                                 <?php endif; ?>
 
                                                 <?php if ($cancelSupportReady && in_array((string)$n['estado'], ['nueva', 'vista', 'apartada'], true)): ?>
-                                                    <form method="POST" data-cancel-form="1" style="margin:0; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                                                    <form method="POST" data-cancel-form="1" class="pickup-cancel-form" style="margin:0;">
                                                         <?php echo csrfInput(); ?>
                                                         <input type="hidden" name="accion" value="cancelar_pedido">
                                                         <input type="hidden" name="id_notificacion" value="<?php echo (int)$n['id_notificacion']; ?>">
-                                                        <select name="motivo_cancelacion" data-cancel-reason="1" class="browser-default" style="min-width:220px; max-width:280px; border:1px solid #9e9e9e; height:30px;">
+                                                        <select name="motivo_cancelacion" data-cancel-reason="1" class="browser-default" style="border:1px solid #9e9e9e;">
                                                             <option value="" selected disabled>Motivo de cancelacion</option>
                                                             <?php foreach ($cancelReasonOptions as $reasonKey => $reasonLabel): ?>
                                                                 <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
                                                             <?php endforeach; ?>
                                                         </select>
-                                                        <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Si seleccionas Otro, especifica aqui" style="min-width:230px; max-width:320px; display:none;" />
+                                                        <input type="text" name="motivo_cancelacion_otro" data-cancel-other="1" maxlength="180" placeholder="Si seleccionas Otro, especifica aqui" style="display:none;" />
                                                         <button type="submit" class="btn-small red darken-2 waves-effect waves-light">Cancelar y resurtir stock</button>
                                                     </form>
                                                 <?php endif; ?>
@@ -914,7 +894,8 @@ include __DIR__ . '/includes/header.php';
                         No se encontraron productos en detalle para este pedido.
                     </div>
                 <?php else: ?>
-                    <table class="striped responsive-table" style="margin-top:12px;">
+                    <div class="pickup-table-scroll" style="margin-top:12px;">
+                    <table class="striped pickup-detail-table">
                         <thead>
                             <tr>
                                 <th>Producto</th>
@@ -968,6 +949,7 @@ include __DIR__ . '/includes/header.php';
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                    </div>
 
                     <div class="right-align" style="margin-top:14px; padding:10px 12px; background:#f5f5f5; border-radius:6px;">
                         <strong>Total pedido:</strong> $<?php echo number_format((float)$pedidoMeta['total'], 2); ?>
@@ -985,6 +967,10 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <style>
+    .pickup-count-card .display-count {
+        font-size: 2.4rem;
+        line-height: 1.2;
+    }
     .pickup-order-link {
         color: #1a237e;
         text-decoration: underline;
@@ -1031,6 +1017,77 @@ include __DIR__ . '/includes/header.php';
         object-fit: contain;
         background: #fff;
         border: 1px solid #e0e0e0;
+    }
+
+    /* --- Tablas con scroll horizontal propio (no arrastran el ancho de la pagina) --- */
+    .pickup-table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .pickup-list-table {
+        min-width: 900px;
+    }
+    .pickup-detail-table {
+        min-width: 620px;
+    }
+
+    /* Acciones de seguimiento: en escritorio en linea, en movil apiladas y a todo el ancho. */
+    .pickup-seguimiento-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        min-width: 240px;
+    }
+    .pickup-cancel-form {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .pickup-cancel-form select,
+    .pickup-cancel-form input[type="text"] {
+        min-width: 200px;
+        max-width: 280px;
+        height: 32px;
+    }
+
+    @media only screen and (max-width: 600px) {
+        .pickup-notifs-header {
+            flex-direction: column;
+            align-items: flex-start !important;
+        }
+        .pickup-notifs-header .btn {
+            width: 100%;
+        }
+        /* Los contadores de estado: 2 por fila y numeros mas chicos para que quepan. */
+        .pickup-count-card .card-content {
+            padding: 12px;
+        }
+        .pickup-count-card .display-count {
+            font-size: 1.7rem !important;
+        }
+        /* Acciones de cada fila: botones y campos a todo el ancho, sin desbordar. */
+        .pickup-seguimiento-actions,
+        .pickup-cancel-form {
+            min-width: 0;
+            width: 100%;
+        }
+        .pickup-seguimiento-actions form,
+        .pickup-seguimiento-actions > a,
+        .pickup-seguimiento-actions .btn-small {
+            width: 100%;
+        }
+        .pickup-cancel-form select,
+        .pickup-cancel-form input[type="text"],
+        .pickup-cancel-form .btn-small {
+            width: 100%;
+            max-width: none;
+        }
+        /* Modales casi a pantalla completa en el telefono. */
+        .modal {
+            width: 96% !important;
+        }
     }
 </style>
 

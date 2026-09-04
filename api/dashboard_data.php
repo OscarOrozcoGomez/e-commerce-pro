@@ -167,8 +167,21 @@ try {
         // Stock bajo
         $stats['stock_bajo'] = $pdo->query("SELECT COUNT(*) as total FROM inventario_almacen ia JOIN productos p ON ia.id_producto = p.id_producto WHERE ia.cantidad_actual <= ia.stock_minimo AND p.estado = 'activo'")->fetch();
         
-        // Auditoría
-        $stats['incompletos'] = $pdo->query("SELECT COUNT(DISTINCT p.id_producto) as total FROM productos p LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto WHERE p.precio_venta <= 0 OR p.precio_costo <= 0 OR ia.id_producto IS NULL")->fetch();
+        // Auditoría: productos vendibles sin algun dato clave (mismo criterio que
+        // views/productos_incompletos.php). Se excluyen archivados y productos padre con
+        // variantes (esos no llevan precio/inventario propios).
+        $stats['incompletos'] = $pdo->query(
+            "SELECT COUNT(*) AS total FROM productos p
+             WHERE p.estado <> 'archivado'
+               AND NOT EXISTS (SELECT 1 FROM productos hijo WHERE hijo.id_padre = p.id_producto)
+               AND (
+                    p.precio_venta <= 0
+                    OR p.precio_costo <= 0
+                    OR p.sku IS NULL OR TRIM(p.sku) = ''
+                    OR p.codigo_barras IS NULL OR TRIM(p.codigo_barras) = ''
+                    OR NOT EXISTS (SELECT 1 FROM inventario_almacen ia WHERE ia.id_producto = p.id_producto)
+               )"
+        )->fetch();
 
         // Caducidades por lote (tolera que la tabla aún no exista)
         try {

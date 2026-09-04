@@ -12,211 +12,108 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy + Run Migrations
+    name: Deploy (rsync + migraciones) al VPS
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Validate required secrets
-        env:
-          FTP_HOST: ${{ secrets.FTP_HOST }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          FTP_PORT: ${{ secrets.FTP_PORT }}
-          FTP_PROTOCOL: ${{ secrets.FTP_PROTOCOL }}
-          PTF_HOST: ${{ secrets.PTF_HOST }}
-          PTF_USERNAME: ${{ secrets.PTF_USERNAME }}
-          PTF_PASSWORD: ${{ secrets.PTF_PASSWORD }}
-          PTF_PORT: ${{ secrets.PTF_PORT }}
-          PTF_PROTOCOL: ${{ secrets.PTF_PROTOCOL }}
-          MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
-          MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
+      - name: Guard - sin archivos de secretos rastreados
         run: |
-          # Prefer FTP_* names; keep PTF_* as legacy fallback.
-          RESOLVED_FTP_HOST="${FTP_HOST:-$PTF_HOST}"
-          RESOLVED_FTP_USERNAME="${FTP_USERNAME:-$PTF_USERNAME}"
-          RESOLVED_FTP_PASSWORD="${FTP_PASSWORD:-$PTF_PASSWORD}"
-          RESOLVED_FTP_PORT="${FTP_PORT:-${PTF_PORT:-21}}"
-          RESOLVED_FTP_PROTOCOL="${FTP_PROTOCOL:-${PTF_PROTOCOL:-ftp}}"
+          fail=0
+          for f in \
+            core/app_secrets.php core/app_secrets.production.php core/app_secrets.qa.php \
+            core/app_secrets.local.php app_secrets.php .app_secrets.php views/.app_secrets.php
+          do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "::error::$f esta rastreado en git y no debe estarlo"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] || exit 1
 
-          if [ -n "$PTF_HOST" ] || [ -n "$PTF_USERNAME" ] || [ -n "$PTF_PASSWORD" ]; then
-            echo "::warning::Using legacy PTF_* secrets. Prefer FTP_* secrets going forward."
-          fi
+      - name: Setup PHP 8.2 + Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
 
-          export RESOLVED_FTP_HOST RESOLVED_FTP_USERNAME RESOLVED_FTP_PASSWORD
-          export RESOLVED_FTP_PORT RESOLVED_FTP_PROTOCOL
+      - name: composer install (produccion, sin dev)
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
 
+      - name: Validar secrets de despliegue
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
           missing=0
-          for key in RESOLVED_FTP_HOST RESOLVED_FTP_USERNAME RESOLVED_FTP_PASSWORD MIGRATIONS_URL MIGRATIONS_DEPLOY_TOKEN; do
-            if [ -z "${!key}" ]; then
-              case "$key" in
-                RESOLVED_FTP_HOST)
-                  echo "::error::Missing required secret: FTP_HOST (or legacy PTF_HOST)"
-                  ;;
-                RESOLVED_FTP_USERNAME)
-                  echo "::error::Missing required secret: FTP_USERNAME (or legacy PTF_USERNAME)"
-                  ;;
-                RESOLVED_FTP_PASSWORD)
-                  echo "::error::Missing required secret: FTP_PASSWORD (or legacy PTF_PASSWORD)"
-                  ;;
-                *)
-                  echo "::error::Missing required secret: $key"
-                  ;;
-              esac
-              missing=1
-            fi
+          for k in SSH_HOST SSH_USER SSH_PORT SSH_KEY SSH_KNOWN_HOSTS DEPLOY_PATH; do
+            if [ -z "${!k}" ]; then echo "::error::Falta secret: $k"; missing=1; fi
           done
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
+          [ "$missing" -eq 0 ] || exit 1
 
-          {
-            echo "FTP_HOST_RESOLVED=$RESOLVED_FTP_HOST"
-            echo "FTP_USERNAME_RESOLVED=$RESOLVED_FTP_USERNAME"
-            echo "FTP_PASSWORD_RESOLVED=$RESOLVED_FTP_PASSWORD"
-            echo "FTP_PORT_RESOLVED=$RESOLVED_FTP_PORT"
-            echo "FTP_PROTOCOL_RESOLVED=$RESOLVED_FTP_PROTOCOL"
-          } >> "$GITHUB_ENV"
-
-      - name: Deploy files via FTP (attempt 1)
-        id: ftp_attempt_1
-        continue-on-error: true
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
-        with:
-          server: ${{ env.FTP_HOST_RESOLVED }}
-          username: ${{ env.FTP_USERNAME_RESOLVED }}
-          password: ${{ env.FTP_PASSWORD_RESOLVED }}
-          port: ${{ env.FTP_PORT_RESOLVED }}
-          protocol: ${{ env.FTP_PROTOCOL_RESOLVED }}
-          server-dir: /public_html/
-          timeout: 120000
-          exclude: |
-            **/.git*/**
-            **/.github/**
-            .ftp-deploy-sync-state.json
-            node_modules/**
-            package.json
-            package-lock.json
-            playwright.config.ts
-            tsconfig.json
-            playwright-report/**
-            test-results/**
-            tests/**
-            .mcp.json
-            scripts/seed_e2e_test_data.php
-            scripts/seed_e2e_staff_accounts.php
-
-      - name: Wait before FTP retry
-        if: steps.ftp_attempt_1.outcome == 'failure'
-        run: sleep 20
-
-      - name: Deploy files via FTP (attempt 2)
-        id: ftp_attempt_2
-        if: steps.ftp_attempt_1.outcome == 'failure'
-        continue-on-error: true
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
-        with:
-          server: ${{ env.FTP_HOST_RESOLVED }}
-          username: ${{ env.FTP_USERNAME_RESOLVED }}
-          password: ${{ env.FTP_PASSWORD_RESOLVED }}
-          port: ${{ env.FTP_PORT_RESOLVED }}
-          protocol: ${{ env.FTP_PROTOCOL_RESOLVED }}
-          server-dir: /public_html/
-          timeout: 120000
-          exclude: |
-            **/.git*/**
-            **/.github/**
-            .ftp-deploy-sync-state.json
-            node_modules/**
-            package.json
-            package-lock.json
-            playwright.config.ts
-            tsconfig.json
-            playwright-report/**
-            test-results/**
-            tests/**
-            .mcp.json
-            scripts/seed_e2e_test_data.php
-            scripts/seed_e2e_staff_accounts.php
-
-      - name: Wait before FTP retry (final)
-        if: steps.ftp_attempt_1.outcome == 'failure' && steps.ftp_attempt_2.outcome == 'failure'
-        run: sleep 20
-
-      - name: Deploy files via FTP (attempt 3)
-        id: ftp_attempt_3
-        if: steps.ftp_attempt_1.outcome == 'failure' && steps.ftp_attempt_2.outcome == 'failure'
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
-        with:
-          server: ${{ env.FTP_HOST_RESOLVED }}
-          username: ${{ env.FTP_USERNAME_RESOLVED }}
-          password: ${{ env.FTP_PASSWORD_RESOLVED }}
-          port: ${{ env.FTP_PORT_RESOLVED }}
-          protocol: ${{ env.FTP_PROTOCOL_RESOLVED }}
-          server-dir: /public_html/
-          timeout: 120000
-          exclude: |
-            **/.git*/**
-            **/.github/**
-            .ftp-deploy-sync-state.json
-            node_modules/**
-            package.json
-            package-lock.json
-            playwright.config.ts
-            tsconfig.json
-            playwright-report/**
-            test-results/**
-            tests/**
-            .mcp.json
-            scripts/seed_e2e_test_data.php
-            scripts/seed_e2e_staff_accounts.php
-
-      - name: Trigger remote migrations
+      - name: Configurar clave SSH
         env:
-          MIGRATIONS_URL: ${{ secrets.MIGRATIONS_URL }}
-          MIGRATIONS_DEPLOY_TOKEN: ${{ secrets.MIGRATIONS_DEPLOY_TOKEN }}
+          SSH_KEY_RAW: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
         run: |
-          max_attempts=5
-          attempt=0
-          http_code=""
-          response=""
-          body_file="$RUNNER_TEMP/migration_response.json"
-
-          while [ $attempt -lt $max_attempts ]; do
-            attempt=$((attempt + 1))
-            echo "Migration attempt $attempt of $max_attempts..."
-
-            http_code=$(curl -sS \
-              --connect-timeout 30 \
-              --max-time 360 \
-              -o "$body_file" \
-              -w '%{http_code}' \
-              -X POST "$MIGRATIONS_URL" \
-              -H "Content-Type: application/json" \
-              -H "X-Migrations-Token: $MIGRATIONS_DEPLOY_TOKEN" \
-              -d '{}')
-            curl_exit=$?
-            response=$(cat "$body_file" 2>/dev/null || echo "")
-
-            if [ "$curl_exit" -eq 0 ] && [ "$http_code" = "200" ] && echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-              break
-            fi
-
-            echo "Attempt $attempt failed (curl exit $curl_exit, HTTP ${http_code:-none}): $response"
-            if [ $attempt -lt $max_attempts ]; then
-              echo "Waiting 20s before retry..."
-              sleep 20
-            fi
-          done
-
-          echo "Migration response (HTTP ${http_code:-none}):"
-          echo "$response"
-
-          if [ "$http_code" != "200" ] || ! echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-            echo "::error::Remote migrations failed after $attempt attempt(s) (last HTTP status: ${http_code:-none})"
+          mkdir -p "$HOME/.ssh"
+          KEY="$HOME/.ssh/deploy_key"
+          if printf '%s' "$SSH_KEY_RAW" | base64 -d > "$KEY" 2>/dev/null \
+             && ssh-keygen -y -f "$KEY" >/dev/null 2>&1; then
+            echo "clave SSH: decodificada de base64"
+          else
+            printf '%s\n' "$SSH_KEY_RAW" > "$KEY"
+            echo "clave SSH: tratada como PEM crudo"
+          fi
+          chmod 600 "$KEY"
+          if ! ssh-keygen -y -f "$KEY" >/dev/null 2>&1; then
+            echo "::error::SSH_KEY invalida (ni base64 ni PEM validos). Regenera la llave y re-sube el secret."
             exit 1
           fi
+          echo "clave SSH valida"
+
+          KH="$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$KH"
+          if ssh-keygen -l -f "$KH" >/dev/null 2>&1; then
+            echo "known_hosts: desde secret"
+          else
+            ssh-keyscan -t ed25519,rsa,ecdsa -p "${SSH_PORT}" "${SSH_HOST}" > "$KH" 2>/dev/null
+            echo "known_hosts: via ssh-keyscan"
+          fi
+          chmod 644 "$KH"
+          test -s "$KH" || { echo "::error::known_hosts quedo vacio"; exit 1; }
+
+      - name: Rsync al VPS
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          rsync -rlptz --delete \
+            --exclude-from=deploy-exclude.txt \
+            -e "ssh -i $HOME/.ssh/deploy_key -p ${SSH_PORT} -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
+            ./ "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/"
+
+      - name: Post-deploy en el VPS (permisos + migraciones)
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -p "${SSH_PORT}" \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "${SSH_USER}@${SSH_HOST}" "DEPLOY_PATH='${DEPLOY_PATH}' bash -s" < scripts/deploy_remote.sh

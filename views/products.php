@@ -431,8 +431,8 @@ include __DIR__ . '/includes/header.php';
                         if (url.startsWith('//')) url = 'https:' + url;
                         
                         // Validar que sea una URL absoluta, que tenga extensión de imagen y no sea un placeholder
-                        const esValida = url.startsWith('http') && 
-                                         /\.(jpg|jpeg|png|webp|gif)/i.test(url) && 
+                        const esValida = url.startsWith('http') &&
+                                         /\.(jpg|jpeg|png|webp|gif|avif|svg)/i.test(url) &&
                                          !url.includes('no-image') &&
                                          !url.includes('no-product') && 
                                          !url.includes('placeholder');
@@ -766,7 +766,7 @@ include __DIR__ . '/includes/header.php';
         }
         
         // 3. Ruta de archivo (solo si tiene extensión de imagen o "/" y NO es base64)
-        if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
+        if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg|avif)$/i.test(imgData)) {
             const cleanPath = imgData.replace(/^\/+/, '');
             const finalUrl = baseUrl + 'assets/img/products/' + cleanPath;
             return finalUrl;

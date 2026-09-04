@@ -7,7 +7,10 @@ require_once __DIR__ . '/../core/ai_assistant.php';
 
 header('Content-Type: application/json');
 
-if (!isAuthenticated() || !isAdmin()) {
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
+// Permiso 'gestionar_asistente_ia' abre este endpoint; el admin entra siempre (short-circuit).
+if (!isAuthenticated() || (!hasPermission('gestionar_asistente_ia') && !isAdmin())) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado.']);
     exit;

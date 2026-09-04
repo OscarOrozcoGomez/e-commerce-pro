@@ -4,11 +4,13 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
+require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
-if (!canManageDeliveryOrders()) {
+// Fase 4: el permiso 'asignar_entregas' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('asignar_entregas') && !canManageDeliveryOrders()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -44,6 +46,11 @@ $safeDecryptValue = static function (?string $value, string $fallback = ''): str
     }
     return $decrypted;
 };
+
+// Agrupación de tarjetas por día: la lógica vive en core/entrega_cambio_utils.php (con
+// pruebas unitarias). Aquí solo se dejan alias cortos para las llamadas del template.
+$formatDiaLabel = static fn (?string $fecha): string => deliveryFormatDiaLabel($fecha);
+$diaKey = static fn (?string $fecha): string => deliveryDiaKey($fecha);
 
 // Procesar asignación
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
@@ -347,7 +354,11 @@ try {
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN usuarios r ON p.id_repartidor = r.id_usuario
             WHERE p.id_repartidor IS NOT NULL{$notPickupFilter}{$almacenFilter}
-            ORDER BY (p.estado = 'cancelado') ASC, p.fecha_entrega_programada DESC, p.fecha_creacion DESC";
+            ORDER BY (p.fecha_entrega_programada IS NULL) ASC,
+                     DATE(p.fecha_entrega_programada) DESC,
+                     (p.estado = 'cancelado') ASC,
+                     p.fecha_entrega_programada DESC,
+                     p.fecha_creacion DESC";
     $stmtAsignados = $pdo->prepare($sqlAsignados);
     $stmtAsignados->execute($scopeAlmacenId !== null ? [':id_almacen' => $scopeAlmacenId] : []);
     $pedidosAsignados = $stmtAsignados->fetchAll();
@@ -443,8 +454,17 @@ include __DIR__ . '/includes/header.php';
                     <?php if (empty($pedidos)): ?>
                         <p class="center-align grey-text">No hay pedidos pendientes de asignación por ahora.</p>
                     <?php else: ?>
+                        <p class="grey-text" style="font-size:0.85rem; margin-top:0;">Agrupados por día en que se registró el pedido.</p>
                         <div class="row assign-deliveries-grid">
+                            <?php $diaActualPorAsignar = null; ?>
                             <?php foreach ($pedidos as $p): ?>
+                                <?php $diaPedido = $diaKey($p['fecha_creacion'] ?? ''); ?>
+                                <?php if ($diaPedido !== $diaActualPorAsignar): ?>
+                                    <?php $diaActualPorAsignar = $diaPedido; ?>
+                                    <div class="col s12 assign-dia-header">
+                                        <h6><i class="material-icons tiny">event</i> <?php echo esc($formatDiaLabel($p['fecha_creacion'] ?? '')); ?></h6>
+                                    </div>
+                                <?php endif; ?>
                                 <div class="col s12 m6 l4">
                                     <div class="card assign-delivery-card">
                                         <div class="card-content">
@@ -527,7 +547,9 @@ include __DIR__ . '/includes/header.php';
                                 'cancelado' => ['Cancelado', '#757575'],
                             ];
                         ?>
+                        <p class="grey-text" style="font-size:0.85rem; margin-top:0;">Agrupadas por día de entrega programado (las más recientes primero).</p>
                         <div class="row assign-deliveries-grid">
+                            <?php $diaActualAsignadas = null; ?>
                             <?php foreach ($pedidosAsignados as $pa): ?>
                                 <?php
                                     $estadoPa = (string)($pa['estado'] ?? '');
@@ -538,7 +560,14 @@ include __DIR__ . '/includes/header.php';
                                     $puedeCancelarAsignado = in_array($estadoPa, ['pendiente_pago', 'pagado', 'en_reparto'], true);
                                     $itemsPa = $detallesPorPedidoAsignado[(int)$pa['id_pedido']] ?? [];
                                     $entregadosRestantesPa = count(array_filter($itemsPa, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
+                                    $diaAsignada = $diaKey($pa['fecha_entrega_programada'] ?? '');
                                 ?>
+                                <?php if ($diaAsignada !== $diaActualAsignadas): ?>
+                                    <?php $diaActualAsignadas = $diaAsignada; ?>
+                                    <div class="col s12 assign-dia-header">
+                                        <h6><i class="material-icons tiny">local_shipping</i> <?php echo esc($formatDiaLabel($pa['fecha_entrega_programada'] ?? '')); ?></h6>
+                                    </div>
+                                <?php endif; ?>
                                 <div class="col s12 m6 l4">
                                     <div class="card assign-delivery-card">
                                         <div class="card-content">
@@ -621,13 +650,12 @@ include __DIR__ . '/includes/header.php';
                                                     <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
                                                     <input type="hidden" name="accion" value="agregar_producto_pedido">
                                                     <label class="assign-delivery-label">Agregar producto</label>
-                                                    <select name="id_producto" required class="browser-default assign-delivery-select">
-                                                        <option value="">-- Seleccionar producto --</option>
-                                                        <?php foreach ($productosActivos as $prodOpt): ?>
-                                                            <?php $nombreProdOpt = (string)$prodOpt['nombre'] . (!empty($prodOpt['nombre_variante']) ? ' - ' . (string)$prodOpt['nombre_variante'] : ''); ?>
-                                                            <option value="<?php echo (int)$prodOpt['id_producto']; ?>"><?php echo esc($nombreProdOpt); ?> ($<?php echo number_format((float)$prodOpt['precio_venta'], 2); ?>)</option>
-                                                        <?php endforeach; ?>
-                                                    </select>
+                                                    <div class="assign-prod-combo">
+                                                        <input type="text" class="assign-prod-combo-search" placeholder="Escribe para buscar producto..." autocomplete="off">
+                                                        <input type="hidden" name="id_producto" class="assign-prod-combo-id">
+                                                        <ul class="assign-prod-combo-list" hidden></ul>
+                                                        <p class="assign-prod-combo-error red-text" hidden>Selecciona un producto de la lista.</p>
+                                                    </div>
                                                     <div style="display:flex; gap:8px; align-items:flex-end; margin-top:8px;">
                                                         <div style="flex:1;">
                                                             <label class="assign-delivery-label" style="margin-top:0;">Cantidad</label>
@@ -654,6 +682,76 @@ include __DIR__ . '/includes/header.php';
 
 <style>
     .assign-deliveries-grid { margin-top: 8px; }
+    .assign-dia-header { margin: 10px 0 2px; }
+    .assign-dia-header h6 {
+        margin: 0;
+        padding: 6px 0;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #37474f;
+        border-bottom: 2px solid #cfd8dc;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .assign-dia-header h6 i { color: #607d8b; }
+    .assign-dia-header:first-child { margin-top: 0; }
+
+    /* Materialize pone overflow:hidden en .card, lo que recortaria la lista desplegable
+       del buscador de productos (esta cerca del borde inferior de la tarjeta). */
+    .assign-delivery-card { overflow: visible; }
+    .assign-prod-combo { position: relative; }
+    input.assign-prod-combo-search {
+        width: 100%;
+        height: 44px;
+        border: 1px solid #cfd8dc;
+        border-radius: 4px;
+        padding: 0 10px;
+        box-sizing: border-box;
+        margin: 0;
+        background: #fff;
+    }
+    input.assign-prod-combo-search:focus {
+        border-color: #3f51b5;
+        box-shadow: 0 0 0 1px #3f51b5;
+        outline: none;
+    }
+    .assign-prod-combo-list {
+        position: absolute;
+        z-index: 30;
+        left: 0;
+        right: 0;
+        top: 100%;
+        max-height: 240px;
+        overflow-y: auto;
+        margin: 2px 0 0;
+        padding: 0;
+        list-style: none;
+        background: #fff;
+        border: 1px solid #cfd8dc;
+        border-radius: 4px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.14);
+    }
+    .assign-prod-combo-list[hidden] { display: none; }
+    .assign-prod-combo-list li {
+        padding: 8px 10px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        border-bottom: 1px solid #eceff1;
+    }
+    .assign-prod-combo-list li:last-child { border-bottom: 0; }
+    .assign-prod-combo-list li:hover { background: #eceff1; }
+    .assign-prod-combo-list .assign-prod-combo-empty {
+        color: #90a4ae;
+        cursor: default;
+    }
+    .assign-prod-combo-list .assign-prod-combo-empty:hover { background: transparent; }
+    .assign-prod-combo-precio { color: #2e7d32; font-weight: 600; white-space: nowrap; }
+    .assign-prod-combo-error { font-size: 0.8rem; margin: 4px 0 0; }
+    .assign-prod-combo-error[hidden] { display: none; }
     .assign-delivery-to-pickup-btn {
         border: 1px solid #607d8b !important;
         color: #455a64 !important;
@@ -745,5 +843,102 @@ include __DIR__ . '/includes/header.php';
         .assign-delivery-numero { font-size: 1.1rem; }
     }
 </style>
+
+<script>
+// Buscador de productos para "Agregar producto" en la pestaña Asignadas. El catalogo se
+// envia una sola vez como arreglo JS y cada tarjeta lo filtra al escribir (sin acentos,
+// sin distinguir mayusculas). El id elegido va en el input hidden name="id_producto".
+document.addEventListener('DOMContentLoaded', function () {
+    var CATALOGO = <?php echo json_encode(array_map(static function ($prodOpt) {
+        $nombre = (string)$prodOpt['nombre'] . (!empty($prodOpt['nombre_variante']) ? ' - ' . (string)$prodOpt['nombre_variante'] : '');
+        return ['id' => (int)$prodOpt['id_producto'], 'nombre' => $nombre, 'precio' => (float)$prodOpt['precio_venta']];
+    }, $productosActivos), JSON_UNESCAPED_UNICODE); ?>;
+
+    function normaliza(txt) {
+        return (txt || '').toString().toLowerCase()
+            .replace(/[áàäâã]/g, 'a').replace(/[éèëê]/g, 'e').replace(/[íìïî]/g, 'i')
+            .replace(/[óòöôõ]/g, 'o').replace(/[úùüû]/g, 'u').replace(/ñ/g, 'n');
+    }
+    function escaparHtml(txt) {
+        return (txt || '').replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    document.querySelectorAll('.assign-prod-combo').forEach(function (combo) {
+        var input = combo.querySelector('.assign-prod-combo-search');
+        var hidden = combo.querySelector('.assign-prod-combo-id');
+        var list = combo.querySelector('.assign-prod-combo-list');
+        var errEl = combo.querySelector('.assign-prod-combo-error');
+        var form = combo.closest('form');
+        if (!input || !hidden || !list) { return; }
+
+        function cerrar() {
+            list.hidden = true;
+            list.innerHTML = '';
+        }
+        function abrir(filtro) {
+            var q = normaliza(filtro);
+            var resultados = CATALOGO.filter(function (p) {
+                return q === '' || normaliza(p.nombre).indexOf(q) !== -1;
+            }).slice(0, 50);
+
+            if (resultados.length === 0) {
+                list.innerHTML = '<li class="assign-prod-combo-empty">Sin coincidencias</li>';
+                list.hidden = false;
+                return;
+            }
+            list.innerHTML = resultados.map(function (p) {
+                return '<li data-id="' + p.id + '" data-nombre="' + escaparHtml(p.nombre) + '">'
+                    + '<span>' + escaparHtml(p.nombre) + '</span>'
+                    + '<span class="assign-prod-combo-precio">$' + p.precio.toFixed(2) + '</span></li>';
+            }).join('');
+            list.hidden = false;
+        }
+
+        input.addEventListener('focus', function () { abrir(input.value); });
+        input.addEventListener('input', function () {
+            hidden.value = '';
+            abrir(input.value);
+        });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { cerrar(); return; }
+            if (e.key === 'Enter' && !list.hidden) {
+                var primera = list.querySelector('li[data-id]');
+                if (primera) {
+                    e.preventDefault();
+                    hidden.value = primera.getAttribute('data-id');
+                    input.value = primera.getAttribute('data-nombre') || '';
+                    if (errEl) { errEl.hidden = true; }
+                    cerrar();
+                }
+            }
+        });
+        // mousedown (no click) para ganarle al blur del input y no perder la seleccion.
+        list.addEventListener('mousedown', function (e) {
+            var li = e.target.closest('li[data-id]');
+            if (!li) { return; }
+            e.preventDefault();
+            hidden.value = li.getAttribute('data-id');
+            input.value = li.getAttribute('data-nombre') || '';
+            if (errEl) { errEl.hidden = true; }
+            cerrar();
+        });
+        input.addEventListener('blur', function () {
+            setTimeout(cerrar, 150);
+        });
+
+        if (form) {
+            form.addEventListener('submit', function (e) {
+                if (!hidden.value) {
+                    e.preventDefault();
+                    if (errEl) { errEl.hidden = false; }
+                    input.focus();
+                }
+            });
+        }
+    });
+});
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

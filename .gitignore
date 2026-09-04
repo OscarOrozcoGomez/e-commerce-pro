@@ -21,6 +21,11 @@ app_error.log
 /vendor/
 composer.phar
 
+# Dependencias y artefactos de las pruebas E2E de Playwright (viven en la rama automation)
+/node_modules/
+/test-results/
+/playwright-report/
+
 # Cache local de PHPUnit
 .phpunit.cache/
 
@@ -41,16 +46,28 @@ app_secrets.*.env
 # Bloqueo explícito de secretos locales/qa para evitar subidas accidentales
 core/app_secrets.qa.php
 core/app_secrets.local.php
+core/app_secrets.production.php
 app_secrets.qa.php
 app_secrets.local.php
 .app_secrets.qa.php
 .app_secrets.local.php
 
+# Plantilla de secretos que estuvo rastreada por error (migración a VPS)
+views/.app_secrets.php
+
+# Estado del viejo deploy por FTP (SamKirkland/FTP-Deploy-Action)
+.ftp-deploy-sync-state.json
+
 # Diagnosticos locales temporales
 scripts/_img_diag.php
 scripts/_img_diag_after.php
 scripts/_img_diag_after_report.txt
+scripts/_img_audit.php
 scripts/_tmp_*.php
+
+# Scripts de un solo uso para sembrar/probar datos de prueba en local (ej. seed de
+# Comportamiento en el Sitio) -- generan datos, no logica; nunca se suben al repo.
+scripts/dev_*.php
 
 # Guia interna local, no subir al repo
 /VENTA_SIN_INVENTARIO.md
@@ -64,6 +81,10 @@ scripts/_tmp_*.php
 
 # Runbooks privados locales (no subir al repo)
 /private/
+
+# Documentos internos de las nuevas iniciativas de ventas/marketing
+# (atribucion, feed, referidos, stock+campanas) - solo para uso local/negocio
+/docs/features/
 
 # Payloads de prueba locales (JSON) - no subir al repo
 /test_payloads/

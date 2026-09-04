@@ -70,6 +70,41 @@ final class ClienteDireccionUtilsTest extends TestCase
         $this->assertFalse($result['success']);
     }
 
+    public function testMapsLinkEsValidoSoloAceptaHttpHttps(): void
+    {
+        $this->assertTrue(direccionMapsLinkEsValido('https://maps.google.com/?q=1,2'));
+        $this->assertTrue(direccionMapsLinkEsValido('  http://goo.gl/maps/abc  '));
+        $this->assertTrue(direccionMapsLinkEsValido('HTTPS://www.google.com/maps'));
+
+        $this->assertFalse(direccionMapsLinkEsValido(null));
+        $this->assertFalse(direccionMapsLinkEsValido(''));
+        $this->assertFalse(direccionMapsLinkEsValido('maps.google.com/?q=1,2'));
+        $this->assertFalse(direccionMapsLinkEsValido('javascript:alert(1)'));
+        $this->assertFalse(direccionMapsLinkEsValido('data:text/html,<script>'));
+    }
+
+    public function testGoogleMapsHrefUsaElLinkGuardadoCuandoEsHttp(): void
+    {
+        $this->assertSame(
+            'https://maps.app.goo.gl/xyz',
+            direccionGoogleMapsHref('  https://maps.app.goo.gl/xyz  ', 'Calle Falsa 123')
+        );
+    }
+
+    public function testGoogleMapsHrefArmaBusquedaCuandoNoHayLinkValido(): void
+    {
+        $this->assertSame(
+            'https://www.google.com/maps/search/?api=1&query=Calle%20Falsa%20123%2C%20Col.%20Centro',
+            direccionGoogleMapsHref(null, 'Calle Falsa 123, Col. Centro')
+        );
+
+        // Un maps_link con esquema peligroso NO se usa como href: cae a la busqueda por texto.
+        $this->assertSame(
+            'https://www.google.com/maps/search/?api=1&query=Av.%20Siempre%20Viva%20742',
+            direccionGoogleMapsHref('javascript:alert(1)', '  Av. Siempre Viva 742  ')
+        );
+    }
+
     private function seedDireccion(int $idDireccion, int $idCliente, string $alias, string $direccion): void
     {
         $this->pdo->prepare('INSERT INTO cliente_direcciones (id_direccion, id_cliente, alias, direccion) VALUES (?, ?, ?, ?)')

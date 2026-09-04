@@ -46,6 +46,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="<?php echo BASE_URL; ?>assets/css/admin-responsive.css">
     <style>
         html {
             -webkit-text-size-adjust: 100%;
@@ -363,10 +364,15 @@
                             <li><a href="<?php echo BASE_URL; ?>views/manage_blogs.php"><i class="material-icons">book</i> Gestionar Blogs</a></li>
                         <?php endif; ?>
                         
-                        <?php if (isAdmin()): ?>
+                        <?php if (hasPermission('gestionar_usuarios')): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/users.php"><i class="material-icons">people</i> Usuarios</a></li>
+                            <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
                         <?php endif; ?>
-                        
+
+                        <?php if (isAdmin()): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
+                        <?php endif; ?>
+
                         <li class="divider"></li>
                         <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text text-darken-1"><i class="material-icons red-text">exit_to_app</i> Cerrar Sesión</a></li>
                     </ul>
@@ -1016,12 +1022,89 @@
                     credentials: 'same-origin'
                 }).catch(() => {});
             }
-            
-            // 1. Registrar Visita a la página
-            sendActivity({
-                tipo: 'visit',
-                url: window.location.href
-            });
+
+            // Otras paginas (ej. handleAddToCart en catalogo.php) usan esto para reportar
+            // clics con contexto que el listener genérico de abajo no puede inferir del DOM
+            // (ej. id_producto en un boton "Agregar al Carrito" sin id fijo en el HTML).
+            window.bbTrackEvent = sendActivity;
+
+            // Id unico por carga de pagina (no por visitante -- ver getVisitorId() para eso).
+            // Enlaza el evento 'visit' de abajo con el evento 'duration' que se manda al
+            // salir de la pagina, para saber cuanto tiempo estuvo viendola el visitante.
+            function makePageviewId() {
+                const bytes = new Uint8Array(16);
+                if (window.crypto && window.crypto.getRandomValues) {
+                    window.crypto.getRandomValues(bytes);
+                } else {
+                    for (let i = 0; i < bytes.length; i++) {
+                        bytes[i] = Math.floor(Math.random() * 256);
+                    }
+                }
+                return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+            const pageviewId = makePageviewId();
+
+            // 1. Registrar Visita a la página, incluyendo atribucion de marketing
+            // (persistAttribution() ya la guardo en localStorage si la URL trajo UTM/gclid).
+            // El referrer se lee siempre en este momento, no solo cuando hay UTM, para que
+            // el trafico organico/referido puro tambien quede clasificado.
+            (function() {
+                const visitPayload = {
+                    tipo: 'visit',
+                    url: window.location.href,
+                    referrer: document.referrer || '',
+                    pageview_id: pageviewId
+                };
+
+                try {
+                    const stored = localStorage.getItem('bb_marketing_attribution');
+                    if (stored) {
+                        const attribution = JSON.parse(stored);
+                        ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'wbraid', 'gbraid', 'landing_page'].forEach(function(key) {
+                            if (attribution && attribution[key]) {
+                                visitPayload[key] = attribution[key];
+                            }
+                        });
+                        if (attribution && attribution.referrer && !visitPayload.referrer) {
+                            visitPayload.referrer = attribution.referrer;
+                        }
+                    }
+                } catch (e) {
+                    // No bloquear el registro de la visita si localStorage falla.
+                }
+
+                sendActivity(visitPayload);
+            })();
+
+            // 1b. Medir cuanto tiempo estuvo la pagina visible (no solo abierta -- una
+            // pestaña en segundo plano no cuenta) y mandarlo al salir. Comportamiento en
+            // el Sitio: que tanto se detiene la gente a ver un producto/pagina.
+            (function() {
+                let visibleSinceMs = document.visibilityState === 'visible' ? Date.now() : null;
+                let accumulatedMs = 0;
+
+                function flush() {
+                    if (visibleSinceMs !== null) {
+                        accumulatedMs += Date.now() - visibleSinceMs;
+                        visibleSinceMs = null;
+                    }
+                    const segundos = Math.round(accumulatedMs / 1000);
+                    if (segundos > 0) {
+                        sendActivity({ tipo: 'duration', pageview_id: pageviewId, segundos: segundos });
+                    }
+                }
+
+                document.addEventListener('visibilitychange', function() {
+                    if (document.visibilityState === 'visible') {
+                        visibleSinceMs = Date.now();
+                    } else {
+                        // Manda el acumulado parcial en cada cambio a oculto, no solo al
+                        // cerrar: en movil, 'pagehide' no siempre dispara de forma confiable.
+                        flush();
+                    }
+                });
+                window.addEventListener('pagehide', flush);
+            })();
 
             // 2. Registrar Clics en elementos interactivos
             document.addEventListener('click', function(e) {

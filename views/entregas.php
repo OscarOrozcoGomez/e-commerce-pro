@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
+require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
@@ -72,6 +73,11 @@ $productRejectReasonOptions = [
     'otro' => 'Otro',
 ];
 
+// Motivos preestablecidos para cuando el repartidor confirma la entrega SIN foto de
+// evidencia (se le olvido, fallo la camara, etc). Definidos en core/entrega_cambio_utils.php
+// junto con deliveryValidateSinEvidencia() para poder cubrirlos con pruebas unitarias.
+$sinEvidenciaReasonOptions = deliverySinEvidenciaReasonOptions();
+
 // Estados de pedido en los que el repartidor todavia puede editar la lista de productos
 // (definidos junto a dbMarkProductoNoEntregado en core/entrega_item_utils.php).
 $pedidoEntregaEditableEstados = PEDIDO_ENTREGA_EDITABLE_ESTADOS;
@@ -110,20 +116,66 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                     $tieneEvidencia = ((int)$stmtEv->fetchColumn()) > 0;
                 }
 
-                if (!$tieneEvidencia) {
-                    $error = 'Sube una foto de evidencia de la entrega antes de confirmar el cobro.';
+                // Si no hay foto, el repartidor puede continuar SOLO si marca explicitamente
+                // "entregar sin evidencia" y da un motivo (se le olvido, fallo la camara, etc).
+                // La validacion vive en deliveryValidateSinEvidencia() (con pruebas unitarias).
+                $sinEv = deliveryValidateSinEvidencia($_POST);
+
+                if (!$tieneEvidencia && !$sinEv['omitir']) {
+                    $error = 'Sube una foto de evidencia de la entrega, o marca "Entregar sin evidencia" e indica el motivo.';
+                } elseif (!$tieneEvidencia && !$sinEv['valid']) {
+                    $error = $sinEv['error'];
                 } else {
+                    $entregaSinEvidencia = !$tieneEvidencia && $sinEv['omitir'];
                     // Confirma entrega y cobro simultaneamente (pago contra entrega)
                     $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                     $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                     if ($stmt->rowCount() > 0) {
-                        logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
-                        $success = 'Pedido entregado y cobrado correctamente.';
-                        $justDeliveredPedidoId = $id_pedido;
+                        if ($entregaSinEvidencia) {
+                            // Marcador en observaciones para que admin/encargado lo vea sin abrir
+                            // el log de auditoria (mismo estilo que otros marcadores de esta pantalla).
+                            $marcadorSinEv = ' | SIN_EVIDENCIA_ENTREGA: ' . date('Y-m-d H:i')
+                                . ' por ' . (string)($usuario['nombre'] ?? 'repartidor')
+                                . ' | Motivo: ' . $sinEv['motivo_etiqueta'];
+                            $stmtObs = $pdo->prepare("UPDATE pedidos SET observaciones = CONCAT(COALESCE(observaciones, ''), ?) WHERE id_pedido = ?");
+                            $stmtObs->execute([$marcadorSinEv, $id_pedido]);
+                            logAudit('PEDIDO_ENTREGADO_SIN_EVIDENCIA', 'pedidos', $id_pedido, 'Pedido entregado y pagado SIN foto de evidencia. Motivo: ' . $sinEv['motivo_etiqueta']);
+                            $success = 'Pedido entregado y cobrado (sin evidencia fotografica). Quedo registrado el motivo.';
+                            // Sin foto no hay nada que publicar en redes: no se ofrece ese paso.
+                        } else {
+                            logAudit('PEDIDO_ENTREGADO', 'pedidos', $id_pedido, 'Pedido marcado como entregado y pagado por repartidor');
+                            $success = 'Pedido entregado y cobrado correctamente.';
+                            $justDeliveredPedidoId = $id_pedido;
+                        }
                     }
                 }
             } catch (PDOException $e) {
                 $error = 'Error al actualizar el pedido.';
+            }
+        }
+
+        if ($_POST['accion'] === 'omitir_publicacion') {
+            // El pedido ya esta entregado y cobrado; el repartidor solo quiere quitarlo de su
+            // lista sin publicarlo en redes (entrega vieja, sin foto, etc). Se deja un marcador
+            // en observaciones y el filtro de "pendientes de publicar" deja de traerlo.
+            try {
+                $stmt = $pdo->prepare("SELECT observaciones FROM pedidos WHERE id_pedido = ? AND id_repartidor = ? AND estado = 'entregado'");
+                $stmt->execute([$id_pedido, $usuario['id_usuario']]);
+                $obsActual = $stmt->fetchColumn();
+
+                if ($obsActual === false) {
+                    $error = 'No se pudo terminar la entrega. Verifica que sea tuya y ya este entregada.';
+                } elseif (deliveryPublicacionFueOmitida((string)$obsActual)) {
+                    $success = 'Esta entrega ya estaba terminada.';
+                } else {
+                    $marca = deliveryBuildPublicacionOmitidaMarker((string)($usuario['nombre'] ?? 'repartidor'));
+                    $stmtUpd = $pdo->prepare("UPDATE pedidos SET observaciones = CONCAT(COALESCE(observaciones, ''), ?) WHERE id_pedido = ? AND id_repartidor = ?");
+                    $stmtUpd->execute([$marca, $id_pedido, $usuario['id_usuario']]);
+                    logAudit('PEDIDO_PUBLICACION_OMITIDA', 'pedidos', $id_pedido, 'Repartidor termino la entrega sin publicarla en redes');
+                    $success = 'Entrega terminada. Ya no aparece en tu lista.';
+                }
+            } catch (PDOException $e) {
+                $error = 'Error al terminar la entrega.';
             }
         }
 
@@ -346,8 +398,12 @@ try {
     if (!defined('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE')) {
         define('ENTREGA_PUBLICACION_PERSISTENCIA_DESDE', '2026-08-26 22:00:00');
     }
+    // El repartidor puede dar por terminada una entrega ya cobrada sin publicarla en redes
+    // (entregas viejas, sin foto, etc): deja un marcador PUBLICACION_OMITIDA en observaciones
+    // y la tarjeta deja de reaparecer aqui.
+    $noPublicacionOmitida = ' AND p.observaciones NOT LIKE ' . $pdo->quote('%' . DELIVERY_PUBLICACION_OMITIDA_TOKEN . '%');
     $entregadoPendientePublicarFilter = ($hasPedidoPublicacionesTable && $isRepartidorView)
-        ? " OR (p.estado = 'entregado' AND EXISTS (
+        ? " OR (p.estado = 'entregado'{$noPublicacionOmitida} AND EXISTS (
                 SELECT 1 FROM pedido_publicaciones pp
                 WHERE pp.id_pedido = p.id_pedido AND pp.creado_en >= " . $pdo->quote(ENTREGA_PUBLICACION_PERSISTENCIA_DESDE) . "
             ) AND (
@@ -497,9 +553,9 @@ include __DIR__ . '/includes/header.php';
         <div class="card green lighten-4 green-text text-darken-4" style="padding: 14px;">
             <div><i class="material-icons left">check_circle</i> <?php echo esc($success); ?></div>
             <?php if ($justDeliveredPedidoId): ?>
-                <a href="#modal-entrega-publicacion" id="ep-btn-abrir-modal" class="btn purple darken-1 waves-effect waves-light modal-trigger" style="margin-top:10px; width:100%; max-width:340px;">
-                    <i class="material-icons left">campaign</i> Publicar en Redes
-                </a>
+                <div style="margin-top:6px; font-size:0.85rem;">
+                    <i class="material-icons tiny">campaign</i> Publica esta entrega desde su tarjeta, mas abajo.
+                </div>
             <?php endif; ?>
         </div>
     <?php endif; ?>
@@ -620,6 +676,25 @@ include __DIR__ . '/includes/header.php';
                         && function_exists('piiDecryptValue')
                         && piiIsEncryptedValue($clienteNombre)) {
                         $clienteNombre = (string)piiDecryptValue($clienteNombre);
+                    }
+
+                    // Nunca mostrar ciphertext ENCv1 del nombre en la UI. Si el descifrado
+                    // fallo (tipicamente porque PII_ENCRYPTION_KEY no quedo cargada en este
+                    // proceso), preferir el nombre que venga en las observaciones del pedido
+                    // y, si tampoco sirve, un marcador con el numero de pedido. El teléfono
+                    // ya tiene esta misma red de seguridad mas abajo.
+                    if (is_string($clienteNombre) && $clienteNombre !== ''
+                        && function_exists('piiIsEncryptedValue')
+                        && piiIsEncryptedValue($clienteNombre)) {
+                        if (is_string($obsClienteNombre) && trim($obsClienteNombre) !== ''
+                            && !piiIsEncryptedValue($obsClienteNombre)) {
+                            $clienteNombre = trim($obsClienteNombre);
+                        } else {
+                            $numeroPedidoRef = trim((string)($ent['numero_pedido'] ?? ''));
+                            $clienteNombre = $numeroPedidoRef !== ''
+                                ? 'Cliente del pedido ' . $numeroPedidoRef
+                                : 'Cliente';
+                        }
                     }
 
                     if (is_string($clienteTel) && $clienteTel !== ''
@@ -842,6 +917,23 @@ include __DIR__ . '/includes/header.php';
                                     <i class="material-icons tiny">event_busy</i> Sin dia programado
                                 </p>
                             <?php endif; ?>
+
+                            <?php if ($isRepartidorView && ($ent['estado'] ?? '') !== 'entregado'): ?>
+                                <?php $cambioTotal = number_format((float)($ent['total'] ?? 0), 2, '.', ''); ?>
+                                <div class="cambio-box" data-total="<?php echo esc($cambioTotal); ?>">
+                                    <div class="cambio-box-head">
+                                        <i class="material-icons tiny">payments</i>
+                                        <span>Calcular cambio</span>
+                                        <span class="cambio-box-total">Total $<?php echo number_format((float)($ent['total'] ?? 0), 2); ?></span>
+                                    </div>
+                                    <label class="cambio-box-label" for="cambio-paga-<?php echo (int)$ent['id_pedido']; ?>">¿Con cuánto paga el cliente?</label>
+                                    <div class="cambio-input-wrap">
+                                        <span class="cambio-input-prefix">$</span>
+                                        <input type="number" inputmode="decimal" min="0" step="0.50" id="cambio-paga-<?php echo (int)$ent['id_pedido']; ?>" class="cambio-paga" placeholder="0.00" autocomplete="off">
+                                    </div>
+                                    <div class="cambio-result" aria-live="polite"></div>
+                                </div>
+                            <?php endif; ?>
                         </div>
                         <div class="card-action center-align">
                             <?php if ($isRepartidorView): ?>
@@ -868,9 +960,27 @@ include __DIR__ . '/includes/header.php';
                                             <i class="material-icons tiny"><?php echo $pubWhatsappDone ? 'check_circle' : 'radio_button_unchecked'; ?></i> WhatsApp
                                         </span>
                                     </p>
-                                    <button type="button" class="btn purple darken-1 waves-effect waves-light w-100 ep-btn-publicar-card" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>">
-                                        <i class="material-icons left">campaign</i> PUBLICAR EN REDES
-                                    </button>
+                                    <div class="epc-publish" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>">
+                                        <?php if (!$pubFacebookDone): ?>
+                                            <button type="button" class="btn blue darken-3 waves-effect waves-light w-100 epc-btn-fb" style="margin-bottom:6px;">
+                                                <i class="material-icons left">facebook</i> PUBLICAR EN FACEBOOK
+                                            </button>
+                                        <?php endif; ?>
+                                        <?php if (!$pubWhatsappDone): ?>
+                                            <button type="button" class="btn green waves-effect waves-light w-100 epc-btn-wa" style="margin-bottom:6px;">
+                                                <i class="material-icons left">share</i> COMPARTIR POR WHATSAPP
+                                            </button>
+                                        <?php endif; ?>
+                                        <p class="epc-status center-align" style="min-height:1.1em; font-size:0.8rem; margin:2px 0;"></p>
+                                    </div>
+                                    <form method="POST" id="omitir-publicacion-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px;">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo (int)$ent['id_pedido']; ?>">
+                                        <input type="hidden" name="accion" value="omitir_publicacion">
+                                        <button type="submit" class="btn-flat grey-text text-darken-1 waves-effect w-100" style="font-size:0.8rem;" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Terminar esta entrega sin publicarla en redes? Se quitara de tu lista.', 'blue-grey darken-1', 'Sí, terminar'); return false;">
+                                            <i class="material-icons left" style="font-size:18px;">done_all</i> No voy a publicar, terminar
+                                        </button>
+                                    </form>
                                 <?php elseif (!$enReparto): ?>
                                     <form method="POST">
                                         <?php echo csrfInput(); ?>
@@ -893,13 +1003,49 @@ include __DIR__ . '/includes/header.php';
                                         <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                     </p>
                                     <p class="blue-text text-darken-2" style="font-size:0.85rem; margin-bottom:8px;">
-                                        <i class="material-icons tiny">photo_camera</i> Sube una foto de evidencia antes de cobrar
+                                        <i class="material-icons tiny">photo_camera</i> Sube una o varias fotos de evidencia antes de cobrar
                                     </p>
-                                    <input type="file" accept="image/*" capture="environment" class="ev-foto-input" id="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
-                                    <button type="button" class="btn deep-purple waves-effect waves-light w-100 ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
-                                        <i class="material-icons left">photo_camera</i> SUBIR EVIDENCIA
+                                    <div class="ev-capture" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>">
+                                        <input type="file" accept="image/*" capture="environment" multiple class="ev-foto-input" id="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
+                                        <input type="file" accept="image/*" multiple class="ev-foto-input" id="ev-foto-input-galeria-<?php echo (int)$ent['id_pedido']; ?>" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" style="display:none;">
+                                        <div class="ev-btn-row">
+                                            <button type="button" class="btn deep-purple waves-effect waves-light ev-btn-subir" data-input="ev-foto-input-<?php echo (int)$ent['id_pedido']; ?>">
+                                                <i class="material-icons left">photo_camera</i> TOMAR FOTO
+                                            </button>
+                                            <button type="button" class="btn indigo darken-1 waves-effect waves-light ev-btn-subir" data-input="ev-foto-input-galeria-<?php echo (int)$ent['id_pedido']; ?>">
+                                                <i class="material-icons left">photo_library</i> DESDE GALERIA
+                                            </button>
+                                        </div>
+                                        <div class="ev-thumbs"></div>
+                                        <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
+                                        <button type="button" class="btn green waves-effect waves-light w-100 ev-btn-continuar" style="display:none; margin-top:4px;">
+                                            <i class="material-icons right">done_all</i> SUBIR FOTOS Y CONTINUAR
+                                        </button>
+                                    </div>
+
+                                    <button type="button" class="btn-flat grey-text text-darken-1 waves-effect toggle-omitir-evidencia w-100" data-target="omitir-evidencia-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:6px; font-size:0.8rem;">
+                                        <i class="material-icons left" style="font-size:18px;">no_photography</i> No tengo fotos de esta entrega
                                     </button>
-                                    <div class="ev-status" data-status-for="<?php echo (int)$ent['id_pedido']; ?>" style="font-size:0.8rem; margin-top:6px; min-height: 1.1em;"></div>
+                                    <form method="POST" id="omitir-evidencia-<?php echo (int)$ent['id_pedido']; ?>" class="omitir-evidencia-form" data-omitir-form="1" style="display:none; margin-top:10px; text-align:left;">
+                                        <?php echo csrfInput(); ?>
+                                        <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
+                                        <input type="hidden" name="accion" value="entregar">
+                                        <input type="hidden" name="omitir_evidencia" value="1">
+                                        <p class="grey-text" style="font-size:0.78rem; margin:0 0 8px;">
+                                            La entrega se cerrara sin foto. Quedara registrado el motivo en el historial del pedido.
+                                        </p>
+                                        <label class="active" style="font-size:0.78rem; color:#546e7a;">Motivo por el que no hay evidencia</label>
+                                        <select name="motivo_sin_evidencia" data-omitir-reason="1" class="browser-default" required style="margin-bottom:8px; height:40px;">
+                                            <option value="" selected disabled>-- Selecciona un motivo --</option>
+                                            <?php foreach ($sinEvidenciaReasonOptions as $reasonKey => $reasonLabel): ?>
+                                                <option value="<?php echo esc($reasonKey); ?>"><?php echo esc($reasonLabel); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <input type="text" name="motivo_sin_evidencia_otro" data-omitir-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
+                                        <button type="submit" class="btn blue-grey darken-1 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro SIN foto de evidencia? Quedara registrado el motivo.', 'blue-grey darken-1', 'Sí, entregar sin foto'); return false;">
+                                            ENTREGAR SIN EVIDENCIA <i class="material-icons right">done_all</i>
+                                        </button>
+                                    </form>
                                 <?php else: ?>
                                     <form method="POST">
                                         <?php echo csrfInput(); ?>
@@ -950,41 +1096,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($isRepartidorView): ?>
-<div id="modal-entrega-publicacion" class="modal">
-    <div class="modal-content">
-        <h5><i class="material-icons left">campaign</i> Publicar esta entrega</h5>
-        <p class="grey-text" id="ep-colonia-info" style="min-height: 1.2em;"></p>
-        <div class="row" style="margin-bottom: 0;">
-            <div class="col s12">
-                <textarea id="ep-texto" class="materialize-textarea" maxlength="500" style="min-height: 90px;"></textarea>
-                <label for="ep-texto" class="active">Texto de la publicacion (editable)</label>
-            </div>
-        </div>
-        <div class="file-field input-field">
-            <div class="btn blue darken-2">
-                <span>Foto</span>
-                <input type="file" id="ep-foto-input" accept="image/*">
-            </div>
-            <div class="file-path-wrapper">
-                <input class="file-path validate" type="text" placeholder="Selecciona o toma una foto de la entrega">
-            </div>
-        </div>
-        <div class="center-align" style="margin: 10px 0;">
-            <img id="ep-foto-preview" src="" alt="Vista previa" style="display:none; max-width: 100%; max-height: 260px; border-radius: 6px;">
-        </div>
-        <p id="ep-status" class="center-align" style="min-height: 1.2em;"></p>
-    </div>
-    <div class="modal-footer">
-        <a href="#!" id="ep-btn-omitir" class="modal-close waves-effect btn-flat">Omitir</a>
-        <a href="#!" id="ep-btn-compartir" class="waves-effect waves-light btn green">
-            <i class="material-icons left">share</i> Compartir
-        </a>
-        <a href="#!" id="ep-btn-facebook" class="waves-effect waves-light btn blue darken-3">
-            <i class="material-icons left">facebook</i> Publicar en Facebook
-        </a>
-    </div>
-</div>
-
 <div id="modal-siguiente-en-camino" class="modal bottom-sheet">
     <div class="modal-content">
         <h5><i class="material-icons left">local_shipping</i> Siguiente entrega</h5>
@@ -1059,6 +1170,83 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    document.querySelectorAll('.toggle-omitir-evidencia').forEach((btn) => {
+        const originalHtml = btn.innerHTML;
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-target');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (!target) return;
+            const isHidden = target.style.display === 'none' || target.style.display === '';
+            target.style.display = isHidden ? 'block' : 'none';
+            btn.innerHTML = isHidden
+                ? '<i class="material-icons left" style="font-size:18px;">expand_less</i> Cerrar'
+                : originalHtml;
+        });
+    });
+
+    document.querySelectorAll('form.omitir-evidencia-form[data-omitir-form="1"]').forEach((formEl) => {
+        const reasonSelect = formEl.querySelector('select[data-omitir-reason="1"]');
+        const otherInput = formEl.querySelector('input[data-omitir-other="1"]');
+        if (!reasonSelect || !otherInput) return;
+
+        const syncOtherFieldVisibility = () => {
+            const mustShow = reasonSelect.value === 'otro';
+            otherInput.style.display = mustShow ? 'block' : 'none';
+            otherInput.required = mustShow;
+            if (!mustShow) {
+                otherInput.value = '';
+            }
+        };
+
+        reasonSelect.addEventListener('change', syncOtherFieldVisibility);
+        syncOtherFieldVisibility();
+    });
+
+    // Calculadora de cambio: mismo criterio que deliveryCalcularCambio() en PHP
+    // (core/entrega_cambio_utils.php). La coma se trata como separador de miles.
+    document.querySelectorAll('.cambio-box').forEach((box) => {
+        const input = box.querySelector('.cambio-paga');
+        const result = box.querySelector('.cambio-result');
+        const total = parseFloat(box.getAttribute('data-total')) || 0;
+        if (!input || !result) return;
+
+        const parseMonto = (txt) => {
+            const limpio = String(txt == null ? '' : txt).replace(/[,$\s ]/g, '');
+            if (limpio === '' || !/^-?\d*\.?\d+$/.test(limpio)) return null;
+            return parseFloat(limpio);
+        };
+        const money = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        const render = () => {
+            const paga = parseMonto(input.value);
+            if (paga === null) {
+                result.textContent = '';
+                result.className = 'cambio-result';
+                return;
+            }
+            if (paga < 0) {
+                result.textContent = 'El monto no puede ser negativo.';
+                result.className = 'cambio-result is-error';
+                return;
+            }
+            const diff = Math.round((paga - total) * 100) / 100;
+            if (diff >= -0.005) {
+                if (diff <= 0.005) {
+                    result.textContent = 'Pago exacto, no hay que dar cambio.';
+                    result.className = 'cambio-result is-ok';
+                } else {
+                    result.textContent = 'Cambio a devolver: $' + money(diff);
+                    result.className = 'cambio-result is-ok';
+                }
+            } else {
+                result.textContent = 'Falta: $' + money(Math.round((total - paga) * 100) / 100);
+                result.className = 'cambio-result is-error';
+            }
+        };
+
+        input.addEventListener('input', render);
+    });
+
     document.querySelectorAll('form.cancel-entrega-form[data-cancel-form="1"]').forEach((formEl) => {
         const reasonSelect = formEl.querySelector('select[data-cancel-reason="1"]');
         const otherInput = formEl.querySelector('input[data-cancel-other="1"]');
@@ -1108,69 +1296,14 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const epJustDeliveredId = <?php echo json_encode($justDeliveredPedidoId, JSON_UNESCAPED_UNICODE); ?>;
     const epCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
     const epEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
     const epRouteStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0), JSON_UNESCAPED_UNICODE); ?>;
 
-    const modalEl = document.getElementById('modal-entrega-publicacion');
-    const textoEl = document.getElementById('ep-texto');
-    const coloniaInfoEl = document.getElementById('ep-colonia-info');
-    const fotoInputEl = document.getElementById('ep-foto-input');
-    const previewEl = document.getElementById('ep-foto-preview');
-    const statusEl = document.getElementById('ep-status');
-    const btnFacebook = document.getElementById('ep-btn-facebook');
-    const btnCompartir = document.getElementById('ep-btn-compartir');
-    const btnOmitir = document.getElementById('ep-btn-omitir');
-    if (!modalEl || typeof M === 'undefined' || !M.Modal) {
-        return;
-    }
-
-    // No cachear la instancia: footer.php corre M.AutoInit() en su propio DOMContentLoaded y
-    // puede re-inicializar este mismo modal despues, dejando una instancia vieja/inerte si la
-    // guardamos una sola vez aqui. Pedimos la instancia vigente cada vez que se necesita.
-    function epGetModalInstance() {
-        return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true });
-    }
-
-    // Cual pedido esta activo en el modal ahora mismo. Antes esto era una constante fija
-    // (epJustDeliveredId, solo el ultimo que se acababa de cobrar); ahora el modal es
-    // reutilizable para CUALQUIER pedido "entregado" que todavia le falte publicar en
-    // Facebook o WhatsApp (boton "PUBLICAR EN REDES" de su propia tarjeta, ver mas abajo),
-    // asi que necesita poder cambiar de pedido sin recargar la pagina.
-    let epCurrentIdPedido = epJustDeliveredId || null;
-    let epCurrentNumeroEntrega = null;
-
-    // Busca en que posicion iba este pedido dentro de la ultima ruta optimizada generada
-    // (guardada en localStorage, ver routeSaveStoredRoute mas abajo) para poder anunciar
-    // "Primera/Segunda/... entrega" en el orden real de reparto. Si no hay ruta guardada o
-    // el pedido ya no esta en ella, regresa null y el backend cae a contar entregas del dia.
-    function epFindNumeroEntregaFromRoute(idPedido) {
-        try {
-            const raw = localStorage.getItem(epRouteStorageKey);
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
-            const stops = parsed && parsed.data && Array.isArray(parsed.data.orderedStops) ? parsed.data.orderedStops : null;
-            if (!stops) return null;
-            const idx = stops.findIndex((stop) => String(stop.id_pedido) === String(idPedido));
-            return idx >= 0 ? idx + 1 : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    let epUploadedId = null;
-    let epUploadedForFile = null;
-    let epServerPhotoFile = null; // foto ya subida en un intento anterior, reconstruida como File para poder compartirla
-    let epDidPublishSomething = false; // si se logro publicar algo en este pedido, recargar al cerrar
-    let epFacebookDone = false; // publicado en Facebook en ESTA sesion del modal
-    let epCompartirDone = false; // compartido/WhatsApp en ESTA sesion del modal
-    const btnFacebookDefaultHtml = btnFacebook.innerHTML;
-    const btnCompartirDefaultHtml = btnCompartir.innerHTML;
-
-    // El backend siempre responde JSON, pero un proxy/host caido puede regresar una pagina de
-    // error en HTML; sin esto, r.json() truena con "Unexpected token '<'" y confunde al repartidor.
+    // El backend siempre responde JSON, pero un proxy/host caido puede devolver HTML; sin esto
+    // r.json() truena con "Unexpected token '<'" y confunde al repartidor.
     function epParseJsonResponse(response) {
         return response.text().then(function (text) {
             try {
@@ -1181,102 +1314,124 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function epSetStatus(msg, isError) {
-        statusEl.textContent = msg || '';
-        statusEl.className = 'center-align ' + (isError ? 'red-text' : 'green-text');
-    }
+    // ---------- Publicar en redes DESDE LA TARJETA (ya no hay modal) ----------
+    // Las fotos que se publican son las de evidencia que el repartidor subio antes de cobrar.
+    // El backend resuelve "todas las fotos de este pedido" cuando no se le manda lista de ids
+    // ni texto (arma el texto sugerido solo).
+    document.querySelectorAll('.epc-publish').forEach(function (box) {
+        const idPedido = box.getAttribute('data-id-pedido');
+        const btnFb = box.querySelector('.epc-btn-fb');
+        const btnWa = box.querySelector('.epc-btn-wa');
+        const statusEl = box.querySelector('.epc-status');
 
-    // A diferencia de antes, cada boton se habilita/deshabilita por su cuenta: publicar en
-    // Facebook no debe bloquear el boton de Compartir (y viceversa), para poder hacer ambas
-    // redes en la misma sesion del modal sin que una tape a la otra.
-    function epSetButtonBusy(btn, busy) {
-        btn.classList.toggle('disabled', busy);
-    }
+        function setStatus(msg, isError) {
+            if (!statusEl) return;
+            statusEl.textContent = msg || '';
+            statusEl.className = 'epc-status center-align ' + (isError ? 'red-text' : 'green-text');
+        }
 
-    // Prepara el modal para un pedido dado: pide texto/colonia sugeridos y precarga la foto si
-    // ya se habia subido antes (flujo nuevo: la foto se sube al "SUBIR EVIDENCIA", antes de
-    // cobrar). No abre el modal por si sola (ver epOpenPublishModalFor mas abajo).
-    function epPrepareModal(idPedido, numeroEntrega) {
-        epCurrentIdPedido = idPedido;
-        epCurrentNumeroEntrega = numeroEntrega || null;
-        epUploadedId = null;
-        epUploadedForFile = null;
-        epServerPhotoFile = null;
-        epDidPublishSomething = false;
-        epFacebookDone = false;
-        epCompartirDone = false;
-        btnFacebook.innerHTML = btnFacebookDefaultHtml;
-        btnCompartir.innerHTML = btnCompartirDefaultHtml;
-        epSetButtonBusy(btnFacebook, false);
-        epSetButtonBusy(btnCompartir, false);
-        epSetStatus('', false);
-        previewEl.style.display = 'none';
-        previewEl.src = '';
-
-        return fetch(epEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'preparar', id_pedido: idPedido, numero_entrega: epCurrentNumeroEntrega, csrf_token: epCsrfToken }),
-        })
-            .then(epParseJsonResponse)
-            .then((data) => {
-                if (data && data.success) {
-                    textoEl.value = data.texto || '';
-                    M.textareaAutoResize(textoEl);
-                    M.updateTextFields();
-                    const infoPartes = [];
-                    infoPartes.push(data.colonia_detectada
-                        ? 'Colonia detectada: ' + data.colonia_detectada
-                        : 'No se pudo detectar la colonia automaticamente.');
-                    if (data.numero_entrega) {
-                        infoPartes.push('Entrega #' + data.numero_entrega + ' del dia' + (epCurrentNumeroEntrega ? ' (segun tu ruta)' : ''));
-                    }
-                    coloniaInfoEl.textContent = infoPartes.join(' | ') + ' (puedes editar el texto arriba)';
-
-                    if (data.id_publicacion && data.foto_url) {
-                        epUploadedId = data.id_publicacion;
-                        previewEl.src = data.foto_url;
-                        previewEl.style.display = 'block';
-                        fetch(data.foto_url)
-                            .then((r) => r.blob())
-                            .then((blob) => {
-                                epServerPhotoFile = new File([blob], 'entrega.jpg', { type: blob.type || 'image/jpeg' });
-                            })
-                            .catch(() => {});
-                    }
-                }
-            })
-            .catch(() => {});
-    }
-
-    // Abre el modal para un pedido especifico (boton "PUBLICAR EN REDES" de su tarjeta). A
-    // diferencia del flujo del pedido recien cobrado (que solo prepara los datos y deja que el
-    // repartidor abra el modal cuando quiera, ver mas abajo), aqui la apertura es explicita:
-    // el click ya es la intencion de publicar ahora mismo.
-    function epOpenPublishModalFor(idPedido, numeroEntrega) {
-        epPrepareModal(idPedido, numeroEntrega).then(function () {
-            epGetModalInstance().open();
-        });
-    }
-
-    document.querySelectorAll('.ep-btn-publicar-card').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            const idPedido = btn.getAttribute('data-id-pedido');
-            if (idPedido) {
-                epOpenPublishModalFor(idPedido, null);
+        // Cuando ya no queda ninguna red pendiente, la tarjeta debe salir de la lista: recarga.
+        function reloadIfDone() {
+            const fbPend = btnFb && !btnFb.classList.contains('epc-done');
+            const waPend = btnWa && !btnWa.classList.contains('epc-done');
+            if (!fbPend && !waPend) {
+                setTimeout(function () { location.reload(); }, 900);
             }
-        });
+        }
+
+        if (btnFb) {
+            btnFb.addEventListener('click', function () {
+                if (btnFb.classList.contains('disabled') || btnFb.classList.contains('epc-done')) {
+                    return;
+                }
+                btnFb.classList.add('disabled');
+                setStatus('Publicando en Facebook...', false);
+                fetch(epEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'publicar_facebook', id_pedido: idPedido, csrf_token: epCsrfToken }),
+                })
+                    .then(epParseJsonResponse)
+                    .then(function (data) {
+                        if (!data || !data.success) {
+                            throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
+                        }
+                        setStatus(data.ya_publicado ? 'Ya estaba publicado en Facebook.' : 'Publicado en Facebook.', false);
+                        btnFb.classList.add('epc-done');
+                        btnFb.innerHTML = '<i class="material-icons left">check_circle</i> YA EN FACEBOOK';
+                        reloadIfDone();
+                    })
+                    .catch(function (err) {
+                        setStatus(err.message, true);
+                        btnFb.classList.remove('disabled');
+                    });
+            });
+        }
+
+        if (btnWa) {
+            btnWa.addEventListener('click', function () {
+                if (btnWa.classList.contains('disabled') || btnWa.classList.contains('epc-done')) {
+                    return;
+                }
+                btnWa.classList.add('disabled');
+                setStatus('Preparando fotos para compartir...', false);
+                fetch(epEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'preparar', id_pedido: idPedido, csrf_token: epCsrfToken }),
+                })
+                    .then(epParseJsonResponse)
+                    .then(function (data) {
+                        const fotos = (data && Array.isArray(data.fotos)) ? data.fotos : [];
+                        const texto = (data && data.texto) || '';
+                        if (!fotos.length) {
+                            throw new Error('No hay fotos de evidencia para compartir.');
+                        }
+                        return Promise.all(fotos.map(function (f, i) {
+                            return fetch(f.foto_url)
+                                .then(function (r) { return r.blob(); })
+                                .then(function (blob) { return new File([blob], 'entrega-' + (i + 1) + '.jpg', { type: blob.type || 'image/jpeg' }); })
+                                .catch(function () { return null; });
+                        })).then(function (files) {
+                            files = files.filter(Boolean);
+                            const canShare = files.length && navigator.canShare && navigator.canShare({ files: files });
+                            if (navigator.share && canShare) {
+                                return navigator.share({ text: texto, files: files });
+                            }
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(texto).catch(function () {});
+                            }
+                            throw new Error('Tu navegador no permite compartir directo. Se copio el texto; comparte las fotos manualmente.');
+                        });
+                    })
+                    .then(function () {
+                        return fetch(epEndpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'marcar_compartido', id_pedido: idPedido, csrf_token: epCsrfToken }),
+                        });
+                    })
+                    .then(function () {
+                        setStatus('Compartido por WhatsApp.', false);
+                        btnWa.classList.add('epc-done');
+                        btnWa.innerHTML = '<i class="material-icons left">check_circle</i> YA COMPARTIDO';
+                        reloadIfDone();
+                    })
+                    .catch(function (err) {
+                        if (err && err.name === 'AbortError') {
+                            setStatus('', false);
+                            btnWa.classList.remove('disabled');
+                            return;
+                        }
+                        setStatus(err.message, true);
+                        btnWa.classList.remove('disabled');
+                    });
+            });
+        }
     });
 
-    if (epJustDeliveredId) {
-        // Precarga en segundo plano: el repartidor decide cuando abrir el modal con el boton
-        // "Publicar en Redes" del aviso de exito (id="ep-btn-abrir-modal", modal-trigger de
-        // Materialize). Antes se forzaba a abrir de inmediato despues de cobrar, lo cual
-        // interrumpia el flujo.
-        epPrepareModal(epJustDeliveredId, epFindNumeroEntregaFromRoute(epJustDeliveredId));
-
-        // Sugiere marcar como "en camino" el siguiente pedido de la ruta guardada apenas se
-        // confirma la entrega, para no tener que volver a buscarlo manualmente en la lista.
+    // ---------- Sugerir "en camino" el siguiente pedido de la ruta guardada tras cobrar ----------
+    if (epJustDeliveredId && typeof M !== 'undefined' && M.Modal) {
         (function setupSiguienteEnCaminoPrompt() {
             const stops = (function () {
                 try {
@@ -1335,165 +1490,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 250);
         })();
     }
-
-    fotoInputEl.addEventListener('change', function () {
-        epUploadedId = null;
-        epUploadedForFile = null;
-        epSetStatus('', false);
-        const file = fotoInputEl.files && fotoInputEl.files[0];
-        if (!file) {
-            previewEl.style.display = 'none';
-            previewEl.src = '';
-            return;
-        }
-        previewEl.src = URL.createObjectURL(file);
-        previewEl.style.display = 'block';
-    });
-
-    function epEnsureUploaded() {
-        const file = fotoInputEl.files && fotoInputEl.files[0];
-        if (!file) {
-            if (epUploadedId) {
-                return Promise.resolve(epUploadedId); // ya se subio antes de cobrar
-            }
-            return Promise.reject(new Error('Selecciona una foto de la entrega primero.'));
-        }
-        if (epUploadedId && epUploadedForFile === file) {
-            return Promise.resolve(epUploadedId);
-        }
-        const formData = new FormData();
-        formData.append('foto', file);
-        formData.append('id_pedido', epCurrentIdPedido);
-        formData.append('texto', textoEl.value || '');
-        if (epCurrentNumeroEntrega) {
-            formData.append('numero_entrega', epCurrentNumeroEntrega);
-        }
-        formData.append('csrf_token', epCsrfToken);
-
-        return fetch(epEndpoint, { method: 'POST', body: formData })
-            .then(epParseJsonResponse)
-            .then((data) => {
-                if (!data || !data.success) {
-                    throw new Error((data && data.error) || 'No se pudo subir la foto.');
-                }
-                epUploadedId = data.id_publicacion;
-                epUploadedForFile = file;
-                return epUploadedId;
-            });
-    }
-
-    // No se recarga la pagina justo despues de publicar en Facebook o WhatsApp: eso sacaba al
-    // repartidor del modal a medio proceso (publicar Facebook recargaba la pagina y lo obligaba
-    // a volver a abrir el modal para hacer WhatsApp, y se sentia como si "se hubiera
-    // desmarcado"). Ahora puede hacer ambas dentro de la MISMA sesion del modal, cada boton
-    // se deshabilita solo por su cuenta al terminar (no el otro), y la pagina solo se recarga
-    // al cerrar el modal (boton OMITIR), para que la tarjeta refleje el estado final o
-    // desaparezca si ya quedo completo en ambas redes.
-    btnFacebook.addEventListener('click', function (e) {
-        e.preventDefault();
-        if (epFacebookDone) {
-            return;
-        }
-        epSetButtonBusy(btnFacebook, true);
-        epSetStatus('Publicando en Facebook...', false);
-        epEnsureUploaded()
-            .then((idPublicacion) => fetch(epEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'publicar_facebook',
-                    id_pedido: epCurrentIdPedido,
-                    id_publicacion: idPublicacion,
-                    texto: textoEl.value,
-                    csrf_token: epCsrfToken,
-                }),
-            }))
-            .then(epParseJsonResponse)
-            .then((data) => {
-                if (!data || !data.success) {
-                    throw new Error((data && data.error) || 'Facebook rechazo la publicacion.');
-                }
-                epSetStatus('Publicado en Facebook correctamente. Puedes seguir con WhatsApp o cerrar.', false);
-                epDidPublishSomething = true;
-                epFacebookDone = true;
-                btnFacebook.innerHTML = '<i class="material-icons left">check_circle</i> YA PUBLICADO EN FACEBOOK';
-                // Se queda deshabilitado (evita publicar dos veces); Compartir sigue disponible.
-            })
-            .catch((err) => {
-                epSetStatus(err.message, true);
-                epSetButtonBusy(btnFacebook, false);
-            });
-    });
-
-    btnCompartir.addEventListener('click', function (e) {
-        e.preventDefault();
-        if (epCompartirDone) {
-            return;
-        }
-        const file = (fotoInputEl.files && fotoInputEl.files[0]) || epServerPhotoFile;
-        if (!file && !epUploadedId) {
-            epSetStatus('Selecciona una foto de la entrega primero.', true);
-            return;
-        }
-        epSetButtonBusy(btnCompartir, true);
-        epSetStatus('Preparando para compartir...', false);
-        epEnsureUploaded()
-            .then((idPublicacion) => {
-                const canNativeShare = file && navigator.canShare && navigator.canShare({ files: [file] });
-                if (navigator.share && canNativeShare) {
-                    return navigator.share({ text: textoEl.value, files: [file] })
-                        .then(() => fetch(epEndpoint, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'marcar_compartido', id_pedido: epCurrentIdPedido, id_publicacion: idPublicacion, csrf_token: epCsrfToken }),
-                        }))
-                        .then(() => {
-                            epSetStatus('Listo. Puedes seguir con Facebook o cerrar.', false);
-                            epDidPublishSomething = true;
-                            epCompartirDone = true;
-                            btnCompartir.innerHTML = '<i class="material-icons left">check_circle</i> YA COMPARTIDO';
-                            // Se queda deshabilitado; Facebook sigue disponible.
-                        })
-                        .catch((err) => {
-                            if (err && err.name === 'AbortError') {
-                                epSetStatus('', false);
-                                epSetButtonBusy(btnCompartir, false);
-                                return;
-                            }
-                            throw err;
-                        });
-                }
-
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(textoEl.value).catch(() => {});
-                }
-                epSetStatus('Tu navegador no soporta compartir directo. Se copio el texto; descarga la foto desde la vista previa y compartela manualmente.', true);
-                epSetButtonBusy(btnCompartir, false);
-            })
-            .catch((err) => {
-                epSetStatus(err.message, true);
-                epSetButtonBusy(btnCompartir, false);
-            });
-    });
-
-    btnOmitir.addEventListener('click', function () {
-        epGetModalInstance().close();
-        if (epDidPublishSomething) {
-            location.reload();
-        }
-    });
 });
 </script>
 
 <script>
-// Flujo nuevo: subir la foto de evidencia ANTES de cobrar, mientras el pedido sigue
-// en_reparto (boton "SUBIR EVIDENCIA" en la tarjeta). Independiente del script de arriba:
-// corre siempre, no solo justo despues de marcar una entrega (ver epJustDeliveredId), porque
-// aplica a cualquier tarjeta en_reparto sin evidencia todavia, sin importar cuando se cargo
-// la pagina.
+// Evidencia ANTES de cobrar, ahora con VARIAS fotos: el repartidor elige/toma las que quiera
+// (se muestran como miniaturas y puede quitarlas), y al pulsar "SUBIR FOTOS Y CONTINUAR" se
+// suben todas de una y la tarjeta recarga para pasar a "ENTREGADO Y COBRADO".
 document.addEventListener('DOMContentLoaded', function () {
     const evCsrfToken = <?php echo json_encode(getCsrfToken(), JSON_UNESCAPED_UNICODE); ?>;
     const evEndpoint = <?php echo json_encode(BASE_URL . 'api/entrega_publicacion.php', JSON_UNESCAPED_UNICODE); ?>;
+    const EV_MAX = 10;
 
     function evParseJsonResponse(response) {
         return response.text().then(function (text) {
@@ -1505,62 +1512,97 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    document.querySelectorAll('.ev-btn-subir').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            const inputEl = document.getElementById(btn.getAttribute('data-input') || '');
-            if (inputEl) {
-                inputEl.click();
-            }
-        });
-    });
+    document.querySelectorAll('.ev-capture').forEach(function (box) {
+        const idPedido = box.getAttribute('data-id-pedido');
+        const inputs = box.querySelectorAll('.ev-foto-input');
+        const thumbsEl = box.querySelector('.ev-thumbs');
+        const statusEl = box.querySelector('.ev-status');
+        const btnContinuar = box.querySelector('.ev-btn-continuar');
+        const btnsSubir = box.querySelectorAll('.ev-btn-subir');
+        let seleccion = []; // File[] elegidas, aun sin subir
 
-    document.querySelectorAll('.ev-foto-input').forEach(function (inputEl) {
-        inputEl.addEventListener('change', function () {
-            const file = inputEl.files && inputEl.files[0];
-            if (!file) {
+        function setStatus(msg, cls) {
+            if (!statusEl) return;
+            statusEl.textContent = msg || '';
+            statusEl.className = 'ev-status ' + (cls || 'grey-text');
+        }
+
+        function render() {
+            thumbsEl.innerHTML = '';
+            seleccion.forEach(function (file, idx) {
+                const wrap = document.createElement('div');
+                wrap.className = 'ev-thumb';
+                const img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                img.alt = 'Evidencia ' + (idx + 1);
+                wrap.appendChild(img);
+                const x = document.createElement('button');
+                x.type = 'button';
+                x.className = 'ev-thumb-x';
+                x.setAttribute('aria-label', 'Quitar foto');
+                x.textContent = '×';
+                x.addEventListener('click', function () { seleccion.splice(idx, 1); render(); });
+                wrap.appendChild(x);
+                thumbsEl.appendChild(wrap);
+            });
+            if (seleccion.length) {
+                btnContinuar.style.display = 'block';
+                btnContinuar.innerHTML = '<i class="material-icons right">done_all</i> SUBIR ' + seleccion.length
+                    + ' FOTO' + (seleccion.length > 1 ? 'S' : '') + ' Y CONTINUAR';
+            } else {
+                btnContinuar.style.display = 'none';
+            }
+        }
+
+        btnsSubir.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const input = document.getElementById(btn.getAttribute('data-input') || '');
+                if (input) {
+                    input.click();
+                }
+            });
+        });
+
+        inputs.forEach(function (input) {
+            input.addEventListener('change', function () {
+                const files = input.files ? Array.from(input.files) : [];
+                let rechazadas = 0;
+                files.forEach(function (f) {
+                    if (seleccion.length >= EV_MAX) { rechazadas++; return; }
+                    seleccion.push(f);
+                });
+                input.value = ''; // permite volver a elegir la misma foto / re-disparar change
+                render();
+                setStatus(rechazadas > 0 ? ('Maximo ' + EV_MAX + ' fotos; se ignoraron ' + rechazadas + '.') : '', rechazadas > 0 ? 'red-text' : 'grey-text');
+            });
+        });
+
+        btnContinuar.addEventListener('click', function () {
+            if (!seleccion.length || btnContinuar.classList.contains('disabled')) {
                 return;
             }
+            btnContinuar.classList.add('disabled');
+            btnsSubir.forEach(function (b) { b.classList.add('disabled'); });
+            setStatus('Subiendo ' + seleccion.length + ' foto(s)...', 'grey-text');
 
-            const idPedido = inputEl.getAttribute('data-id-pedido');
-            const statusEl = document.querySelector('[data-status-for="' + idPedido + '"]');
-            const btnEl = document.querySelector('.ev-btn-subir[data-input="' + inputEl.id + '"]');
+            const fd = new FormData();
+            seleccion.forEach(function (f) { fd.append('foto[]', f); });
+            fd.append('id_pedido', idPedido);
+            fd.append('csrf_token', evCsrfToken);
 
-            if (statusEl) {
-                statusEl.textContent = 'Subiendo evidencia...';
-                statusEl.className = 'ev-status grey-text';
-            }
-            if (btnEl) {
-                btnEl.classList.add('disabled');
-            }
-
-            const formData = new FormData();
-            formData.append('foto', file);
-            formData.append('id_pedido', idPedido);
-            formData.append('csrf_token', evCsrfToken);
-
-            fetch(evEndpoint, { method: 'POST', body: formData })
+            fetch(evEndpoint, { method: 'POST', body: fd })
                 .then(evParseJsonResponse)
                 .then(function (data) {
                     if (!data || !data.success) {
-                        throw new Error((data && data.error) || 'No se pudo subir la evidencia.');
+                        throw new Error((data && data.error) || 'No se pudieron subir las fotos.');
                     }
-                    if (statusEl) {
-                        statusEl.textContent = 'Evidencia subida. Actualizando...';
-                        statusEl.className = 'ev-status green-text';
-                    }
-                    // Recarga para que la tarjeta pase a mostrar "ENTREGADO Y COBRADO": el
-                    // servidor ya detecta la evidencia recien subida en pedido_publicaciones.
+                    setStatus('Fotos subidas. Actualizando...', 'green-text');
                     setTimeout(function () { location.reload(); }, 500);
                 })
                 .catch(function (err) {
-                    if (statusEl) {
-                        statusEl.textContent = err.message;
-                        statusEl.className = 'ev-status red-text';
-                    }
-                    if (btnEl) {
-                        btnEl.classList.remove('disabled');
-                    }
-                    inputEl.value = '';
+                    setStatus(err.message, 'red-text');
+                    btnContinuar.classList.remove('disabled');
+                    btnsSubir.forEach(function (b) { b.classList.remove('disabled'); });
                 });
         });
     });
@@ -2336,9 +2378,74 @@ document.addEventListener('DOMContentLoaded', () => {
         margin-right: 8px;
     }
     .w-100 { width: 100%; }
+    .ev-btn-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .ev-btn-row .btn {
+        width: 100%;
+        margin: 0;
+    }
     .delivery-value {
         margin-left: 4px;
     }
+    .cambio-box {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid #cfd8dc;
+        border-radius: 6px;
+        background: #fafafa;
+        text-align: left;
+    }
+    .cambio-box-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #37474f;
+    }
+    .cambio-box-head i { color: #2e7d32; }
+    .cambio-box-total {
+        margin-left: auto;
+        font-weight: 700;
+        color: #2e7d32;
+        white-space: nowrap;
+    }
+    .cambio-box-label {
+        display: block;
+        font-size: 0.78rem;
+        color: #546e7a;
+        margin: 8px 0 4px;
+    }
+    .cambio-input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid #cfd8dc;
+        border-radius: 4px;
+        background: #fff;
+        padding: 0 8px;
+    }
+    .cambio-input-prefix { color: #78909c; font-weight: 700; }
+    input.cambio-paga {
+        flex: 1;
+        border: 0 !important;
+        box-shadow: none !important;
+        height: 40px !important;
+        margin: 0 !important;
+        font-size: 1rem;
+    }
+    input.cambio-paga:focus { border: 0 !important; box-shadow: none !important; }
+    .cambio-result {
+        min-height: 1.2em;
+        margin-top: 6px;
+        font-size: 0.95rem;
+        font-weight: 700;
+    }
+    .cambio-result.is-ok { color: #2e7d32; }
+    .cambio-result.is-error { color: #c62828; }
     .route-select-wrap {
         display: flex;
         align-items: center;
@@ -2375,43 +2482,99 @@ document.addEventListener('DOMContentLoaded', () => {
         background: #ffebee;
     }
 
-    /* Modal de publicar entrega / confirmar accion: legible y usable en pantallas de celular. */
-    #modal-entrega-publicacion,
-    #modal-confirmar-entrega {
+    /* Modales de confirmar accion / error de ruta: layout en columna con footer de altura
+       automatica para que en pantallas chicas los botones apilados no queden fuera de la caja. */
+    #modal-confirmar-entrega,
+    #modal-route-error {
         width: 90%;
         max-width: 560px;
+        max-height: 85vh;
     }
-    #modal-entrega-publicacion .modal-footer,
-    #modal-confirmar-entrega .modal-footer {
+    #modal-confirmar-entrega.open,
+    #modal-route-error.open {
+        display: flex;
+        flex-direction: column;
+    }
+    #modal-confirmar-entrega .modal-content,
+    #modal-route-error .modal-content {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #modal-confirmar-entrega .modal-footer,
+    #modal-route-error .modal-footer {
+        flex: 0 0 auto;
+        height: auto;
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
         align-items: center;
         justify-content: flex-end;
     }
-    #modal-entrega-publicacion .file-field.input-field {
+
+    /* Miniaturas de las fotos de evidencia elegidas en la tarjeta, antes de subirlas. */
+    .ev-thumbs {
         display: flex;
         flex-wrap: wrap;
-        align-items: center;
-        gap: 8px;
+        gap: 6px;
+        margin: 8px 0 2px;
     }
+    .ev-thumbs:empty {
+        display: none;
+    }
+    .ev-thumbs .ev-thumb {
+        position: relative;
+        width: 74px;
+        height: 74px;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #eceff1;
+        border: 1px solid #cfd8dc;
+    }
+    .ev-thumbs .ev-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+    .ev-thumbs .ev-thumb-x {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 20px;
+        height: 20px;
+        border: none;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font-size: 15px;
+        line-height: 20px;
+        padding: 0;
+        cursor: pointer;
+    }
+
     @media only screen and (max-width: 600px) {
-        #modal-entrega-publicacion,
-        #modal-confirmar-entrega {
+        #modal-confirmar-entrega,
+        #modal-route-error {
             width: 96%;
-            max-height: 90%;
         }
-        #modal-entrega-publicacion .modal-footer > a,
-        #modal-confirmar-entrega .modal-footer > a {
+        #modal-confirmar-entrega.open,
+        #modal-route-error.open {
+            top: 1.5vh !important;
+            max-height: 97vh;
+            display: block;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        #modal-confirmar-entrega.open .modal-content,
+        #modal-route-error.open .modal-content {
+            overflow: visible;
+        }
+        #modal-confirmar-entrega .modal-footer > a.btn,
+        #modal-route-error .modal-footer > a.btn {
             width: 100%;
             margin: 4px 0 !important;
             text-align: center;
-        }
-        #modal-entrega-publicacion .file-field.input-field .btn {
-            width: 100%;
-        }
-        #modal-entrega-publicacion .file-path-wrapper {
-            width: 100%;
         }
     }
 </style>

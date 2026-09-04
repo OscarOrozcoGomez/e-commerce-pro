@@ -7,7 +7,10 @@ require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 
 header('Content-Type: application/json');
 
-if (!isAuthenticated() || (!isAdmin() && !isEncargado())) {
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
+// Fase 4: el permiso 'inventario' abre este endpoint; el rol se mantiene como respaldo.
+if (!isAuthenticated() || (!hasPermission('inventario') && !isAdmin() && !isEncargado())) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }

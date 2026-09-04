@@ -235,6 +235,39 @@ CREATE TABLE IF NOT EXISTS `purchase_order_postponed_items` (
   CONSTRAINT `fk_po_postergado_usuario` FOREIGN KEY (`pospuesto_por`) REFERENCES `usuarios` (`id_usuario`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+-- Órdenes de compra (cabecera) generadas desde la lista de compra sugerida
+CREATE TABLE IF NOT EXISTS `ordenes_compra` (
+  `id_orden_compra` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NOT NULL,
+  `id_almacen` INT UNSIGNED NOT NULL,
+  `referencia` VARCHAR(50) NOT NULL,
+  `fecha_creacion` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `estado` ENUM('borrador','enviada','parcial','recibida','cancelada') NOT NULL DEFAULT 'borrador',
+  `total_estimado` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `observaciones` TEXT DEFAULT NULL,
+  PRIMARY KEY (`id_orden_compra`),
+  INDEX `idx_oc_almacen` (`id_almacen`),
+  INDEX `idx_oc_usuario` (`id_usuario`),
+  INDEX `idx_oc_estado` (`estado`),
+  CONSTRAINT `fk_oc_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`),
+  CONSTRAINT `fk_oc_almacen` FOREIGN KEY (`id_almacen`) REFERENCES `almacenes` (`id_almacen`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Órdenes de compra (detalle): una fila por producto solicitado
+CREATE TABLE IF NOT EXISTS `detalle_orden_compra` (
+  `id_detalle` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_orden_compra` INT UNSIGNED NOT NULL,
+  `id_producto` INT UNSIGNED NOT NULL,
+  `cantidad_solicitada` INT NOT NULL,
+  `cantidad_recibida` INT NOT NULL DEFAULT 0,
+  `costo_unitario` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  PRIMARY KEY (`id_detalle`),
+  INDEX `idx_doc_orden` (`id_orden_compra`),
+  INDEX `idx_doc_producto` (`id_producto`),
+  CONSTRAINT `fk_doc_orden` FOREIGN KEY (`id_orden_compra`) REFERENCES `ordenes_compra` (`id_orden_compra`) ON DELETE CASCADE,
+  CONSTRAINT `fk_doc_producto` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Métodos de pago
 CREATE TABLE IF NOT EXISTS `metodos_pago` (
   `id_metodo` INT UNSIGNED NOT NULL AUTO_INCREMENT,

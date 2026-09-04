@@ -7,7 +7,8 @@ require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 requireAuth();
-if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
+// Permiso 'gestionar_clientes' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
 $pdo = getPDO();
 $error = '';
@@ -788,7 +789,12 @@ include __DIR__ . '/includes/header.php';
 <div class="container">
     <div class="row">
         <div class="col s12">
-            <h4><i class="material-icons left blue-text">people</i> Gestion de Clientes</h4>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                <h4 style="margin-bottom:0;"><i class="material-icons left blue-text">people</i> Gestion de Clientes</h4>
+                <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light">
+                    <i class="material-icons left">dashboard</i> Volver al Dashboard
+                </a>
+            </div>
             <p class="grey-text">Aqui registras clientes nuevos, editas sus datos y administras uno o varios domicilios por alias.</p>
         </div>
     </div>
@@ -1152,13 +1158,19 @@ include __DIR__ . '/includes/header.php';
                                                         <i class="material-icons tiny">check_circle</i> Confirmada el <?php echo date('d/m/Y H:i', strtotime((string)$d['confirmada_en'])); ?>
                                                     </div>
                                                 <?php endif; ?>
-                                                <?php if (trim((string)($d['maps_link'] ?? '')) !== ''): ?>
-                                                    <div style="margin-top:6px;">
-                                                        <a href="<?php echo esc((string)$d['maps_link']); ?>" target="_blank" rel="noopener noreferrer" class="blue-text">
-                                                            <i class="material-icons tiny">map</i> Abrir mapa
-                                                        </a>
-                                                    </div>
-                                                <?php endif; ?>
+                                                <?php
+                                                    // Siempre ofrecer un boton para abrir Google Maps: pin exacto si hay
+                                                    // maps_link http(s), o busqueda por texto si no. Logica y filtro de
+                                                    // esquemas peligrosos en core/cliente_direccion_utils.php (con pruebas).
+                                                    $mapsLinkEsHttp = direccionMapsLinkEsValido($d['maps_link'] ?? null);
+                                                    $mapsHref = direccionGoogleMapsHref($d['maps_link'] ?? null, $d['direccion'] ?? null);
+                                                ?>
+                                                <div style="margin-top:8px;">
+                                                    <a href="<?php echo esc($mapsHref); ?>" target="_blank" rel="noopener noreferrer" class="btn-small blue darken-1 waves-effect waves-light">
+                                                        <i class="material-icons left" style="margin-right:4px;">map</i>
+                                                        <?php echo $mapsLinkEsHttp ? 'Abrir ubicacion en Google Maps' : 'Buscar direccion en Google Maps'; ?>
+                                                    </a>
+                                                </div>
                                                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
                                                     <button type="button" class="btn-small amber darken-2 waves-effect waves-light" onclick='cargarEdicionDireccion(<?php echo (int)$c['id_cliente']; ?>, <?php echo json_encode([
                                                         'id_direccion' => (int)$d['id_direccion'],

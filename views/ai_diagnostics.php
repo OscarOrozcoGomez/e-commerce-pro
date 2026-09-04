@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/ai_assistant.php';
 
 requireAuth();
-if (!isAdmin()) {
+// Permiso 'gestionar_asistente_ia' abre esta vista; el admin entra siempre (short-circuit).
+if (!hasPermission('gestionar_asistente_ia') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -270,7 +271,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
     var csrfToken = <?php echo json_encode(getCsrfToken()); ?>;
 
     var ayudaElem = document.getElementById('ayuda-diagnostico');
@@ -390,7 +391,7 @@ include __DIR__ . '/includes/header.php';
                 });
         });
     });
-})();
+});
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

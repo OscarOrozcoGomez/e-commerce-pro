@@ -1,0 +1,58 @@
+# Patrones que rsync NO sube al VPS (deploy.yml usa --exclude-from con este archivo).
+# Con --delete, lo que aqui se excluye y solo existe en el servidor NO se borra.
+
+# --- Control de versiones / CI / tooling ---
+.git/
+.github/
+.gitattributes
+.gitignore
+.claude/
+.vscode/
+.phpunit.cache/
+phpunit.xml
+composer.phar
+deploy-exclude.txt
+
+# --- Front / E2E (viven en la rama automation) ---
+node_modules/
+test-results/
+playwright-report/
+tests/
+test_payloads/
+
+# --- Scripts locales / de un solo uso / diagnostico ---
+scripts/dev_*.php
+scripts/_img_*.php
+scripts/_tmp_*.php
+scripts/seed_e2e_test_data.php
+scripts/seed_e2e_staff_accounts.php
+scripts/seed_phone_test_data.php
+scripts/output/
+
+# --- Docs internas / runbooks locales ---
+private/
+docs/features/
+LOCAL_TEST_DATA.md
+VENTA_SIN_INVENTARIO.md
+PRESENTATIONS_SQL.md
+core/db_tools.php
+
+# --- Archivos de secretos: gestionados EN el servidor, nunca sobrescribir ni borrar ---
+.app_secrets.php
+app_secrets.php
+app_secrets.*.php
+.app_secrets.*.php
+core/app_secrets.php
+core/app_secrets.*.php
+views/.app_secrets.php
+
+# --- Contenido de runtime: vive solo en el servidor ---
+core/uploads/
+core/cache/
+assets/img/products/
+assets/img/entregas/
+logs/
+app_error.log
+mail_log.txt
+mail_preview_last_order.html
+.ftp-deploy-sync-state.json
