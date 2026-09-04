@@ -308,6 +308,25 @@ include __DIR__ . '/includes/header.php';
     .rp-perm .pd { color: #90a4ae; font-size: 12px; display: block; }
     .rp-perm .tags { margin-left: auto; }
     .rp-perm .tags .chip { font-size: 10px; height: 20px; line-height: 20px; font-weight: 700; text-transform: uppercase; margin: 0 0 0 4px; }
+    /* Tooltip "que hace este permiso": burbuja al pasar el mouse sobre el icono ⓘ. */
+    .rp-info {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 16px; height: 16px; border-radius: 50%; margin-left: 5px; vertical-align: -3px;
+        background: #e8eaf6; color: #3949ab; font-size: 11px; font-weight: 700; font-style: normal;
+        cursor: default; position: relative;
+    }
+    .rp-info .rp-bubble {
+        position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(4px);
+        width: max-content; max-width: min(260px, 78vw); background: #1c2333; color: #fff; font-weight: 400;
+        font-size: 12px; line-height: 1.45; padding: 8px 10px; border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(26,35,126,.25); opacity: 0; pointer-events: none;
+        transition: opacity .14s ease, transform .14s ease; z-index: 20; text-align: left; white-space: normal;
+    }
+    .rp-info .rp-bubble::after {
+        content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+        border: 6px solid transparent; border-top-color: #1c2333;
+    }
+    .rp-info:hover .rp-bubble, .rp-info:focus-visible .rp-bubble { opacity: 1; transform: translateX(-50%) translateY(0); }
     .chip.rp-dead { background: #ffebee; color: #c62828; }
     .chip.rp-dup { background: #fff8e1; color: #ff8f00; }
     .chip.rp-live { background: #e8f5e9; color: #2e7d32; }
@@ -432,6 +451,10 @@ include __DIR__ . '/includes/header.php';
                                             </div>
                                             <div>
                                                 <span class="pk"><?php echo esc($p['clave']); ?></span>
+                                                <?php $pDesc = trim((string) ($p['descripcion'] ?? '')); ?>
+                                                <?php if ($pDesc !== ''): ?>
+                                                    <span class="rp-info" tabindex="0">i<span class="rp-bubble"><?php echo esc($pDesc); ?></span></span>
+                                                <?php endif; ?>
                                                 <span class="pd"><?php echo esc((string) ($p['nombre'] ?? '')); ?></span>
                                             </div>
                                             <div class="tags">

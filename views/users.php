@@ -382,7 +382,7 @@ try {
 // Catalogo de permisos + mapa de permisos por usuario para el modal "Permisos".
 try {
     $permisosCat = $pdo->query(
-        "SELECT id_permiso, clave, nombre, COALESCE(NULLIF(categoria,''),'Otros') AS categoria
+        "SELECT id_permiso, clave, nombre, descripcion, COALESCE(NULLIF(categoria,''),'Otros') AS categoria
          FROM permisos WHERE estado = 'activo' ORDER BY clave"
     )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -543,6 +543,27 @@ include __DIR__ . '/includes/header.php';
         align-items: center;
         justify-content: center;
     }
+
+    /* Tooltip "que hace este permiso" en el modal de Permisos (mismo estilo que
+       Roles y Permisos, .rp-info/.rp-bubble). */
+    .up-info {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 15px; height: 15px; border-radius: 50%; margin-left: 5px; vertical-align: -2px;
+        background: #e8eaf6; color: #3949ab; font-size: 10px; font-weight: 700; font-style: normal;
+        cursor: default; position: relative;
+    }
+    .up-info .up-bubble {
+        position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(4px);
+        width: max-content; max-width: min(240px, 78vw); background: #1c2333; color: #fff; font-weight: 400;
+        font-size: 12px; line-height: 1.45; padding: 8px 10px; border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(26,35,126,.25); opacity: 0; pointer-events: none;
+        transition: opacity .14s ease, transform .14s ease; z-index: 20; text-align: left; white-space: normal;
+    }
+    .up-info .up-bubble::after {
+        content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+        border: 6px solid transparent; border-top-color: #1c2333;
+    }
+    .up-info:hover .up-bubble, .up-info:focus-visible .up-bubble { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 
 <div class="container">
@@ -881,6 +902,11 @@ include __DIR__ . '/includes/header.php';
         var modalEl = document.getElementById('modalPermUser');
         var modal = modalEl ? M.Modal.init(modalEl) : null;
 
+        function escHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
         function chip(kind) {
             if (kind === 'rol') return '<span class="chip grey lighten-3" style="font-size:10px;height:20px;line-height:20px;">por rol</span>';
             if (kind === 'add') return '<span class="chip green lighten-4 green-text text-darken-2" style="font-size:10px;height:20px;line-height:20px;">añadido</span>';
@@ -909,10 +935,13 @@ include __DIR__ . '/includes/header.php';
                     if (denegar.indexOf(pid) !== -1) checked = false;
                     var sinEfecto = window.UP_LIVE.indexOf(p.clave) === -1;
                     var expVal = expira[pid] || '';
+                    var infoHtml = p.descripcion
+                        ? '<span class="up-info" tabindex="0">i<span class="up-bubble">' + escHtml(p.descripcion) + '</span></span>'
+                        : '';
                     html += '<div class="up-row" data-inrole="' + (enRol ? 1 : 0) + '" style="display:flex;align-items:center;gap:12px;padding:9px 2px;border-bottom:1px solid #f2f3f9;flex-wrap:wrap;">'
                          + '<div class="switch"><label><input type="checkbox" name="permisos[]" value="' + pid + '" ' + (checked ? 'checked' : '') + '><span class="lever"></span></label></div>'
-                         + '<div style="flex:1;min-width:150px;"><span style="font-weight:700;font-family:monospace;font-size:13px;">' + p.clave + '</span>'
-                         + '<span style="display:block;color:#90a4ae;font-size:11px;">' + (p.nombre || '') + (sinEfecto ? ' · <i>sin efecto aún</i>' : '') + '</span></div>'
+                         + '<div style="flex:1;min-width:150px;"><span style="font-weight:700;font-family:monospace;font-size:13px;">' + escHtml(p.clave) + '</span>' + infoHtml
+                         + '<span style="display:block;color:#90a4ae;font-size:11px;">' + escHtml(p.nombre || '') + (sinEfecto ? ' · <i>sin efecto aún</i>' : '') + '</span></div>'
                          + '<span class="up-tag"></span>'
                          + '<label class="up-exp" style="display:none;font-size:11px;color:#78909c;white-space:nowrap;">acceso hasta '
                          + '<input type="date" name="expira[' + pid + ']" min="' + hoyISO + '" value="' + expVal + '" style="height:1.6rem;font-size:12px;width:auto;margin:0 0 0 4px;padding:0 4px;border:1px solid #cfd8dc;border-radius:3px;"></label>'
