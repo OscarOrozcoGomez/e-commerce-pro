@@ -245,6 +245,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 if ($accion === 'crear_permiso') {
+                    // Evita duplicados como venta/realizar_ventas: si el nombre se parece
+                    // mucho a uno ya activo, se pide confirmar explícitamente antes de crear.
+                    $confirmarDuplicado = ($_POST['confirmar_duplicado'] ?? '') === '1';
+                    if (!$confirmarDuplicado) {
+                        $existentes = $pdo->query("SELECT clave, nombre FROM permisos WHERE estado = 'activo'")->fetchAll(PDO::FETCH_ASSOC);
+                        foreach ($existentes as $ex) {
+                            similar_text(mb_strtolower($nombre), mb_strtolower((string) $ex['nombre']), $pct);
+                            if ($pct >= 65.0) {
+                                throw new Exception(
+                                    "Ya existe un permiso parecido: \"{$ex['nombre']}\" (clave `{$ex['clave']}`). " .
+                                    "Si de verdad es una capacidad distinta, marca \"Confirmo que no es un permiso que ya existe\" y vuelve a enviarlo."
+                                );
+                            }
+                        }
+                    }
+
                     $pdo->prepare("INSERT INTO permisos (clave, nombre, descripcion, categoria, estado) VALUES (?, ?, ?, ?, 'activo')")
                         ->execute([$clave, $nombre, $descripcion !== '' ? $descripcion : null, $categoria]);
                     logAudit('PERMISO_CREADO', 'permisos', (int) $pdo->lastInsertId(), "Clave: {$clave}");
@@ -256,6 +272,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     logAudit('PERMISO_ACTUALIZADO', 'permisos', $idPermiso, "Clave: {$clave}");
                     $success = 'Permiso actualizado.';
                 }
+            } elseif ($accion === 'desactivar_permiso') {
+                if (!isSuperAdmin()) {
+                    throw new Exception('Solo un super admin puede desactivar permisos del catálogo.');
+                }
+                $idPermiso = (int) ($_POST['id_permiso'] ?? 0);
+                $stmtP = $pdo->prepare("SELECT clave, nombre FROM permisos WHERE id_permiso = ?");
+                $stmtP->execute([$idPermiso]);
+                $permisoObjetivo = $stmtP->fetch(PDO::FETCH_ASSOC);
+                if (!$permisoObjetivo) {
+                    throw new Exception('Permiso no encontrado.');
+                }
+                // Nunca desactivar una clave que el código sí comprueba hoy -- eso le
+                // quitaría acceso de golpe a todo el que la tuviera, por rol o individual.
+                if (in_array($permisoObjetivo['clave'], PERMISOS_EN_USO, true)) {
+                    throw new Exception(
+                        "\"{$permisoObjetivo['clave']}\" está en uso (algún archivo la comprueba con hasPermission()). " .
+                        "Desactivarla le quitaría acceso a quien la tenga. No se puede desactivar desde aquí."
+                    );
+                }
+                $pdo->prepare("UPDATE permisos SET estado = 'inactivo' WHERE id_permiso = ?")->execute([$idPermiso]);
+                logAudit('PERMISO_DESACTIVADO', 'permisos', $idPermiso, "Clave: {$permisoObjetivo['clave']}");
+                $success = "Permiso \"{$permisoObjetivo['nombre']}\" desactivado. Ya no aparece en la matriz ni en el modal de usuarios.";
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -367,27 +405,51 @@ include __DIR__ . '/includes/header.php';
     .rp-header h4 { margin: 0; }
     .rp-stats .chip { margin: 4px 4px 4px 0; }
 
-    /* Pestañas: el default de Materialize (texto/indicador rosa palido) casi no se ve
-       sobre blanco. Barra indigo solida + iconos + subrayado ambar de alto contraste. */
-    .card-tabs { background: #1a237e; border-radius: 2px 2px 0 0; }
-    .card-tabs .tabs { background: transparent; }
-    .card-tabs .tabs .tab { height: 56px; line-height: 56px; }
+    /* Pestañas como botones sueltos: el default de Materialize (texto/indicador rosa
+       palido, una sola franja continua) no se leia como controles separados. Cada
+       pestaña es su propia pastilla con sombra; la activa se vuelve solida y "salta"
+       hacia adelante -- separación real entre botones, no una franja uniforme. */
+    .card-tabs { background: #eef1f8; padding: 12px 12px 0; border-radius: 2px 2px 0 0; }
+    .card-tabs .tabs {
+        background: transparent;
+        height: auto;
+        overflow: visible;
+        gap: 10px;
+        padding-bottom: 12px;
+    }
+    .card-tabs .tabs .tab {
+        height: auto;
+        line-height: normal;
+        overflow: visible;
+    }
     .card-tabs .tabs .tab a {
-        color: rgba(255,255,255,.72);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        height: auto;
+        padding: 11px 16px;
+        background: #fff;
+        color: #3949ab;
+        border: 1px solid #dde1f0;
+        border-radius: 10px;
         font-weight: 700;
-        font-size: 13.5px;
-        letter-spacing: .03em;
-        transition: color .15s ease;
+        font-size: 13px;
+        letter-spacing: .02em;
+        box-shadow: 0 1px 2px rgba(26,35,126,.07);
+        transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease, color .16s ease;
     }
-    .card-tabs .tabs .tab a i.material-icons {
-        font-size: 19px;
-        margin-right: 6px;
-        vertical-align: -4px;
+    .card-tabs .tabs .tab a i.material-icons { font-size: 19px; margin: 0; }
+    .card-tabs .tabs .tab a:hover { background: #f2f4fc; box-shadow: 0 2px 6px rgba(26,35,126,.12); }
+    .card-tabs .tabs .tab a.active {
+        background: #1a237e;
+        color: #fff;
+        border-color: #1a237e;
+        box-shadow: 0 6px 14px rgba(26,35,126,.32);
+        transform: translateY(-3px);
     }
-    .card-tabs .tabs .tab a:hover { color: #fff; }
-    .card-tabs .tabs .tab a.active { color: #fff; }
-    .card-tabs .tabs .tab a:focus, .card-tabs .tabs .tab a:focus.active { background-color: rgba(255,255,255,.14); }
-    .card-tabs .tabs .indicator { background-color: #ffab00; height: 3px; }
+    .card-tabs .tabs .tab a:focus-visible { outline: 2px solid #1a237e; outline-offset: 2px; }
+    .card-tabs .tabs .indicator { display: none; }
     .rp-grid { display: grid; grid-template-columns: 300px 1fr; gap: 0; }
     @media (max-width: 900px) { .rp-grid { grid-template-columns: 1fr; } }
     .rp-role-list { border-right: 1px solid #e0e0e0; }
@@ -731,7 +793,7 @@ include __DIR__ . '/includes/header.php';
                             <span class="chip rp-dup">duplicado</span> misma capacidad que otra clave
                         </p>
                         <table class="striped">
-                            <thead><tr><th>Clave</th><th>Categoría</th><th>Roles</th><th>Estado</th></tr></thead>
+                            <thead><tr><th>Clave</th><th>Categoría</th><th>Roles</th><th>Estado</th><?php if (isSuperAdmin()): ?><th></th><?php endif; ?></tr></thead>
                             <tbody>
                                 <?php foreach ($permisos as $p): ?>
                                     <?php $viva = in_array($p['clave'], PERMISOS_EN_USO, true); $dup = in_array($p['clave'], $RP_DUPLICADOS, true); ?>
@@ -743,6 +805,23 @@ include __DIR__ . '/includes/header.php';
                                             <?php if ($dup): ?><span class="chip rp-dup">duplicado</span><br><?php endif; ?>
                                             <span class="chip <?php echo $viva ? 'rp-live' : 'rp-dead'; ?>"><?php echo $viva ? 'activo' : 'sin efecto'; ?></span>
                                         </td>
+                                        <?php if (isSuperAdmin()): ?>
+                                            <td>
+                                                <?php if (!$viva): ?>
+                                                    <form method="POST" style="display:inline;"
+                                                          onsubmit="return confirm('¿Desactivar &quot;<?php echo esc(addslashes((string) ($p['nombre'] ?? $p['clave']))); ?>&quot;? Desaparece de la matriz de roles y del modal de usuarios. No se borra, se puede reactivar por soporte.');">
+                                                        <?php echo csrfInput(); ?>
+                                                        <input type="hidden" name="accion" value="desactivar_permiso">
+                                                        <input type="hidden" name="id_permiso" value="<?php echo (int) $p['id_permiso']; ?>">
+                                                        <button type="submit" class="btn-flat btn-small red-text waves-effect" style="padding:0 8px;" title="Desactivar (no se usa en código)">
+                                                            <i class="material-icons tiny">visibility_off</i>
+                                                        </button>
+                                                    </form>
+                                                <?php else: ?>
+                                                    <span class="grey-text" style="font-size:11px;" title="En uso por código: no se puede desactivar desde aquí">—</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -878,7 +957,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="input-field col s12 m6"><input type="text" name="nombre" required><label>Nombre visible</label></div>
                 <div class="input-field col s12 m6">
                     <select name="categoria">
-                        <?php foreach (['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Administracion', 'Otros'] as $c): ?>
+                        <?php foreach (['Ventas', 'Inventario', 'Entregas', 'Catalogo', 'Metricas', 'Administracion', 'Otros'] as $c): ?>
                             <option value="<?php echo $c; ?>"><?php echo $c; ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -887,6 +966,16 @@ include __DIR__ . '/includes/header.php';
                 <div class="input-field col s12"><input type="text" name="descripcion"><label>Descripción</label></div>
             </div>
             <p class="grey-text" style="font-size:12px;"><i class="material-icons tiny">info</i> Las claves no se borran, se desactivan. Crear una clave no la conecta con el código: eso es trabajo de la Fase 4.</p>
+            <p style="margin-top:16px;">
+                <label>
+                    <input type="checkbox" name="confirmar_duplicado" value="1" class="filled-in">
+                    <span>Ya revisé el catálogo y confirmo que <b>no</b> es un permiso que ya existe con otro nombre</span>
+                </label>
+            </p>
+            <p class="grey-text" style="font-size:11.5px;margin-top:-4px;">
+                Si el nombre se parece mucho a uno activo (ej. "Realizar ventas" vs. "Venta"), el sistema lo rechaza a
+                menos que marques esta casilla — así evitamos otro <span class="chip rp-dup" style="font-size:9px;height:16px;line-height:16px;">duplicado</span>.
+            </p>
         </div>
         <div class="modal-footer">
             <a href="#!" class="modal-close btn-flat">Cancelar</a>
