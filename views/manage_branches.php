@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/pickup_offer_utils.php';
 
 requireAuth();
-if (!isAdmin()) {
+// Permiso 'gestionar_sucursales' abre esta vista; el admin entra siempre (short-circuit).
+if (!hasPermission('gestionar_sucursales') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

@@ -9,8 +9,16 @@ header('Content-Type: application/json');
 // Permite ejecución local sin sesión para cron/manual en localhost
 $isLocalCron = (!isAuthenticated() && ($_SERVER['REMOTE_ADDR'] ?? '') === '127.0.0.1');
 if (!$isLocalCron) {
-    requireAuth();
-    if (!isAdmin() && !isEncargado()) {
+    // Antes usaba requireAuth(), que sin sesion redirige a login.php en vez de
+    // devolver JSON -- rompia el fetch() que espera JSON siempre.
+    if (!isAuthenticated()) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'No autenticado']);
+        exit;
+    }
+    refreshSessionPermissions();
+    // Permiso 'inventario' abre este endpoint; el rol se mantiene como respaldo.
+    if (!hasPermission('inventario') && !isAdmin() && !isEncargado()) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => 'No autorizado']);
         exit;

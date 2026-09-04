@@ -10,6 +10,44 @@ require_once __DIR__ . '/ventas_features.php';
 require_once __DIR__ . '/referrals.php';
 
 /**
+ * Claves de permiso que HOY se comprueban de verdad en el codigo
+ * (via requirePermission()/hasPermission()). El panel de Roles y Permisos usa
+ * esta lista para marcar como "sin efecto" las claves que aun no controlan nada
+ * (se gatean por rol). Al migrar una vista de rol -> permiso en la Fase 4,
+ * agrega aqui su clave.
+ */
+const PERMISOS_EN_USO = [
+    'gestionar_productos',
+    'ver_reportes',
+    'ver_entregas',
+    'gestionar_blogs',
+    'apartar_productos',
+    'gestionar_usuarios',
+    // Fase 4: activados en vistas que antes decidian solo por rol (con el helper de rol
+    // como respaldo, para no quitar acceso a nadie).
+    'asignar_entregas',
+    'realizar_ventas',
+    'inventario',
+    'transferir_stock',
+    // Metricas y campanas (vistas nuevas, antes solo-admin por codigo; admin sigue
+    // entrando por short-circuit).
+    'ver_analitica_negocio',
+    'ver_trafico_campanas',
+    'ver_comportamiento_sitio',
+    'gestionar_campanas',
+    'configurar_iniciativas_ventas',
+    'ver_auditoria',
+    // Vistas admin/staff enganchadas al panel (sucursales, cancelaciones, clientes,
+    // asistente de IA / Alex Insights). El helper de rol sigue como respaldo.
+    'gestionar_clientes',
+    'gestionar_sucursales',
+    'gestionar_cancelaciones',
+    'gestionar_asistente_ia',
+    'ver_insights_ia',
+    'ver_notificaciones_pickup',
+];
+
+/**
  * Verifica si el usuario está autenticado.
  *
  * @return bool
@@ -132,6 +170,159 @@ function hasPermission(string $permiso): bool
     }
 
     return in_array($permiso, $usuario['permisos'], true);
+}
+
+/**
+ * Combina los permisos de un rol con los overrides individuales de un usuario.
+ * Funcion pura (sin BD) para poder testearla facilmente.
+ *
+ * @param string[] $permisosRol Claves que otorga el rol.
+ * @param array<int, array{clave?: string, efecto?: string}> $overrides Filas
+ *        vigentes de usuario_permisos (clave + efecto 'conceder'|'denegar').
+ * @return string[] Claves efectivas, unicas y ordenadas.
+ */
+function mergeEffectivePermissions(array $permisosRol, array $overrides): array
+{
+    $set = [];
+    foreach ($permisosRol as $clave) {
+        $clave = (string) $clave;
+        if ($clave !== '') {
+            $set[$clave] = true;
+        }
+    }
+
+    foreach ($overrides as $override) {
+        $clave = (string) ($override['clave'] ?? '');
+        if ($clave === '') {
+            continue;
+        }
+        if (($override['efecto'] ?? 'conceder') === 'denegar') {
+            unset($set[$clave]);
+        } else {
+            $set[$clave] = true;
+        }
+    }
+
+    $claves = array_keys($set);
+    sort($claves);
+    return $claves;
+}
+
+/**
+ * Permisos efectivos de un usuario = permisos del rol
+ *   ∪ overrides 'conceder' vigentes
+ *   − overrides 'denegar' vigentes.
+ *
+ * Tolera que la tabla usuario_permisos aun no exista (migracion sin correr):
+ * en ese caso devuelve solo los permisos del rol.
+ *
+ * @return string[]
+ */
+function getEffectivePermissions(PDO $pdo, int $idUsuario, int $idRol): array
+{
+    $permisosRol = [];
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT p.clave
+             FROM rol_permisos rp
+             JOIN permisos p ON p.id_permiso = rp.id_permiso
+             WHERE rp.id_rol = ? AND p.estado = 'activo'"
+        );
+        $stmt->execute([$idRol]);
+        $permisosRol = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+    } catch (Throwable $e) {
+        error_log('getEffectivePermissions (rol): ' . $e->getMessage());
+    }
+
+    $overrides = [];
+    if ($idUsuario > 0) {
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT p.clave, up.efecto
+                 FROM usuario_permisos up
+                 JOIN permisos p ON p.id_permiso = up.id_permiso
+                 WHERE up.id_usuario = ?
+                   AND p.estado = 'activo'
+                   AND (up.expira_en IS NULL OR up.expira_en > NOW())"
+            );
+            $stmt->execute([$idUsuario]);
+            $overrides = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            // La tabla puede no existir todavia en algun entorno; degradar a solo-rol.
+            error_log('getEffectivePermissions (overrides): ' . $e->getMessage());
+        }
+    }
+
+    return mergeEffectivePermissions($permisosRol, $overrides);
+}
+
+/**
+ * Re-lee rol, es_superadmin, id_almacen y permisos efectivos del usuario en sesion
+ * para que los cambios de roles/permisos apliquen sin necesidad de re-login.
+ *
+ * Throttled: como mucho una vez cada 30 s por sesion, y una sola consulta por
+ * request (guard estatico). Si la cuenta fue desactivada, limpia la sesion.
+ */
+function refreshSessionPermissions(bool $force = false): void
+{
+    static $ranThisRequest = false;
+    if ($ranThisRequest && !$force) {
+        return;
+    }
+    $ranThisRequest = true;
+
+    if (!isAuthenticated()) {
+        return;
+    }
+
+    $idUsuario = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
+    if ($idUsuario <= 0) {
+        return;
+    }
+
+    $ttlSegundos = 30;
+    $ultimo = (int) ($_SESSION['_perms_refreshed_at'] ?? 0);
+    if (!$force && (time() - $ultimo) < $ttlSegundos) {
+        return;
+    }
+
+    if (!function_exists('getPDO')) {
+        return;
+    }
+
+    try {
+        $pdo = getPDO();
+        $stmt = $pdo->prepare(
+            "SELECT u.id_rol, u.id_almacen, COALESCE(u.es_superadmin, 0) AS es_superadmin,
+                    u.estado, r.nombre AS rol
+             FROM usuarios u
+             JOIN roles r ON r.id_rol = u.id_rol
+             WHERE u.id_usuario = ?
+             LIMIT 1"
+        );
+        $stmt->execute([$idUsuario]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('refreshSessionPermissions: ' . $e->getMessage());
+        return;
+    }
+
+    if (!$row) {
+        return;
+    }
+
+    if ((string) ($row['estado'] ?? 'activo') !== 'activo') {
+        // La cuenta fue desactivada: el proximo requireAuth() mandara al login.
+        $_SESSION['usuario'] = [];
+        return;
+    }
+
+    $_SESSION['usuario']['id_rol'] = (int) $row['id_rol'];
+    $_SESSION['usuario']['id_almacen'] = $row['id_almacen'];
+    $_SESSION['usuario']['es_superadmin'] = (int) $row['es_superadmin'];
+    $_SESSION['usuario']['rol'] = (string) $row['rol'];
+    $_SESSION['usuario']['permisos'] = getEffectivePermissions($pdo, $idUsuario, (int) $row['id_rol']);
+    $_SESSION['_perms_refreshed_at'] = time();
 }
 
 /**
@@ -319,6 +510,11 @@ function resolveSalesWarehouseId(PDO $pdo): int
  */
 function requireAuth(string $redirectUrl = ''): void
 {
+    if (isAuthenticated()) {
+        // Aplica cambios de rol/permisos hechos desde el panel sin re-login.
+        refreshSessionPermissions();
+    }
+
     if (!isAuthenticated()) {
         if ($redirectUrl === '') {
             $redirectUrl = BASE_URL . 'views/login.php';
@@ -337,6 +533,10 @@ function requireAuth(string $redirectUrl = ''): void
  */
 function requirePermission(string $permiso, string $redirectUrl = ''): void
 {
+    if (isAuthenticated()) {
+        refreshSessionPermissions();
+    }
+
     if (!hasPermission($permiso)) {
         if ($redirectUrl === '') {
             $redirectUrl = BASE_URL . 'index.php';
@@ -347,16 +547,177 @@ function requirePermission(string $permiso, string $redirectUrl = ''): void
 }
 
 /**
+ * Establece la sesión de un usuario ya verificado (contraseña correcta y, si aplica,
+ * segundo factor superado). Centraliza el bloque de "login exitoso" para que lo
+ * compartan authenticate() y verifyStaffLoginOtp().
+ */
+function establishUserSession(PDO $pdo, array $user): void
+{
+    $user['permisos'] = getEffectivePermissions($pdo, (int) $user['id_usuario'], (int) $user['id_rol']);
+    $_SESSION['usuario'] = $user;
+    $_SESSION['_perms_refreshed_at'] = time();
+    unset($_SESSION['_pending_otp']);
+    session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
+    $_SESSION['_session_id_rotated_at'] = time();
+}
+
+/**
+ * ¿Este usuario necesita el segundo factor por correo para entrar?
+ * Solo staff sensible (admin/encargado) y solo si STAFF_OTP_ENABLED está activo.
+ */
+function staffOtpRequiredForUser(array $user): bool
+{
+    if (!defined('STAFF_OTP_ENABLED') || !STAFF_OTP_ENABLED) {
+        return false;
+    }
+    return in_array((string) ($user['rol'] ?? ''), ['admin', 'encargado'], true);
+}
+
+/**
+ * Genera un código de 6 dígitos, lo guarda hasheado (invalidando los anteriores del
+ * usuario) y lo envía por correo. No lanza: si el correo falla se registra y se sigue,
+ * el usuario podrá pedir reenvío.
+ */
+function issueStaffLoginOtp(PDO $pdo, array $user): bool
+{
+    $idUsuario = (int) $user['id_usuario'];
+    $email = (string) $user['email'];
+    $code = (string) random_int(100000, 999999);
+    $hash = hash('sha256', $code);
+    $expira = date('Y-m-d H:i:s', time() + 600); // 10 minutos
+
+    try {
+        $pdo->prepare("UPDATE staff_login_otp SET usado = 1 WHERE id_usuario = ? AND usado = 0")
+            ->execute([$idUsuario]);
+        $pdo->prepare("INSERT INTO staff_login_otp (id_usuario, codigo_hash, expira_en) VALUES (?, ?, ?)")
+            ->execute([$idUsuario, $hash, $expira]);
+    } catch (Throwable $e) {
+        error_log('issueStaffLoginOtp: ' . $e->getMessage());
+        return false;
+    }
+
+    $subject = 'Tu código para iniciar sesión';
+    $message = "Alguien inició sesión con tu cuenta de staff.\n\n" .
+               "Tu código de verificación es: {$code}\n\n" .
+               "Escríbelo en la pantalla de acceso para terminar de entrar.\n" .
+               "El código caduca en 10 minutos. Si no fuiste tú, cambia tu contraseña.\n";
+
+    return appSendPlainTextEmail($email, $subject, $message);
+}
+
+/**
+ * Reenvía un código nuevo para el login en curso (hay un _pending_otp en sesión).
+ */
+function resendStaffLoginOtp(?string &$errorMessage = null): bool
+{
+    $errorMessage = null;
+    $pending = $_SESSION['_pending_otp'] ?? null;
+    if (!is_array($pending) || empty($pending['id_usuario'])) {
+        $errorMessage = 'No hay un inicio de sesión pendiente. Vuelve a introducir tu correo y contraseña.';
+        return false;
+    }
+
+    $pdo = getPDO();
+    $stmt = $pdo->prepare("SELECT id_usuario, nombre, email, id_rol, id_almacen, es_superadmin,
+                                  (SELECT nombre FROM roles WHERE roles.id_rol = usuarios.id_rol) AS rol
+                           FROM usuarios WHERE id_usuario = ? AND estado = 'activo' LIMIT 1");
+    $stmt->execute([(int) $pending['id_usuario']]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        unset($_SESSION['_pending_otp']);
+        $errorMessage = 'La cuenta ya no está disponible.';
+        return false;
+    }
+
+    return issueStaffLoginOtp($pdo, $user);
+}
+
+/**
+ * Valida el código OTP del login en curso. Misma política de 5 intentos que el reset
+ * de contraseña. Si acierta, establece la sesión y limpia _pending_otp.
+ */
+function verifyStaffLoginOtp(string $code, ?string &$errorMessage = null): bool
+{
+    $errorMessage = null;
+    $code = trim($code);
+
+    $pending = $_SESSION['_pending_otp'] ?? null;
+    if (!is_array($pending) || empty($pending['id_usuario'])) {
+        $errorMessage = 'No hay un inicio de sesión pendiente. Vuelve a introducir tu correo y contraseña.';
+        return false;
+    }
+    if ($code === '' || !preg_match('/^\d{6}$/', $code)) {
+        $errorMessage = 'El código debe tener 6 dígitos.';
+        return false;
+    }
+
+    $idUsuario = (int) $pending['id_usuario'];
+    $pdo = getPDO();
+
+    $stmt = $pdo->prepare("SELECT * FROM staff_login_otp
+                           WHERE id_usuario = ? AND usado = 0
+                           ORDER BY id_otp DESC LIMIT 1");
+    $stmt->execute([$idUsuario]);
+    $record = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$record || strtotime((string) $record['expira_en']) < time()) {
+        $errorMessage = 'El código expiró. Pide uno nuevo.';
+        return false;
+    }
+
+    if ((int) $record['intentos'] >= 5) {
+        $pdo->prepare("UPDATE staff_login_otp SET usado = 1 WHERE id_otp = ?")->execute([$record['id_otp']]);
+        $errorMessage = 'Demasiados intentos fallidos. Pide un código nuevo.';
+        return false;
+    }
+
+    if (!hash_equals((string) $record['codigo_hash'], hash('sha256', $code))) {
+        $nuevos = (int) $record['intentos'] + 1;
+        $usado = $nuevos >= 5 ? 1 : 0;
+        $pdo->prepare("UPDATE staff_login_otp SET intentos = ?, usado = ? WHERE id_otp = ?")
+            ->execute([$nuevos, $usado, $record['id_otp']]);
+        $errorMessage = $usado
+            ? 'Demasiados intentos fallidos. Pide un código nuevo.'
+            : 'Código incorrecto. Te quedan ' . (5 - $nuevos) . ' intento(s).';
+        return false;
+    }
+
+    // Código correcto: cargar el usuario y establecer la sesión.
+    $stmtU = $pdo->prepare("SELECT u.id_usuario, u.nombre, u.email, u.id_rol, u.id_almacen, u.es_superadmin,
+                                   r.nombre AS rol, c.id_cliente
+                            FROM usuarios u
+                            JOIN roles r ON r.id_rol = u.id_rol
+                            LEFT JOIN clientes c ON c.id_usuario = u.id_usuario
+                            WHERE u.id_usuario = ? AND u.estado = 'activo' LIMIT 1");
+    $stmtU->execute([$idUsuario]);
+    $user = $stmtU->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        unset($_SESSION['_pending_otp']);
+        $errorMessage = 'La cuenta ya no está disponible.';
+        return false;
+    }
+
+    $pdo->prepare("UPDATE staff_login_otp SET usado = 1 WHERE id_otp = ?")->execute([$record['id_otp']]);
+
+    establishUserSession($pdo, $user);
+    logAudit('LOGIN_EXITOSO', 'usuarios', $idUsuario, "Inició sesión (verificación por correo)");
+    return true;
+}
+
+/**
  * Intenta autenticar al usuario.
  *
  * Acepta email o telefono como identificador de acceso.
  *
  * @param string $loginIdentifier
  * @param string $password
- * @return bool
+ * @param string|null $challenge  Salida: 'otp_required' si la contraseña es correcta
+ *        pero falta el segundo factor por correo (staff con STAFF_OTP_ENABLED).
+ * @return bool  true solo si la sesión quedó establecida.
  */
-function authenticate(string $loginIdentifier, string $password): bool
+function authenticate(string $loginIdentifier, string $password, ?string &$challenge = null): bool
 {
+    $challenge = null;
     $pdo = getPDO();
     $loginIdentifier = trim($loginIdentifier);
     $loginDigits = normalizePhoneDigitsMx($loginIdentifier);
@@ -380,16 +741,14 @@ function authenticate(string $loginIdentifier, string $password): bool
         }
     }
 
-    // Se añadió u.contrasena a la lista de columnas seleccionadas
+    // Los permisos se calculan aparte con getEffectivePermissions() (rol + overrides
+    // individuales), por eso aqui ya no se hace el GROUP_CONCAT sobre rol_permisos.
     $sql = "SELECT u.id_usuario, u.nombre, u.email, u.contrasena, u.id_rol, u.id_almacen, u.es_superadmin, r.nombre as rol,
-                   GROUP_CONCAT(p.clave) as permisos,
                    c.id_cliente,
                    c.telefono as telefono_cliente,
                    u.intentos_fallidos, u.bloqueado_hasta
             FROM usuarios u
             JOIN roles r ON u.id_rol = r.id_rol
-            LEFT JOIN rol_permisos rp ON r.id_rol = rp.id_rol
-            LEFT JOIN permisos p ON rp.id_permiso = p.id_permiso
             LEFT JOIN clientes c ON u.id_usuario = c.id_usuario
             WHERE " . ($userId !== null ? 'u.id_usuario = :login_id' : 'u.email = :login') . " AND u.estado = 'activo'
             GROUP BY u.id_usuario";
@@ -427,24 +786,35 @@ function authenticate(string $loginIdentifier, string $password): bool
 
     if (password_verify($password, $user['contrasena'])) {
         error_log("DEBUG LOGIN: Contraseña CORRECTA para ID " . $user['id_usuario']);
-        
+
         if (empty($user['rol'])) {
             error_log("DEBUG LOGIN ADVERTENCIA: El usuario no tiene un rol asignado.");
         }
 
-        $user['permisos'] = $user['permisos'] ? explode(',', $user['permisos']) : [];
-        $_SESSION['usuario'] = $user;
-        session_regenerate_id(true); // SEGURIDAD: Evita ataques de fijación de sesión
-        $_SESSION['_session_id_rotated_at'] = time();
-
-        // ÉXITO: limpiar intentos es importante, pero no debe bloquear el login.
+        // La contraseña ya es correcta: limpiar el contador de intentos (no debe bloquear el login).
         try {
             $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
                 ->execute([$user['id_usuario']]);
         } catch (Throwable $e) {
             error_log("LOGIN_WARN: No se pudo limpiar intentos_fallidos: " . $e->getMessage());
         }
-        
+
+        // Mejora 9: segundo factor por correo para staff admin/encargado.
+        if (staffOtpRequiredForUser($user)) {
+            if (!issueStaffLoginOtp($pdo, $user)) {
+                error_log('LOGIN_WARN: no se pudo enviar el OTP de staff a ' . $user['email'] . '; el usuario puede pedir reenvío.');
+            }
+            $_SESSION['_pending_otp'] = [
+                'id_usuario' => (int) $user['id_usuario'],
+                'email'      => (string) $user['email'],
+                'ts'         => time(),
+            ];
+            $challenge = 'otp_required';
+            logAudit('LOGIN_OTP_ENVIADO', 'usuarios', (int)$user['id_usuario'], "Código de verificación enviado por correo");
+            return false;
+        }
+
+        establishUserSession($pdo, $user);
         logAudit('LOGIN_EXITOSO', 'usuarios', (int)$user['id_usuario'], "Usuario inició sesión");
         return true;
     }
@@ -522,7 +892,7 @@ function logout(): void
     exit;
 }
 
-function generatePasswordResetToken(string $email): bool
+function generatePasswordResetToken(string $email, bool $bienvenida = false): bool
 {
     $pdo = getPDO();
     $sql = "SELECT id_usuario FROM usuarios WHERE email = :email AND estado = 'activo' LIMIT 1";
@@ -554,7 +924,7 @@ function generatePasswordResetToken(string $email): bool
         ':expires_at' => $expiresAt,
     ]);
 
-    return sendPasswordResetEmail($email, $code);
+    return sendPasswordResetEmail($email, $code, $bienvenida);
 }
 
 /**
@@ -655,8 +1025,19 @@ function resetPasswordWithToken(string $email, string $token, string $newPasswor
     }
 }
 
-function sendPasswordResetEmail(string $email, string $token): bool
+function sendPasswordResetEmail(string $email, string $token, bool $bienvenida = false): bool
 {
+    if ($bienvenida) {
+        $subject = 'Bienvenido/a: activa tu cuenta de staff';
+        $message = "Se creó una cuenta de staff para ti.\n\n" .
+                   "Tu código de activación es: {$token}\n\n" .
+                   "Entra a la página de recuperar contraseña, escribe tu correo y este código, " .
+                   "y elige tu propia contraseña para poder iniciar sesión.\n" .
+                   "El código caduca en 1 hora. Si no esperabas esto, ignora este mensaje.\n";
+
+        return appSendPlainTextEmail($email, $subject, $message);
+    }
+
     $subject = 'Código de recuperación de contraseña';
     $message = "Tu código de seguridad es: {$token}\n\n" .
                "Ingrésalo en la página para restablecer tu contraseña.\n" .

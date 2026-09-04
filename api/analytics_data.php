@@ -7,7 +7,10 @@ require_once __DIR__ . '/../core/stock_prediction.php';
 
 header('Content-Type: application/json');
 
-if (!isAuthenticated() || !isAdmin()) {
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
+// Permiso 'ver_analitica_negocio' abre este endpoint; el admin entra siempre (short-circuit).
+if (!isAuthenticated() || (!hasPermission('ver_analitica_negocio') && !isAdmin())) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }

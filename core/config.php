@@ -98,7 +98,15 @@ if (!defined('BASE_URL')) {
     // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
     $host = $_SERVER['HTTP_HOST'] ?? '';
     if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
-        define('BASE_URL', '/e-commerce-pro/');
+        // Deriva la subcarpeta del propio script para que un git worktree servido en
+        // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
+        // local; cae a /e-commerce-pro/ si no se puede determinar.
+        $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
+        if (preg_match('#^/([^/]+)#', $scriptDir, $m) && $m[1] !== 'views' && $m[1] !== 'api') {
+            define('BASE_URL', '/' . $m[1] . '/');
+        } else {
+            define('BASE_URL', '/e-commerce-pro/');
+        }
     } else {
         define('BASE_URL', '/');
     }
@@ -484,6 +492,14 @@ if (!defined('GOOGLE_MAPS_API_KEY')) {
 // hace que ese pedido no descuente inventario (ventas de muestra, cortesía, etc.).
 // Configurable por entorno para no dejarla fija en el código.
 define('SALE_INVENTORY_BYPASS_KEYWORD', getEnvVar('SALE_INVENTORY_BYPASS_KEYWORD', 'SININVENTARIO'));
+
+// Segundo factor por correo (código de 6 dígitos) para el login de staff admin/encargado.
+// Apagado por defecto: actívalo con STAFF_OTP_ENABLED=1 en el entorno cuando el envío de
+// correo esté disponible en el host.
+if (!defined('STAFF_OTP_ENABLED')) {
+    $staffOtpEnv = strtolower((string) (getEnvVar('STAFF_OTP_ENABLED', '0') ?? '0'));
+    define('STAFF_OTP_ENABLED', in_array($staffOtpEnv, ['1', 'true', 'on', 'yes'], true));
+}
 
 const CSV_IMPORT_PATH = __DIR__ . '/../Exportaciones/Variante del producto (product.product).csv';
 const UPLOAD_DIR = __DIR__ . '/uploads';

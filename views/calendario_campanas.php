@@ -7,7 +7,9 @@ require_once __DIR__ . '/../core/ventas_features.php';
 require_once __DIR__ . '/../core/stock_prediction.php';
 
 requireAuth();
-if (!isAdmin()) {
+// Permiso 'gestionar_campanas' abre esta vista (ver + crear/eliminar campanas);
+// el admin entra siempre (short-circuit).
+if (!hasPermission('gestionar_campanas') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

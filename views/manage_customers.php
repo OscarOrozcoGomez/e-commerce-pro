@@ -7,7 +7,8 @@ require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 requireAuth();
-if (!isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
+// Permiso 'gestionar_clientes' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
 $pdo = getPDO();
 $error = '';

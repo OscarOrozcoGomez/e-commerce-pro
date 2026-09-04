@@ -6,6 +6,8 @@ require_once __DIR__ . '/../core/image_optimizer.php';
 
 header('Content-Type: application/json');
 
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
 if (!isAuthenticated() || !hasPermission('gestionar_productos')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
@@ -402,9 +404,9 @@ try {
             }
         }
         elseif ($action === 'bulk_assign_category') {
-            // Aunque toda la API ya exige 'gestionar_productos' arriba, esta accion en
-            // particular queda reservada solo a admin/encargado (a peticion expresa).
-            if (!canBulkAssignCategories()) {
+            // Fase 4: basta con 'gestionar_productos' (ya exigido arriba); el rol
+            // admin/encargado se mantiene como respaldo.
+            if (!hasPermission('gestionar_productos') && !canBulkAssignCategories()) {
                 throw new Exception("No tienes permiso para asignar categorías de forma masiva.");
             }
 
