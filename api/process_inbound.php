@@ -4,6 +4,8 @@ require_once __DIR__ . '/../core/auth.php';
 
 header('Content-Type: application/json');
 
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
 // Permiso 'inventario' abre este endpoint; el rol se mantiene como respaldo.
 if (!isAuthenticated() || (!hasPermission('inventario') && !isAdmin() && !isEncargado())) {
     echo json_encode(['success' => false, 'error' => 'No autorizado']);

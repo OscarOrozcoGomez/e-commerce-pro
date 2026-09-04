@@ -6,6 +6,8 @@ require_once __DIR__ . '/../core/image_optimizer.php';
 
 header('Content-Type: application/json');
 
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
 if (!isAuthenticated() || !hasPermission('gestionar_productos')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;

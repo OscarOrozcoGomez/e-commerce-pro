@@ -300,6 +300,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if (isAdminAccount($targetUser) && !isSuperAdmin()) {
                     throw new Exception('Solo un super admin puede editar los permisos de una cuenta de administrador.');
                 }
+                // Los clientes no son staff y no entran a este panel (la lista de abajo ya
+                // los excluye); rechazarlos aqui tambien evita que un id_usuario manipulado
+                // a mano le de permisos de staff a una cuenta de cliente sin que se note en
+                // la lista de Usuarios.
+                if (($targetUser['rol'] ?? '') === 'cliente') {
+                    throw new Exception('No se pueden asignar permisos de staff a una cuenta de cliente.');
+                }
 
                 // Permisos que otorga su rol.
                 $stmtR = $pdo->prepare("SELECT id_permiso FROM rol_permisos WHERE id_rol = ?");

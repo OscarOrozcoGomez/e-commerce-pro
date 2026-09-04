@@ -4,6 +4,8 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 header('Content-Type: application/json');
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco (no-op sin sesion).
+refreshSessionPermissions();
 // Fase 4: el permiso 'transferir_stock' abre este endpoint; el rol admin se mantiene como respaldo.
 if (!hasPermission('transferir_stock') && !isAdmin()) { echo json_encode(['success' => false, 'message' => 'No autorizado']); exit; }
 
