@@ -45,6 +45,83 @@ function rpRolePermisoIds(PDO $pdo, int $idRol): array
     return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 }
 
+/**
+ * Arbol de acceso: por cada rol de staff (se excluye 'cliente', que no entra al panel),
+ * su set de permisos "pre-aprobado" (rol_permisos) y sus usuarios con lo que se les
+ * haya agregado/quitado encima (usuario_permisos vigentes). admin es especial: su
+ * acceso es total por hasPermission()/isAdmin() y NO depende de rol_permisos, así que
+ * listar sus filas ahí sería enganoso -- se marca aparte.
+ *
+ * @return array<int, array{id_rol:int, nombre:string, es_sistema:bool, es_admin:bool,
+ *   permisos_base: array<int, array{clave:string, categoria:string}>,
+ *   usuarios: array<int, array{id_usuario:int, nombre:string, estado:string,
+ *     conceder: string[], denegar: string[]}>}>
+ */
+function rpBuildArbol(PDO $pdo): array
+{
+    $roles = $pdo->query(
+        "SELECT id_rol, nombre, COALESCE(es_sistema, 0) AS es_sistema
+         FROM roles WHERE estado = 'activo' AND nombre != 'cliente'"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $ordenRol = ['admin' => 0, 'encargado' => 1, 'vendedor' => 2, 'repartidor' => 3];
+    usort($roles, static function ($a, $b) use ($ordenRol) {
+        $ia = $ordenRol[$a['nombre']] ?? 99;
+        $ib = $ordenRol[$b['nombre']] ?? 99;
+        return $ia <=> $ib ?: strcmp($a['nombre'], $b['nombre']);
+    });
+
+    $basePorRol = [];
+    foreach ($pdo->query(
+        "SELECT rp.id_rol, p.clave, p.categoria FROM rol_permisos rp
+         JOIN permisos p ON p.id_permiso = rp.id_permiso
+         WHERE p.estado = 'activo' ORDER BY p.clave"
+    ) as $row) {
+        $basePorRol[(int) $row['id_rol']][] = $row;
+    }
+
+    $usuariosPorRol = [];
+    foreach ($pdo->query(
+        "SELECT u.id_usuario, u.id_rol, u.nombre, u.estado FROM usuarios u
+         JOIN roles r ON r.id_rol = u.id_rol
+         WHERE r.nombre != 'cliente' ORDER BY u.nombre"
+    ) as $row) {
+        $usuariosPorRol[(int) $row['id_rol']][] = $row;
+    }
+
+    $overridesPorUsuario = [];
+    foreach ($pdo->query(
+        "SELECT up.id_usuario, up.efecto, p.clave FROM usuario_permisos up
+         JOIN permisos p ON p.id_permiso = up.id_permiso
+         WHERE up.expira_en IS NULL OR up.expira_en > NOW()
+         ORDER BY p.clave"
+    ) as $row) {
+        $overridesPorUsuario[(int) $row['id_usuario']][$row['efecto']][] = $row['clave'];
+    }
+
+    foreach ($roles as &$r) {
+        $idRol = (int) $r['id_rol'];
+        $r['id_rol'] = $idRol;
+        $r['es_sistema'] = (bool) $r['es_sistema'];
+        $r['es_admin'] = $r['nombre'] === 'admin';
+        $r['permisos_base'] = $basePorRol[$idRol] ?? [];
+        $r['usuarios'] = [];
+        foreach (($usuariosPorRol[$idRol] ?? []) as $u) {
+            $ov = $overridesPorUsuario[(int) $u['id_usuario']] ?? [];
+            $r['usuarios'][] = [
+                'id_usuario' => (int) $u['id_usuario'],
+                'nombre' => $u['nombre'],
+                'estado' => $u['estado'],
+                'conceder' => $ov['conceder'] ?? [],
+                'denegar' => $ov['denegar'] ?? [],
+            ];
+        }
+    }
+    unset($r);
+
+    return $roles;
+}
+
 function rpCountOtrosAdminsActivos(PDO $pdo, int $exceptoIdUsuario = 0): int
 {
     $stmt = $pdo->prepare(
@@ -193,6 +270,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 }
 
 $roles = rpGetRoles($pdo);
+$arbol = rpBuildArbol($pdo);
 $permisos = rpGetPermisos($pdo);
 
 $permisosPorCategoria = [];
@@ -327,6 +405,19 @@ include __DIR__ . '/includes/header.php';
         border: 6px solid transparent; border-top-color: #1c2333;
     }
     .rp-info:hover .rp-bubble, .rp-info:focus-visible .rp-bubble { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Tab Arbol: admin (todo) -> rol (set base) -> usuarios con sus overrides. */
+    .mono { font-family: 'Roboto Mono', monospace; font-size: 12px; }
+    .rp-tree-rol { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; }
+    .rp-tree-rol-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .rp-tree-rol-head h6 { margin: 0; font-weight: 700; text-transform: capitalize; font-size: 16px; }
+    .rp-tree-base { margin: 10px 0 2px; padding: 10px 12px; background: #f7f8fc; border-radius: 8px; font-size: 12.5px; line-height: 1.7; }
+    .rp-tree-base-admin { background: #e8f5e9; color: #2e7d32; }
+    .rp-tree-base .cat-tag { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #5c6bc0; margin-right: 8px; }
+    .rp-tree-users { margin: 12px 0 0 4px; padding-left: 16px; border-left: 2px solid #e8eaf6; }
+    .rp-tree-user { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; flex-wrap: wrap; }
+    .rp-tree-user .name { font-weight: 600; }
+    .rp-tree-user-detail { font-size: 11.5px; color: #78909c; padding: 0 0 6px 22px; line-height: 1.5; }
     .chip.rp-dead { background: #ffebee; color: #c62828; }
     .chip.rp-dup { background: #fff8e1; color: #ff8f00; }
     .chip.rp-live { background: #e8f5e9; color: #2e7d32; }
@@ -366,6 +457,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card-tabs">
             <ul class="tabs tabs-fixed-width">
                 <li class="tab"><a class="active" href="#rp-tab-roles">Roles</a></li>
+                <li class="tab"><a href="#rp-tab-arbol">Árbol</a></li>
                 <li class="tab"><a href="#rp-tab-cat">Catálogo de permisos</a></li>
                 <li class="tab"><a href="#rp-tab-hist">Historial</a></li>
             </ul>
@@ -497,6 +589,113 @@ include __DIR__ . '/includes/header.php';
                         <?php endif; ?>
                     </div>
                 </div>
+            </div>
+
+            <!-- ================= TAB ARBOL ================= -->
+            <div id="rp-tab-arbol" style="padding: 22px;">
+                <h5 style="font-weight:700;margin-top:0;">Árbol de acceso por rol</h5>
+                <p class="grey-text" style="font-size:13px;max-width:70ch;">
+                    De arriba hacia abajo: lo que trae cada rol de fábrica (el "set pre-aprobado"), y debajo
+                    quién lo tiene hoy y qué le cambiaste encima. Para editar el set de un rol o los permisos
+                    de una persona, usa la pestaña <b>Roles</b> o <a href="<?php echo BASE_URL; ?>views/users.php">Usuarios</a>
+                    — esta vista es solo de consulta.
+                </p>
+
+                <?php foreach ($arbol as $rolArbol): ?>
+                    <div class="rp-tree-rol">
+                        <div class="rp-tree-rol-head">
+                            <i class="material-icons" style="color:#3949ab;"><?php echo esc($iconoRol[$rolArbol['nombre']] ?? 'group'); ?></i>
+                            <h6><?php echo esc($rolArbol['nombre']); ?></h6>
+                            <?php if ($rolArbol['es_sistema']): ?>
+                                <span class="chip grey lighten-3" style="font-size:10px;height:20px;line-height:20px;">sistema</span>
+                            <?php endif; ?>
+                            <span class="grey-text" style="font-size:12.5px;margin-left:auto;">
+                                <?php echo count($rolArbol['usuarios']); ?> usuario<?php echo count($rolArbol['usuarios']) === 1 ? '' : 's'; ?>
+                            </span>
+                            <a href="?rol=<?php echo (int) $rolArbol['id_rol']; ?>#rp-tab-roles" class="btn-flat btn-small waves-effect" style="padding:0 10px;">Editar rol</a>
+                        </div>
+
+                        <?php if ($rolArbol['es_admin']): ?>
+                            <div class="rp-tree-base rp-tree-base-admin">
+                                <i class="material-icons tiny" style="vertical-align:-3px;">verified_user</i>
+                                Acceso total a todo el sistema, por diseño: <span class="mono">isAdmin()</span> pasa
+                                cualquier verificación de permiso, sin importar el catálogo.
+                            </div>
+                        <?php else: ?>
+                            <div class="rp-tree-base">
+                                <?php if (empty($rolArbol['permisos_base'])): ?>
+                                    <span class="grey-text">Este rol no trae ningún permiso de fábrica todavía.</span>
+                                <?php else: ?>
+                                    <?php
+                                    $porCat = [];
+                                    foreach ($rolArbol['permisos_base'] as $pb) {
+                                        $porCat[$pb['categoria']][] = $pb['clave'];
+                                    }
+                                    ?>
+                                    <?php foreach ($porCat as $cat => $claves): ?>
+                                        <div style="margin-bottom:4px;">
+                                            <span class="cat-tag"><?php echo esc($cat); ?></span>
+                                            <?php foreach ($claves as $cl): ?><span class="mono" style="margin-right:10px;"><?php echo esc($cl); ?></span><?php endforeach; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($rolArbol['usuarios'])): ?>
+                            <?php
+                            $conCambios = [];
+                            $sinCambios = [];
+                            foreach ($rolArbol['usuarios'] as $u) {
+                                if (count($u['conceder']) > 0 || count($u['denegar']) > 0) {
+                                    $conCambios[] = $u;
+                                } else {
+                                    $sinCambios[] = $u;
+                                }
+                            }
+                            ?>
+                            <div class="rp-tree-users">
+                                <?php if (empty($conCambios)): ?>
+                                    <p class="grey-text" style="font-size:12.5px;margin:2px 0;">
+                                        Nadie tiene permisos individuales sobre este rol todavía —
+                                        los <?php echo count($sinCambios); ?> usuarios tienen exactamente el set de arriba.
+                                    </p>
+                                <?php else: ?>
+                                    <?php foreach ($conCambios as $u): ?>
+                                        <?php $nCon = count($u['conceder']); $nDen = count($u['denegar']); ?>
+                                        <div class="rp-tree-user">
+                                            <i class="material-icons tiny grey-text"><?php echo $u['estado'] === 'activo' ? 'person' : 'person_off'; ?></i>
+                                            <span class="name"><?php echo esc($u['nombre']); ?></span>
+                                            <?php if ($u['estado'] !== 'activo'): ?>
+                                                <span class="grey-text" style="font-size:11px;">(inactivo)</span>
+                                            <?php endif; ?>
+                                            <span class="chip green lighten-4 green-text text-darken-2" style="font-size:10px;height:20px;line-height:20px;">
+                                                rol<?php echo $nCon > 0 ? ' +' . $nCon : ''; ?><?php echo $nDen > 0 ? ' −' . $nDen : ''; ?>
+                                            </span>
+                                        </div>
+                                        <div class="rp-tree-user-detail">
+                                            <?php if ($nCon > 0): ?>añadido: <span class="mono"><?php echo esc(implode(', ', $u['conceder'])); ?></span><?php endif; ?>
+                                            <?php if ($nCon > 0 && $nDen > 0): ?> &middot; <?php endif; ?>
+                                            <?php if ($nDen > 0): ?>quitado: <span class="mono"><?php echo esc(implode(', ', $u['denegar'])); ?></span><?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                    <?php if (!empty($sinCambios)): ?>
+                                        <details style="margin-top:6px;">
+                                            <summary style="cursor:pointer;font-size:12px;color:#78909c;">
+                                                + <?php echo count($sinCambios); ?> más igual al rol, sin cambios
+                                            </summary>
+                                            <p style="font-size:12px;color:#78909c;margin:6px 0 0;">
+                                                <?php echo esc(implode(', ', array_column($sinCambios, 'nombre'))); ?>
+                                            </p>
+                                        </details>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                            </div>
+                        <?php else: ?>
+                            <p class="grey-text" style="font-size:12.5px;margin:10px 0 0;">Nadie tiene este rol todavía.</p>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
             </div>
 
             <!-- ================= TAB CATALOGO ================= -->
