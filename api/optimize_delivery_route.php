@@ -14,7 +14,8 @@ if (!isAuthenticated()) {
     exit;
 }
 
-if (!isAdmin() && !isRepartidor()) {
+// Permiso 'ver_entregas' abre este endpoint; el rol se mantiene como respaldo.
+if (!hasPermission('ver_entregas') && !isAdmin() && !isRepartidor()) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'No autorizado para optimizar rutas.']);
     exit;
