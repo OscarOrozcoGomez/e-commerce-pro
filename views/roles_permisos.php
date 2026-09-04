@@ -366,6 +366,28 @@ include __DIR__ . '/includes/header.php';
     .rp-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
     .rp-header h4 { margin: 0; }
     .rp-stats .chip { margin: 4px 4px 4px 0; }
+
+    /* Pestañas: el default de Materialize (texto/indicador rosa palido) casi no se ve
+       sobre blanco. Barra indigo solida + iconos + subrayado ambar de alto contraste. */
+    .card-tabs { background: #1a237e; border-radius: 2px 2px 0 0; }
+    .card-tabs .tabs { background: transparent; }
+    .card-tabs .tabs .tab { height: 56px; line-height: 56px; }
+    .card-tabs .tabs .tab a {
+        color: rgba(255,255,255,.72);
+        font-weight: 700;
+        font-size: 13.5px;
+        letter-spacing: .03em;
+        transition: color .15s ease;
+    }
+    .card-tabs .tabs .tab a i.material-icons {
+        font-size: 19px;
+        margin-right: 6px;
+        vertical-align: -4px;
+    }
+    .card-tabs .tabs .tab a:hover { color: #fff; }
+    .card-tabs .tabs .tab a.active { color: #fff; }
+    .card-tabs .tabs .tab a:focus, .card-tabs .tabs .tab a:focus.active { background-color: rgba(255,255,255,.14); }
+    .card-tabs .tabs .indicator { background-color: #ffab00; height: 3px; }
     .rp-grid { display: grid; grid-template-columns: 300px 1fr; gap: 0; }
     @media (max-width: 900px) { .rp-grid { grid-template-columns: 1fr; } }
     .rp-role-list { border-right: 1px solid #e0e0e0; }
@@ -456,10 +478,10 @@ include __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-tabs">
             <ul class="tabs tabs-fixed-width">
-                <li class="tab"><a class="active" href="#rp-tab-roles">Roles</a></li>
-                <li class="tab"><a href="#rp-tab-arbol">Árbol</a></li>
-                <li class="tab"><a href="#rp-tab-cat">Catálogo de permisos</a></li>
-                <li class="tab"><a href="#rp-tab-hist">Historial</a></li>
+                <li class="tab"><a class="active" href="#rp-tab-roles"><i class="material-icons left">groups</i>Roles</a></li>
+                <li class="tab"><a href="#rp-tab-arbol"><i class="material-icons left">account_tree</i>Árbol</a></li>
+                <li class="tab"><a href="#rp-tab-cat"><i class="material-icons left">fact_check</i>Catálogo de permisos</a></li>
+                <li class="tab"><a href="#rp-tab-hist"><i class="material-icons left">history</i>Historial</a></li>
             </ul>
         </div>
 
