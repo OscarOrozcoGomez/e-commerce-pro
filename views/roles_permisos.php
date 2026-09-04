@@ -218,12 +218,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
                 $pdo->prepare("UPDATE roles SET descripcion = ? WHERE id_rol = ?")
                     ->execute([$descripcion !== '' ? $descripcion : null, $idRol]);
-                $pdo->prepare("DELETE FROM rol_permisos WHERE id_rol = ?")->execute([$idRol]);
-                if ($permisosIds) {
-                    $ins = $pdo->prepare("INSERT INTO rol_permisos (id_rol, id_permiso) VALUES (?, ?)");
-                    foreach ($permisosIds as $pid) {
-                        if ($pid > 0) {
-                            $ins->execute([$idRol, $pid]);
+                // admin nunca se toca aqui: su acceso es total via isAdmin() sin importar
+                // rol_permisos, y sus casillas se muestran marcadas+bloqueadas en el
+                // formulario (no se envian), asi que no hay nada real que guardar. Tocar
+                // rol_permisos para admin solo serviria para desincronizar el catalogo de
+                // "quien puede...?" -- se mantiene con TODOS los permisos activos siempre
+                // (ver crear_permiso, que agrega cada clave nueva a admin automaticamente).
+                if ($rol['nombre'] !== 'admin') {
+                    $pdo->prepare("DELETE FROM rol_permisos WHERE id_rol = ?")->execute([$idRol]);
+                    if ($permisosIds) {
+                        $ins = $pdo->prepare("INSERT INTO rol_permisos (id_rol, id_permiso) VALUES (?, ?)");
+                        foreach ($permisosIds as $pid) {
+                            if ($pid > 0) {
+                                $ins->execute([$idRol, $pid]);
+                            }
                         }
                     }
                 }
@@ -286,7 +294,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
                     $pdo->prepare("INSERT INTO permisos (clave, nombre, descripcion, categoria, estado) VALUES (?, ?, ?, ?, 'activo')")
                         ->execute([$clave, $nombre, $descripcion !== '' ? $descripcion : null, $categoria]);
-                    logAudit('PERMISO_CREADO', 'permisos', (int) $pdo->lastInsertId(), "Clave: {$clave}");
+                    $idNuevoPermiso = (int) $pdo->lastInsertId();
+                    // admin siempre tiene todos los permisos activos (ver guardar_rol): una
+                    // clave nueva se agrega tambien a su rol_permisos para que nunca se
+                    // desactualice, aunque isAdmin() ya le daba acceso sin necesitar esto.
+                    $pdo->prepare(
+                        "INSERT INTO rol_permisos (id_rol, id_permiso)
+                         SELECT id_rol, ? FROM roles WHERE nombre = 'admin'"
+                    )->execute([$idNuevoPermiso]);
+                    logAudit('PERMISO_CREADO', 'permisos', $idNuevoPermiso, "Clave: {$clave}");
                     $success = 'Permiso creado.';
                 } else {
                     $idPermiso = (int) ($_POST['id_permiso'] ?? 0);
@@ -363,6 +379,7 @@ if ($rolSel === null && $roles) {
 $permisosDelRol = $rolSel ? rpRolePermisoIds($pdo, $selRol) : [];
 $usuariosAfectados = $rolSel ? (int) $rolSel['num_usuarios'] : 0;
 $rolSelEsSistema = $rolSel ? ((int) ($rolSel['es_sistema'] ?? 0) === 1) : false;
+$rolSelEsAdmin = $rolSel ? ($rolSel['nombre'] === 'admin') : false;
 
 // Mejora 2: ¿quién puede...?
 $quienClave = trim((string) ($_GET['quien'] ?? ''));
@@ -622,10 +639,21 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                 </div>
 
-                                <p class="grey-text" style="font-size:13px;margin:4px 0 0;">
-                                    <i class="material-icons tiny" style="vertical-align:-3px;">toggle_on</i>
-                                    Activa los permisos que este rol otorga por defecto a todos sus usuarios.
-                                </p>
+                                <?php if ($rolSelEsAdmin): ?>
+                                    <p class="card-panel green lighten-4 green-text text-darken-3" style="font-size:13px;margin:10px 0 0;box-shadow:none;">
+                                        <i class="material-icons tiny" style="vertical-align:-3px;">verified_user</i>
+                                        <b>admin siempre tiene acceso total</b> — no depende de esta lista. Las casillas
+                                        de abajo se muestran marcadas y bloqueadas porque son informativas: reflejan
+                                        que admin puede hacer todo, pero desmarcarlas no le quitaría nada (por diseño,
+                                        para que nunca se pueda auto-bloquear el administrador). Los permisos nuevos se
+                                        agregan aquí automáticamente al crearse.
+                                    </p>
+                                <?php else: ?>
+                                    <p class="grey-text" style="font-size:13px;margin:4px 0 0;">
+                                        <i class="material-icons tiny" style="vertical-align:-3px;">toggle_on</i>
+                                        Activa los permisos que este rol otorga por defecto a todos sus usuarios.
+                                    </p>
+                                <?php endif; ?>
 
                                 <?php foreach ($permisosPorCategoria as $cat => $lista): ?>
                                     <div class="rp-cat">
@@ -634,7 +662,7 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                     <?php foreach ($lista as $p): ?>
                                         <?php
-                                        $enRol = in_array((int) $p['id_permiso'], $permisosDelRol, true);
+                                        $enRol = $rolSelEsAdmin ? true : in_array((int) $p['id_permiso'], $permisosDelRol, true);
                                         $viva = in_array($p['clave'], PERMISOS_EN_USO, true);
                                         $dup = rpEsDuplicado($p['clave'], $RP_GRUPOS_DUPLICADOS, $RP_CLAVES_ACTIVAS);
                                         ?>
@@ -645,7 +673,8 @@ include __DIR__ . '/includes/header.php';
                                                            value="<?php echo (int) $p['id_permiso']; ?>"
                                                            data-clave="<?php echo esc($p['clave']); ?>"
                                                            data-inrole="<?php echo $enRol ? '1' : '0'; ?>"
-                                                           <?php echo $enRol ? 'checked' : ''; ?>>
+                                                           <?php echo $enRol ? 'checked' : ''; ?>
+                                                           <?php echo $rolSelEsAdmin ? 'disabled' : ''; ?>>
                                                     <span class="lever"></span>
                                                 </label>
                                             </div>
