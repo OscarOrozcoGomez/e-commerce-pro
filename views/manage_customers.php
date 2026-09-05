@@ -186,8 +186,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     throw new Exception('El correo capturado no es valido.');
                 }
-                if ($aliasDireccion !== '' && mb_strlen($aliasDireccion) > 50) {
-                    throw new Exception('El alias de la direccion no puede exceder 50 caracteres.');
+                if ($aliasDireccion !== '' && direccionAliasExcedeLimite($aliasDireccion)) {
+                    throw new Exception(direccionAliasErrorLimite());
                 }
 
                 $pdo->beginTransaction();
@@ -257,8 +257,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if ($alias === '' || $direccion === '') {
                     throw new Exception('Alias y direccion son obligatorios.');
                 }
-                if (mb_strlen($alias) > 50) {
-                    throw new Exception('El alias de la direccion no puede exceder 50 caracteres.');
+                if (direccionAliasExcedeLimite($alias)) {
+                    throw new Exception(direccionAliasErrorLimite());
                 }
 
                 $pdo->beginTransaction();

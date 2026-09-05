@@ -2,6 +2,35 @@
 declare(strict_types=1);
 
 /**
+ * Limite de caracteres para el alias de una direccion de cliente. Es una etiqueta
+ * corta ("Casa", "Oficina", "Mama"), no un texto libre.
+ *
+ * Ademas de la regla de negocio, mantener el alias corto protege el almacenamiento:
+ * cliente_direcciones.alias guarda el valor CIFRADO con piiEncryptValue()
+ * (core/pii_crypto.php) y el texto cifrado (ENCv1: + base64 de nonce+tag+ciphertext)
+ * mide bastante mas que el plano -- un alias de ~4 caracteres ya llega a 50 cifrado.
+ */
+const DIRECCION_ALIAS_MAX_CARACTERES = 50;
+
+/**
+ * True si el alias supera el limite permitido. Cuenta caracteres (no bytes) para que
+ * acentos y emojis valgan 1, igual que lo ve el usuario en el input.
+ */
+function direccionAliasExcedeLimite(string $alias): bool
+{
+    return mb_strlen(trim($alias)) > DIRECCION_ALIAS_MAX_CARACTERES;
+}
+
+/**
+ * Mensaje estandar de error cuando el alias excede el limite. Centralizado para que
+ * manage_customers.php y mis_direcciones.php muestren exactamente el mismo texto.
+ */
+function direccionAliasErrorLimite(): string
+{
+    return 'El alias de la direccion no puede exceder ' . DIRECCION_ALIAS_MAX_CARACTERES . ' caracteres.';
+}
+
+/**
  * Marca una direccion de cliente como confirmada por el cliente (p.ej. via WhatsApp),
  * dejando registro de cuando y quien del staff la confirmo. Se usa junto con el boton
  * "Enviar por WhatsApp para confirmar" en views/manage_customers.php: el cliente responde
