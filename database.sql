@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS `clientes` (
 CREATE TABLE IF NOT EXISTS `cliente_direcciones` (
   `id_direccion` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `id_cliente` INT UNSIGNED NOT NULL,
-  `alias` VARCHAR(50) NOT NULL COMMENT 'Ej: Casa, Oficina',
+  `alias` TEXT NOT NULL COMMENT 'Ej: Casa, Oficina (se guarda cifrado con piiEncryptValue)',
   `direccion` TEXT NOT NULL,
   `maps_link` TEXT NULL,
   `es_default` TINYINT(1) NOT NULL DEFAULT 0,

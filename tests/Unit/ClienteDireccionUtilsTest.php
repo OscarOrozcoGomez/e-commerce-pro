@@ -105,6 +105,27 @@ final class ClienteDireccionUtilsTest extends TestCase
         );
     }
 
+    public function testAliasDentroDelLimiteNoSeMarcaComoExcedido(): void
+    {
+        $this->assertFalse(direccionAliasExcedeLimite('Casa'));
+        $this->assertFalse(direccionAliasExcedeLimite(str_repeat('a', DIRECCION_ALIAS_MAX_CARACTERES)));
+        // Se cuentan caracteres, no bytes: 50 acentuadas siguen siendo 50.
+        $this->assertFalse(direccionAliasExcedeLimite(str_repeat('á', DIRECCION_ALIAS_MAX_CARACTERES)));
+        // Espacios al borde se recortan antes de contar.
+        $this->assertFalse(direccionAliasExcedeLimite('  ' . str_repeat('a', DIRECCION_ALIAS_MAX_CARACTERES) . '  '));
+    }
+
+    public function testAliasSobreElLimiteSeMarcaComoExcedido(): void
+    {
+        $this->assertTrue(direccionAliasExcedeLimite(str_repeat('a', DIRECCION_ALIAS_MAX_CARACTERES + 1)));
+        $this->assertTrue(direccionAliasExcedeLimite(str_repeat('🏠', DIRECCION_ALIAS_MAX_CARACTERES + 1)));
+    }
+
+    public function testMensajeDeErrorDeLimiteMencionaElMaximo(): void
+    {
+        $this->assertStringContainsString((string) DIRECCION_ALIAS_MAX_CARACTERES, direccionAliasErrorLimite());
+    }
+
     private function seedDireccion(int $idDireccion, int $idCliente, string $alias, string $direccion): void
     {
         $this->pdo->prepare('INSERT INTO cliente_direcciones (id_direccion, id_cliente, alias, direccion) VALUES (?, ?, ?, ?)')
