@@ -416,18 +416,28 @@ function aiStripHandoffFlag(string $text): string
  * ------------------------------------------------------------------- */
 
 /**
- * El wa_id de Meta trae codigo de pais (ej. "5215512345678"), pero findClienteByPhone()/
- * normalizePhoneDigitsMx() esperan exactamente 10 digitos nacionales. Se toman los ultimos
- * 10 digitos para poder cruzar con el telefono guardado en clientes.
+ * El wa_id de un chat normal de WhatsApp trae codigo de pais (ej. "5215512345678"),
+ * y findClienteByPhone()/normalizePhoneDigitsMx() esperan exactamente 10 digitos
+ * nacionales para cruzar con el telefono guardado en clientes.
+ *
+ * Extrae los 10 digitos nacionales de un wa_id SOLO si tiene forma de numero
+ * mexicano real: <52><10 digitos> o <521><10 digitos> (el "1" es el prefijo movil
+ * legacy que WhatsApp a veces inserta). Cualquier otra cosa -- en particular los
+ * "LID" de WhatsApp (identificadores de privacidad de 14+ digitos que el puente
+ * recibe en lugar del telefono cuando el cliente tiene esa opcion activada)--
+ * devuelve null: de un LID no se puede derivar un telefono real, y es preferible
+ * "no se sabe" a tomar 10 digitos arbitrarios (eso hacia que Alex rechazara a
+ * clientes reales de Guadalajara y guardara telefonos basura en clientes nuevos).
  */
 function aiWaIdToMxDigits(string $waId): ?string
 {
     $digits = preg_replace('/\D+/', '', $waId) ?? '';
-    if (strlen($digits) < 10) {
+
+    if (!preg_match('/^52(?:1)?(\d{10})$/', $digits, $m)) {
         return null;
     }
 
-    return substr($digits, -10);
+    return $m[1];
 }
 
 /**
@@ -730,6 +740,17 @@ function aiFindConversationsNeedingFollowup(PDO $pdo, int $horas = AI_FOLLOWUP_I
         if (empty($row['ultimo_envio_bot'])) {
             return false;
         }
+
+        // Cliente foraneo CONFIRMADO (lada distinta de 33): no se le manda el
+        // recordatorio proactivo de recompra. No hacemos entregas fuera de la Zona
+        // Metropolitana de Guadalajara, asi que insistirle seria molesto y gasto de
+        // tokens/mensajes. Si la lada no se pudo determinar (telefono desconocido o
+        // "LID" de WhatsApp), aiPhoneHasLocalLada() devuelve null y el seguimiento
+        // sigue su curso normal -- solo se excluye lo que se identifica como foraneo.
+        if (aiPhoneHasLocalLada((string) ($row['wa_id'] ?? '')) === false) {
+            return false;
+        }
+
         $ts = strtotime((string)$row['ultimo_envio_bot']);
 
         return $ts !== false && $ts <= $cutoff;

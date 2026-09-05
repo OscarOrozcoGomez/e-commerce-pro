@@ -525,7 +525,9 @@ final class SecurityAndEdgeCasesTest extends TestCase
 
     public function testFindConversationsNeedingFollowupSkipsRowsWithMalformedBotTimestamp(): void
     {
-        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500099015', null);
+        // Lada 33 para aislar la causa de exclusion: aqui se prueba que un timestamp
+        // corrupto descarta la fila, no que sea un cliente foraneo.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5213300099015', null);
         $idConversacion = (int) $conversacion['id_conversacion'];
 
         $this->pdo->prepare(
@@ -637,7 +639,8 @@ final class SecurityAndEdgeCasesTest extends TestCase
             'CREATE TABLE clientes (
                 id_cliente INTEGER PRIMARY KEY,
                 id_usuario INTEGER NULL,
-                telefono TEXT NULL
+                telefono TEXT NULL,
+                nombre TEXT NULL
             )'
         );
         $this->pdo->exec(
