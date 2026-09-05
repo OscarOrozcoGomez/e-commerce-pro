@@ -131,6 +131,12 @@ function waParseBridgePayload(array $payload): ?array
     $profileName = waExtractScalarString($payload, 'profile_name') ?? '';
     $senderJid = waExtractScalarString($payload, 'sender_jid') ?? '';
 
+    // message_kind: 'text' | 'image' | 'audio' | 'video' | 'document' | 'sticker' |
+    // 'location' | 'contact' | 'other'. Cuando el cliente manda algo que no es texto,
+    // el puente pone un texto sintetico entre corchetes en $message (ej. "[El cliente
+    // envio una nota de voz]") y marca aqui el tipo. Puentes viejos no lo mandan -> 'text'.
+    $messageKind = waExtractScalarString($payload, 'message_kind') ?? '';
+
     return [
         'wa_id' => $waIdDigits,
         'wa_message_id' => $messageId !== '' ? $messageId : null,
@@ -138,6 +144,7 @@ function waParseBridgePayload(array $payload): ?array
         'from_me' => !empty($payload['from_me']),
         'profile_name' => mb_substr($profileName, 0, 150),
         'sender_jid' => mb_substr($senderJid, 0, 190),
+        'message_kind' => $messageKind !== '' ? $messageKind : 'text',
     ];
 }
 

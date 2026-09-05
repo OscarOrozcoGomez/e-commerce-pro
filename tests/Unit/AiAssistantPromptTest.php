@@ -106,6 +106,14 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('nunca uses las palabras "error", "falla" ni "sistema"', $prompt);
     }
 
+    public function testSystemPromptTellsAlexHowToHandleNonTextMessages(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('no son texto', $prompt);
+        $this->assertStringContainsString('Nunca ignores ese mensaje', $prompt);
+    }
+
     public function testSystemPromptIncludesContinuityRule(): void
     {
         $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
