@@ -446,6 +446,27 @@ function aiWaIdToMxDigits(string $waId): ?string
 }
 
 /**
+ * Version legible de un wa_id para mostrar en el dashboard: "+52 33 3404 0398"
+ * cuando el wa_id es un numero mexicano real, o null cuando es un LID de WhatsApp
+ * (privacidad) del que no se puede sacar telefono -- el caller decide que texto
+ * poner en ese caso.
+ */
+function aiWaIdToDisplayPhone(string $waId): ?string
+{
+    $digits = aiWaIdToMxDigits($waId);
+    if ($digits === null || strlen($digits) !== 10) {
+        return null;
+    }
+
+    // Ladas de 2 digitos (Guadalajara 33, CDMX 55, Monterrey 81) vs 3 digitos.
+    if (in_array(substr($digits, 0, 2), ['33', '55', '81'], true)) {
+        return '+52 ' . substr($digits, 0, 2) . ' ' . substr($digits, 2, 4) . ' ' . substr($digits, 6, 4);
+    }
+
+    return '+52 ' . substr($digits, 0, 3) . ' ' . substr($digits, 3, 3) . ' ' . substr($digits, 6, 4);
+}
+
+/**
  * Las entregas fisicas contra entrega solo aplican en la Zona Metropolitana de
  * Guadalajara (lada 33). Regresa null si no se pudo determinar el telefono (para no
  * asumir fuera de cobertura por falta de dato), true/false si si se pudo.

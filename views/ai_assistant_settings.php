@@ -222,11 +222,31 @@ include __DIR__ . '/includes/header.php';
                         <p class="grey-text">Sin conversaciones todavia.</p>
                     <?php else: ?>
                         <?php foreach ($conversaciones as $conv): ?>
+                            <?php
+                                $convTelefono = aiWaIdToDisplayPhone((string)$conv['wa_id']);
+                                $convNombre = trim((string)($conv['nombre_perfil'] ?? ''));
+                                // Linea principal: nombre de perfil de WhatsApp si lo tenemos; si no,
+                                // el telefono formateado; si es un LID sin nombre, un texto generico.
+                                $convTitulo = $convNombre !== ''
+                                    ? $convNombre
+                                    : ($convTelefono ?? 'Contacto de WhatsApp');
+                                // Linea secundaria: el telefono (si la principal fue el nombre), o el
+                                // aviso de que WhatsApp no comparte el numero de este contacto.
+                                if ($convNombre !== '' && $convTelefono !== null) {
+                                    $convSub = $convTelefono;
+                                } elseif ($convTelefono === null) {
+                                    $convSub = 'Sin número (WhatsApp no lo comparte)';
+                                } else {
+                                    $convSub = '';
+                                }
+                            ?>
                             <div style="border-bottom: 1px solid #e0e0e0; padding: 12px 0;">
                                 <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                                     <div>
-                                        <strong><?php echo esc((string)($conv['nombre_perfil'] ?: $conv['wa_id'])); ?></strong><br>
-                                        <span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc((string)$conv['wa_id']); ?></span>
+                                        <strong><?php echo esc($convTitulo); ?></strong>
+                                        <?php if ($convSub !== ''): ?>
+                                            <br><span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc($convSub); ?></span>
+                                        <?php endif; ?>
                                     </div>
                                     <span class="chip <?php echo $conv['estado_bot'] === 'activo' ? 'green lighten-4' : 'orange lighten-4'; ?>" style="margin: 0;">
                                         <?php echo esc((string)$conv['estado_bot']); ?>

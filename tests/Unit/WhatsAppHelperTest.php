@@ -49,6 +49,29 @@ final class WhatsAppHelperTest extends TestCase
         $this->assertTrue($result['from_me']);
     }
 
+    public function testParseBridgePayloadExtractsProfileNameAndSenderJid(): void
+    {
+        $result = waParseBridgePayload([
+            'sender_phone' => '5213312345',
+            'message' => 'Hola',
+            'profile_name' => 'Juan Pérez',
+            'sender_jid' => '53236337742009@lid',
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertSame('Juan Pérez', $result['profile_name']);
+        $this->assertSame('53236337742009@lid', $result['sender_jid']);
+    }
+
+    public function testParseBridgePayloadProfileNameDefaultsToEmptyForOldBridge(): void
+    {
+        $result = waParseBridgePayload(['sender_phone' => '5213312345', 'message' => 'Hola']);
+
+        $this->assertNotNull($result);
+        $this->assertSame('', $result['profile_name']);
+        $this->assertSame('', $result['sender_jid']);
+    }
+
     public function testParseBridgePayloadReturnsNullWhenPhoneOrMessageMissing(): void
     {
         $this->assertNull(waParseBridgePayload(['message' => 'Hola']));

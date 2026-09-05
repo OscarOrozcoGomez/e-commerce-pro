@@ -122,8 +122,18 @@ include __DIR__ . '/includes/header.php';
                                     <tr>
                                         <td style="white-space: nowrap;"><?php echo esc((string)$err['fecha_creacion']); ?></td>
                                         <td>
-                                            <?php echo esc((string)($err['nombre_perfil'] ?: ($err['wa_id'] ?? 'N/D'))); ?><br>
-                                            <span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc((string)($err['wa_id'] ?? '')); ?></span>
+                                            <?php
+                                                $errTel = aiWaIdToDisplayPhone((string)($err['wa_id'] ?? ''));
+                                                $errNombre = trim((string)($err['nombre_perfil'] ?? ''));
+                                                $errTitulo = $errNombre !== '' ? $errNombre : ($errTel ?? 'Contacto de WhatsApp');
+                                                $errSub = ($errNombre !== '' && $errTel !== null)
+                                                    ? $errTel
+                                                    : ($errTel === null ? 'Sin número' : '');
+                                            ?>
+                                            <?php echo esc($errTitulo); ?>
+                                            <?php if ($errSub !== ''): ?>
+                                                <br><span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc($errSub); ?></span>
+                                            <?php endif; ?>
                                         </td>
                                         <td><span class="chip"><?php echo esc((string)$err['tipo_error']); ?></span></td>
                                         <td style="max-width: 220px; white-space: normal;"><?php echo esc((string)($err['mensaje_usuario'] ?? '')); ?></td>
