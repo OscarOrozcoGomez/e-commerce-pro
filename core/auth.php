@@ -1402,6 +1402,94 @@ function dbDeleteOrderNotificationEmail(int $idCorreo): bool
 }
 
 /**
+ * Lista de correos que avisan cuando un lote cambia de severidad de caducidad.
+ * Mismo patron que dbGetOrderNotificationEmails(), pero recibe PDO explicito
+ * (a diferencia de esa) para poder probarse contra una BD SQLite de pruebas.
+ */
+function dbGetCaducidadNotificationEmails(PDO $pdo, bool $soloActivos = false): array
+{
+    $sql = 'SELECT id_correo, correo, activo, creado_en FROM caducidad_notificacion_correos';
+    if ($soloActivos) {
+        $sql .= ' WHERE activo = 1';
+    }
+    $sql .= ' ORDER BY creado_en ASC';
+
+    $stmt = $pdo->query($sql);
+    $rows = $stmt ? $stmt->fetchAll() : [];
+
+    if ($soloActivos) {
+        return array_values(array_map(static fn($row) => (string) $row['correo'], $rows));
+    }
+
+    return $rows;
+}
+
+/**
+ * Agrega un correo a la lista de notificación de caducidades (solo admin).
+ */
+function dbAddCaducidadNotificationEmail(PDO $pdo, string $correo): array
+{
+    if (!isAdmin()) {
+        return ['success' => false, 'message' => 'No autorizado.'];
+    }
+
+    $correo = trim($correo);
+    if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'El correo no es válido.'];
+    }
+
+    try {
+        $stmt = $pdo->prepare('INSERT INTO caducidad_notificacion_correos (correo) VALUES (:correo)');
+        $stmt->execute([':correo' => $correo]);
+        return ['success' => true, 'message' => 'Correo agregado correctamente.'];
+    } catch (PDOException $e) {
+        if ((int) $e->getCode() === 23000) {
+            return ['success' => false, 'message' => 'Ese correo ya está en la lista.'];
+        }
+        error_log('Error en dbAddCaducidadNotificationEmail: ' . $e->getMessage());
+        return ['success' => false, 'message' => 'No fue posible agregar el correo.'];
+    }
+}
+
+/**
+ * Activa/desactiva un correo de la lista de notificación de caducidades (solo admin).
+ */
+function dbSetCaducidadNotificationEmailActive(PDO $pdo, int $idCorreo, bool $activo): bool
+{
+    if (!isAdmin() || $idCorreo <= 0) {
+        return false;
+    }
+
+    try {
+        $stmt = $pdo->prepare('UPDATE caducidad_notificacion_correos SET activo = :activo WHERE id_correo = :id');
+        $stmt->execute([':activo' => $activo ? 1 : 0, ':id' => $idCorreo]);
+        return true;
+    } catch (PDOException $e) {
+        error_log('Error en dbSetCaducidadNotificationEmailActive: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Elimina un correo de la lista de notificación de caducidades (solo admin).
+ */
+function dbDeleteCaducidadNotificationEmail(PDO $pdo, int $idCorreo): bool
+{
+    if (!isAdmin() || $idCorreo <= 0) {
+        return false;
+    }
+
+    try {
+        $stmt = $pdo->prepare('DELETE FROM caducidad_notificacion_correos WHERE id_correo = :id');
+        $stmt->execute([':id' => $idCorreo]);
+        return true;
+    } catch (PDOException $e) {
+        error_log('Error en dbDeleteCaducidadNotificationEmail: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * Crea un pedido público (Checkout) encapsulando la lógica SQL.
  */
 function dbCreatePublicOrder(array $data): array {

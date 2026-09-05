@@ -28,8 +28,5 @@
         <env name="DB_USER" value="root"/>
         <env name="DB_PASSWORD" value=""/>
         <env name="DB_CHARSET" value="utf8mb4"/>
-        <!-- El OCR de caducidades nunca debe salir a la red en pruebas unitarias;
-             los tests que ejercitan la interpretacion inyectan su propio callable. -->
-        <env name="LOTE_OCR_ENABLED" value="0"/>
     </php>
 </phpunit>

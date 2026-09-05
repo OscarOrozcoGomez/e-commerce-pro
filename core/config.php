@@ -103,9 +103,14 @@ if (!defined('BASE_URL')) {
     if ($envBaseUrl !== false && trim($envBaseUrl) !== '') {
         define('BASE_URL', $envBaseUrl);
     } else {
-        // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+        // Detección automática: si es localhost (o una IP de LAN, para probar desde el
+        // celular en la misma red -- p.ej. 192.168.x.x) usa la subcarpeta; si no, la raíz.
         $host = $_SERVER['HTTP_HOST'] ?? '';
-        if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+        $hostSinPuerto = (string) preg_replace('/:\d+$/', '', $host);
+        $esRedLocal = strpos($host, 'localhost') !== false
+            || strpos($host, '127.0.0.1') !== false
+            || preg_match('/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/', $hostSinPuerto) === 1;
+        if ($esRedLocal) {
             // Deriva la subcarpeta del propio script para que un git worktree servido en
             // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
             // local; cae a /e-commerce-pro/ si no se puede determinar.
@@ -685,8 +690,9 @@ function sendSecurityHeaders(): void
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     // geolocation=(self): el propio sitio SI usa geolocalizacion (boton "Usar mi ubicacion"
-    // en entregas.php para planear rutas). Un allowlist vacio "()" bloquea incluso al propio
-    // origen, por lo que el permiso del navegador/telefono nunca llegaba a evaluarse.
+    // en entregas.php para planear rutas). camera/microphone en () porque nada en el sitio
+    // usa getUserMedia (camara en vivo) -- la captura de fotos usa <input capture>, que no
+    // depende de este permiso. Un allowlist vacio "()" bloquea incluso al propio origen.
     header('Permissions-Policy: geolocation=(self), microphone=(), camera=()');
     // cdn.tiny.cloud: views/manage_blogs.php carga el editor TinyMCE desde ahi. Sin este
     // dominio en script-src/script-src-elem, el <script src="https://cdn.tiny.cloud/..."> se

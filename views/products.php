@@ -159,6 +159,28 @@ include __DIR__ . '/includes/header.php';
                         })();
                         </script>
 
+                        <div id="lotes-producto-wrap" style="display:none; margin: 15px 0; padding: 12px; border: 1px solid #ffcc80; border-radius: 4px; background: #fff8e1;">
+                            <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
+                            <div id="lotes-producto-tabla" style="overflow-x:auto;"></div>
+                            <div class="row" style="margin: 10px 0 0;">
+                                <div class="input-field col s6 m3" style="margin-top:0;">
+                                    <input type="text" id="lp-codigo">
+                                    <label for="lp-codigo">Código de lote</label>
+                                </div>
+                                <div class="input-field col s6 m3" style="margin-top:0;">
+                                    <input type="date" id="lp-fecha">
+                                    <label for="lp-fecha" class="active">Caducidad</label>
+                                </div>
+                                <div class="input-field col s6 m3" style="margin-top:0;">
+                                    <input type="number" min="0" id="lp-cantidad">
+                                    <label for="lp-cantidad">Cantidad</label>
+                                </div>
+                                <div class="col s6 m3" style="padding-top: 12px;">
+                                    <button type="button" class="btn-small orange darken-2 waves-effect" id="btn-agregar-lote">Agregar lote</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="input-field">
                             <i class="material-icons prefix">account_tree</i>
                             <input type="text" id="search_padre" class="autocomplete" autocomplete="off" placeholder="Escribe el nombre del padre (ej: Creatina)...">
@@ -303,10 +325,22 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     let cacheProductosPadre = [];
+    let loteProductoActualId = null;
+    const LOTE_SEV = {
+      critico:      {t:'Crítico',      c:'red darken-1 white-text'},
+      urgente:      {t:'Urgente',      c:'deep-orange darken-1 white-text'},
+      planificar:   {t:'Planificar',   c:'amber darken-2 white-text'},
+      vigilar:      {t:'Vigilar',      c:'blue-grey lighten-1 white-text'},
+      caducado:     {t:'Caducado',     c:'black white-text'},
+      sin_rotacion: {t:'Sin rotación', c:'grey darken-1 white-text'},
+      sin_historico:{t:'Sin histórico',c:'grey lighten-1'},
+      ok:           {t:'Ok',           c:'green lighten-1 white-text'},
+    };
     const editProductIdFromUrl = new URLSearchParams(window.location.search).get('id_producto');
     let pendingEditProductId = editProductIdFromUrl ? String(editProductIdFromUrl) : '';
 
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
+    const LOTES_API = '<?php echo BASE_URL; ?>api/lotes_manager.php';
     let colaImagenes = []; // { type: 'local'|'server', file: File|null, path: string|null, preview: string }
 
     // Función para expandir/colapsar variantes
@@ -623,6 +657,8 @@ include __DIR__ . '/includes/header.php';
                 })
                 .catch(err => M.toast({html: err.message, classes: 'red'}));
         });
+
+        document.getElementById('btn-agregar-lote')?.addEventListener('click', agregarLoteAlProducto);
 
         document.getElementById('form-category')?.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -954,6 +990,9 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('unidad').value = prod.unidad || '';
         document.getElementById('capsulas_por_envase').value = prod.capsulas_por_envase || '';
         document.getElementById('porcion_capsulas').value = prod.porcion_capsulas || '';
+
+        document.getElementById('lotes-producto-wrap').style.display = 'block';
+        cargarLotesProducto(prod.id_producto);
         document.getElementById('mostrar_tabla').checked = (prod.mostrar_tabla == 1);
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
@@ -1062,6 +1101,10 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('capsulas_por_envase').value = '';
         document.getElementById('porcion_capsulas').value = '';
 
+        document.getElementById('lotes-producto-wrap').style.display = 'none';
+        document.getElementById('lotes-producto-tabla').innerHTML = '';
+        loteProductoActualId = null;
+
         document.getElementById('search_padre').value = '';
 
         // Resetear estado
@@ -1128,6 +1171,107 @@ include __DIR__ . '/includes/header.php';
             M.toast({html: '<?php echo esc($success); ?>', classes: 'green darken-1 rounded', displayLength: 4000});
         <?php endif; ?>
     });
+
+    /* ------------------------- Lotes / caducidades ------------------------- */
+
+    function escLote(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function cargarLotesProducto(idProducto) {
+        loteProductoActualId = idProducto;
+        fetch(`${LOTES_API}?id_producto=${idProducto}`)
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) { document.getElementById('lotes-producto-tabla').innerHTML = '<p class="red-text small">' + escLote(res.message) + '</p>'; return; }
+                renderLotesProducto(res.data || []);
+            })
+            .catch(() => { document.getElementById('lotes-producto-tabla').innerHTML = '<p class="red-text small">Error de conexión al cargar lotes.</p>'; });
+    }
+
+    function renderLotesProducto(lotes) {
+        const cont = document.getElementById('lotes-producto-tabla');
+        if (!lotes.length) {
+            cont.innerHTML = '<p class="grey-text small" style="margin:0;">Sin lotes registrados todavía.</p>';
+            return;
+        }
+        let html = '<table class="striped condensed"><thead><tr>' +
+            '<th>Lote</th><th>Caduca</th><th>Días</th><th>Restante</th><th>Severidad</th><th></th>' +
+            '</tr></thead><tbody>';
+        lotes.forEach(l => {
+            const sev = LOTE_SEV[l.severidad] || {t: l.severidad, c: 'grey'};
+            const noVend = l.no_vendible ? ' <span class="new badge red darken-3 white-text" data-badge-caption="" title="Un envase comprado hoy no se alcanza a terminar antes de caducar">NO VENDIBLE</span>' : '';
+            html += `<tr>
+                <td>${escLote(l.codigo_lote)}</td>
+                <td>${escLote(l.fecha_caducidad)}${l.caducidad_aproximada ? ' <small class="grey-text">(aprox)</small>' : ''}</td>
+                <td>${l.dias_hasta_caducar}</td>
+                <td>${l.cantidad_restante}</td>
+                <td><span class="new badge ${sev.c}" data-badge-caption="">${sev.t}</span>${noVend}</td>
+                <td style="white-space:nowrap;">
+                    <a class="btn-flat btn-small" title="Ajustar cantidad" onclick="ajustarLote(${l.id_lote}, ${l.cantidad_restante})"><i class="material-icons">tune</i></a>
+                    <a class="btn-flat btn-small" title="Marcar en oferta / atendida" onclick="atenderLote(${l.id_lote})"><i class="material-icons">local_offer</i></a>
+                    <a class="btn-flat btn-small" title="Retirar" onclick="retirarLote(${l.id_lote})"><i class="material-icons">block</i></a>
+                    <a class="btn-flat btn-small red-text" title="Eliminar" onclick="eliminarLote(${l.id_lote})"><i class="material-icons">delete</i></a>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        cont.innerHTML = html;
+    }
+
+    function postLote(payload) {
+        payload.csrf_token = document.querySelector('input[name="csrf_token"]').value;
+        return fetch(LOTES_API, { method: 'POST', body: new URLSearchParams(payload) }).then(r => r.json());
+    }
+
+    function despuesDeLote(res) {
+        M.toast({html: res.message || 'Listo', classes: res.success ? 'green' : 'red'});
+        if (res.success && loteProductoActualId) cargarLotesProducto(loteProductoActualId);
+    }
+
+    window.agregarLoteAlProducto = function () {
+        if (!loteProductoActualId) return;
+        const codigo = document.getElementById('lp-codigo').value.trim();
+        const fecha = document.getElementById('lp-fecha').value;
+        const cantidad = document.getElementById('lp-cantidad').value;
+        if (!codigo || !fecha || cantidad === '') {
+            M.toast({html: 'Completa código, caducidad y cantidad del lote', classes: 'red'});
+            return;
+        }
+        postLote({
+            accion: 'guardar', id_lote: 0, id_producto: loteProductoActualId,
+            codigo_lote: codigo, fecha_caducidad: fecha, cantidad: cantidad,
+        }).then(res => {
+            despuesDeLote(res);
+            if (res.success) {
+                document.getElementById('lp-codigo').value = '';
+                document.getElementById('lp-fecha').value = '';
+                document.getElementById('lp-cantidad').value = '';
+                M.updateTextFields();
+            }
+        });
+    };
+
+    window.ajustarLote = function (id, actual) {
+        const val = prompt('Nueva cantidad restante:', actual);
+        if (val === null || val.trim() === '') return;
+        const cantidad = parseInt(val, 10);
+        if (isNaN(cantidad) || cantidad < 0) { M.toast({html: 'Cantidad inválida', classes: 'red'}); return; }
+        postLote({accion: 'ajustar', id_lote: id, cantidad}).then(despuesDeLote);
+    };
+
+    window.atenderLote = function (id) {
+        const enOferta = confirm('¿Ya pusiste este lote en oferta? Aceptar = sí, Cancelar = solo marcar como revisado.');
+        postLote({accion: 'marcar_atendida', id_lote: id, en_oferta: enOferta ? '1' : ''}).then(despuesDeLote);
+    };
+
+    window.retirarLote = function (id) {
+        if (!confirm('¿Retirar este lote (ya no se vende ni se cuenta en el stock de caducidades)?')) return;
+        postLote({accion: 'cambiar_estado', id_lote: id, estado: 'retirado'}).then(despuesDeLote);
+    };
+
+    window.eliminarLote = function (id) {
+        if (!confirm('¿Eliminar este lote? Esta acción no se puede deshacer.')) return;
+        postLote({accion: 'eliminar', id_lote: id}).then(despuesDeLote);
+    };
 
     let parentMap = {};
     function initParentAutocomplete(list) {

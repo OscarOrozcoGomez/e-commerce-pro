@@ -82,13 +82,6 @@ include __DIR__ . '/includes/header.php';
                                 <label for="caducidad_inbound" class="active">Caducidad</label>
                             </div>
                         </div>
-                        <div class="file-field input-field" style="margin-top:0;">
-                            <div class="btn-small blue darken-2"><span>Escanear bote</span>
-                                <input type="file" id="foto_lote_inbound" accept="image/*" capture="environment">
-                            </div>
-                            <div class="file-path-wrapper"><input class="file-path" type="text" placeholder="Lee lote y caducidad de la foto"></div>
-                        </div>
-                        <span id="ocr_inbound_status" class="grey-text small"></span>
 
                         <div class="input-field">
                             <input type="text" name="observacion" id="obs_inbound" value="Entrada de mercancía">
@@ -260,31 +253,6 @@ include __DIR__ . '/includes/header.php';
             const formData = new FormData(this);
             enviarEntrada(formData);
         });
-
-        // Escaneo de lote/caducidad por cámara (opcional).
-        const fotoLote = document.getElementById('foto_lote_inbound');
-        if (fotoLote) {
-            fotoLote.addEventListener('change', function () {
-                const f = this.files[0];
-                if (!f) return;
-                const st = document.getElementById('ocr_inbound_status');
-                st.textContent = 'Leyendo…';
-                const fd = new FormData();
-                fd.set('csrf_token', '<?php echo getCsrfToken(); ?>');
-                fd.set('foto_lote', f);
-                fetch('<?php echo BASE_URL; ?>api/lote_ocr.php', { method: 'POST', body: fd })
-                    .then(r => r.json())
-                    .then(res => {
-                        if (!res.success) { st.textContent = res.message || 'No se pudo leer'; return; }
-                        const d = res.data;
-                        if (d.codigo_lote) document.getElementById('lote_inbound').value = d.codigo_lote;
-                        if (d.fecha_caducidad) document.getElementById('caducidad_inbound').value = d.fecha_caducidad;
-                        M.updateTextFields();
-                        st.textContent = 'Leído (confianza ' + Math.round((d.confianza || 0) * 100) + '%). Revisa antes de registrar.';
-                    })
-                    .catch(() => { st.textContent = 'Error de conexión'; });
-            });
-        }
 
         // Lógica de búsqueda/filtro para la lista rápida
         document.getElementById('filtro-lista-rapida').addEventListener('keyup', function() {

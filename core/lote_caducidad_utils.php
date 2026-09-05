@@ -287,9 +287,18 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
         $excedente = null;
         $diasParaAgotar = null;
         $velObjetivo = null;
+        // Cuanto de la demanda futura (desde hoy) deja realmente "ocupada" este lote
+        // para los que le siguen en la fila FEFO. Un lote que ya caduco, o del que no
+        // conocemos velocidad, no le quita demanda a nadie mas -- lo unico que le quita
+        // demanda al siguiente lote es lo que EN REALIDAD se alcanzo a vender de este.
+        // (Bug corregido: antes se sumaba $cantRestante completo aqui, tratando la merma
+        // de un lote ya vencido como si fuera venta ya cubierta, lo que inflaba el
+        // excedente proyectado de los lotes siguientes que en la realidad si alcanzan a
+        // venderse una vez que este ya no esta en el anaquel.)
+        $consumidoPorEsteLote = 0.0;
 
         if ($diasHastaCaducar < 0) {
-            // Ya caduco: todo lo que queda es merma.
+            // Ya caduco: todo lo que queda es merma. No compite por demanda futura.
             $excedente = $cantRestante;
         } elseif ($sinHistorico) {
             $excedente = null; // no se puede proyectar
@@ -303,6 +312,7 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             $excedente = max(0, $excedente);
             $diasParaAgotar = ($posicion + $cantRestante) / $velDiaria;
             $velObjetivo = ($posicion + $cantRestante) / max(1, $diasHastaCaducar);
+            $consumidoPorEsteLote = $vendidasATiempo;
         }
 
         $severidad = loteSeveridad($diasHastaCaducar, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
@@ -331,7 +341,7 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             'descuento_sugerido_pct' => $descuento,
         ]);
 
-        $posicion += $cantRestante;
+        $posicion += $consumidoPorEsteLote;
     }
 
     return $filas;
@@ -341,8 +351,8 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
  * Carga lotes visibles con su proyeccion de caducidad.
  *
  * @param array{
- *   severidad?:string, id_almacen?:int, categoria?:string, q?:string,
- *   solo_con_excedente?:bool
+ *   severidad?:string, id_almacen?:int, id_producto?:int, categoria?:string,
+ *   q?:string, solo_con_excedente?:bool
  * } $filtros
  * @return array{lotes: array<int,array<string,mixed>>, ventana_dias:int}
  */
@@ -357,6 +367,10 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
     $where = ["l.estado IN ('activo','caducado')"];
     $params = [];
 
+    if (!empty($filtros['id_producto'])) {
+        $where[] = 'l.id_producto = :id_producto';
+        $params[':id_producto'] = (int) $filtros['id_producto'];
+    }
     if (!empty($filtros['id_almacen'])) {
         $where[] = 'l.id_almacen = :id_almacen';
         $params[':id_almacen'] = (int) $filtros['id_almacen'];
@@ -484,54 +498,6 @@ function loteReconciliacionStock(PDO $pdo, array $idsProducto): array
     return $out;
 }
 
-/**
- * Conteo de lotes por severidad, para la tarjeta del dashboard / la campana.
- *
- * @return array{critico:int, urgente:int, planificar:int, vigilar:int, caducado:int, total:int}
- */
-function loteContarAlertas(PDO $pdo): array
-{
-    $res = ['critico' => 0, 'urgente' => 0, 'planificar' => 0, 'vigilar' => 0, 'caducado' => 0, 'no_vendible' => 0, 'total' => 0];
-
-    if (!loteTablaExiste($pdo, 'lotes_inventario')) {
-        return $res;
-    }
-
-    foreach (loteFetchProyecciones($pdo)['lotes'] as $lote) {
-        if (!empty($lote['no_vendible'])) {
-            $res['no_vendible']++;
-        }
-        $sev = (string) $lote['severidad'];
-        if (isset($res[$sev])) {
-            $res[$sev]++;
-            $res['total']++;
-        }
-    }
-
-    return $res;
-}
-
-/**
- * Busca un producto por su codigo de barras (para el escaneo con camara).
- *
- * @return array{id_producto:int, nombre:string}|null
- */
-function loteBuscarProductoPorCodigoBarras(PDO $pdo, string $codigo): ?array
-{
-    $codigo = trim($codigo);
-    if ($codigo === '') {
-        return null;
-    }
-    $stmt = $pdo->prepare(
-        "SELECT id_producto, nombre FROM productos
-         WHERE codigo_barras = :c AND estado <> 'archivado' LIMIT 1"
-    );
-    $stmt->execute([':c' => $codigo]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    return $row ? ['id_producto' => (int) $row['id_producto'], 'nombre' => (string) $row['nombre']] : null;
-}
-
 /* -------------------------------------------------------------------------- *
  *  CRUD                                                                      *
  * -------------------------------------------------------------------------- */
@@ -554,12 +520,19 @@ function loteNormalizarDatos(array $d): array
         throw new InvalidArgumentException('Codigo de lote invalido.');
     }
 
+    // Validacion estricta YYYY-MM-DD + calendario real. strtotime() es demasiado
+    // permisivo para este campo: acepta expresiones relativas ("tomorrow"), rellena
+    // fechas de calendario invalidas en vez de rechazarlas (2029-02-30 se convertia
+    // silenciosamente en 2029-03-02) y "0000-00-00" en una fecha negativa absurda.
+    // El unico formato que envia <input type="date"> (el unico caller real) es
+    // YYYY-MM-DD, asi que no se pierde ningun caso de uso legitimo al exigirlo.
     $fecha = trim((string) ($d['fecha_caducidad'] ?? ''));
-    $ts = strtotime($fecha);
-    if ($ts === false) {
+    if (
+        !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $fecha, $m)
+        || !checkdate((int) $m[2], (int) $m[3], (int) $m[1])
+    ) {
         throw new InvalidArgumentException('Fecha de caducidad invalida.');
     }
-    $fecha = date('Y-m-d', $ts);
 
     $cantidad = (int) ($d['cantidad'] ?? $d['cantidad_inicial'] ?? 0);
     if ($cantidad < 0) {

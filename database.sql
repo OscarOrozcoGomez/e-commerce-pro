@@ -200,6 +200,7 @@ CREATE TABLE IF NOT EXISTS `lotes_inventario` (
   `estado` ENUM('activo','agotado','caducado','retirado') NOT NULL DEFAULT 'activo',
   `en_oferta` TINYINT(1) NOT NULL DEFAULT 0,
   `alerta_atendida` TINYINT(1) NOT NULL DEFAULT 0,
+  `ultima_severidad_notificada` VARCHAR(20) DEFAULT NULL,
   `foto_evidencia` VARCHAR(255) DEFAULT NULL,
   `id_usuario_seguimiento` INT UNSIGNED DEFAULT NULL,
   `notas_seguimiento` VARCHAR(500) DEFAULT NULL,
@@ -380,6 +381,17 @@ CREATE TABLE IF NOT EXISTS `pedido_notificacion_correos` (
   `creado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_correo`),
   UNIQUE KEY `uq_pedido_notificacion_correo` (`correo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Lista editable de correos que reciben aviso cuando un lote cambia de severidad
+-- de caducidad. Ver database/migrations/20260905_000001_crear_tabla_caducidad_notificacion_correos.sql
+CREATE TABLE IF NOT EXISTS `caducidad_notificacion_correos` (
+  `id_correo` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `correo` VARCHAR(190) NOT NULL,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `creado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_correo`),
+  UNIQUE KEY `uq_caducidad_notificacion_correo` (`correo`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- Chat de Soporte Interno

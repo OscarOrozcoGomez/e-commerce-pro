@@ -247,6 +247,329 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->assertSame(150, (int) $row['cantidad_inicial']);
     }
 
+    public function testFetchProyeccionesFiltraPorProducto(): void
+    {
+        $this->seedProducto(1, 'Omega 3');
+        $this->seedProducto(2, 'Magnesio');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(1, 'L1', $this->enDias(60), 5);
+        $this->seedLote(2, 'L2', $this->enDias(60), 5);
+
+        $lotes = loteFetchProyecciones($this->pdo, ['id_producto' => 1])['lotes'];
+        $this->assertCount(1, $lotes);
+        $this->assertSame(1, (int) $lotes[0]['id_producto']);
+    }
+
+    /* ------------------- Pruebas adversariales / edge cases ------------------- */
+
+    /**
+     * Bug real encontrado y corregido: un lote que YA caduco con sobrante NO debe
+     * tratarse como si hubiera "cubierto" demanda futura para el siguiente lote en
+     * la fila FEFO -- lo que en realidad paso es que esas unidades se convirtieron
+     * en merma sin venderse, asi que la demanda de esos dias sigue disponible para
+     * el lote que sigue. Antes del fix, este caso marcaba al lote B con excedente
+     * inflado (50/50) cuando en realidad se vende completo.
+     */
+    public function testFefoNoTrataMermaDeUnLoteCaducadoComoVentaCubierta(): void
+    {
+        $this->seedProducto(1, 'Con merma');
+        $this->seedVentaHistorica(1, 90); // ~1 pieza/dia
+
+        // Lote A: 100 piezas, caduca en 5 dias -> solo 5 se alcanzan a vender, 95 merma.
+        $this->seedLote(1, 'A', $this->enDias(5), 100);
+        // Lote B: 50 piezas, caduca en 100 dias -> a 1 pieza/dia, sobran 95 dias para
+        // venderlas TODAS despues de que A ya no este (dia 5 a dia 100). Excedente real = 0.
+        $this->seedLote(1, 'B', $this->enDias(100), 50);
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+        $porCodigo = [];
+        foreach ($lotes as $l) {
+            $porCodigo[$l['codigo_lote']] = $l;
+        }
+
+        $this->assertSame(95, $porCodigo['A']['excedente_proyectado']);
+        $this->assertSame(0, $porCodigo['B']['excedente_proyectado'], 'B deberia venderse completo una vez que A ya no compite por la demanda');
+        $this->assertSame('ok', $porCodigo['B']['severidad']);
+    }
+
+    /**
+     * Cadena de 3 lotes con destinos distintos (uno ya caduco con merma, uno que se
+     * vende justo a tiempo, uno con margen de sobra) para verificar que la posicion
+     * FEFO acumulada no se "descarrila" con mas de dos eslabones.
+     */
+    public function testFefoCadenaDeTresLotesConDestinosMixtos(): void
+    {
+        $this->seedProducto(1, 'Cadena');
+        $this->seedVentaHistorica(1, 90); // ~1 pieza/dia
+
+        $this->seedLote(1, 'A', $this->enDias(-2), 30);   // ya caduco, sin poder venderse mas
+        $this->seedLote(1, 'B', $this->enDias(30), 30);   // debe agotarse justo a tiempo
+        $this->seedLote(1, 'C', $this->enDias(60), 30);   // deberia venderse de sobra
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+        $porCodigo = [];
+        foreach ($lotes as $l) {
+            $porCodigo[$l['codigo_lote']] = $l;
+        }
+
+        $this->assertSame('caducado', $porCodigo['A']['severidad']);
+        $this->assertSame(30, $porCodigo['A']['excedente_proyectado']);
+
+        // B: caduca en 30 dias, A no aporta nada a la posicion (ya esta fuera) -> se
+        // vende completo (30 piezas / 30 dias a 1/dia).
+        $this->assertSame(0, $porCodigo['B']['excedente_proyectado']);
+
+        // C: caduca en 60 dias; para cuando le toca, B ya consumio 30 dias de demanda
+        // (posicion=30), quedan 30 dias de demanda para C (60-30) que cubren sus 30 piezas.
+        $this->assertSame(0, $porCodigo['C']['excedente_proyectado']);
+    }
+
+    public function testCeroDiasParaCaducarEsCriticoNoCaducado(): void
+    {
+        $this->seedProducto(1, 'Hoy caduca');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(0), 40);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->assertSame(0, $lote['dias_hasta_caducar']);
+        $this->assertSame('critico', $lote['severidad']);
+    }
+
+    public function testUnDiaDespuesDeCaducarEsCaducado(): void
+    {
+        $this->seedProducto(1, 'Ayer caduco');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(-1), 40);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->assertSame(-1, $lote['dias_hasta_caducar']);
+        $this->assertSame('caducado', $lote['severidad']);
+    }
+
+    /**
+     * loteSeveridad() clasifica exclusivamente por fecha_caducidad, no por la
+     * columna `estado`. Si alguien marca un lote como 'caducado' a mano (ej. se
+     * daño/se contamino aunque la fecha impresa siga vigente), la SEVERIDAD que se
+     * muestra sigue reflejando la fecha real, no la marca manual -- documentamos
+     * este comportamiento (potencialmente confuso) explicitamente.
+     */
+    public function testEstadoManualCaducadoConFechaFuturaNoCambiaLaSeveridadCalculada(): void
+    {
+        $this->seedProducto(1, 'Marcado a mano');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(150), 5); // vende a tiempo -> 'ok' por fecha
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'caducado' WHERE id_lote = {$lote['id_lote']}");
+
+        $lote2 = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->assertSame('activo', $lote['estado'], 'precondicion: arranca activo');
+        $this->assertSame('caducado', $lote2['estado'], 'la columna estado si cambio');
+        $this->assertSame('ok', $lote2['severidad'], 'pero la severidad calculada sigue basandose en la fecha real, no en estado');
+    }
+
+    public function testAjustarCantidadReactivaAgotadoPeroNoRetiradoNiCaducado(): void
+    {
+        $this->seedProducto(1, 'Reactivar');
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'R1', 'fecha_caducidad' => $this->enDias(90), 'cantidad' => 10,
+        ], 1);
+
+        loteAjustarCantidad($this->pdo, $id, 0, 1);
+        $row = $this->pdo->query("SELECT estado FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('agotado', $row['estado']);
+
+        // Restockear un lote agotado si debe reactivarlo.
+        loteAjustarCantidad($this->pdo, $id, 20, 1);
+        $row = $this->pdo->query("SELECT estado, cantidad_restante FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('activo', $row['estado']);
+        $this->assertSame(20, (int) $row['cantidad_restante']);
+
+        // Pero un lote retirado o caducado NO se reactiva solo por ajustar cantidad
+        // (son estados que reflejan una decision/hecho, no el nivel de stock).
+        loteCambiarEstado($this->pdo, $id, 'retirado', 1);
+        loteAjustarCantidad($this->pdo, $id, 5, 1);
+        $row = $this->pdo->query("SELECT estado FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('retirado', $row['estado']);
+
+        loteCambiarEstado($this->pdo, $id, 'caducado', 1);
+        loteAjustarCantidad($this->pdo, $id, 5, 1);
+        $row = $this->pdo->query("SELECT estado FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('caducado', $row['estado']);
+    }
+
+    public function testGuardarRechazaLoteDuplicadoParaElMismoProducto(): void
+    {
+        $this->seedProducto(1, 'Duplicado');
+        loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'DUP1', 'fecha_caducidad' => $this->enDias(90), 'cantidad' => 10,
+        ], 1);
+
+        $this->expectException(PDOException::class);
+        loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'DUP1', 'fecha_caducidad' => $this->enDias(60), 'cantidad' => 5,
+        ], 1);
+    }
+
+    /**
+     * @dataProvider fechasInvalidasProvider
+     */
+    public function testNormalizarDatosRechazaFechasDeCalendarioImposibles(string $fechaInvalida): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        loteNormalizarDatos([
+            'id_producto' => 1, 'codigo_lote' => 'X', 'fecha_caducidad' => $fechaInvalida, 'cantidad' => 1,
+        ]);
+    }
+
+    public static function fechasInvalidasProvider(): array
+    {
+        return [
+            'febrero 30 (no existe)'        => ['2029-02-30'],
+            'mes 13'                        => ['2029-13-01'],
+            'mes 00'                        => ['2029-00-15'],
+            'cero absoluto'                 => ['0000-00-00'],
+            'expresion relativa'            => ['tomorrow'],
+            'vacio'                         => [''],
+            'formato dd-mm-yyyy'            => ['30-02-2029'],
+            'sin ceros de relleno'          => ['2029-2-3'],
+            'texto arbitrario'              => ['la proxima semana'],
+            'fecha con hora pegada'         => ['2029-05-10 12:00:00'],
+        ];
+    }
+
+    public function testNormalizarDatosAceptaFechaValidaBienFormateada(): void
+    {
+        $datos = loteNormalizarDatos([
+            'id_producto' => 1, 'codigo_lote' => 'X', 'fecha_caducidad' => '2029-02-28', 'cantidad' => 1,
+        ]);
+        $this->assertSame('2029-02-28', $datos['fecha_caducidad']);
+    }
+
+    public function testNormalizarDatosRechazaCantidadNegativa(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        loteNormalizarDatos([
+            'id_producto' => 1, 'codigo_lote' => 'X', 'fecha_caducidad' => $this->enDias(10), 'cantidad' => -5,
+        ]);
+    }
+
+    public function testLotesAgotadosYRetiradosNoAparecenEnLaLista(): void
+    {
+        $this->seedProducto(1, 'Oculto');
+        $this->seedVentaHistorica(1, 90);
+        $idAgotado = $this->seedLoteId(1, 'AG', $this->enDias(90), 0);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'agotado' WHERE id_lote = $idAgotado");
+        $idRetirado = $this->seedLoteId(1, 'RE', $this->enDias(90), 10);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'retirado' WHERE id_lote = $idRetirado");
+        $this->seedLote(1, 'OK', $this->enDias(90), 10);
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+        $this->assertCount(1, $lotes);
+        $this->assertSame('OK', $lotes[0]['codigo_lote']);
+    }
+
+    public function testOrdenFefoEsDeterministaConFechasIdenticas(): void
+    {
+        $this->seedProducto(1, 'Empate');
+        $this->seedVentaHistorica(1, 90);
+        $misma = $this->enDias(60);
+        $idPrimero = $this->seedLoteId(1, 'PRIMERO', $misma, 10);
+        $idSegundo = $this->seedLoteId(1, 'SEGUNDO', $misma, 10);
+        // Mismas fechas de caducidad e ingreso -> el desempate es por id_lote (orden de creacion).
+        $this->pdo->exec("UPDATE lotes_inventario SET fecha_ingreso = '{$this->enDias(-30)}' WHERE id_lote IN ($idPrimero, $idSegundo)");
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+        $this->assertSame('PRIMERO', $lotes[0]['codigo_lote']);
+        $this->assertSame('SEGUNDO', $lotes[1]['codigo_lote']);
+    }
+
+    /**
+     * Footgun documentado: id_producto = 0 (o cualquier valor "falsy" de PHP) NO
+     * aplica el filtro porque el codigo usa !empty(). api/lotes_manager.php ya se
+     * protege validando id_producto > 0 antes de llamar aqui, pero si en el futuro
+     * otro caller invoca loteFetchProyecciones() directo con id_producto=0
+     * esperando "nada", en realidad recibe TODOS los lotes.
+     */
+    public function testFiltroIdProductoCeroNoFiltraNada(): void
+    {
+        $this->seedProducto(1, 'Uno');
+        $this->seedProducto(2, 'Dos');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(1, 'L1', $this->enDias(60), 5);
+        $this->seedLote(2, 'L2', $this->enDias(60), 5);
+
+        $lotes = loteFetchProyecciones($this->pdo, ['id_producto' => 0])['lotes'];
+        $this->assertCount(2, $lotes, 'id_producto=0 deberia idealmente no devolver nada, pero !empty() lo trata como "sin filtro"');
+    }
+
+    public function testNoVendibleAportaSoloLoRealmenteConsumidoAlSiguienteLote(): void
+    {
+        // Producto con porcion tal que un envase rinde 90 dias.
+        $this->seedProducto(1, 'No vendible en cadena', 90, 1);
+        $this->seedVentaHistorica(1, 90); // ~1 pieza/dia
+
+        // Lote A: caduca en 40 dias -> "no_vendible" (rinde 90 > 40 dias de vida),
+        // pero de cualquier forma solo se alcanzan a vender ~40 de sus piezas antes
+        // de esa fecha.
+        $this->seedLote(1, 'A', $this->enDias(40), 60);
+        // Lote B: caduca en 95 dias (>= los 90 que rinde el envase, o sea B NO es
+        // no_vendible por si mismo). Si A "contaminara" la posicion con las 60
+        // piezas completas (por el flag no_vendible de A), B se veria con excedente
+        // inflado. Debe seguir usando lo realmente consumido por A (~40) para la posicion.
+        $this->seedLote(1, 'B', $this->enDias(95), 20);
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+        $porCodigo = [];
+        foreach ($lotes as $l) {
+            $porCodigo[$l['codigo_lote']] = $l;
+        }
+
+        $this->assertTrue($porCodigo['A']['no_vendible']);
+        $this->assertFalse($porCodigo['B']['no_vendible']);
+        // B: demanda disponible = 95 dias; posicion real consumida por A = min(60, 40) = 40;
+        // quedan 55 dias de demanda para B, mas que suficiente para sus 20 piezas.
+        $this->assertSame(0, $porCodigo['B']['excedente_proyectado']);
+    }
+
+    public function testVelocidadIncluyeVentaExactamenteEnElBordeDeLaVentana(): void
+    {
+        $this->seedProducto(1, 'Borde ventana');
+        // Primera y unica venta hace exactamente LOTE_VENTANA_DIAS (90) dias.
+        $this->seedVenta(1, 90, LOTE_VENTANA_DIAS);
+
+        $vel = loteVelocidadVentas($this->pdo, [1])[1];
+        $this->assertFalse($vel['sin_rotacion'], 'una venta justo en el borde de los 90 dias debe contar dentro de la ventana');
+        $this->assertGreaterThan(0, $vel['vel_diaria']);
+    }
+
+    public function testLoteConCantidadCeroNoProduceExcedenteNiRompe(): void
+    {
+        $this->seedProducto(1, 'Cantidad cero');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L0', $this->enDias(30), 0);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->assertSame(0, $lote['cantidad_restante']);
+        $this->assertSame(0, $lote['excedente_proyectado']);
+        $this->assertSame('ok', $lote['severidad']);
+    }
+
+    public function testExcedenteProyectadoRedondeaHaciaArriba(): void
+    {
+        // vel = 1/3 por dia (1 pieza cada 3 dias), lote de 10 piezas, caduca en 10 dias.
+        // demanda cubierta = 10 * (1/3) = 3.33 -> vendidas = 3.33 -> excedente = ceil(10-3.33) = ceil(6.67) = 7.
+        $lotes = [[
+            'id_lote' => 1, 'fecha_caducidad' => $this->enDias(10), 'fecha_ingreso' => $this->enDias(-30),
+            'cantidad_restante' => 10, 'capsulas_por_envase' => null, 'porcion_capsulas' => null,
+        ]];
+        $vel = ['vel_diaria' => 1 / 3, 'sin_historico' => false, 'sin_rotacion' => false];
+        $r = loteComputeProyeccionProducto($lotes, $vel, (new DateTimeImmutable('today'))->format('Y-m-d'));
+        $this->assertSame(7, $r[0]['excedente_proyectado']);
+    }
+
     /* --------------------------------------------------------------------- */
 
     private function enDias(int $dias): string
@@ -286,7 +609,8 @@ final class LoteCaducidadUtilsTest extends TestCase
             en_oferta INTEGER NOT NULL DEFAULT 0, alerta_atendida INTEGER NOT NULL DEFAULT 0,
             foto_evidencia TEXT NULL, id_usuario_seguimiento INTEGER NULL,
             notas_seguimiento TEXT NULL, creado_por INTEGER NULL,
-            creado_en TEXT DEFAULT CURRENT_TIMESTAMP, actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+            creado_en TEXT DEFAULT CURRENT_TIMESTAMP, actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (id_producto, codigo_lote)
         )");
         $this->seedAlmacen(1, 'Matriz');
     }
@@ -350,5 +674,11 @@ final class LoteCaducidadUtilsTest extends TestCase
             $cantidad,
             $cantidad,
         ]);
+    }
+
+    private function seedLoteId(int $idProducto, string $codigo, string $fechaCaducidad, int $cantidad, ?int $idAlmacen = null): int
+    {
+        $this->seedLote($idProducto, $codigo, $fechaCaducidad, $cantidad, $idAlmacen);
+        return (int) $this->pdo->lastInsertId();
     }
 }

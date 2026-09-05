@@ -12,14 +12,32 @@ if (!isAuthenticated() || (!isAdmin() && !isEncargado())) {
     exit;
 }
 
+$pdo = getPDO();
+$userId = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
+
+// Lectura: lotes (con proyección) de un producto, para pintarlos al editarlo en products.php.
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $idProducto = (int) ($_GET['id_producto'] ?? 0);
+    if ($idProducto <= 0) {
+        echo json_encode(['success' => false, 'message' => 'Producto inválido']);
+        exit;
+    }
+    try {
+        $proy = loteFetchProyecciones($pdo, ['id_producto' => $idProducto]);
+        echo json_encode(['success' => true, 'data' => $proy['lotes'], 'ventana_dias' => $proy['ventana_dias']], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        error_log('lotes_manager (GET): ' . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'No se pudieron cargar los lotes.']);
+    }
+    exit;
+}
+
 $data = $_POST;
 if (!validateCsrfToken((string) ($data['csrf_token'] ?? ''))) {
     echo json_encode(['success' => false, 'message' => 'Token de seguridad inválido']);
     exit;
 }
 
-$pdo = getPDO();
-$userId = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
 $accion = (string) ($data['accion'] ?? '');
 
 try {
@@ -35,7 +53,6 @@ try {
                 'cantidad' => $data['cantidad'] ?? 0,
                 'costo_unitario' => $data['costo_unitario'] ?? null,
                 'notas' => $data['notas'] ?? null,
-                'foto_evidencia' => $data['foto_evidencia'] ?? null,
             ], $userId);
             logAudit('LOTE_GUARDADO', 'lotes_inventario', $id, 'Lote ' . ($data['codigo_lote'] ?? ''));
             echo json_encode(['success' => true, 'message' => 'Lote guardado', 'id_lote' => $id]);
@@ -66,19 +83,6 @@ try {
             loteEliminar($pdo, (int) ($data['id_lote'] ?? 0));
             logAudit('LOTE_ELIMINADO', 'lotes_inventario', (int) ($data['id_lote'] ?? 0), 'Lote eliminado');
             echo json_encode(['success' => true, 'message' => 'Lote eliminado']);
-            break;
-
-        case 'actualizar_capsulas_producto':
-            $idProd = (int) ($data['id_producto'] ?? 0);
-            $caps = ($data['capsulas_por_envase'] ?? '') !== '' ? max(0, (int) $data['capsulas_por_envase']) : null;
-            $porcion = ($data['porcion_capsulas'] ?? '') !== '' ? max(0, (int) $data['porcion_capsulas']) : null;
-            if ($idProd <= 0) {
-                throw new InvalidArgumentException('Producto inválido.');
-            }
-            $pdo->prepare('UPDATE productos SET capsulas_por_envase = :c, porcion_capsulas = :p WHERE id_producto = :id')
-                ->execute([':c' => $caps, ':p' => $porcion, ':id' => $idProd]);
-            logAudit('PRODUCTO_CAPSULAS_ACTUALIZADAS', 'productos', $idProd, "cápsulas/envase={$caps}, porción={$porcion}");
-            echo json_encode(['success' => true, 'message' => 'Datos de cápsulas guardados en el producto']);
             break;
 
         default:
