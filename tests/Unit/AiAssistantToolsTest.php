@@ -18,6 +18,34 @@ final class AiAssistantToolsTest extends TestCase
         $this->createSchema();
     }
 
+    public function testAiBuildWhatsAppLinkLineBuildsWaMeLinkFromWaId(): void
+    {
+        $linea = aiBuildWhatsAppLinkLine('5213334040398');
+
+        $this->assertStringContainsString('https://wa.me/523334040398', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLineHandlesWaIdWithoutExtraMobilePrefix(): void
+    {
+        $linea = aiBuildWhatsAppLinkLine('523334040398');
+
+        $this->assertStringContainsString('https://wa.me/523334040398', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLineReturnsEmptyWhenNotEnoughDigits(): void
+    {
+        $this->assertSame('', aiBuildWhatsAppLinkLine(''));
+        $this->assertSame('', aiBuildWhatsAppLinkLine('12345'));
+    }
+
+    public function testAiBuildWhatsAppLinkLineReturnsEmptyForLidIdentifiers(): void
+    {
+        // aiWaIdToMxDigits() valida el patron exacto 52(1)?+10 digitos -- un LID de WhatsApp
+        // (identificador de privacidad, 14-15 digitos, sin relacion con el telefono real) no
+        // encaja en ese patron, asi que no se arma ningun link inventado.
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194'));
+    }
+
     public function testAiSearchInventorySumsStockAcrossWarehouses(): void
     {
         $this->seedProducto(10, 'Omega 3', 'OMG3', null, 299.00);
