@@ -627,6 +627,15 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNull(aiWaIdToMxDigits('123'));
     }
 
+    public function testAiWaIdToDisplayPhoneFormatsRealNumbersAndNullsForLid(): void
+    {
+        $this->assertSame('+52 33 3404 0398', aiWaIdToDisplayPhone('5213334040398'));
+        $this->assertSame('+52 55 1234 5678', aiWaIdToDisplayPhone('5215512345678'));
+        $this->assertSame('+52 341 123 4567', aiWaIdToDisplayPhone('5213411234567')); // lada de 3 digitos
+        $this->assertNull(aiWaIdToDisplayPhone('53236337742009'));   // LID
+        $this->assertNull(aiWaIdToDisplayPhone('120363402368777906')); // LID
+    }
+
     public function testCloseUnresponsiveConversationTagsAndClosesBot(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020007', null);

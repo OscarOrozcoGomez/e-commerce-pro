@@ -124,11 +124,20 @@ function waParseBridgePayload(array $payload): ?array
     // todavia se procesa el mensaje, solo que sin proteccion de deduplicado ante reintentos.
     $messageId = waExtractScalarString($payload, 'message_id') ?? '';
 
+    // profile_name (pushName de Baileys) y sender_jid (remoteJid crudo) son opcionales:
+    // versiones viejas del puente no los mandan. profile_name da un nombre legible para
+    // el dashboard; sender_jid termina en "@lid" cuando WhatsApp oculta el telefono
+    // (privacidad) y en "@s.whatsapp.net" cuando si viene el numero real.
+    $profileName = waExtractScalarString($payload, 'profile_name') ?? '';
+    $senderJid = waExtractScalarString($payload, 'sender_jid') ?? '';
+
     return [
         'wa_id' => $waIdDigits,
         'wa_message_id' => $messageId !== '' ? $messageId : null,
         'texto' => $message,
         'from_me' => !empty($payload['from_me']),
+        'profile_name' => mb_substr($profileName, 0, 150),
+        'sender_jid' => mb_substr($senderJid, 0, 190),
     ];
 }
 
