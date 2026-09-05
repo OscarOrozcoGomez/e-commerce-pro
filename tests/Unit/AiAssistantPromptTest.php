@@ -318,4 +318,21 @@ final class AiAssistantPromptTest extends TestCase
 
         $this->assertSame('', aiBuildFewShotBlock($reglas));
     }
+
+    public function testSystemPromptHidesPedidoAgendadoTagFromAlex(): void
+    {
+        $etiquetas = [
+            ['nombre' => 'Cliente Frecuente'],
+            ['nombre' => AI_TAG_PEDIDO_AGENDADO],
+            ['nombre' => 'Mayoreo'],
+        ];
+
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null, $etiquetas);
+
+        // Alex ve las demas etiquetas pero NUNCA "Pedido Agendado": esa la pone
+        // solo el codigo al confirmar un pedido real.
+        $this->assertStringContainsString('Cliente Frecuente', $prompt);
+        $this->assertStringContainsString('Mayoreo', $prompt);
+        $this->assertStringNotContainsString(AI_TAG_PEDIDO_AGENDADO, $prompt);
+    }
 }

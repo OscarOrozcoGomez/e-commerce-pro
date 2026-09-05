@@ -900,6 +900,24 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertContains('Mayoreo', $names);
     }
 
+    public function testEtiquetarClienteRefusesToApplyPedidoAgendado(): void
+    {
+        // Aunque la etiqueta exista, Alex no puede asignarla: la pone solo el
+        // codigo cuando agendar_venta confirma un pedido real.
+        aiFindOrCreateTag($this->pdo, AI_TAG_PEDIDO_AGENDADO);
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009019', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolEtiquetarCliente($this->pdo, ['nombre_etiqueta' => AI_TAG_PEDIDO_AGENDADO], $context);
+
+        $this->assertFalse($result['ok']);
+        $names = array_map(
+            static fn(array $t) => $t['nombre'],
+            aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion'])
+        );
+        $this->assertNotContains(AI_TAG_PEDIDO_AGENDADO, $names);
+    }
+
     public function testQuitarEtiquetaClienteRemovesKnownTag(): void
     {
         aiFindOrCreateTag($this->pdo, 'Mayoreo');

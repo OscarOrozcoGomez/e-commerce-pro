@@ -220,10 +220,15 @@ function aiBuildSystemPrompt(
     }
 
     if (!empty($etiquetasDisponibles)) {
-        $nombresEtiquetas = array_values(array_filter(array_map(
-            static fn(array $t): string => trim((string)($t['nombre'] ?? '')),
-            $etiquetasDisponibles
-        )));
+        $nombresEtiquetas = array_values(array_filter(
+            array_map(
+                static fn(array $t): string => trim((string)($t['nombre'] ?? '')),
+                $etiquetasDisponibles
+            ),
+            // "Pedido Agendado" la pone solo el codigo al confirmar un pedido; Alex
+            // no debe verla como opcion para no aplicarla por intencion de compra.
+            static fn(string $n): bool => $n !== '' && $n !== AI_TAG_PEDIDO_AGENDADO
+        ));
         if (!empty($nombresEtiquetas)) {
             $lines[] = '';
             $lines[] = 'Etiquetas de WhatsApp disponibles para clasificar esta conversacion: ' . implode(', ', $nombresEtiquetas) . '.';
@@ -511,6 +516,11 @@ function aiGetOrCreateConversation(PDO $pdo, string $waId, ?string $perfilNombre
 
 const AI_TAG_CLIENTE_NUEVO = 'Cliente Nuevo';
 const AI_TAG_PREGUNTON = 'Preguntón';
+
+// La aplica SOLO el codigo cuando agendar_venta tiene exito. Alex nunca la
+// asigna ni la ve en su lista de etiquetas disponibles: es un marcador fiable
+// de "esta conversacion cerro un pedido real", no de intencion de compra.
+const AI_TAG_PEDIDO_AGENDADO = 'Pedido Agendado';
 
 function aiFindOrCreateTag(PDO $pdo, string $nombre): ?int
 {
@@ -1458,6 +1468,17 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         }
     }
 
+    // Marcador de "esta conversacion cerro un pedido real". Se pone AQUI (despues de
+    // que dbCreatePublicOrder confirmo el pedido), nunca por criterio de Alex ni antes
+    // de tener el pedido -- justamente lo que se pedia evitar.
+    if (!empty($context['id_conversacion'])) {
+        try {
+            aiAssignTag($pdo, (int)$context['id_conversacion'], AI_TAG_PEDIDO_AGENDADO);
+        } catch (Throwable $e) {
+            error_log('WARNING: no se pudo asignar etiqueta "Pedido Agendado": ' . $e->getMessage());
+        }
+    }
+
     // dbCreatePublicOrder no tiene parametro para el metodo de pago preferido (siempre usa el default);
     // se anexa como nota igual que hace dbCancelOrderByCustomer, armando el texto en PHP para no
     // depender de CONCAT/|| especifico de motor.
@@ -1586,6 +1607,9 @@ function aiToolEtiquetarCliente(PDO $pdo, array $args, array $context): array
 
     if ($nombre === '' || $idConversacion <= 0) {
         return ['ok' => false, 'message' => 'Falta el nombre de la etiqueta.'];
+    }
+    if (strcasecmp($nombre, AI_TAG_PEDIDO_AGENDADO) === 0) {
+        return ['ok' => false, 'message' => 'Esa etiqueta la aplica el sistema automaticamente al agendar un pedido; no la asignes tu.'];
     }
     if (!aiTagExists($pdo, $nombre)) {
         return ['ok' => false, 'message' => 'Esa etiqueta no existe. Usa unicamente un nombre de la lista disponible.'];
