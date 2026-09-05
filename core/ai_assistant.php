@@ -9,6 +9,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/pii_crypto.php';
 require_once __DIR__ . '/whatsapp_helper.php';
+require_once __DIR__ . '/whatsapp_link_utils.php';
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -1518,12 +1519,49 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         }
     }
 
+    $listaItems = implode(', ', array_map(
+        static fn(array $item): string => "{$item['quantity']}x {$item['nombre']}",
+        $resolved['items']
+    ));
+    $totalPedido = isset($result['total']) ? number_format((float)$result['total'], 2) : '?';
+    $waIdVenta = (string)($context['wa_id'] ?? '');
+    aiSendTelegramAlert(
+        "Venta agendada por Alex: {$nombre}\n"
+        . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
+        . "Productos: {$listaItems}"
+        . aiBuildWhatsAppLinkLine($waIdVenta)
+    );
+
     return [
         'ok' => true,
         'numero_pedido' => (string)($result['pedido'] ?? ''),
         'id_pedido' => $result['id_pedido'] ?? null,
         'message' => 'Pedido registrado correctamente.',
     ];
+}
+
+/**
+ * Pura y testeable: arma la linea "abrir chat" con el link de un clic hacia WhatsApp
+ * (wa.me) para incluir en las alertas de Telegram. wa_id ya trae el codigo de pais (52),
+ * asi que primero se reduce al numero nacional de 10 digitos (aiWaIdToMxDigits) antes de
+ * pasarselo a waBuildBusinessLinkPhone(), que es quien vuelve a anteponer el "52" -- de lo
+ * contrario quedaria duplicado. Regresa cadena vacia si no se pudo determinar un numero de
+ * 10 digitos -- ej. cuando wa_id es en realidad un LID de WhatsApp (identificador de
+ * privacidad sin relacion con el telefono real).
+ */
+function aiBuildWhatsAppLinkLine(string $waId): string
+{
+    $digitsNacionales = aiWaIdToMxDigits($waId);
+    if ($digitsNacionales === null) {
+        return '';
+    }
+
+    $linkPhone = waBuildBusinessLinkPhone($digitsNacionales);
+    if ($linkPhone === '') {
+        return '';
+    }
+
+    return "\nAbrir chat: https://wa.me/{$linkPhone}";
 }
 
 function aiSendTelegramAlert(string $texto): void
@@ -1571,7 +1609,7 @@ function aiToolTransferirHumano(PDO $pdo, array $args, array $context): array
     $nombrePerfil = trim((string)($context['nombre_perfil'] ?? ''));
     $quien = $nombrePerfil !== '' ? "{$nombrePerfil} ({$waId})" : $waId;
 
-    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}");
+    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}" . aiBuildWhatsAppLinkLine($waId));
 
     return ['ok' => true, 'message' => 'Un asesor humano continuara la conversacion en breve.'];
 }
