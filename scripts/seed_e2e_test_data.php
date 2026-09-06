@@ -27,14 +27,28 @@ const E2E_OUT_OF_STOCK_PRODUCT_NAME = 'Playwright E2E Out Of Stock Product';
 const E2E_OUT_OF_STOCK_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0003';
 
 // Producto de uso exclusivo del test de "posponer" en purchase_orders.php (ver
-// tests/e2e/purchase-orders.staff.spec.ts). Ese test reactiva el posponer con un ingreso real
-// de 1 unidad -unico mecanismo que expone la app para reactivar pospuestos-, asi que el stock
-// sube un poco en cada corrida; se le da un stock_minimo generoso (ver mas abajo) para que siga
-// calificando para la lista de resurtido muchas corridas despues sin resembrar. Es un producto
-// aparte de E2E_OUT_OF_STOCK_PRODUCT_NAME a proposito: ese otro debe quedarse SIEMPRE en 0.
+// tests/e2e/purchase-orders.staff.spec.ts). Se reactiva con el boton "Devolver" de la
+// pestana Pospuestos (api/postpone_reactivate.php), que no toca el inventario -- por
+// eso el stock NO se resetea en cada corrida (ver mas abajo), a diferencia de los dos
+// productos del ciclo real de Ordenes de Compra que siguen. Se le da un stock_minimo
+// generoso para que siga calificando para la lista de resurtido aunque no se resiembre.
+// Es un producto aparte de E2E_OUT_OF_STOCK_PRODUCT_NAME a proposito: ese otro debe
+// quedarse SIEMPRE en 0.
 const E2E_PURCHASE_ORDER_PRODUCT_NAME = 'Playwright E2E Purchase Order Product';
 const E2E_PURCHASE_ORDER_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0004';
 const E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO = 1000;
+
+// Dos productos de uso exclusivo del ciclo REAL de Ordenes de Compra (generar orden ->
+// pestana "Ordenes Abiertas" -> surtir/cancelar), a diferencia del de arriba que solo
+// prueba "posponer". Estos SI mutan ordenes_compra/detalle_orden_compra de verdad, asi
+// que cantidad_actual se resetea a 0 en cada corrida (ver mas abajo) para que el test de
+// "surtir" -que sube el inventario real- sea repetible sin resembrar ni acumular stock.
+const E2E_PO_SURTIR_PRODUCT_NAME = 'Playwright E2E PO Surtir Product';
+const E2E_PO_SURTIR_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0005';
+const E2E_PO_CANCEL_PRODUCT_NAME = 'Playwright E2E PO Cancel Product';
+const E2E_PO_CANCEL_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0006';
+const E2E_PO_LIFECYCLE_STOCK_MINIMO = 5;
+const E2E_PO_LIFECYCLE_STOCK_MAXIMO = 10;
 
 $productsToSeed = [
     ['nombre' => E2E_PRODUCT_NAME, 'codigo_barras' => E2E_PRODUCT_BARCODE, 'precio' => 99.99, 'stock' => 9999],
@@ -321,6 +335,57 @@ try {
         'stock_maximo' => E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO + 5,
     ]);
     echo 'Seed OK: ' . E2E_PURCHASE_ORDER_PRODUCT_NAME . " -> id_producto={$idProductoPO}, id_almacen={$idAlmacen}, stock_minimo=" . E2E_PURCHASE_ORDER_PRODUCT_STOCK_MINIMO . "\n";
+
+    // Los dos productos del ciclo real de Ordenes de Compra: a diferencia del de arriba,
+    // cantidad_actual SI se resetea a 0 en cada corrida, y se cancela cualquier orden de
+    // compra que haya quedado abierta de una corrida anterior interrumpida a medias -- si
+    // no, el producto quedaria excluido de la Lista de Compra para siempre
+    // (purchaseOrderFetchSuggestions oculta productos con una orden 'borrador'/'enviada'/
+    // 'parcial' sin cerrar).
+    foreach ([
+        E2E_PO_SURTIR_PRODUCT_BARCODE => E2E_PO_SURTIR_PRODUCT_NAME,
+        E2E_PO_CANCEL_PRODUCT_BARCODE => E2E_PO_CANCEL_PRODUCT_NAME,
+    ] as $codigoBarrasLifecycle => $nombreLifecycle) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO productos (nombre, codigo_barras, precio_venta, precio_costo, estado)
+             VALUES (:nombre, :codigo_barras, 19.99, 10.00, "activo")
+             ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), precio_venta = VALUES(precio_venta), precio_costo = VALUES(precio_costo), estado = "activo"'
+        );
+        $stmt->execute(['nombre' => $nombreLifecycle, 'codigo_barras' => $codigoBarrasLifecycle]);
+
+        $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE codigo_barras = :codigo_barras');
+        $stmt->execute(['codigo_barras' => $codigoBarrasLifecycle]);
+        $idProductoLifecycle = (int) $stmt->fetchColumn();
+        if ($idProductoLifecycle <= 0) {
+            throw new RuntimeException("No se pudo resolver id_producto para {$codigoBarrasLifecycle}.");
+        }
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
+             VALUES (:id_producto, :id_almacen, 0, :stock_minimo, :stock_maximo)
+             ON DUPLICATE KEY UPDATE cantidad_actual = 0, stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)'
+        );
+        $stmt->execute([
+            'id_producto' => $idProductoLifecycle,
+            'id_almacen' => $idAlmacen,
+            'stock_minimo' => E2E_PO_LIFECYCLE_STOCK_MINIMO,
+            'stock_maximo' => E2E_PO_LIFECYCLE_STOCK_MAXIMO,
+        ]);
+
+        $stmtCancelStale = $pdo->prepare(
+            "UPDATE ordenes_compra oc
+             JOIN detalle_orden_compra doc ON doc.id_orden_compra = oc.id_orden_compra
+             SET oc.estado = 'cancelada'
+             WHERE doc.id_producto = :id_producto
+               AND oc.estado IN ('borrador','enviada','parcial')"
+        );
+        $stmtCancelStale->execute(['id_producto' => $idProductoLifecycle]);
+        if ($stmtCancelStale->rowCount() > 0) {
+            echo "Correccion: {$nombreLifecycle} tenia {$stmtCancelStale->rowCount()} orden(es) de compra abierta(s) de una corrida anterior -- canceladas.\n";
+        }
+
+        echo "Seed OK: {$nombreLifecycle} -> id_producto={$idProductoLifecycle}, id_almacen={$idAlmacen}, stock_minimo=" . E2E_PO_LIFECYCLE_STOCK_MINIMO . "\n";
+    }
 
     // La tabla clientes no tiene una llave unica sobre nombre, asi que la
     // idempotencia se resuelve buscando primero en vez de ON DUPLICATE KEY.

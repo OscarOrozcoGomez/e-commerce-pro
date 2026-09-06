@@ -12,10 +12,14 @@ export const E2E_LOW_STOCK_PRODUCT_NAME = 'Playwright E2E Low Stock Product';
 // necesiten posponer/reactivar (mutan el stock), usar E2E_PURCHASE_ORDER_PRODUCT_NAME en vez
 // de este, para no romper este test (ver scripts/seed_e2e_test_data.php).
 export const E2E_OUT_OF_STOCK_PRODUCT_NAME = 'Playwright E2E Out Of Stock Product';
-// Uso exclusivo del test de "posponer" en purchase_orders.php: su stock sube un poco en cada
-// corrida (unico mecanismo de la app para reactivar un producto pospuesto), asi que se siembra
-// con un stock_minimo generoso para seguir calificando para la lista de resurtido.
+// Uso exclusivo del test de "posponer" en purchase_orders.php: se reactiva con el boton
+// "Devolver" de la pestana Pospuestos (no toca el inventario), asi que se siembra con un
+// stock_minimo generoso solo para que siga calificando para la lista de resurtido.
 export const E2E_PURCHASE_ORDER_PRODUCT_NAME = 'Playwright E2E Purchase Order Product';
+// Dos productos de uso exclusivo del ciclo REAL de Ordenes de Compra (generar orden ->
+// pestana "Ordenes Abiertas" -> surtir/cancelar). Debe coincidir con scripts/seed_e2e_test_data.php.
+export const E2E_PO_SURTIR_PRODUCT_NAME = 'Playwright E2E PO Surtir Product';
+export const E2E_PO_CANCEL_PRODUCT_NAME = 'Playwright E2E PO Cancel Product';
 // Cliente fijo (no autoregistrado) con domicilio guardado, para views/sales.php.
 export const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
 
