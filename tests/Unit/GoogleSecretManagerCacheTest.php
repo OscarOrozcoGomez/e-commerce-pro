@@ -25,6 +25,8 @@ final class GoogleSecretManagerCacheTest extends TestCase
 
         $_SESSION = [];
 
+        @unlink(gsmCacheEpochFilePath());
+
         putenv('GCP_PROJECT_ID');
         putenv('GOOGLE_CLOUD_PROJECT');
         putenv('GCLOUD_PROJECT');
@@ -36,6 +38,8 @@ final class GoogleSecretManagerCacheTest extends TestCase
         $_SESSION = $this->originalSession;
         $_SERVER = $this->originalServer;
         $_ENV = $this->originalEnv;
+
+        @unlink(gsmCacheEpochFilePath());
 
         parent::tearDown();
     }
@@ -76,6 +80,56 @@ final class GoogleSecretManagerCacheTest extends TestCase
 
         $this->assertNull(gsmGetSessionSecretsCache());
         $this->assertArrayNotHasKey('app_secrets_cached_at', $_SESSION);
+    }
+
+    public function testClearSecretsCacheBumpsGlobalEpoch(): void
+    {
+        $this->assertSame(0, gsmGetCacheEpoch());
+
+        clear_secrets_cache();
+
+        $this->assertGreaterThan(0, gsmGetCacheEpoch());
+    }
+
+    public function testSessionCacheIsDiscardedWhenEpochIsNewerThanCache(): void
+    {
+        $_SESSION['app_secrets'] = ['PII_ENCRYPTION_KEY' => 'k'];
+        $_SESSION['app_secrets_cached_at'] = time() - 100;
+
+        gsmBumpCacheEpoch();
+
+        $this->assertNull(gsmGetSessionSecretsCache());
+        $this->assertArrayNotHasKey('app_secrets', $_SESSION);
+    }
+
+    public function testSessionCacheIsKeptWhenEpochIsOlderThanCache(): void
+    {
+        gsmBumpCacheEpoch();
+
+        $_SESSION['app_secrets'] = ['PII_ENCRYPTION_KEY' => 'k'];
+        $_SESSION['app_secrets_cached_at'] = time() + 100;
+
+        $this->assertSame(['PII_ENCRYPTION_KEY' => 'k'], gsmGetSessionSecretsCache());
+    }
+
+    public function testSessionCacheWithoutTimestampIgnoresEpoch(): void
+    {
+        gsmBumpCacheEpoch();
+
+        // Copia de sesion sin marca de tiempo (compatibilidad hacia atras): no se toca.
+        $_SESSION['app_secrets'] = ['DB_HOST' => '127.0.0.1'];
+
+        $this->assertSame(['DB_HOST' => '127.0.0.1'], gsmGetSessionSecretsCache());
+    }
+
+    public function testCacheEntryFreshnessAgainstEpoch(): void
+    {
+        $this->assertTrue(gsmCacheEntryIsFresherThanEpoch(['created_at' => time()]));
+
+        gsmBumpCacheEpoch();
+
+        $this->assertFalse(gsmCacheEntryIsFresherThanEpoch(['created_at' => time() - 50]));
+        $this->assertTrue(gsmCacheEntryIsFresherThanEpoch(['created_at' => time() + 50]));
     }
 
     public function testNormalizeMappingSortsKeysAndFiltersInvalidValues(): void

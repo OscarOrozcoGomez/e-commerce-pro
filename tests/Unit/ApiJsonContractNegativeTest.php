@@ -76,15 +76,41 @@ final class ApiJsonContractNegativeTest extends TestCase
         $this->assertFalse($decoded['success'], "$relPath deberia negar acceso sin sesion");
     }
 
-    /** @return array<string,array{0:string}> */
+    /**
+     * Todo endpoint bajo api/ que decide con hasPermission() (grep -l "hasPermission("
+     * api/*.php) debe estar aqui. Antes de agregar uno confirma que su guardia usa
+     * isAuthenticated()/hasPermission() -- no requireAuth(), que sin sesion redirige a
+     * login.php en vez de devolver JSON (bug real que este test encontro y se corrigio
+     * en api/ventas.php, api/create_customer.php, api/update_customer_phone.php y
+     * api/cleanup_reservations.php).
+     *
+     * @return array<string,array{0:string}>
+     */
     public static function jsonEndpoints(): array
     {
         return [
-            'purchase_orders_data' => ['api/purchase_orders_data.php'],
-            'analytics_data'       => ['api/analytics_data.php'],
-            'batch_inbound'        => ['api/batch_inbound.php'],
-            'update_thresholds'    => ['api/update_thresholds.php'],
-            'inventory_handler'    => ['api/inventory_handler.php'],
+            'purchase_orders_data'   => ['api/purchase_orders_data.php'],
+            'analytics_data'         => ['api/analytics_data.php'],
+            'batch_inbound'          => ['api/batch_inbound.php'],
+            'update_thresholds'      => ['api/update_thresholds.php'],
+            'inventory_handler'      => ['api/inventory_handler.php'],
+            'transfer_stock'         => ['api/transfer_stock.php'],
+            'ventas'                 => ['api/ventas.php'],
+            'postpone_purchase_items'=> ['api/postpone_purchase_items.php'],
+            'purchase_order_create'  => ['api/purchase_order_create.php'],
+            'purchase_order_receive' => ['api/purchase_order_receive.php'],
+            'purchase_order_cancel'  => ['api/purchase_order_cancel.php'],
+            'purchase_orders_open'   => ['api/purchase_orders_open.php'],
+            'postponed_items_data'   => ['api/postponed_items_data.php'],
+            'postpone_reactivate'    => ['api/postpone_reactivate.php'],
+            'products_manager'       => ['api/products_manager.php'],
+            'ai_assistant_admin'     => ['api/ai_assistant_admin.php'],
+            'create_customer'        => ['api/create_customer.php'],
+            'update_customer_phone'  => ['api/update_customer_phone.php'],
+            'cleanup_reservations'   => ['api/cleanup_reservations.php'],
+            'process_inbound'        => ['api/process_inbound.php'],
+            'entrega_publicacion'    => ['api/entrega_publicacion.php'],
+            'optimize_delivery_route'=> ['api/optimize_delivery_route.php'],
         ];
     }
 }

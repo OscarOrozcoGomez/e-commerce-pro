@@ -9,6 +9,7 @@ declare(strict_types=1);
 // autenticacion que api/run_migrations.php (MIGRATIONS_DEPLOY_TOKEN) para no duplicar secretos.
 
 require_once __DIR__ . '/../core/migrations.php';
+require_once __DIR__ . '/../core/google_secret_manager.php';
 
 header('Content-Type: application/json');
 
@@ -44,11 +45,20 @@ $cleared = [
     'session' => false,
     'apcu_keys_borradas' => 0,
     'archivos_borrados' => 0,
+    'epoch' => 0,
 ];
 
 if (function_exists('clear_secrets_cache')) {
+    // Ademas de limpiar esta sesion, clear_secrets_cache() sube el "epoch" global en disco:
+    // las sesiones de otros usuarios y el APCu de otros pools de PHP-FPM comparan contra el
+    // y se auto-invalidan en su siguiente peticion, sin necesitar que cada quien cierre
+    // sesion ni tener acceso a su memoria.
     clear_secrets_cache();
     $cleared['session'] = true;
+}
+
+if (function_exists('gsmGetCacheEpoch')) {
+    $cleared['epoch'] = gsmGetCacheEpoch();
 }
 
 // APCu es por proceso/pool de PHP-FPM: correr esto como peticion web (no CLI) es lo que permite
@@ -80,5 +90,40 @@ foreach (glob($pattern) ?: [] as $file) {
         $cleared['archivos_borrados']++;
     }
 }
+
+// Verificacion: con las 3 capas ya limpias, forzamos una recarga real de secretos (la
+// MISMA ruta que corre en cada peticion de produccion) y reportamos QUE claves quedaron
+// disponibles -- solo presencia (bool), nunca el valor. Asi este endpoint, y el workflow
+// de GitHub Actions que lo dispara, confirma si FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN / etc.
+// de verdad llegaron desde Secret Manager, en vez de tener que ir a probarlo a mano en la
+// vista del repartidor.
+$secretosPresentes = [];
+if (function_exists('preloadSecretSources')) {
+    try {
+        preloadSecretSources();
+    } catch (Throwable $e) {
+        error_log('clear_secrets_cache.php: recarga de verificacion fallo: ' . $e->getMessage());
+    }
+
+    $clavesImportantes = [
+        'DB_HOST', 'DB_NAME', 'DB_USER',
+        'PII_ENCRYPTION_KEY',
+        'FB_PAGE_ID', 'FB_PAGE_ACCESS_TOKEN',
+        'MAPS_KEY',
+        'TELEGRAM_BOT_TOKEN',
+        'WA_WEBHOOK_TOKEN',
+    ];
+    foreach ($clavesImportantes as $clave) {
+        $valor = getenv($clave);
+        if ($valor === false) {
+            $valor = $_SERVER[$clave] ?? $_ENV[$clave] ?? null;
+        }
+        $secretosPresentes[$clave] = is_string($valor) && trim($valor) !== '';
+    }
+}
+
+$cleared['secretos_presentes'] = $secretosPresentes;
+$cleared['facebook_configurado'] =
+    ($secretosPresentes['FB_PAGE_ID'] ?? false) && ($secretosPresentes['FB_PAGE_ACCESS_TOKEN'] ?? false);
 
 echo json_encode(['success' => true, 'limpiado' => $cleared]);

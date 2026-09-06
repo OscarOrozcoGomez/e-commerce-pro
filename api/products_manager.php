@@ -2,9 +2,12 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/image_optimizer.php';
 
 header('Content-Type: application/json');
 
+// Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
+refreshSessionPermissions();
 if (!isAuthenticated() || !hasPermission('gestionar_productos')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
@@ -13,6 +16,13 @@ if (!isAuthenticated() || !hasPermission('gestionar_productos')) {
 $pdo = getPDO();
 $action = $_GET['action'] ?? '';
 $usuario = $_SESSION['usuario'];
+
+/**
+ * Helpers de la sincronización con B-Life (blifeResolveHandle, blifeCatalog, blifeHtmlToText,
+ * blifeTabText, blifeVariantMetaFromJsonLd, ...). Viven en core/ para poder cubrirlos con
+ * pruebas unitarias sin arrastrar la sesión ni cURL.
+ */
+require_once __DIR__ . '/../core/blife_sync_utils.php';
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -55,32 +65,174 @@ try {
             }
         }
         elseif ($action === 'fetch_blife_info') {
-            $variant_id = $_GET['variant_id'] ?? '';
-            if (empty($variant_id)) throw new Exception("ID de variante requerido");
+            $rawId = trim((string)($_GET['variant_id'] ?? ''));
 
-            $url = "https://backend.blife-mx.com/nutritional-information/get-by-variant-id/" . $variant_id;
-            
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Útil en entornos locales como XAMPP
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
-                'Referer: https://blife.mx/',
-                'Cookie: connect.sid=s%3Ae5ccf23c-c139-4165-82cf-ca226e77832b.AeGgR1Hq8dlTZimdmSSWC4Cm0cggyYIzbZe0GNdFWE0; session_uid=e5ccf23c-c139-4165-82cf-ca226e77832b'
+            // 1. Identificador -> handle del producto en la tienda Shopify de B-Life.
+            [$handle, $variantHint] = blifeResolveHandle($rawId);
+
+            // 2. Datos estructurados (nombre, variantes, precios, SKU, imágenes).
+            [$jsonBody, $jsonCode, $jsonErr] = blifeHttpGet(BLIFE_SHOP . '/products/' . rawurlencode($handle) . '.json');
+            if ($jsonErr !== '') {
+                throw new Exception("No se pudo conectar con la tienda de B-Life: $jsonErr");
+            }
+            if ($jsonCode === 404) {
+                throw new Exception("B-Life no tiene un producto con handle «{$handle}».");
+            }
+            if ($jsonCode !== 200) {
+                error_log("fetch_blife_info handle=$handle json_http=$jsonCode body=" . substr($jsonBody, 0, 300));
+                throw new Exception("B-Life devolvió $jsonCode al pedir «{$handle}».");
+            }
+            $prod = json_decode($jsonBody, true)['product'] ?? null;
+            if (!is_array($prod)) {
+                throw new Exception("Respuesta inesperada de B-Life para «{$handle}».");
+            }
+            $productId = (int)($prod['id'] ?? 0);
+
+            // 3. Variante elegida: la que pidió el usuario o la primera.
+            $variants = $prod['variants'] ?? [];
+            $variante = [];
+            if ($variantHint) {
+                foreach ($variants as $v) {
+                    if ((int)($v['id'] ?? 0) === $variantHint) { $variante = $v; break; }
+                }
+            }
+            if (!$variante) $variante = $variants[0] ?? [];
+
+            // 4. Imágenes: la destacada de la variante al frente, luego el resto del producto.
+            $normImg = static function ($src): string {
+                $src = trim((string)$src);
+                if ($src === '') return '';
+                if (strpos($src, '//') === 0) $src = 'https:' . $src;
+                return $src;
+            };
+            $galeria = [];
+            foreach ($prod['images'] ?? [] as $img) {
+                $u = $normImg($img['src'] ?? '');
+                if ($u !== '') $galeria[] = $u;
+            }
+            $destacada = $normImg($variante['featured_image']['src'] ?? '');
+            if ($destacada !== '') {
+                $galeria = array_values(array_filter($galeria, static fn($u) => $u !== $destacada));
+                array_unshift($galeria, $destacada);
+            }
+            $galeria = array_values(array_unique($galeria));
+
+            // 5. Página del producto: pestañas del tema (ingredientes / modo de uso) y el
+            //    JSON-LD, de donde sale el código de barras (gtin), que products.json no trae.
+            [$htmlBody, $htmlCode] = blifeHttpGet(BLIFE_SHOP . '/products/' . rawurlencode($handle));
+            $ingredientes = $htmlCode === 200 ? blifeTabText($htmlBody, 'ingredientes', $productId) : '';
+            $modoUso      = $htmlCode === 200 ? blifeTabText($htmlBody, 'modo-uso', $productId) : '';
+            $variantMeta  = $htmlCode === 200 ? blifeVariantMetaFromJsonLd($htmlBody) : [];
+
+            $variantId = (int)($variante['id'] ?? 0);
+            $sku       = trim((string)($variante['sku'] ?? '')) ?: trim((string)($variantMeta[$variantId]['sku'] ?? ''));
+            // El código de barras viene en products/<handle>.json (campo barcode). El JSON-LD
+            // (gtin) queda como respaldo por si Shopify deja de exponerlo en el .json.
+            $barcode   = trim((string)($variante['barcode'] ?? '')) ?: trim((string)($variantMeta[$variantId]['barcode'] ?? ''));
+
+            // Precio de retail de B-Life (arranque para "Precio de Venta"; el usuario lo ajusta).
+            // El costo real (mayoreo) no está en la tienda pública, ese lo pone el usuario.
+            $precioVenta = (float)($variante['price'] ?? 0);
+            $precioComp  = (float)($variante['compare_at_price'] ?? 0);
+
+            // 6. Respuesta con la MISMA forma que consumía fetchBlifeData() en views/products.php.
+            $blife_data = [
+                'producto' => [
+                    'title'       => (string)($prod['title'] ?? ''),
+                    'description' => blifeHtmlToText((string)($prod['body_html'] ?? '')),
+                    'ingredients' => $ingredientes,
+                    'mode_use'    => $modoUso,
+                    'sku'         => $sku,
+                    'codigo_barras' => $barcode,
+                    'precio_venta'       => $precioVenta > 0 ? number_format($precioVenta, 2, '.', '') : '',
+                    'precio_comparacion' => $precioComp  > 0 ? number_format($precioComp, 2, '.', '') : '',
+                    'variante'    => [
+                        'title'          => (string)($variante['title'] ?? ($prod['options'][0]['values'][0] ?? '')),
+                        'sku'            => $sku,
+                        'codigo_barras'  => $barcode,
+                        'precio_venta'       => $precioVenta > 0 ? number_format($precioVenta, 2, '.', '') : '',
+                        'precio_comparacion' => $precioComp  > 0 ? number_format($precioComp, 2, '.', '') : '',
+                        'featuredImage'  => $galeria[0] ?? '',
+                        'secondaryImage' => $galeria[1] ?? '',
+                        'gallery'        => array_slice($galeria, 2),
+                    ],
+                ],
+                // La tabla nutrimental (custom.tabla_nutrimental) no se expone sin token de
+                // Storefront API. Se deja vacía para captura manual.
+                'rows' => [],
+            ];
+
+            // Todas las variantes del producto, por si quieres alimentar un bot.
+            $variantesLista = [];
+            foreach ($variants as $v) {
+                $vid = (int)($v['id'] ?? 0);
+                $variantesLista[] = [
+                    'variant_id'    => $vid,
+                    'title'         => (string)($v['title'] ?? ''),
+                    'sku'           => trim((string)($v['sku'] ?? '')) ?: trim((string)($variantMeta[$vid]['sku'] ?? '')),
+                    'codigo_barras' => trim((string)($v['barcode'] ?? '')) ?: trim((string)($variantMeta[$vid]['barcode'] ?? '')),
+                    'precio'        => (string)($v['price'] ?? ''),
+                    'precio_comparacion' => (string)($v['compare_at_price'] ?? ''),
+                ];
+            }
+
+            $sinCodigo = $barcode === '' ? ' No encontré código de barras para esta variante.' : '';
+
+            echo json_encode([
+                'success'    => true,
+                'blife_data' => $blife_data,
+                'handle'     => $handle,
+                'variantes'  => $variantesLista,
+                'blife_note' => 'Se importó nombre, descripción, presentación, ingredientes, modo de uso, SKU, precio de venta e imágenes de B-Life. Falta el precio de costo (mayoreo) y la tabla nutrimental.' . $sinCodigo,
             ]);
-
-            $response_curl = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            if ($http_code !== 200) throw new Exception("Error consultando API externa ($http_code)");
-            echo json_encode(['success' => true, 'blife_data' => json_decode($response_curl, true)]);
             exit;
         }
-    } 
+        elseif ($action === 'blife_search') {
+            // Busca en el catálogo cacheado de B-Life por nombre, SKU o código de barras,
+            // para no tener que ir a buscar la URL/handle a mano.
+            $q = mb_strtolower(trim((string)($_GET['q'] ?? '')));
+            if (mb_strlen($q) < 2) {
+                echo json_encode(['success' => true, 'results' => []]);
+                exit;
+            }
+
+            $tokens = array_values(array_filter(preg_split('~\s+~', $q) ?: []));
+            $results = [];
+            foreach (blifeCatalog() as $p) {
+                $title = (string)($p['title'] ?? '');
+                $skus  = [];
+                $barcodes = [];
+                foreach ($p['variants'] ?? [] as $v) {
+                    if (!empty($v['sku']))     $skus[] = (string)$v['sku'];
+                    if (!empty($v['barcode'])) $barcodes[] = (string)$v['barcode'];
+                }
+                $haystack = mb_strtolower($title . ' ' . implode(' ', $skus) . ' ' . implode(' ', $barcodes));
+
+                $match = true;
+                foreach ($tokens as $t) {
+                    if (mb_strpos($haystack, $t) === false) { $match = false; break; }
+                }
+                if (!$match) continue;
+
+                $results[] = [
+                    'handle'    => (string)($p['handle'] ?? ''),
+                    'title'     => $title,
+                    'image'     => (string)($p['images'][0]['src'] ?? ''),
+                    'variantes' => array_map(static fn($v) => [
+                        'variant_id'    => (int)($v['id'] ?? 0),
+                        'title'         => (string)($v['title'] ?? ''),
+                        'sku'           => (string)($v['sku'] ?? ''),
+                        'codigo_barras' => (string)($v['barcode'] ?? ''),
+                        'precio'        => (string)($v['price'] ?? ''),
+                    ], $p['variants'] ?? []),
+                ];
+                if (count($results) >= 25) break;
+            }
+
+            echo json_encode(['success' => true, 'results' => $results]);
+            exit;
+        }
+    }
     elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = $_POST;
         if (!validateCsrfToken($data['csrf_token'] ?? '')) {
@@ -98,11 +250,18 @@ try {
             $codigoBarras = trim((string)($data['codigo_barras'] ?? ''));
             $codigoBarras = $codigoBarras === '' ? null : $codigoBarras;
 
+            $capsulasPorEnvase = isset($data['capsulas_por_envase']) && $data['capsulas_por_envase'] !== ''
+                ? max(0, (int)$data['capsulas_por_envase']) : null;
+            $porcionCapsulas = isset($data['porcion_capsulas']) && $data['porcion_capsulas'] !== ''
+                ? max(0, (int)$data['porcion_capsulas']) : null;
+
             if ($id > 0) {
                 // EDITAR
                 $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras,
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
-                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad, `id_padre` = :id_padre, `precio_costo` = :precio_costo,
+                        `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad,
+                        `capsulas_por_envase` = :capsulas_por_envase, `porcion_capsulas` = :porcion_capsulas,
+                        `id_padre` = :id_padre, `precio_costo` = :precio_costo,
                         `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
@@ -112,15 +271,17 @@ try {
                     ':descripcion' => $data['descripcion'] ?? '', ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '', ':tabla' => $data['tabla_nutrimental'] ?? '[]',
                     ':mostrar_tabla' => $mostrar_tabla,
-                    ':unidad' => $data['unidad'] ?? null, ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
+                    ':unidad' => $data['unidad'] ?? null,
+                    ':capsulas_por_envase' => $capsulasPorEnvase, ':porcion_capsulas' => $porcionCapsulas,
+                    ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0, ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
                     ':estado' => $estado, ':id' => $id
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`) 
-                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `capsulas_por_envase`, `porcion_capsulas`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`)
+                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :capsulas_por_envase, :porcion_capsulas, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '',
@@ -133,6 +294,8 @@ try {
                     ':tabla' => $data['tabla_nutrimental'] ?? '[]',
                     ':mostrar_tabla' => $mostrar_tabla,
                     ':unidad' => $data['unidad'] ?? null,
+                    ':capsulas_por_envase' => $capsulasPorEnvase,
+                    ':porcion_capsulas' => $porcionCapsulas,
                     ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0,
@@ -224,6 +387,7 @@ try {
                         $targetFile = $targetDir . $fileName;
                         
                         if (move_uploaded_file($files['tmp_name'][$i], $targetFile)) {
+                            optimizeUploadedProductImage($targetFile);
                             $uploadedPaths[$i] = $folderName . '/' . $fileName;
                         } else {
                             throw new Exception("Error al mover el archivo subido al servidor. Revisa permisos de escritura en: " . $targetDir);
@@ -263,6 +427,7 @@ try {
                                 // Solo guardar si el servidor respondió 200 OK y es una imagen real
                                 if ($httpCode === 200 && strpos($contentType, 'image/') !== false && $imgRaw) {
                                     file_put_contents($targetFile, $imgRaw);
+                                    optimizeUploadedProductImage($targetFile);
                                     $remoteDownloaded[$url] = $dbPath;
                                 }
                         }
@@ -376,11 +541,47 @@ try {
 
             dbSetProductCategories($id, $data['categorias'] ?? []);
             
-            if (isAdmin()) {
-                $id_alm = (int)($data['id_almacen_stock'] ?? 1);
-                $stmtInv = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo) 
-                                          VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
-                $stmtInv->execute([$id, $id_alm, (int)($data['cantidad_actual'] ?? 0), (int)($data['stock_minimo'] ?? 2), (int)($data['stock_maximo'] ?? 5)]);
+            // El inventario_almacen SOLO se escribe si el usuario editó a propósito los campos
+            // de stock de la ficha (stock_touched=1). Antes esto corría en cada guardado, así
+            // que cambiar el nombre/foto/precio de un producto reescribía cantidad_actual,
+            // stock_minimo y stock_maximo del almacén seleccionado (y con el selector de la
+            // lista podía terminar escribiendo en el almacén equivocado).
+            if (isAdmin() && ($data['stock_touched'] ?? '0') === '1') {
+                $id_alm = (int)($data['id_almacen_stock'] ?? 0);
+                if ($id_alm > 0) {
+                    $nuevaCantidad = max(0, (int)($data['cantidad_actual'] ?? 0));
+                    $nuevoMin = max(0, (int)($data['stock_minimo'] ?? 2));
+                    // 0 es válido: "sin objetivo de reorden" para almacenes que no se resurten.
+                    $nuevoMax = max(0, (int)($data['stock_maximo'] ?? 5));
+
+                    // Existencias previas en ese almacén, para el registro de auditoría.
+                    $stmtPrev = $pdo->prepare("SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?");
+                    $stmtPrev->execute([$id, $id_alm]);
+                    $prevRaw = $stmtPrev->fetchColumn();
+                    $cantidadPrevia = ($prevRaw === false) ? null : (int)$prevRaw;
+
+                    $stmtInv = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
+                                              VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
+                    $stmtInv->execute([$id, $id_alm, $nuevaCantidad, $nuevoMin, $nuevoMax]);
+
+                    // Auditoría: dejar rastro del ajuste manual de existencias. Si la tabla de
+                    // movimientos falla, no se rompe el guardado del producto.
+                    if ($cantidadPrevia === null || $cantidadPrevia !== $nuevaCantidad) {
+                        try {
+                            $delta = $nuevaCantidad - (int)($cantidadPrevia ?? 0);
+                            $obs = sprintf(
+                                'Ajuste manual desde ficha de producto (antes: %s, despues: %d)',
+                                $cantidadPrevia === null ? 'sin registro' : (string)$cantidadPrevia,
+                                $nuevaCantidad
+                            );
+                            $stmtMov = $pdo->prepare("INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
+                                                      VALUES (?, 'ajuste', ?, ?, ?, ?)");
+                            $stmtMov->execute([$id, $id_alm, $delta, $_SESSION['usuario']['id_usuario'] ?? null, $obs]);
+                        } catch (Throwable $movErr) {
+                            error_log('products_manager: no se pudo registrar movimiento de ajuste: ' . $movErr->getMessage());
+                        }
+                    }
+                }
             }
 
             echo json_encode(['success' => true, 'message' => 'Producto guardado con éxito']);
@@ -399,9 +600,9 @@ try {
             }
         }
         elseif ($action === 'bulk_assign_category') {
-            // Aunque toda la API ya exige 'gestionar_productos' arriba, esta accion en
-            // particular queda reservada solo a admin/encargado (a peticion expresa).
-            if (!canBulkAssignCategories()) {
+            // Fase 4: basta con 'gestionar_productos' (ya exigido arriba); el rol
+            // admin/encargado se mantiene como respaldo.
+            if (!hasPermission('gestionar_productos') && !canBulkAssignCategories()) {
                 throw new Exception("No tienes permiso para asignar categorías de forma masiva.");
             }
 

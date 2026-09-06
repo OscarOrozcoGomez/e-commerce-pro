@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/phone_utils.php';
+require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 requireAuth();
 if (!isCliente()) { header('Location: dashboard.php'); exit; }
 
@@ -38,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $direccion = trim($_POST['direccion'] ?? '');
                 $maps_link = trim($_POST['maps_link'] ?? '');
                 if (empty($alias) || empty($direccion)) throw new Exception("Campos obligatorios.");
+                if (direccionAliasExcedeLimite($alias)) throw new Exception(direccionAliasErrorLimite());
 
                 $aliasStore = function_exists('piiEncryptValue') ? piiEncryptValue($alias) : $alias;
                 $direccionStore = function_exists('piiEncryptValue') ? piiEncryptValue($direccion) : $direccion;
@@ -52,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $direccion = trim($_POST['direccion'] ?? '');
                 $maps_link = trim($_POST['maps_link'] ?? '');
                 if (empty($alias) || empty($direccion)) throw new Exception("Campos obligatorios.");
+                if (direccionAliasExcedeLimite($alias)) throw new Exception(direccionAliasErrorLimite());
 
                 $aliasStore = function_exists('piiEncryptValue') ? piiEncryptValue($alias) : $alias;
                 $direccionStore = function_exists('piiEncryptValue') ? piiEncryptValue($direccion) : $direccion;
@@ -234,7 +237,7 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="maps_link" id="maps_link" value="<?php echo esc($prefillMapsLink); ?>">
                         
                         <div class="input-field">
-                            <input type="text" id="alias" name="alias" required placeholder="Ej: Casa, Oficina, Mamá" value="<?php echo esc($prefillAlias); ?>">
+                            <input type="text" id="alias" name="alias" required maxlength="50" placeholder="Ej: Casa, Oficina, Mamá" value="<?php echo esc($prefillAlias); ?>">
                             <label for="alias">Alias / Nombre</label>
                         </div>
                         <div class="input-field">

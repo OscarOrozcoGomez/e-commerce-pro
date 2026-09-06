@@ -749,40 +749,96 @@ function deliveryWindowDeadlineTimestamp(array $window, DateTimeImmutable $depar
  * @return array{deadline: ?int, window: ?array}
  */
 /**
- * Margen de tolerancia interno (en segundos) para considerar "a tiempo" una entrega con
- * ventana de horario, segun que tan lejos esta del origen. Es solo para decidir logistica
- * (orden de ruta, cuando vale la pena corregir): nunca se le comunica al cliente, que sigue
- * viendo la ventana exacta que se le prometio.
+ * Colchon de seguridad interno (en segundos) que se RESTA al fin de la ventana de una
+ * parada para decidir logistica: obliga a llegar con margen real antes de que cierre,
+ * absorbiendo trafico, clientes que se demoran en abrir y el tiempo de dar cambio.
+ *
+ * Al reves del margen de tolerancia anterior (que aflojaba el corte y dejaba que la ruta
+ * apretara entregas sin horario antes de una con ventana), este lo aprieta. Nunca se le
+ * comunica al cliente, que sigue viendo la ventana exacta que se le prometio.
+ *
+ * Perfil "agresivo": base fija + minutos por cada parada que se visita ANTES de esta
+ * (mas paradas antes = mas cosas que pueden salir mal) + contingencia de trafico segun
+ * distancia al origen. Con tope para no volver imposible la logistica.
+ *
+ * @param float $distanceMeters distancia en linea recta de la parada al origen (0 si se desconoce)
+ * @param int   $stopsAhead     cuantas paradas se visitan antes de esta en la ruta
  */
-function deliveryToleranceSecondsForDistance(float $distanceMeters): int
+function deliverySafetyBufferSeconds(float $distanceMeters, int $stopsAhead = 0): int
 {
-    $distanceKm = $distanceMeters / 1000;
+    $base = 15 * 60;
+    $perStop = 5 * 60 * max(0, $stopsAhead);
 
-    if ($distanceKm < 10) {
-        return 20 * 60;
+    $trafficContingency = 0;
+    if ($distanceMeters > 0) {
+        $distanceKm = $distanceMeters / 1000;
+        if ($distanceKm < 10) {
+            $trafficContingency = 10 * 60;
+        } elseif ($distanceKm <= 25) {
+            $trafficContingency = 15 * 60;
+        } else {
+            $trafficContingency = 20 * 60;
+        }
     }
 
-    if ($distanceKm <= 25) {
-        return 30 * 60;
+    $total = $base + $perStop + $trafficContingency;
+    $cap = 45 * 60;
+
+    return min($cap, $total);
+}
+
+/**
+ * Convierte la apertura (inicio) de una ventana en un timestamp respecto a la salida.
+ * Gemelo de deliveryWindowDeadlineTimestamp pero para el inicio: se usa para detectar
+ * llegadas ANTES de que el cliente pueda recibir.
+ */
+function deliveryWindowOpenTimestamp(array $window, DateTimeImmutable $departure): ?int
+{
+    $dayKey = deliveryNormalizeWeekdayKey((string)($window['day'] ?? ''));
+    if ($dayKey === null) {
+        return null;
     }
 
-    return 60 * 60;
+    $weekdayMap = [
+        'lunes' => 1,
+        'martes' => 2,
+        'miercoles' => 3,
+        'jueves' => 4,
+        'viernes' => 5,
+        'sabado' => 6,
+        'domingo' => 7,
+    ];
+
+    $targetDay = $weekdayMap[$dayKey] ?? null;
+    if ($targetDay === null) {
+        return null;
+    }
+
+    $currentDay = (int)$departure->format('N');
+    $delta = (($targetDay - $currentDay) + 7) % 7;
+    $targetDate = $departure->modify('+' . $delta . ' days');
+    $startMinutes = deliveryTimeToMinutes((string)($window['start'] ?? '00:00'));
+    $open = $targetDate->setTime(intdiv($startMinutes, 60), $startMinutes % 60);
+    return $open->getTimestamp();
 }
 
 /**
  * Resuelve, para una parada, la ventana de horario con el deadline mas proximo respecto a
- * la salida, sumandole el margen de tolerancia interno segun distancia al origen (si se
- * provee $origin y la parada trae coordenadas). Sin $origin, la tolerancia es 0 (mismo
- * comportamiento que antes de introducirla).
+ * la salida, restandole el colchon de seguridad interno (base + por-parada-previa +
+ * contingencia de trafico segun distancia al origen si se provee $origin y hay coordenadas).
+ *
+ * Devuelve tanto el deadline "efectivo" (con colchon, para decidir el orden de la ruta y
+ * disparar correcciones) como el "crudo" (fin de ventana exacto, para calcular la holgura
+ * real que se le muestra al repartidor) y la apertura de la ventana.
  *
  * @param array<string, mixed> $stop
- * @return array{deadline: ?int, window: ?array}
+ * @return array{deadline: ?int, deadline_raw: ?int, window_open: ?int, window: ?array}
  */
-function deliveryResolveBestWindowDeadline(array $stop, DateTimeImmutable $departure, ?array $origin = null): array
+function deliveryResolveBestWindowDeadline(array $stop, DateTimeImmutable $departure, ?array $origin = null, int $stopsAhead = 0): array
 {
     $preferences = deliveryParseDeliveryPreferences($stop['delivery_preferences'] ?? $stop['preferencias_entrega'] ?? []);
 
-    $toleranceSeconds = 0;
+    $distanceMeters = 0.0;
     if ($origin !== null && isset($origin['lat'], $origin['lng'], $stop['lat'], $stop['lng'])) {
         $distanceMeters = deliveryHaversineMeters(
             (float)$origin['lat'],
@@ -790,8 +846,8 @@ function deliveryResolveBestWindowDeadline(array $stop, DateTimeImmutable $depar
             (float)$stop['lat'],
             (float)$stop['lng']
         );
-        $toleranceSeconds = deliveryToleranceSecondsForDistance($distanceMeters);
     }
+    $safetyBufferSeconds = deliverySafetyBufferSeconds($distanceMeters, $stopsAhead);
 
     $bestDeadline = null;
     $bestWindow = null;
@@ -808,28 +864,44 @@ function deliveryResolveBestWindowDeadline(array $stop, DateTimeImmutable $depar
         }
     }
 
+    $bestDeadlineRaw = $bestDeadline;
+    $bestWindowOpen = null;
     if ($bestDeadline !== null) {
-        $bestDeadline += $toleranceSeconds;
+        $bestDeadline = max($departure->getTimestamp(), $bestDeadline - $safetyBufferSeconds);
+        $bestWindowOpen = $bestWindow !== null ? deliveryWindowOpenTimestamp($bestWindow, $departure) : null;
     }
 
-    return ['deadline' => $bestDeadline, 'window' => $bestWindow];
+    return [
+        'deadline' => $bestDeadline,
+        'deadline_raw' => $bestDeadlineRaw,
+        'window_open' => $bestWindowOpen,
+        'window' => $bestWindow,
+    ];
 }
 
 /**
- * Revisa un listado de paradas ya con ETA calculado (eta_estimada) contra su
- * ventana de horario (mas el margen de tolerancia interno por distancia) y regresa
- * las que llegarian tarde. Se usa despues de pedir la ruta real a Google, porque el
- * preordenamiento solo estima tiempos con linea recta y puede equivocarse.
+ * Revisa un listado de paradas ya con ETA calculado (eta_estimada) contra su ventana de
+ * horario, restandole el colchon de seguridad interno, y regresa las que NO llegarian con
+ * margen suficiente (el ETA cae despues del "deadline efectivo" = fin de ventana - colchon).
+ * Se usa despues de pedir la ruta real a Google, porque el preordenamiento solo estima
+ * tiempos con linea recta y puede equivocarse.
+ *
+ * El colchon crece con la posicion de la parada en la ruta ($pos = cuantas paradas van
+ * antes): mientras mas tarde en la ruta, mas cosas pueden haber salido mal antes de llegar.
+ *
+ * Solo reporta llegadas SIN MARGEN / tarde (dispara el reordenamiento de correccion). Las
+ * llegadas antes de la apertura se anotan por parada en deliveryBuildOrderedStopsWithEta
+ * (ventana_estado = 'temprano'), no aqui.
  *
  * @param array<int, array<string, mixed>> $orderedStopsWithEta
- * @return array<int, array{id_pedido: mixed, numero_pedido: mixed, eta_estimada: string, ventana_fin: string}>
+ * @return array<int, array{id_pedido: mixed, numero_pedido: mixed, eta_estimada: string, ventana_fin: string, retraso_s: int}>
  */
 function deliveryFindWindowViolations(array $orderedStopsWithEta, DateTimeImmutable $departure, ?array $origin = null): array
 {
     $violations = [];
 
-    foreach ($orderedStopsWithEta as $stop) {
-        $resolved = deliveryResolveBestWindowDeadline($stop, $departure, $origin);
+    foreach ($orderedStopsWithEta as $pos => $stop) {
+        $resolved = deliveryResolveBestWindowDeadline($stop, $departure, $origin, (int)$pos);
         $deadline = $resolved['deadline'];
         if ($deadline === null) {
             continue;
@@ -847,12 +919,15 @@ function deliveryFindWindowViolations(array $orderedStopsWithEta, DateTimeImmuta
         }
 
         if ($eta->getTimestamp() > $deadline) {
+            $deadlineRaw = $resolved['deadline_raw'] ?? $deadline;
             $violations[] = [
                 'id_pedido' => $stop['id_pedido'] ?? null,
                 'numero_pedido' => $stop['numero_pedido'] ?? null,
                 'eta_estimada' => $etaText,
+                'ventana_inicio' => (string)($resolved['window']['start'] ?? ''),
                 'ventana_fin' => (string)($resolved['window']['end'] ?? ''),
                 'retraso_s' => $eta->getTimestamp() - $deadline,
+                'holgura_real_s' => $deadlineRaw - $eta->getTimestamp(),
             ];
         }
     }
@@ -925,6 +1000,39 @@ function deliveryBuildOrderedStopsWithEta(array $orderedStops, array $route, Dat
         $stop['eta_estimada'] = $etaText;
         $stop['duracion_tramo_s'] = $legSeconds;
         $stop['en_riesgo'] = $enRiesgo;
+
+        // Anota el estado de la ventana de horario de esta parada para que la vista del
+        // repartidor pueda mostrar la holgura real (fin de ventana - ETA) y avisar si
+        // llega tarde o antes de que abra.
+        $stop['ventana_inicio'] = '';
+        $stop['ventana_fin'] = '';
+        $stop['ventana_holgura_s'] = null;
+        $stop['ventana_colchon_s'] = null;
+        $stop['ventana_estado'] = 'sin_ventana';
+
+        $resolvedWindow = deliveryResolveBestWindowDeadline($stop, $departure, $origin, (int)$pos);
+        if ($resolvedWindow['deadline_raw'] !== null) {
+            $etaTs = $eta->getTimestamp();
+            $deadlineRaw = (int)$resolvedWindow['deadline_raw'];
+            $deadlineEff = (int)$resolvedWindow['deadline'];
+            $windowOpen = $resolvedWindow['window_open'];
+
+            $stop['ventana_inicio'] = (string)($resolvedWindow['window']['start'] ?? '');
+            $stop['ventana_fin'] = (string)($resolvedWindow['window']['end'] ?? '');
+            $stop['ventana_holgura_s'] = $deadlineRaw - $etaTs;
+            $stop['ventana_colchon_s'] = $deadlineRaw - $deadlineEff;
+
+            if ($windowOpen !== null && $etaTs < (int)$windowOpen) {
+                $stop['ventana_estado'] = 'temprano';
+            } elseif ($etaTs > $deadlineRaw) {
+                $stop['ventana_estado'] = 'tarde';
+            } elseif ($etaTs > $deadlineEff) {
+                $stop['ventana_estado'] = 'ajustado';
+            } else {
+                $stop['ventana_estado'] = 'ok';
+            }
+        }
+
         $orderedWithEta[] = $stop;
 
         $runningSeconds += max(0, (int)($stop['tiempo_servicio_min'] ?? 0)) * 60;

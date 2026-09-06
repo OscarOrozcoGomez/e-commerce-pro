@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS `clientes` (
 CREATE TABLE IF NOT EXISTS `cliente_direcciones` (
   `id_direccion` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `id_cliente` INT UNSIGNED NOT NULL,
-  `alias` VARCHAR(50) NOT NULL COMMENT 'Ej: Casa, Oficina',
+  `alias` TEXT NOT NULL COMMENT 'Ej: Casa, Oficina (se guarda cifrado con piiEncryptValue)',
   `direccion` TEXT NOT NULL,
   `maps_link` TEXT NULL,
   `es_default` TINYINT(1) NOT NULL DEFAULT 0,
@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS `productos` (
   `codigo_barras` VARCHAR(120) NOT NULL,
   `descripcion` TEXT DEFAULT NULL,
   `unidad` VARCHAR(80) DEFAULT NULL,
+  `capsulas_por_envase` INT UNSIGNED DEFAULT NULL,
+  `porcion_capsulas` INT UNSIGNED DEFAULT NULL,
   `nombre_variante` VARCHAR(255) NULL,
   `precio_costo` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `precio_venta` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -182,6 +184,39 @@ CREATE TABLE IF NOT EXISTS `inventario_almacen` (
   CONSTRAINT `fk_inventario_almacen` FOREIGN KEY (`id_almacen`) REFERENCES `almacenes` (`id_almacen`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
+-- Lotes de inventario (control de caducidades). Ver
+-- database/migrations/20260901_000001_crear_tabla_lotes_inventario.sql
+CREATE TABLE IF NOT EXISTS `lotes_inventario` (
+  `id_lote` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_producto` INT UNSIGNED NOT NULL,
+  `id_almacen` INT UNSIGNED DEFAULT NULL,
+  `codigo_lote` VARCHAR(120) NOT NULL,
+  `fecha_caducidad` DATE NOT NULL,
+  `caducidad_aproximada` TINYINT(1) NOT NULL DEFAULT 0,
+  `fecha_ingreso` DATE NOT NULL,
+  `cantidad_inicial` INT NOT NULL,
+  `cantidad_restante` INT NOT NULL,
+  `costo_unitario` DECIMAL(12,2) DEFAULT NULL,
+  `estado` ENUM('activo','agotado','caducado','retirado') NOT NULL DEFAULT 'activo',
+  `en_oferta` TINYINT(1) NOT NULL DEFAULT 0,
+  `alerta_atendida` TINYINT(1) NOT NULL DEFAULT 0,
+  `ultima_severidad_notificada` VARCHAR(20) DEFAULT NULL,
+  `foto_evidencia` VARCHAR(255) DEFAULT NULL,
+  `id_usuario_seguimiento` INT UNSIGNED DEFAULT NULL,
+  `notas_seguimiento` VARCHAR(500) DEFAULT NULL,
+  `creado_por` INT UNSIGNED DEFAULT NULL,
+  `creado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `actualizado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_lote`),
+  UNIQUE KEY `uq_lote_producto_codigo` (`id_producto`, `codigo_lote`),
+  KEY `idx_lote_caducidad` (`fecha_caducidad`),
+  KEY `idx_lote_producto_estado` (`id_producto`, `estado`),
+  KEY `idx_lote_almacen` (`id_almacen`),
+  CONSTRAINT `fk_lote_producto` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_lote_almacen` FOREIGN KEY (`id_almacen`) REFERENCES `almacenes` (`id_almacen`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_lote_usuario` FOREIGN KEY (`id_usuario_seguimiento`) REFERENCES `usuarios` (`id_usuario`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
 -- Productos pospuestos en la lista sugerida de compra
 CREATE TABLE IF NOT EXISTS `purchase_order_postponed_items` (
   `id_postergacion` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -199,6 +234,39 @@ CREATE TABLE IF NOT EXISTS `purchase_order_postponed_items` (
   CONSTRAINT `fk_po_postergado_producto` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_po_postergado_almacen` FOREIGN KEY (`id_almacen`) REFERENCES `almacenes` (`id_almacen`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_po_postergado_usuario` FOREIGN KEY (`pospuesto_por`) REFERENCES `usuarios` (`id_usuario`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Órdenes de compra (cabecera) generadas desde la lista de compra sugerida
+CREATE TABLE IF NOT EXISTS `ordenes_compra` (
+  `id_orden_compra` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NOT NULL,
+  `id_almacen` INT UNSIGNED NOT NULL,
+  `referencia` VARCHAR(50) NOT NULL,
+  `fecha_creacion` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `estado` ENUM('borrador','enviada','parcial','recibida','cancelada') NOT NULL DEFAULT 'borrador',
+  `total_estimado` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `observaciones` TEXT DEFAULT NULL,
+  PRIMARY KEY (`id_orden_compra`),
+  INDEX `idx_oc_almacen` (`id_almacen`),
+  INDEX `idx_oc_usuario` (`id_usuario`),
+  INDEX `idx_oc_estado` (`estado`),
+  CONSTRAINT `fk_oc_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`),
+  CONSTRAINT `fk_oc_almacen` FOREIGN KEY (`id_almacen`) REFERENCES `almacenes` (`id_almacen`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Órdenes de compra (detalle): una fila por producto solicitado
+CREATE TABLE IF NOT EXISTS `detalle_orden_compra` (
+  `id_detalle` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_orden_compra` INT UNSIGNED NOT NULL,
+  `id_producto` INT UNSIGNED NOT NULL,
+  `cantidad_solicitada` INT NOT NULL,
+  `cantidad_recibida` INT NOT NULL DEFAULT 0,
+  `costo_unitario` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  PRIMARY KEY (`id_detalle`),
+  INDEX `idx_doc_orden` (`id_orden_compra`),
+  INDEX `idx_doc_producto` (`id_producto`),
+  CONSTRAINT `fk_doc_orden` FOREIGN KEY (`id_orden_compra`) REFERENCES `ordenes_compra` (`id_orden_compra`) ON DELETE CASCADE,
+  CONSTRAINT `fk_doc_producto` FOREIGN KEY (`id_producto`) REFERENCES `productos` (`id_producto`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- Métodos de pago
@@ -313,6 +381,17 @@ CREATE TABLE IF NOT EXISTS `pedido_notificacion_correos` (
   `creado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_correo`),
   UNIQUE KEY `uq_pedido_notificacion_correo` (`correo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+
+-- Lista editable de correos que reciben aviso cuando un lote cambia de severidad
+-- de caducidad. Ver database/migrations/20260905_000001_crear_tabla_caducidad_notificacion_correos.sql
+CREATE TABLE IF NOT EXISTS `caducidad_notificacion_correos` (
+  `id_correo` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `correo` VARCHAR(190) NOT NULL,
+  `activo` TINYINT(1) NOT NULL DEFAULT 1,
+  `creado_en` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_correo`),
+  UNIQUE KEY `uq_caducidad_notificacion_correo` (`correo`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- Chat de Soporte Interno

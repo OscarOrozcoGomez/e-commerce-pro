@@ -95,16 +95,27 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
+                            <div class="input-field col s12" style="margin: 0 0 4px 0; position: relative;">
+                                <i class="material-icons prefix">search</i>
+                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150...">
+                                <label for="blife_search" class="active">Buscar producto en B-Life</label>
+                                <div id="blife-search-results" style="display:none; position:absolute; z-index:20; left:0; right:0; background:#fff; border:1px solid #bbb; border-radius:4px; max-height:280px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
+                            </div>
                             <div class="input-field col s8" style="margin: 0;">
-                                <input type="text" id="blife_id" placeholder="ID B-Life">
+                                <input type="text" id="blife_id" placeholder="se llena solo al elegir de la lista">
                                 <input type="hidden" name="imagenes_orden_json" id="imagenes_orden_json">
-                                <label for="blife_id" class="active">Sincronización con B-Life (ID de Variante)</label>
+                                <label for="blife_id" class="active">Handle / URL del producto (o pégalo a mano)</label>
                             </div>
                             <div class="col s4">
-                                <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
+                                <button type="button" id="btn-sinc" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
                             </div>
                             <input type="hidden" name="remote_images_urls" id="remote_images_urls">
                             <div id="blife-external-images" class="col s12" style="margin-top: 10px; display: none;"></div>
+                            <div class="col s12" style="font-size: 0.72rem; color: #777; margin-top: 6px;">
+                                <i class="material-icons tiny" style="vertical-align: middle;">info_outline</i>
+                                Trae nombre, ingredientes, modo de uso, SKU, código de barras e imágenes.
+                                <strong>No toca el inventario</strong> (stock, mínimo ni máximo).
+                            </div>
                         </div>
 
                         <div class="input-field">
@@ -131,6 +142,54 @@ include __DIR__ . '/includes/header.php';
                                 <option value="" disabled selected>Presentación / Unidad (Elegir)</option>
                             </select>
                             <span class="helper-text">Ej: Cápsulas, Gramos (g), Mililitros (ml)...</span>
+                        </div>
+
+                        <div class="row" style="margin-bottom:0;">
+                            <div class="input-field col s6">
+                                <input type="number" min="0" id="capsulas_por_envase" name="capsulas_por_envase">
+                                <label for="capsulas_por_envase">Cápsulas por envase</label>
+                            </div>
+                            <div class="input-field col s6">
+                                <input type="number" min="0" id="porcion_capsulas" name="porcion_capsulas">
+                                <label for="porcion_capsulas">Cápsulas por porción</label>
+                            </div>
+                            <span class="helper-text col s12" style="margin-top:-10px;">Opcional. Se usa en el Control de Caducidades para capturar lotes "en cápsulas" y para calcular cuánto rinde un envase.</span>
+                            <span class="col s12 teal-text" id="rinde-hint" style="font-size:.85rem;"></span>
+                        </div>
+                        <script>
+                        (function(){
+                          function rinde(){
+                            var c = parseInt(document.getElementById('capsulas_por_envase').value || '0', 10);
+                            var p = parseInt(document.getElementById('porcion_capsulas').value || '0', 10) || 1;
+                            var el = document.getElementById('rinde-hint');
+                            el.textContent = c > 0 ? ('Rinde ≈ ' + Math.floor(c / p) + ' días por envase (' + c + ' ÷ ' + p + '/toma)') : '';
+                          }
+                          ['capsulas_por_envase','porcion_capsulas'].forEach(function(id){
+                            document.getElementById(id).addEventListener('input', rinde);
+                          });
+                        })();
+                        </script>
+
+                        <div id="lotes-producto-wrap" style="display:none; margin: 15px 0; padding: 12px; border: 1px solid #ffcc80; border-radius: 4px; background: #fff8e1;">
+                            <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
+                            <div id="lotes-producto-tabla" style="overflow-x:auto;"></div>
+                            <div class="row" style="margin: 10px 0 0;">
+                                <div class="input-field col s6 m3" style="margin-top:0;">
+                                    <input type="text" id="lp-codigo">
+                                    <label for="lp-codigo">Código de lote</label>
+                                </div>
+                                <div class="input-field col s6 m3" style="margin-top:0;">
+                                    <input type="date" id="lp-fecha">
+                                    <label for="lp-fecha" class="active">Caducidad</label>
+                                </div>
+                                <div class="input-field col s6 m3" style="margin-top:0;">
+                                    <input type="number" min="0" id="lp-cantidad">
+                                    <label for="lp-cantidad">Cantidad</label>
+                                </div>
+                                <div class="col s6 m3" style="padding-top: 12px;">
+                                    <button type="button" class="btn-small orange darken-2 waves-effect" id="btn-agregar-lote">Agregar lote</button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="input-field">
@@ -188,6 +247,10 @@ include __DIR__ . '/includes/header.php';
                         <?php if (isAdmin()): ?>
                         <div class="row grey lighten-4" style="padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
                             <div class="col s12"><p style="margin:0 0 10px 0;"><strong>Control de Inventario</strong></p></div>
+                            <!-- Solo se escribe inventario_almacen si el usuario tocó de verdad alguno de los
+                                 3 campos de abajo. Sin esto, guardar cualquier cambio de la ficha (nombre,
+                                 foto, precio) reescribía el stock del almacén seleccionado. -->
+                            <input type="hidden" name="stock_touched" id="stock_touched" value="0">
                             <div class="input-field col s12">
                                 <select name="id_almacen_stock" id="id_almacen_stock" class="browser-default" style="border: 1px solid #ccc;">
                                     <!-- Almacenes vía JS -->
@@ -203,7 +266,7 @@ include __DIR__ . '/includes/header.php';
                                 <label for="stock_minimo" class="active">Stock Mínimo</label>
                             </div>
                             <div class="input-field col s4">
-                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="1">
+                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="0">
                                 <label for="stock_maximo" class="active">Stock Máximo</label>
                             </div>
                         </div>
@@ -277,10 +340,22 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     let cacheProductosPadre = [];
+    let loteProductoActualId = null;
+    const LOTE_SEV = {
+      critico:      {t:'Crítico',      c:'red darken-1 white-text'},
+      urgente:      {t:'Urgente',      c:'deep-orange darken-1 white-text'},
+      planificar:   {t:'Planificar',   c:'amber darken-2 white-text'},
+      vigilar:      {t:'Vigilar',      c:'blue-grey lighten-1 white-text'},
+      caducado:     {t:'Caducado',     c:'black white-text'},
+      sin_rotacion: {t:'Sin rotación', c:'grey darken-1 white-text'},
+      sin_historico:{t:'Sin histórico',c:'grey lighten-1'},
+      ok:           {t:'Ok',           c:'green lighten-1 white-text'},
+    };
     const editProductIdFromUrl = new URLSearchParams(window.location.search).get('id_producto');
     let pendingEditProductId = editProductIdFromUrl ? String(editProductIdFromUrl) : '';
 
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
+    const LOTES_API = '<?php echo BASE_URL; ?>api/lotes_manager.php';
     let colaImagenes = []; // { type: 'local'|'server', file: File|null, path: string|null, preview: string }
 
     // Función para expandir/colapsar variantes
@@ -292,17 +367,17 @@ include __DIR__ . '/includes/header.php';
     };
 
     window.fetchBlifeData = function(e) {
-        const btn = e.currentTarget;
+        const btn = (e && e.currentTarget) ? e.currentTarget : document.getElementById('btn-sinc');
         const variantId = document.getElementById('blife_id').value.trim();
         if (!variantId) {
-            M.toast({html: 'Ingresa un ID de B-Life', classes: 'orange'});
+            M.toast({html: 'Pega el handle, la URL de blife.mx o el ID del producto', classes: 'orange'});
             return;
         }
         btn.disabled = true;
         const originalText = btn.innerText;
         btn.innerText = '...';
 
-        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${variantId}`)
+        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${encodeURIComponent(variantId)}`)
             .then(r => r.json())
             .then(res => {
                 if(!res.success) throw new Error(res.message);
@@ -344,14 +419,93 @@ include __DIR__ . '/includes/header.php';
                         document.getElementById('modo_uso').value = cleanUso.charAt(0).toUpperCase() + cleanUso.slice(1);
                     }
                     
-                    // 2. Extraer presentación de la variante (ej: 90 Caps)
-                    if (fullData.producto.variante && fullData.producto.variante.title) {
-                        document.getElementById('unidad').value = fullData.producto.variante.title;
+                    // 2. Presentación de la variante (ej: "90 ml", "180 Caps | 1000 mg", "250 g").
+                    //    B-Life NO llena el campo de peso de Shopify, pero el tamaño/contenido
+                    //    viene en el título de la variante. Se manda a "Valor de la Variante"
+                    //    (texto libre) y se INFIERE el "Tipo de Presentación" del select.
+                    const varTitle = (fullData.producto.variante && fullData.producto.variante.title || '').trim();
+                    const esPlaceholder = /^(default title|1\s*(pza\.?|pieza|unidad|u))\.?$/i.test(varTitle);
+                    if (varTitle && !esPlaceholder) {
+                        document.getElementById('nombre_variante').value = varTitle;
+                    }
+
+                    // Inferir el tipo de presentación. B-Life no lo trae como dato; se deduce
+                    // del texto. "ml"/"l" (cremas, líquidos) no tiene opción en la lista -> se
+                    // deja en blanco para captura manual.
+                    const txtPres = (varTitle + ' ' + (fullData.producto.title || '')).toLowerCase();
+                    let tipoPres = '';
+                    if (/\b(c[aá]ps?|c[aá]psulas?)\b/.test(txtPres)) tipoPres = 'Cápsulas';
+                    else if (/\bsoftgels?\b/.test(txtPres)) tipoPres = 'Softgels';
+                    else if (/\b(tabletas?|tabs?)\b/.test(txtPres)) tipoPres = 'Tabletas';
+                    else if (/\bporciones?\b/.test(txtPres)) tipoPres = 'Porciones';
+                    else if (/(\d+\s*(g|gr|grs|gramos?|kg)\b|cont\.?\s*neto)/.test(txtPres)) tipoPres = 'Gramos (g)';
+                    else if (/\d+\s*(pzas?|piezas?|unidades?)\b/.test(txtPres)) tipoPres = 'Unidades';
+                    if (tipoPres) {
+                        const selUnidad = document.getElementById('unidad');
+                        if ([...selUnidad.options].some(o => o.value === tipoPres)) {
+                            selUnidad.value = tipoPres;
+                        }
+                    }
+
+                    // 2b. Cápsulas por envase / por porción (Control de Caducidades).
+                    //     - Envase: el número del título de la variante ("200 Caps | 500 mg" -> 200).
+                    //     - Porción: el número del modo de uso ("dosis sugerida de 2 cápsulas" -> 2;
+                    //       "dos (2) cápsulas" -> 2). Si no es un producto en cápsulas, se deja vacío.
+                    const capEnvaseEl = document.getElementById('capsulas_por_envase');
+                    const capPorcionEl = document.getElementById('porcion_capsulas');
+                    if (capEnvaseEl && capPorcionEl) {
+                        const unidadRe = '(?:c[aá]ps?\\.?|c[aá]psulas?|softgels?|tabletas?|tabs?|comprimidos?)';
+                        const textoTipo = varTitle + ' ' + (fullData.producto.title || '');
+                        const esCapsulas = new RegExp('\\b' + unidadRe + '\\b', 'i').test(textoTipo)
+                            || ['Cápsulas', 'Softgels', 'Tabletas'].includes(tipoPres);
+
+                        if (esCapsulas) {
+                            // Envase: nº del título de la variante; si no, del nombre o la descripción.
+                            const mEnv = varTitle.match(new RegExp('(\\d+)\\s*' + unidadRe + '\\b', 'i'))
+                                || (fullData.producto.title || '').match(new RegExp('(\\d+)\\s*' + unidadRe + '\\b', 'i'))
+                                || (fullData.producto.description || '').match(new RegExp('(\\d+)\\s*(?:c[aá]psulas?|softgels?|tabletas?)\\b', 'i'));
+                            if (mEnv) capEnvaseEl.value = mEnv[1];
+
+                            // Porción: nº del modo de uso. B-Life escribe casi siempre "dos (2)
+                            // cápsulas (1.6 g)"; a veces solo "de 4 cápsulas" o "dos cápsulas".
+                            const usoTxt = fullData.producto.mode_use || '';
+                            const palabras = { un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6 };
+                            let mPor = usoTxt.match(new RegExp('\\((\\d+)\\)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe, 'i'))   // "dos (2) cápsulas"
+                                || usoTxt.match(new RegExp('(\\d+)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe + '\\b', 'i'));     // "1 (una) cápsula", "de 4 cápsulas"
+                            if (mPor) {
+                                capPorcionEl.value = mPor[1];
+                            } else {
+                                const mw = usoTxt.match(new RegExp('\\b(un|uno|una|dos|tres|cuatro|cinco|seis)\\s+(?:\\([^)]*\\)\\s*)?' + unidadRe, 'i'));
+                                if (mw) capPorcionEl.value = String(palabras[mw[1].toLowerCase()]);
+                            }
+
+                            // Recalcular el "Rinde ≈ N días" que escucha el evento input.
+                            capEnvaseEl.dispatchEvent(new Event('input'));
+                        }
                     }
 
                     // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
                     if (fullData.producto.title)
                         document.getElementById('nombre').value = fullData.producto.title;
+
+                    // 3b. Descripción comercial (body_html de Shopify, convertido a texto plano)
+                    if (fullData.producto.description)
+                        document.getElementById('descripcion').value = fullData.producto.description;
+
+                    // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
+                    if (fullData.producto.sku)
+                        document.getElementById('sku').value = fullData.producto.sku;
+                    if (fullData.producto.codigo_barras)
+                        document.getElementById('codigo_barras').value = fullData.producto.codigo_barras;
+
+                    // 5. Precio de venta = precio de retail de B-Life (arranque; ajústalo).
+                    //    El "Precio de Costo" (mayoreo) no está en la tienda pública -> lo pones tú.
+                    const pv = fullData.producto.variante && fullData.producto.variante.precio_venta;
+                    const pc = fullData.producto.variante && fullData.producto.variante.precio_comparacion;
+                    if (pv && parseFloat(pv) > 0)
+                        document.getElementById('precio_venta').value = pv;
+                    if (pc && parseFloat(pc) > 0)
+                        document.getElementById('precio_comparacion').value = pc;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
@@ -381,8 +535,12 @@ include __DIR__ . '/includes/header.php';
                     }));
                 }
                 
-                // 3. Guardar solo lo necesario (filtrado)
-                document.getElementById('tabla_nutrimental').value = list.length > 0 ? JSON.stringify(list) : '[]';
+                // 3. Guardar solo lo necesario (filtrado). Si B-Life no devolvió tabla
+                //    nutrimental (hoy nunca lo hace sin token), NO pisamos lo que ya haya
+                //    capturado a mano para no borrarlo ni disparar el aviso de "datos inválidos".
+                if (list.length > 0) {
+                    document.getElementById('tabla_nutrimental').value = JSON.stringify(list);
+                }
 
                 // 4. Capturar y mostrar previsualización de imágenes externas para importación automática
                 console.log("Datos de Variante B-Life recibidos:", fullData.producto?.variante);
@@ -405,8 +563,8 @@ include __DIR__ . '/includes/header.php';
                         if (url.startsWith('//')) url = 'https:' + url;
                         
                         // Validar que sea una URL absoluta, que tenga extensión de imagen y no sea un placeholder
-                        const esValida = url.startsWith('http') && 
-                                         /\.(jpg|jpeg|png|webp|gif)/i.test(url) && 
+                        const esValida = url.startsWith('http') &&
+                                         /\.(jpg|jpeg|png|webp|gif|avif|svg)/i.test(url) &&
                                          !url.includes('no-image') &&
                                          !url.includes('no-product') && 
                                          !url.includes('placeholder');
@@ -438,13 +596,117 @@ include __DIR__ . '/includes/header.php';
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
                 M.textareaAutoResize(document.getElementById('ingredientes'));
                 M.textareaAutoResize(document.getElementById('modo_uso'));
+                M.textareaAutoResize(document.getElementById('descripcion'));
                 M.updateTextFields();
                 renderNutritionalPreview();
-                M.toast({html: 'Información importada de B-Life', classes: 'green'});
+
+                // La sincronización con B-Life NO toca inventario: no escribe cantidad_actual,
+                // stock_minimo ni stock_maximo, y deja stock_touched en 0 para que al guardar
+                // NO se reescriba inventario_almacen (crítico en producción).
+                if (typeof resetStockTouched === 'function') resetStockTouched();
+
+                M.toast({html: res.blife_note || 'Información importada de B-Life', classes: 'green', displayLength: 5000});
             })
             .catch(err => M.toast({html: 'Error: ' + err.message, classes: 'red'}))
             .finally(() => { btn.disabled = false; btn.innerText = originalText; });
     };
+
+    // --- Buscador de productos de B-Life (evita tener que pegar la URL/handle a mano) ---
+    (function initBlifeSearch() {
+        const input = document.getElementById('blife_search');
+        const box = document.getElementById('blife-search-results');
+        if (!input || !box) return;
+
+        let timer = null;
+        let lastQuery = '';
+
+        const cerrar = () => { box.style.display = 'none'; box.innerHTML = ''; };
+
+        // Los datos vienen del catálogo Shopify de B-Life (título/SKU pueden traer < > " ').
+        // Se escapan antes de inyectarlos en innerHTML para no abrir un XSS almacenado.
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+
+        const pintar = (results) => {
+            if (!results.length) {
+                box.innerHTML = '<div style="padding:10px; color:#888;">Sin coincidencias en B-Life</div>';
+                box.style.display = 'block';
+                return;
+            }
+            box.innerHTML = results.map(r => {
+                const vars = (r.variantes || []).filter(v => v && v.variant_id);
+                const img = r.image
+                    ? `<img src="${esc(r.image)}" style="width:38px; height:38px; object-fit:contain; background:#f5f5f5; border-radius:4px;">`
+                    : '';
+
+                // Shopify NO hace una página por presentación: es una sola página + ?variant=<id>.
+                // Con >1 presentación se listan por separado para sincronizar la elegida (su SKU,
+                // código de barras, precio, imagen y "Valor de la Variante" salen de esa variante).
+                if (vars.length > 1) {
+                    const filas = vars.map(v => `
+                        <div class="blife-result" data-handle="${esc(r.handle + '?variant=' + v.variant_id)}"
+                             style="padding:6px 10px 6px 54px; cursor:pointer; border-bottom:1px solid #f0f0f0; font-size:0.78rem;"
+                             onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
+                            <strong>${esc(v.title || '(sin nombre)')}</strong>
+                            <span style="color:#777;">
+                                ${v.sku ? ' — ' + esc(v.sku) : ''}${v.precio ? ' — $' + esc(v.precio) : ''}
+                            </span>
+                        </div>`).join('');
+                    return `
+                        <div style="display:flex; gap:8px; align-items:center; padding:8px 10px; border-bottom:1px solid #eee; background:#fafafa;">
+                            ${img}
+                            <div style="min-width:0;">
+                                <div style="font-size:0.85rem; font-weight:600;">${esc(r.title)}</div>
+                                <div style="font-size:0.7rem; color:#999;">${vars.length} presentaciones — elige una</div>
+                            </div>
+                        </div>${filas}`;
+                }
+
+                const v0 = vars[0] || {};
+                const handle = v0.variant_id ? r.handle + '?variant=' + v0.variant_id : r.handle;
+                return `
+                    <div class="blife-result" data-handle="${esc(handle)}"
+                         style="display:flex; gap:8px; align-items:center; padding:8px 10px; cursor:pointer; border-bottom:1px solid #eee;"
+                         onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
+                        ${img}
+                        <div style="min-width:0;">
+                            <div style="font-size:0.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.title)}</div>
+                            <div style="font-size:0.72rem; color:#777; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                ${v0.sku ? esc(v0.sku) + ' — ' : ''}${esc(v0.title || r.handle)}
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+            box.style.display = 'block';
+
+            box.querySelectorAll('.blife-result').forEach(el => {
+                el.addEventListener('click', () => {
+                    document.getElementById('blife_id').value = el.getAttribute('data-handle');
+                    cerrar();
+                    input.value = '';
+                    fetchBlifeData(); // dispara la sincronización de inmediato
+                });
+            });
+        };
+
+        const buscar = () => {
+            const q = input.value.trim();
+            if (q.length < 2) { cerrar(); return; }
+            if (q === lastQuery) return;
+            lastQuery = q;
+            fetch(`${BASE_API}?action=blife_search&q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(res => { if (res.success) pintar(res.results || []); })
+                .catch(() => cerrar());
+        };
+
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); });
+        input.addEventListener('focus', () => { if (input.value.trim().length >= 2) buscar(); });
+        document.addEventListener('click', (ev) => {
+            if (ev.target !== input && !box.contains(ev.target)) cerrar();
+        });
+    })();
 
     window.renderNutritionalPreview = function() {
         const raw = document.getElementById('tabla_nutrimental').value.trim();
@@ -532,6 +794,12 @@ include __DIR__ . '/includes/header.php';
     document.addEventListener('DOMContentLoaded', () => {
         cargarDependencias();
 
+        // El inventario solo se guarda si el usuario editó a propósito uno de estos campos.
+        ['cantidad_actual', 'stock_minimo', 'stock_maximo'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', marcarStockTocado);
+        });
+
         // Actualizar previsualización cuando se mueva el toggle de mostrar/ocultar
         document.getElementById('mostrar_tabla')?.addEventListener('change', renderNutritionalPreview);
 
@@ -597,6 +865,8 @@ include __DIR__ . '/includes/header.php';
                 })
                 .catch(err => M.toast({html: err.message, classes: 'red'}));
         });
+
+        document.getElementById('btn-agregar-lote')?.addEventListener('click', agregarLoteAlProducto);
 
         document.getElementById('form-category')?.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -695,6 +965,16 @@ include __DIR__ . '/includes/header.php';
                 tbody.innerHTML = html;
                 aplicarFiltros();
                 autoOpenPendingEdit(res.data);
+
+                // Si hay una ficha en edición, mantener sus campos de stock alineados con el
+                // almacén que ahora se está viendo (evita "muestra el stock del almacén A y
+                // guarda en el almacén B").
+                const accion = document.getElementById('accion');
+                const idProdEditando = document.getElementById('id_producto');
+                if (accion && accion.value === 'editar' && idProdEditando && idProdEditando.value) {
+                    const prodActual = res.data.find(p => String(p.id_producto) === String(idProdEditando.value));
+                    if (prodActual) sincronizarCamposStock(prodActual);
+                }
             })
             .catch(err => {
                 tbody.innerHTML = `<tr><td colspan="8" class="center red-text">${err.message}</td></tr>`;
@@ -740,7 +1020,7 @@ include __DIR__ . '/includes/header.php';
         }
         
         // 3. Ruta de archivo (solo si tiene extensión de imagen o "/" y NO es base64)
-        if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
+        if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg|avif)$/i.test(imgData)) {
             const cleanPath = imgData.replace(/^\/+/, '');
             const finalUrl = baseUrl + 'assets/img/products/' + cleanPath;
             return finalUrl;
@@ -787,11 +1067,18 @@ include __DIR__ . '/includes/header.php';
         return Math.max(0, parseInt(p?.cantidad_actual ?? p?.chat_stock ?? p?.total_stock) || 0);
     }
 
+    // Umbral de stock respetando el 0: solo cae al default si el valor viene nulo/indefinido.
+    // (0 || default lo pisaba, y por eso la lista seguía pintando "2 / 5" tras poner 0 en la BD.)
+    function stockThreshold(value, fallback) {
+        const n = Number(value);
+        return (value === null || value === undefined || value === '' || Number.isNaN(n)) ? fallback : n;
+    }
+
     function renderRow(p) {
         let imgSrc = getProductImgUrl(p.imagen);
         const hasImg = !!imgSrc;
         const stockActual = getNormalizedProductStock(p);
-        const isLow = stockActual <= (parseInt(p.stock_minimo) || 2);
+        const isLow = stockActual <= stockThreshold(p.stock_minimo, 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
@@ -813,8 +1100,8 @@ include __DIR__ . '/includes/header.php';
                     </span>
                 </td>
                 <td class="center-align">
-                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${p.stock_minimo || 2}</strong></span> / 
-                    <span class="blue-text text-darken-2" title="Máximo"><strong>${p.stock_maximo || 5}</strong></span>
+                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${stockThreshold(p.stock_minimo, 2)}</strong></span> /
+                    <span class="blue-text text-darken-2" title="Máximo"><strong>${stockThreshold(p.stock_maximo, 5)}</strong></span>
                 </td>
                 <td>
                     <button type="button" class="btn-floating btn-small blue waves-effect waves-light" onclick='abrirEditar(${jsonP})'>
@@ -907,6 +1194,28 @@ include __DIR__ . '/includes/header.php';
 
     // Mantener las funciones de UI existentes pero adaptadas
 
+    function marcarStockTocado() {
+        const flag = document.getElementById('stock_touched');
+        if (flag) flag.value = '1';
+    }
+
+    function resetStockTouched() {
+        const flag = document.getElementById('stock_touched');
+        if (flag) flag.value = '0';
+    }
+
+    // Rellena los 3 campos de stock de la ficha con la fila del almacén dado, sin marcar
+    // stock_touched. Se usa al abrir la ficha y al cambiar el almacén de la lista mientras
+    // se edita, para que lo que se ve siempre corresponda al almacén que se guardará.
+    function sincronizarCamposStock(prod) {
+        if (!document.getElementById('stock_minimo')) return;
+        document.getElementById('cantidad_actual').value = prod?.cantidad_actual ?? 0;
+        document.getElementById('stock_minimo').value = prod?.stock_minimo ?? 2;
+        document.getElementById('stock_maximo').value = prod?.stock_maximo ?? 5;
+        resetStockTouched();
+        if (window.M && M.updateTextFields) M.updateTextFields();
+    }
+
     function abrirEditar(prod) {
         const currentViewWarehouse = document.getElementById('almacen_view_selector')?.value || '';
         const stockWarehouseSelector = document.getElementById('id_almacen_stock');
@@ -926,6 +1235,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('ingredientes').value = prod.ingredientes || '';
         document.getElementById('tabla_nutrimental').value = prod.tabla_nutrimental || '';
         document.getElementById('unidad').value = prod.unidad || '';
+        document.getElementById('capsulas_por_envase').value = prod.capsulas_por_envase || '';
+        document.getElementById('porcion_capsulas').value = prod.porcion_capsulas || '';
+
+        document.getElementById('lotes-producto-wrap').style.display = 'block';
+        cargarLotesProducto(prod.id_producto);
         document.getElementById('mostrar_tabla').checked = (prod.mostrar_tabla == 1);
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
@@ -977,11 +1291,7 @@ include __DIR__ . '/includes/header.php';
         const checkVisible = document.getElementById('visible_catalogo');
         checkVisible.checked = (prod.estado === 'activo');
         
-        if (document.getElementById('stock_minimo')) {
-            document.getElementById('cantidad_actual').value = prod.cantidad_actual || 0;
-            document.getElementById('stock_minimo').value = prod.stock_minimo || 2;
-            document.getElementById('stock_maximo').value = prod.stock_maximo || 5;
-        }
+        sincronizarCamposStock(prod);
         
         // Manejo de select múltiple
         const selectCats = document.querySelector('select[name="categorias[]"]');
@@ -1018,9 +1328,12 @@ include __DIR__ . '/includes/header.php';
     
     function cancelarEdicion() {
         document.getElementById('form-producto').reset();
-        colaImagenes = []; 
+        resetStockTouched();
+        colaImagenes = [];
         renderPreviews();
         document.getElementById('blife_id').value = '';
+        const blifeSearch = document.getElementById('blife_search');
+        if (blifeSearch) blifeSearch.value = '';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('mostrar_tabla').checked = true;
@@ -1031,6 +1344,12 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('search_padre').value = '';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
+        document.getElementById('capsulas_por_envase').value = '';
+        document.getElementById('porcion_capsulas').value = '';
+
+        document.getElementById('lotes-producto-wrap').style.display = 'none';
+        document.getElementById('lotes-producto-tabla').innerHTML = '';
+        loteProductoActualId = null;
 
         document.getElementById('search_padre').value = '';
 
@@ -1098,6 +1417,107 @@ include __DIR__ . '/includes/header.php';
             M.toast({html: '<?php echo esc($success); ?>', classes: 'green darken-1 rounded', displayLength: 4000});
         <?php endif; ?>
     });
+
+    /* ------------------------- Lotes / caducidades ------------------------- */
+
+    function escLote(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function cargarLotesProducto(idProducto) {
+        loteProductoActualId = idProducto;
+        fetch(`${LOTES_API}?id_producto=${idProducto}`)
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) { document.getElementById('lotes-producto-tabla').innerHTML = '<p class="red-text small">' + escLote(res.message) + '</p>'; return; }
+                renderLotesProducto(res.data || []);
+            })
+            .catch(() => { document.getElementById('lotes-producto-tabla').innerHTML = '<p class="red-text small">Error de conexión al cargar lotes.</p>'; });
+    }
+
+    function renderLotesProducto(lotes) {
+        const cont = document.getElementById('lotes-producto-tabla');
+        if (!lotes.length) {
+            cont.innerHTML = '<p class="grey-text small" style="margin:0;">Sin lotes registrados todavía.</p>';
+            return;
+        }
+        let html = '<table class="striped condensed"><thead><tr>' +
+            '<th>Lote</th><th>Caduca</th><th>Días</th><th>Restante</th><th>Severidad</th><th></th>' +
+            '</tr></thead><tbody>';
+        lotes.forEach(l => {
+            const sev = LOTE_SEV[l.severidad] || {t: l.severidad, c: 'grey'};
+            const noVend = l.no_vendible ? ' <span class="new badge red darken-3 white-text" data-badge-caption="" title="Un envase comprado hoy no se alcanza a terminar antes de caducar">NO VENDIBLE</span>' : '';
+            html += `<tr>
+                <td>${escLote(l.codigo_lote)}</td>
+                <td>${escLote(l.fecha_caducidad)}${l.caducidad_aproximada ? ' <small class="grey-text">(aprox)</small>' : ''}</td>
+                <td>${l.dias_hasta_caducar}</td>
+                <td>${l.cantidad_restante}</td>
+                <td><span class="new badge ${sev.c}" data-badge-caption="">${sev.t}</span>${noVend}</td>
+                <td style="white-space:nowrap;">
+                    <a class="btn-flat btn-small" title="Ajustar cantidad" onclick="ajustarLote(${l.id_lote}, ${l.cantidad_restante})"><i class="material-icons">tune</i></a>
+                    <a class="btn-flat btn-small" title="Marcar en oferta / atendida" onclick="atenderLote(${l.id_lote})"><i class="material-icons">local_offer</i></a>
+                    <a class="btn-flat btn-small" title="Retirar" onclick="retirarLote(${l.id_lote})"><i class="material-icons">block</i></a>
+                    <a class="btn-flat btn-small red-text" title="Eliminar" onclick="eliminarLote(${l.id_lote})"><i class="material-icons">delete</i></a>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        cont.innerHTML = html;
+    }
+
+    function postLote(payload) {
+        payload.csrf_token = document.querySelector('input[name="csrf_token"]').value;
+        return fetch(LOTES_API, { method: 'POST', body: new URLSearchParams(payload) }).then(r => r.json());
+    }
+
+    function despuesDeLote(res) {
+        M.toast({html: res.message || 'Listo', classes: res.success ? 'green' : 'red'});
+        if (res.success && loteProductoActualId) cargarLotesProducto(loteProductoActualId);
+    }
+
+    window.agregarLoteAlProducto = function () {
+        if (!loteProductoActualId) return;
+        const codigo = document.getElementById('lp-codigo').value.trim();
+        const fecha = document.getElementById('lp-fecha').value;
+        const cantidad = document.getElementById('lp-cantidad').value;
+        if (!codigo || !fecha || cantidad === '') {
+            M.toast({html: 'Completa código, caducidad y cantidad del lote', classes: 'red'});
+            return;
+        }
+        postLote({
+            accion: 'guardar', id_lote: 0, id_producto: loteProductoActualId,
+            codigo_lote: codigo, fecha_caducidad: fecha, cantidad: cantidad,
+        }).then(res => {
+            despuesDeLote(res);
+            if (res.success) {
+                document.getElementById('lp-codigo').value = '';
+                document.getElementById('lp-fecha').value = '';
+                document.getElementById('lp-cantidad').value = '';
+                M.updateTextFields();
+            }
+        });
+    };
+
+    window.ajustarLote = function (id, actual) {
+        const val = prompt('Nueva cantidad restante:', actual);
+        if (val === null || val.trim() === '') return;
+        const cantidad = parseInt(val, 10);
+        if (isNaN(cantidad) || cantidad < 0) { M.toast({html: 'Cantidad inválida', classes: 'red'}); return; }
+        postLote({accion: 'ajustar', id_lote: id, cantidad}).then(despuesDeLote);
+    };
+
+    window.atenderLote = function (id) {
+        const enOferta = confirm('¿Ya pusiste este lote en oferta? Aceptar = sí, Cancelar = solo marcar como revisado.');
+        postLote({accion: 'marcar_atendida', id_lote: id, en_oferta: enOferta ? '1' : ''}).then(despuesDeLote);
+    };
+
+    window.retirarLote = function (id) {
+        if (!confirm('¿Retirar este lote (ya no se vende ni se cuenta en el stock de caducidades)?')) return;
+        postLote({accion: 'cambiar_estado', id_lote: id, estado: 'retirado'}).then(despuesDeLote);
+    };
+
+    window.eliminarLote = function (id) {
+        if (!confirm('¿Eliminar este lote? Esta acción no se puede deshacer.')) return;
+        postLote({accion: 'eliminar', id_lote: id}).then(despuesDeLote);
+    };
 
     let parentMap = {};
     function initParentAutocomplete(list) {

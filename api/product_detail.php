@@ -26,9 +26,17 @@ try {
         exit;
     }
 
-    // Obtener stock total de forma independiente
-    $stmtStock = $pdo->prepare("SELECT COALESCE(SUM(cantidad_actual), 0) FROM inventario_almacen WHERE id_producto = ?");
-    $stmtStock->execute([$id]);
+    // Obtener stock total de forma independiente, mismo tipo de dato que muestra el
+    // panel de administración. Antes esto sumaba TODOS los almacenes en la tabla
+    // (incluyendo almacenes internos que el checkout nunca usa para surtir un pedido
+    // web, ej. "Luisa"), asi que un producto podia mostrarse "Disponible" en la ficha
+    // aun con 0 existencia en el almacen que realmente lo va a surtir.
+    $sellableWarehouseIds = getPublicSellableWarehouseIds($pdo);
+    $placeholders = implode(',', array_fill(0, count($sellableWarehouseIds), '?'));
+    $stmtStock = $pdo->prepare(
+        "SELECT COALESCE(SUM(cantidad_actual), 0) FROM inventario_almacen WHERE id_producto = ? AND id_almacen IN ($placeholders)"
+    );
+    $stmtStock->execute(array_merge([$id], $sellableWarehouseIds));
     $product['stock'] = (float)$stmtStock->fetchColumn();
 
     // 2. Resolver imagenes del producto para la variante actual exclusivamente.
@@ -89,7 +97,7 @@ try {
 
         $relativeImages = [];
         foreach ($folderMatches as $folderPath) {
-            $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{webp,jpg,jpeg,png,gif,svg}', GLOB_BRACE);
+            $files = glob($folderPath . DIRECTORY_SEPARATOR . '*.{webp,jpg,jpeg,png,gif,svg,avif}', GLOB_BRACE);
             if (!is_array($files) || empty($files)) {
                 continue;
             }

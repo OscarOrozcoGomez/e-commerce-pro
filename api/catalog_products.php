@@ -19,13 +19,14 @@ $busqueda = trim((string) ($_GET['search'] ?? ''));
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $itemsPerPage = max(1, min(30, (int) ($_GET['items_per_page'] ?? 9)));
 $accumulated = (($_GET['accumulated'] ?? '') === '1');
+$incluirAgotados = (($_GET['agotados'] ?? '') === '1');
 $source = trim((string) ($_GET['source'] ?? 'unknown'));
 $perfEnabled = catalogPerfEnabledForRequest($_GET);
 $requestStartMs = catalogPerfNowMs();
 
 try {
     $pdo = getPDO();
-    $result = catalogFetchProductsPage($pdo, $categoriaSeleccionada, $busqueda, $page, $itemsPerPage, $accumulated);
+    $result = catalogFetchProductsPage($pdo, $categoriaSeleccionada, $busqueda, $page, $itemsPerPage, $accumulated, $incluirAgotados);
     $meta = catalogBuildPaginationMeta((int) $result['total'], $itemsPerPage, $page);
 
     $renderStartMs = catalogPerfNowMs();

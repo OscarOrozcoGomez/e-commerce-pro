@@ -2,11 +2,13 @@
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/pickup_offer_utils.php';
+require_once __DIR__ . '/../core/ventas_features.php';
 
 $pageTitle = 'Mi Carrito de Compras';
 $usuarioLogueado = $_SESSION['usuario'] ?? null;
 $isUserAuthenticated = isAuthenticated(); // Obtener el estado de autenticación de PHP
 $isClienteRole = $isUserAuthenticated && isCliente();
+$referidosActivos = ventasFeatureIsActive(getPDO(), 'programa_referidos');
 
 $direcciones = [];
 if ($isUserAuthenticated && isCliente()) {
@@ -173,6 +175,12 @@ include __DIR__ . '/includes/header.php';
                                 </span>
                             <?php endif; ?>
                         </div>
+                        <?php if ($referidosActivos): ?>
+                            <div class="input-field">
+                                <input type="text" id="codigo_referido" name="codigo_referido" style="text-transform: uppercase;">
+                                <label for="codigo_referido">Código de referido (opcional)</label>
+                            </div>
+                        <?php endif; ?>
                         <div id="direccion-container">
                             <div class="input-field">
                                 <textarea id="direccion" name="direccion" class="materialize-textarea" required><?php echo esc($direcciones[0]['direccion'] ?? ''); ?></textarea>
@@ -204,6 +212,15 @@ include __DIR__ . '/includes/header.php';
     // IDs de producto que el backend rechazo al confirmar el pedido por falta de stock
     // (a diferencia de latestPickupStockCheck, esto aplica a cualquier tipo de entrega).
     let orderSubmitSinStockIds = new Set();
+
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
     function getCheckoutSubmitButton() {
         return document.querySelector('#form-checkout button[type="submit"]');
@@ -645,7 +662,7 @@ include __DIR__ . '/includes/header.php';
             }).join(', ');
 
             message.innerHTML = `<strong>En este momento no esta completo en stock de sucursal.</strong><br>
-                Hay existencia en inventario de respaldo; en aprox. <strong>2 a 3 horas</strong> podriamos moverlo y dejarlo listo para recoger.<br>
+                Hay existencia en inventario de respaldo; en aprox. <strong>1 a 2 horas</strong> podriamos moverlo y dejarlo listo para recoger.<br>
                 <small>Productos a surtir: ${detalles}</small>`;
             banner.style.display = 'block';
             setPickupSubmitBlocked(false);
@@ -845,6 +862,7 @@ include __DIR__ . '/includes/header.php';
                 direccion: document.getElementById('direccion').value
             },
             maps_link: document.getElementById('maps_link')?.value || '',
+            codigo_referido: (document.getElementById('codigo_referido')?.value || '').trim(),
             items: cart
         };
 

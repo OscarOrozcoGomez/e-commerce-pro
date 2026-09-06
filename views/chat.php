@@ -1035,7 +1035,7 @@ function getProductImgUrl(imgData) {
     }
     
     // 3. Ruta de archivo local (compatibilidad con rutas antiguas y nuevas)
-    if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(imgData)) {
+    if (imgData.includes('/') || /\.(jpg|jpeg|png|webp|gif|svg|avif)$/i.test(imgData)) {
         const cleanPath = imgData.replace(/^\/+/, '');
         if (cleanPath.startsWith(baseUrl.replace(/^\/+/, ''))) {
             return '/' + cleanPath.replace(/^\/+/, '');

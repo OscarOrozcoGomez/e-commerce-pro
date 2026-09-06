@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/alex_insights_utils.php';
 
 requireAuth();
-if (!isAdmin() && !isEncargado()) {
+// Permiso 'ver_insights_ia' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('ver_insights_ia') && !isAdmin() && !isEncargado()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

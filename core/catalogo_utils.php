@@ -274,11 +274,74 @@ function catalogCollapseProducts(array $products): array
     }
 
     foreach ($grouped as &$item) {
+        // Se conserva (renombrado, sin el prefijo interno "_") para que
+        // catalogAttachStockAvailability() sepa que ids de variante sumar por card;
+        // se retira mas adelante, antes de que la card se renderice.
+        $item['variant_ids'] = array_keys($item['_variant_ids'] ?? []);
         unset($item['_variant_ids']);
     }
     unset($item);
 
     return array_values($grouped);
+}
+
+/**
+ * Calcula, para cada producto ya colapsado (una fila por familia de variantes),
+ * si tiene existencia vendible (ver getPublicSellableWarehouseIds()) sumando el
+ * stock de TODAS sus variantes -- un producto con varias presentaciones solo se
+ * marca "agotado" si NINGUNA de sus variantes tiene stock vendible. Una sola
+ * consulta agrupada para toda la pagina, no una por producto.
+ *
+ * @param array<int,array<string,mixed>> $products
+ * @return array<int,array<string,mixed>>
+ */
+function catalogAttachStockAvailability(PDO $pdo, array $products): array
+{
+    $allIds = [];
+    foreach ($products as $p) {
+        foreach (($p['variant_ids'] ?? []) as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $allIds[$id] = true;
+            }
+        }
+    }
+
+    $stockByProductId = [];
+    if (!empty($allIds)) {
+        $warehouseIds = getPublicSellableWarehouseIds($pdo);
+        $productIds = array_keys($allIds);
+        $productPlaceholders = implode(',', array_fill(0, count($productIds), '?'));
+        $warehousePlaceholders = implode(',', array_fill(0, count($warehouseIds), '?'));
+
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT id_producto, COALESCE(SUM(cantidad_actual), 0) AS stock
+                 FROM inventario_almacen
+                 WHERE id_producto IN ($productPlaceholders) AND id_almacen IN ($warehousePlaceholders)
+                 GROUP BY id_producto"
+            );
+            $stmt->execute(array_merge($productIds, $warehouseIds));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $stockByProductId[(int) $row['id_producto']] = (float) $row['stock'];
+            }
+        } catch (PDOException $e) {
+            error_log('catalogAttachStockAvailability: error al consultar stock: ' . $e->getMessage());
+        }
+    }
+
+    foreach ($products as &$p) {
+        $stockTotal = 0.0;
+        foreach (($p['variant_ids'] ?? []) as $id) {
+            $stockTotal += $stockByProductId[(int) $id] ?? 0.0;
+        }
+        $p['stock_disponible'] = $stockTotal;
+        $p['agotado'] = $stockTotal <= 0;
+        unset($p['variant_ids']);
+    }
+    unset($p);
+
+    return $products;
 }
 
 /**
@@ -339,15 +402,22 @@ function catalogRenderProductCard(array $p): string
     $precioActual = (float) ($p['precio_desde'] ?? 0);
     $precioComparacion = (float) ($p['precio_comparacion_desde'] ?? $p['precio_comparacion'] ?? 0);
     $showPrecioComparacion = $precioComparacion > $precioActual && $precioActual > 0;
+    // 'agotado' solo esta presente si catalogAttachStockAvailability() ya corrio sobre
+    // este producto -- si por algun motivo no corrio (llamador antiguo/directo), se
+    // asume disponible en vez de ocultar el boton de compra sin verificar nada.
+    $agotado = array_key_exists('agotado', $p) && (bool) $p['agotado'];
 
     ob_start();
     ?>
     <div class="col s12 m6 l4 product-card-container" data-group-key="<?php echo esc($groupKey); ?>" data-name="<?php echo esc(strtolower((string) ($p['nombre'] ?? ''))); ?>" data-sku="<?php echo esc(strtolower((string) ($p['sku'] ?? ''))); ?>">
         <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int) ($p['id_producto'] ?? 0); ?>" class="card-link">
             <div class="card hoverable border-radius-8" style="height: 360px; display: flex; flex-direction: column;">
-                <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center;">
+                <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center; position: relative;">
+                    <?php if ($agotado): ?>
+                        <span class="badge red white-text" style="position: absolute; top: 8px; left: 8px; float: none; border-radius: 4px; padding: 4px 8px; z-index: 1;">Agotado</span>
+                    <?php endif; ?>
                     <?php $imgSrc = catalogResolveCardImageSrc((string) ($p['imagen'] ?? ''), (int) ($p['id_producto'] ?? 0)); ?>
-                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" style="max-height: 100%; width: auto; object-fit: contain;">
+                    <img src="<?php echo $imgSrc; ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo getDefaultProductImageUrl(); ?>';" style="max-height: 100%; width: auto; object-fit: contain; <?php echo $agotado ? 'opacity: 0.55;' : ''; ?>">
                 </div>
                 <div class="card-content" style="flex-grow: 1;">
                     <span class="card-title grey-text text-darken-4 truncate" style="font-size: 1rem; font-weight: bold;" title="<?php echo esc((string) ($p['nombre'] ?? '')); ?>">
@@ -370,10 +440,16 @@ function catalogRenderProductCard(array $p): string
                     </p>
                 </div>
                 <div class="card-action center-align" style="border-top: 1px solid #eee;">
-                    <button class="btn blue darken-4 waves-effect waves-light"
-                            onclick="handleAddToCart(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo (float) ($p['precio_venta'] ?? 0); ?>)">
-                        <i class="material-icons">add_shopping_cart</i>
-                    </button>
+                    <?php if ($agotado): ?>
+                        <button class="btn grey lighten-1 disabled" disabled>
+                            <i class="material-icons left" style="margin-right:4px;">block</i>Agotado
+                        </button>
+                    <?php else: ?>
+                        <button class="btn blue darken-4 waves-effect waves-light"
+                                onclick="handleAddToCart(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo (float) ($p['precio_venta'] ?? 0); ?>)">
+                            <i class="material-icons">add_shopping_cart</i>
+                        </button>
+                    <?php endif; ?>
                 </div>
             </div>
         </a>
@@ -384,9 +460,9 @@ function catalogRenderProductCard(array $p): string
 }
 
 /**
- * @return array{sql_main:string, sql_count:string, params:array<string,mixed>}
+ * @return array{sql_main:string, sql_count:string, order_by:string, params:array<string,mixed>}
  */
-function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): array
+function catalogBuildQueries(PDO $pdo, string $categoriaSeleccionada, string $busqueda, bool $incluirAgotados = true): array
 {
     // Nota de rendimiento: las versiones anteriores de estas 4 subconsultas usaban
     // condiciones "OR" (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto)
@@ -433,11 +509,33 @@ function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): a
         ) fam ON fam.root_id = p.id_producto";
 
     $sqlCount = 'SELECT COUNT(DISTINCT TRIM(p.nombre)) FROM productos p';
+
+    // Stock vendible de la FAMILIA (producto raíz + variantes) sumado sobre los almacenes
+    // que sí surten pedidos públicos. Se usa para (a) ordenar dejando los agotados al final
+    // y (b) ocultarlos cuando el usuario no pidió verlos. Misma tabla derivada + LEFT JOIN
+    // que 'fam' (una sola vez para toda la página, no una subconsulta por fila).
+    $sellableIds = array_values(array_filter(array_map('intval', getPublicSellableWarehouseIds($pdo))));
+    $whInList = $sellableIds ? implode(',', $sellableIds) : '0';
+    $stkJoin = " LEFT JOIN (
+            SELECT COALESCE(NULLIF(pr.id_padre, 0), pr.id_producto) AS root_id,
+                   SUM(COALESCE(ia.cantidad_actual, 0)) AS stock_familia
+            FROM productos pr
+            LEFT JOIN inventario_almacen ia
+                   ON ia.id_producto = pr.id_producto AND ia.id_almacen IN ($whInList)
+            GROUP BY root_id
+        ) stk ON stk.root_id = p.id_producto";
+    $sqlMain  .= $stkJoin;
+    $sqlCount .= $stkJoin;
+
     $params = [];
     $whereClauses = [
         "(p.id_padre IS NULL OR p.id_padre = 0)",
         "(p.estado = 'activo' OR EXISTS (SELECT 1 FROM productos p_child WHERE p_child.id_padre = p.id_producto AND p_child.estado = 'activo'))",
     ];
+
+    if (!$incluirAgotados) {
+        $whereClauses[] = 'COALESCE(stk.stock_familia, 0) > 0';
+    }
 
     if ($categoriaSeleccionada !== '') {
         $joins = ' JOIN producto_categorias pc ON p.id_producto = pc.id_producto JOIN categorias c ON pc.id_categoria = c.id_categoria ';
@@ -470,6 +568,8 @@ function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): a
     return [
         'sql_main' => $sqlMain,
         'sql_count' => $sqlCount,
+        // Disponibles primero, agotados al final; dentro de cada grupo, alfabético.
+        'order_by' => 'ORDER BY (COALESCE(stk.stock_familia, 0) > 0) DESC, p.nombre ASC',
         'params' => $params,
     ];
 }
@@ -477,7 +577,7 @@ function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): a
 /**
  * @return array{productos:array<int,array<string,mixed>>, total:int, timings:array{count_ms:float, query_ms:float, collapse_ms:float, total_ms:float}}
  */
-function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, string $busqueda, int $page, int $itemsPerPage, bool $accumulated = false): array
+function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, string $busqueda, int $page, int $itemsPerPage, bool $accumulated = false, bool $incluirAgotados = true): array
 {
     $startMs = catalogPerfNowMs();
     $safePage = max(1, $page);
@@ -486,7 +586,7 @@ function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, strin
     $limit = $accumulated ? ($safePage * $safePerPage) : $safePerPage;
     $offset = $accumulated ? 0 : (($safePage - 1) * $safePerPage);
 
-    $parts = catalogBuildQueries($categoriaSeleccionada, $busqueda);
+    $parts = catalogBuildQueries($pdo, $categoriaSeleccionada, $busqueda, $incluirAgotados);
 
     $countStartMs = catalogPerfNowMs();
     $stmtCount = $pdo->prepare($parts['sql_count']);
@@ -496,7 +596,7 @@ function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, strin
     $countMs = round(catalogPerfNowMs() - $countStartMs, 2);
 
     $queryStartMs = catalogPerfNowMs();
-    $sqlMain = $parts['sql_main'] . ' ORDER BY p.nombre ASC LIMIT :limit OFFSET :offset';
+    $sqlMain = $parts['sql_main'] . ' ' . $parts['order_by'] . ' LIMIT :limit OFFSET :offset';
     $stmtMain = $pdo->prepare($sqlMain);
     catalogBindNamedParams($stmtMain, $parts['params']);
     $stmtMain->bindValue(':limit', $limit, PDO::PARAM_INT);
@@ -507,6 +607,7 @@ function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, strin
 
     $collapseStartMs = catalogPerfNowMs();
     $productos = catalogCollapseProducts($rawRows);
+    $productos = catalogAttachStockAvailability($pdo, $productos);
     $collapseMs = round(catalogPerfNowMs() - $collapseStartMs, 2);
 
     $totalMs = round(catalogPerfNowMs() - $startMs, 2);

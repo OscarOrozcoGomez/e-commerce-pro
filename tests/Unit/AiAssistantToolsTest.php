@@ -18,6 +18,34 @@ final class AiAssistantToolsTest extends TestCase
         $this->createSchema();
     }
 
+    public function testAiBuildWhatsAppLinkLineBuildsWaMeLinkFromWaId(): void
+    {
+        $linea = aiBuildWhatsAppLinkLine('5213334040398');
+
+        $this->assertStringContainsString('https://wa.me/523334040398', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLineHandlesWaIdWithoutExtraMobilePrefix(): void
+    {
+        $linea = aiBuildWhatsAppLinkLine('523334040398');
+
+        $this->assertStringContainsString('https://wa.me/523334040398', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLineReturnsEmptyWhenNotEnoughDigits(): void
+    {
+        $this->assertSame('', aiBuildWhatsAppLinkLine(''));
+        $this->assertSame('', aiBuildWhatsAppLinkLine('12345'));
+    }
+
+    public function testAiBuildWhatsAppLinkLineReturnsEmptyForLidIdentifiers(): void
+    {
+        // aiWaIdToMxDigits() valida el patron exacto 52(1)?+10 digitos -- un LID de WhatsApp
+        // (identificador de privacidad, 14-15 digitos, sin relacion con el telefono real) no
+        // encaja en ese patron, asi que no se arma ningun link inventado.
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194'));
+    }
+
     public function testAiSearchInventorySumsStockAcrossWarehouses(): void
     {
         $this->seedProducto(10, 'Omega 3', 'OMG3', null, 299.00);
@@ -483,13 +511,16 @@ final class AiAssistantToolsTest extends TestCase
 
     public function testFindConversationsNeedingFollowupOnlyReturnsStaleActiveOnes(): void
     {
-        $stale = aiGetOrCreateConversation($this->pdo, '5215500020001', null);
+        // Numeros con lada 33 (Guadalajara): el follow-up proactivo solo aplica a
+        // clientes locales, y aiFindConversationsNeedingFollowup ahora excluye a los
+        // foraneos identificados. Ver testFindConversationsNeedingFollowupSkipsForeignLada.
+        $stale = aiGetOrCreateConversation($this->pdo, '5213300020001', null);
         $this->seedBotMessage((int) $stale['id_conversacion'], 'Aqui tienes el precio.', '-30 hours');
 
-        $reciente = aiGetOrCreateConversation($this->pdo, '5215500020002', null);
+        $reciente = aiGetOrCreateConversation($this->pdo, '5213300020002', null);
         $this->seedBotMessage((int) $reciente['id_conversacion'], 'Aqui tienes el precio.', '-2 hours');
 
-        $yaConSeguimiento = aiGetOrCreateConversation($this->pdo, '5215500020003', null);
+        $yaConSeguimiento = aiGetOrCreateConversation($this->pdo, '5213300020003', null);
         $this->seedBotMessage((int) $yaConSeguimiento['id_conversacion'], 'Aqui tienes el precio.', '-30 hours');
         $this->pdo->prepare('UPDATE whatsapp_conversaciones SET seguimiento_enviado_en = ? WHERE id_conversacion = ?')
             ->execute([date('Y-m-d H:i:s', strtotime('-1 hour')), (int) $yaConSeguimiento['id_conversacion']]);
@@ -500,6 +531,32 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertContains((int) $stale['id_conversacion'], $ids);
         $this->assertNotContains((int) $reciente['id_conversacion'], $ids);
         $this->assertNotContains((int) $yaConSeguimiento['id_conversacion'], $ids);
+    }
+
+    public function testFindConversationsNeedingFollowupSkipsForeignLada(): void
+    {
+        // Cliente local (lada 33): recibe follow-up.
+        $local = aiGetOrCreateConversation($this->pdo, '5213311122233', null);
+        $this->seedBotMessage((int) $local['id_conversacion'], 'Aqui tienes el precio.', '-30 hours');
+
+        // Cliente foraneo confirmado (lada 55, CDMX): NO recibe follow-up -- no hay
+        // entregas fuera de Guadalajara, insistirle seria molesto y gasto de recursos.
+        $foraneo = aiGetOrCreateConversation($this->pdo, '5215511122233', null);
+        $this->seedBotMessage((int) $foraneo['id_conversacion'], 'Aqui tienes el precio.', '-30 hours');
+
+        // Telefono indeterminado (LID de WhatsApp): sigue el flujo normal, solo se
+        // excluye lo que se identifica como foraneo.
+        $lid = aiGetOrCreateConversation($this->pdo, '53236337742009', null);
+        $this->seedBotMessage((int) $lid['id_conversacion'], 'Aqui tienes el precio.', '-30 hours');
+
+        $ids = array_map(
+            static fn(array $r) => (int) $r['id_conversacion'],
+            aiFindConversationsNeedingFollowup($this->pdo)
+        );
+
+        $this->assertContains((int) $local['id_conversacion'], $ids);
+        $this->assertNotContains((int) $foraneo['id_conversacion'], $ids);
+        $this->assertContains((int) $lid['id_conversacion'], $ids);
     }
 
     public function testCustomerRepliedAfterFollowupDetectsNewerUserMessage(): void
@@ -569,6 +626,42 @@ final class AiAssistantToolsTest extends TestCase
     public function testAiPhoneHasLocalLadaIsNullWhenPhoneUnknown(): void
     {
         $this->assertNull(aiPhoneHasLocalLada('123'));
+    }
+
+    public function testAiPhoneHasLocalLadaIsNullForWhatsAppLid(): void
+    {
+        // Un "LID" de WhatsApp: 14+ digitos que no empiezan con 52. No se puede
+        // derivar un telefono real, asi que la cobertura queda indeterminada (null),
+        // no "fuera de zona" (false). Casos reales vistos en produccion.
+        $this->assertNull(aiPhoneHasLocalLada('53236337742009'));
+        $this->assertNull(aiPhoneHasLocalLada('120363402368777906'));
+        $this->assertNull(aiPhoneHasLocalLada('8659190943912'));
+    }
+
+    public function testAiPhoneHasLocalLadaAcceptsMxNumberWithoutMobilePrefix(): void
+    {
+        // Forma <52><10 digitos>, sin el "1" movil legacy.
+        $this->assertTrue(aiPhoneHasLocalLada('523312345678'));
+        $this->assertFalse(aiPhoneHasLocalLada('525512345678'));
+    }
+
+    public function testAiWaIdToMxDigitsRejectsLidAndAcceptsRealNumber(): void
+    {
+        $this->assertSame('3312345678', aiWaIdToMxDigits('5213312345678'));
+        $this->assertSame('3312345678', aiWaIdToMxDigits('523312345678'));
+        $this->assertSame('3312345678', aiWaIdToMxDigits('5213312345678@s.whatsapp.net'));
+        $this->assertNull(aiWaIdToMxDigits('53236337742009'));
+        $this->assertNull(aiWaIdToMxDigits('53236337742009@lid'));
+        $this->assertNull(aiWaIdToMxDigits('123'));
+    }
+
+    public function testAiWaIdToDisplayPhoneFormatsRealNumbersAndNullsForLid(): void
+    {
+        $this->assertSame('+52 33 3404 0398', aiWaIdToDisplayPhone('5213334040398'));
+        $this->assertSame('+52 55 1234 5678', aiWaIdToDisplayPhone('5215512345678'));
+        $this->assertSame('+52 341 123 4567', aiWaIdToDisplayPhone('5213411234567')); // lada de 3 digitos
+        $this->assertNull(aiWaIdToDisplayPhone('53236337742009'));   // LID
+        $this->assertNull(aiWaIdToDisplayPhone('120363402368777906')); // LID
     }
 
     public function testCloseUnresponsiveConversationTagsAndClosesBot(): void
@@ -842,6 +935,24 @@ final class AiAssistantToolsTest extends TestCase
         $tags = aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion']);
         $names = array_map(static fn(array $t) => $t['nombre'], $tags);
         $this->assertContains('Mayoreo', $names);
+    }
+
+    public function testEtiquetarClienteRefusesToApplyPedidoAgendado(): void
+    {
+        // Aunque la etiqueta exista, Alex no puede asignarla: la pone solo el
+        // codigo cuando agendar_venta confirma un pedido real.
+        aiFindOrCreateTag($this->pdo, AI_TAG_PEDIDO_AGENDADO);
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009019', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolEtiquetarCliente($this->pdo, ['nombre_etiqueta' => AI_TAG_PEDIDO_AGENDADO], $context);
+
+        $this->assertFalse($result['ok']);
+        $names = array_map(
+            static fn(array $t) => $t['nombre'],
+            aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion'])
+        );
+        $this->assertNotContains(AI_TAG_PEDIDO_AGENDADO, $names);
     }
 
     public function testQuitarEtiquetaClienteRemovesKnownTag(): void

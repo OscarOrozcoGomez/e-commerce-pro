@@ -4,11 +4,19 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
-requireAuth();
-
 header('Content-Type: application/json');
 
-if (!isAdmin() && !isEncargado()) {
+// Antes usaba requireAuth(), que sin sesion redirige a login.php en vez de devolver
+// JSON -- rompia el fetch() que espera JSON siempre; ver ApiJsonContractNegativeTest.
+if (!isAuthenticated()) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'No autenticado.']);
+    exit;
+}
+refreshSessionPermissions();
+
+// Permiso 'gestionar_clientes' abre este endpoint; el rol se mantiene como respaldo.
+if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado para crear clientes.']);
     exit;

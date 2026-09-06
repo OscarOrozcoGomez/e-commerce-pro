@@ -131,10 +131,10 @@ include __DIR__ . '/includes/header.php';
                     <div class="card-content white-text">
                         <span class="card-title">Productos sin configuración</span>
                         <p class="display-metric" id="stat-incompletos">0</p>
-                        <p class="text-small">Sin precio, costo o inventario base</p>
+                        <p class="text-small">Sin precio, costo, SKU, código de barras o inventario base</p>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/analytics.php" class="white-text">Ver Detalles</a>
+                        <a href="<?php echo BASE_URL; ?>views/productos_incompletos.php" class="white-text">Ver Detalles</a>
                     </div>
                 </div>
             </div>
@@ -434,11 +434,66 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
+                        <span class="card-title">Tráfico y Campañas</span>
+                        <p>De dónde llegan tus visitas: Google Ads, Facebook Ads, orgánico, directo o referido</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/trafico_visitas.php" class="btn waves-effect waves-light indigo darken-3">Ver Tráfico</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Comportamiento en el Sitio</span>
+                        <p>Qué productos y páginas ven más, cuánto tiempo, y qué tanto convierte en "Agregar al Carrito"</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/comportamiento_sitio.php" class="btn waves-effect waves-light teal darken-2">Ver Comportamiento</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Nuevas Iniciativas de Ventas</span>
+                        <p>Prende o apaga: atribución de ventas, feed de catálogo, referidos, stock vs. campañas</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/ventas_features_config.php" class="btn waves-effect waves-light deep-purple darken-2">Configurar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Stock vs. Campañas</span>
+                        <p>Registra campañas y detecta si un producto se agota antes de que termine</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/calendario_campanas.php" class="btn waves-effect waves-light orange darken-3">Ver Calendario</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
                         <span class="card-title">Notificaciones de Pedidos</span>
                         <p>Configura la lista de correos que avisan cuando entra un pedido web nuevo</p>
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/notificaciones_pedidos.php" class="btn waves-effect waves-light teal darken-3">Configurar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Notificaciones de Caducidades</span>
+                        <p>Correos que avisan cuando un lote cambia de severidad (para ponerlo en oferta a tiempo)</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/notificaciones_caducidades.php" class="btn waves-effect waves-light orange darken-3">Configurar</a>
                     </div>
                 </div>
             </div>

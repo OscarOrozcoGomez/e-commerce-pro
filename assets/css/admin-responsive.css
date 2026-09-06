@@ -1,0 +1,80 @@
+/*
+ * Reglas responsive compartidas para el panel de administracion.
+ * No reemplaza el CSS de cada vista, solo cubre patrones repetidos que hoy
+ * se resuelven (o no) copia-pegados por pagina: tablas anchas sin wrapper,
+ * botones/chips que no envuelven bien, y modales que se salen de pantalla
+ * en celular. Cargar despues de materialize.min.css para poder sobreescribir.
+ */
+
+/* Un <table> por defecto solo ocupa el ancho de su contenido, no del
+   contenedor. Con tablas de pocas columnas/texto corto (ej. la de
+   Conversaciones recientes en Asistente de IA) eso deja un hueco en blanco
+   evidente, sobre todo en celular donde ya hay poco espacio de sobra. */
+table {
+    width: 100%;
+}
+
+@media (max-width: 600px) {
+    /* Cualquier tabla que no tenga ya su propio wrapper con overflow-x:auto
+       se vuelve scrolleable horizontalmente en vez de romper el layout. */
+    table:not(.responsive-table) {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    table:not(.responsive-table) thead,
+    table:not(.responsive-table) tbody,
+    table:not(.responsive-table) tr {
+        display: table;
+        width: 100%;
+        table-layout: auto;
+    }
+
+    /* Encabezados de pantalla (titulo + botones de accion) que hoy usan
+       flex-wrap genérico: que el titulo ocupe su propia linea y los botones
+       queden abajo, en vez de amontonarse. */
+    .admin-header-row {
+        flex-direction: column;
+        align-items: flex-start !important;
+    }
+
+    .admin-header-row > div:last-child {
+        width: 100%;
+    }
+
+    .admin-header-row .btn,
+    .admin-header-row .btn-small,
+    .admin-header-row .btn-flat {
+        margin-bottom: 6px;
+    }
+
+    /* Botones de accion dentro de tablas/tarjetas: touch target minimo
+       recomendado (~40px) y que no queden pegados entre si. */
+    .btn-small {
+        min-height: 32px;
+        margin: 2px;
+    }
+
+    /* Modales de Materialize: en celular casi siempre conviene que usen
+       casi todo el ancho, no un max-width pensado para escritorio. */
+    .modal {
+        width: 92% !important;
+        max-width: 92% !important;
+        left: 4% !important;
+        right: 4% !important;
+    }
+
+    /* Filtros de fecha / selects en linea que en escritorio van uno junto
+       al otro: en celular se apilan para que no se compriman de mas. */
+    .admin-filter-row {
+        flex-direction: column;
+        align-items: stretch !important;
+    }
+
+    .admin-filter-row > * {
+        width: 100% !important;
+        margin-bottom: 8px;
+    }
+}

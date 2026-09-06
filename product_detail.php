@@ -503,7 +503,7 @@ include __DIR__ . '/views/includes/header.php';
                 let score = 3;
                 if (principal && url === principal) {
                     score = 0;
-                } else if (/([\\/]|^)principal\.(webp|jpg|jpeg|png|gif|svg)(\?|$)/i.test(low)) {
+                } else if (/([\\/]|^)principal\.(webp|jpg|jpeg|png|gif|svg|avif)(\?|$)/i.test(low)) {
                     score = 1;
                 } else if (low.includes('/gal_') || low.includes('gal_')) {
                     score = 2;
@@ -632,6 +632,9 @@ include __DIR__ . '/views/includes/header.php';
                 }
                 localStorage.setItem('cart', JSON.stringify(cart));
                 if (typeof updateCartBadge === 'function') updateCartBadge();
+                if (typeof window.bbTrackEvent === 'function') {
+                    window.bbTrackEvent({ tipo: 'click', url: window.location.href, id: 'add_to_cart', texto: 'Agregar al Carrito', id_producto: currentProduct.id_producto });
+                }
                 M.toast({html: `¡${qty}x ${currentProduct.nombre} agregado!`, classes: 'rounded green'});
             }
         });
