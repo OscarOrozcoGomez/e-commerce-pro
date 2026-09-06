@@ -25,6 +25,11 @@ $staffAccounts = [
     // filtra por el id_almacen del encargado, y las notificaciones de pickup se crean con el id_almacen
     // resuelto por resolvePickupWarehouseId() (core/auth.php), no con el almacen "default" de arriba.
     ['rol' => 'encargado', 'nombre' => 'Playwright E2E Encargado Pickup', 'email' => 'e2e-encargado-pickup@playwright.test', 'almacen' => 'pickup'],
+    // isSuperAdmin() = isAdmin() + usuarios.es_superadmin -- un admin normal NO puede tocar el
+    // catalogo de permisos (crear/editar/desactivar) en views/roles_permisos.php, solo super admin.
+    // Cuenta aparte del admin de arriba para poder probar ambos casos (admin normal bloqueado,
+    // superadmin permitido) sin pisarse.
+    ['rol' => 'admin', 'nombre' => 'Playwright E2E Superadmin', 'email' => 'e2e-superadmin@playwright.test', 'almacen' => 'ninguno', 'es_superadmin' => 1],
 ];
 
 $pdo = getPDO();
@@ -71,11 +76,14 @@ try {
             default => null,
         };
 
+        $esSuperadmin = (int) ($cuenta['es_superadmin'] ?? 0);
+
         $stmt = $pdo->prepare(
-            'INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado)
-             VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, "activo")
+            'INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado, es_superadmin)
+             VALUES (:nombre, :email, :contrasena, :id_rol, :id_almacen, "activo", :es_superadmin)
              ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), contrasena = VALUES(contrasena),
-                 id_rol = VALUES(id_rol), id_almacen = VALUES(id_almacen), estado = "activo"'
+                 id_rol = VALUES(id_rol), id_almacen = VALUES(id_almacen), estado = "activo",
+                 es_superadmin = VALUES(es_superadmin)'
         );
         $stmt->execute([
             'nombre' => $cuenta['nombre'],
@@ -83,9 +91,10 @@ try {
             'contrasena' => $hash,
             'id_rol' => $idRol,
             'id_almacen' => $idAlmacenCuenta,
+            'es_superadmin' => $esSuperadmin,
         ]);
 
-        echo "Seed OK: {$cuenta['rol']} -> {$cuenta['email']} (id_rol={$idRol}, id_almacen=" . ($idAlmacenCuenta ?? 'NULL') . ")\n";
+        echo "Seed OK: {$cuenta['rol']} -> {$cuenta['email']} (id_rol={$idRol}, id_almacen=" . ($idAlmacenCuenta ?? 'NULL') . ($esSuperadmin ? ', superadmin' : '') . ")\n";
     }
 
     $pdo->commit();

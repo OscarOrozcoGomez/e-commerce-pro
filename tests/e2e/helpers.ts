@@ -71,6 +71,10 @@ export const E2E_STAFF_EMAILS = {
   // Encargado asignado a la sucursal de pickup (resolvePickupWarehouseId), no a
   // la sucursal "default" -- necesario para views/pickup_notifications.php.
   encargadoPickup: 'e2e-encargado-pickup@playwright.test',
+  // isSuperAdmin() = isAdmin() + usuarios.es_superadmin -- distinto del "admin" de arriba
+  // (que es admin normal, sin ese flag). Necesario para el catalogo de permisos en
+  // views/roles_permisos.php.
+  superadmin: 'e2e-superadmin@playwright.test',
 } as const;
 
 /**
