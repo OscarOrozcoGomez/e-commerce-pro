@@ -59,23 +59,14 @@ include __DIR__ . '/includes/header.php';
                         <div id="po-form-wrapper" style="display: none;">
                             <form id="form-entrada-masiva">
                                 <?php echo csrfInput(); ?>
-                                <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
-                                    <table class="striped highlight responsive-table" style="margin-top: 20px; min-width: 720px;">
-                                        <thead>
-                                            <tr>
-                                                <th>Producto</th>
-                                                <th>Sucursal</th>
-                                                <th>P. Venta</th>
-                                                <th class="center-align">Stock Actual</th>
-                                                <th class="center-align" style="width: 180px;">Ajustar Mín/Máx</th>
-                                                <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad a Pedir</th>
-                                                <th class="right-align">Subtotal Est.</th>
-                                                <th class="center-align" style="width: 120px;">Acción</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="table-po-body"></tbody>
-                                    </table>
+
+                                <div style="display: flex; justify-content: flex-end; gap: 10px; margin: 10px 0 4px;">
+                                    <button type="button" class="btn-flat btn-small" onclick="togglePoGroups(true)"><i class="material-icons left">unfold_more</i>Expandir todo</button>
+                                    <button type="button" class="btn-flat btn-small" onclick="togglePoGroups(false)"><i class="material-icons left">unfold_less</i>Colapsar todo</button>
                                 </div>
+
+                                <!-- Una sección colapsable por sucursal, generada en renderTable() -->
+                                <div id="po-groups"></div>
 
                                 <div class="row" style="margin-top: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; flex-wrap: wrap;">
                                     <div class="grey-text text-darken-2">
@@ -251,49 +242,107 @@ include __DIR__ . '/includes/header.php';
             .catch(err => showError(err.message));
     }
 
+    function renderRow(item, index) {
+        const stockMax = parseInt(item.stock_maximo, 10) || 0;
+        const stockActual = parseInt(item.cantidad_actual, 10) || 0;
+        const precioCosto = parseFloat(item.precio_costo) || 0;
+        const aComprar = Math.max(0, stockMax - stockActual);
+        const costoFila = aComprar * precioCosto;
+        const idProducto = Number(item.id_producto) || 0;
+        const idAlmacen = Number(item.id_almacen) || 0;
+
+        return `
+            <tr id="po-row-${index}" class="po-item-row">
+                <td><strong>${escHtml(item.nombre)}</strong><br><small class="grey-text">SKU: ${escHtml(item.sku)}</small></td>
+                <td>$${(parseFloat(item.precio_venta) || 0).toFixed(2)}</td>
+                <td class="red-text center-align"><strong>${stockActual}</strong></td>
+                <td class="center-align">
+                    <div style="display: flex; gap: 5px;">
+                        <input type="number" name="items[${index}][stock_minimo]" value="${escHtml(item.stock_minimo)}" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
+                        <input type="number" name="items[${index}][stock_maximo]" value="${escHtml(item.stock_maximo)}" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
+                    </div>
+                </td>
+                <td class="blue lighten-5">
+                    <input type="hidden" name="items[${index}][id_producto]" value="${idProducto}">
+                    <input type="hidden" name="items[${index}][id_almacen]" value="${idAlmacen}">
+                    <input type="hidden" name="items[${index}][precio_costo]" value="${precioCosto}">
+                    <input type="number" name="items[${index}][cantidad]" value="${aComprar}" min="0" class="browser-default qty-input" style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
+                </td>
+                <td class="right-align po-subtotal">$${costoFila.toFixed(2)}</td>
+                <td class="center-align">
+                    <button type="button" class="btn-flat red-text" aria-label="Posponer producto" title="Posponer para el siguiente pedido" onclick="posponerItem(${index}, ${idProducto}, ${idAlmacen})">
+                        <i class="material-icons">schedule</i>
+                    </button>
+                </td>
+            </tr>`;
+    }
+
     function renderTable(items) {
-        const tbody = document.getElementById('table-po-body');
-        tbody.innerHTML = '';
+        const cont = document.getElementById('po-groups');
 
+        // Agrupar por sucursal, respetando el orden de aparición.
+        const grupos = new Map();
         items.forEach((item, index) => {
-            const stockMax = parseInt(item.stock_maximo, 10) || 0;
-            const stockActual = parseInt(item.cantidad_actual, 10) || 0;
-            const precioCosto = parseFloat(item.precio_costo) || 0;
-            const aComprar = Math.max(0, stockMax - stockActual);
-            const costoFila = aComprar * precioCosto;
-            const idProducto = Number(item.id_producto) || 0;
-            const idAlmacen = Number(item.id_almacen) || 0;
-
-            tbody.innerHTML += `
-                <tr id="po-row-${index}">
-                    <td><strong>${escHtml(item.nombre)}</strong><br><small class="grey-text">SKU: ${escHtml(item.sku)}</small></td>
-                    <td>${escHtml(item.sucursal)}</td>
-                    <td>$${(parseFloat(item.precio_venta) || 0).toFixed(2)}</td>
-                    <td class="red-text center-align"><strong>${stockActual}</strong></td>
-                    <td class="center-align">
-                        <div style="display: flex; gap: 5px;">
-                            <input type="number" name="items[${index}][stock_minimo]" value="${escHtml(item.stock_minimo)}" class="browser-default qty-input" title="Mínimo" style="width: 50%; padding: 2px;">
-                            <input type="number" name="items[${index}][stock_maximo]" value="${escHtml(item.stock_maximo)}" class="browser-default qty-input" title="Máximo" style="width: 50%; padding: 2px;">
-                        </div>
-                    </td>
-                    <td class="blue lighten-5">
-                        <input type="hidden" name="items[${index}][id_producto]" value="${idProducto}">
-                        <input type="hidden" name="items[${index}][id_almacen]" value="${idAlmacen}">
-                        <input type="hidden" name="items[${index}][precio_costo]" value="${precioCosto}">
-                        <input type="number" name="items[${index}][cantidad]" value="${aComprar}" min="0" class="browser-default qty-input" style="width: 100%; text-align: center; border: 1px solid #9e9e9e; border-radius: 4px; padding: 5px;">
-                    </td>
-                    <td class="right-align po-subtotal">$${costoFila.toFixed(2)}</td>
-                    <td class="center-align">
-                        <button type="button" class="btn-flat red-text" aria-label="Posponer producto" title="Posponer para el siguiente pedido" onclick="posponerItem(${index}, ${idProducto}, ${idAlmacen})">
-                            <i class="material-icons">schedule</i>
-                        </button>
-                    </td>
-                </tr>`;
+            const suc = String(item.sucursal || 'Sin sucursal').trim() || 'Sin sucursal';
+            if (!grupos.has(suc)) grupos.set(suc, []);
+            grupos.get(suc).push({ item, index });
         });
+
+        const thead = `
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>P. Venta</th>
+                    <th class="center-align">Stock Actual</th>
+                    <th class="center-align" style="width: 180px;">Ajustar Mín/Máx</th>
+                    <th class="blue lighten-5 center-align" style="width: 150px;">Cantidad a Pedir</th>
+                    <th class="right-align">Subtotal Est.</th>
+                    <th class="center-align" style="width: 90px;">Acción</th>
+                </tr>
+            </thead>`;
+
+        let html = '<ul class="collapsible expandable" data-collapsible="expandable">';
+        grupos.forEach((filas, sucursal) => {
+            const filasHtml = filas.map(f => renderRow(f.item, f.index)).join('');
+            html += `
+                <li class="po-group active" data-sucursal="${escHtml(sucursal)}">
+                    <div class="collapsible-header">
+                        <i class="material-icons">store</i>
+                        <span class="po-group-name">${escHtml(sucursal)}</span>
+                        <span class="new badge grey lighten-1 po-group-count" data-badge-caption="">${filas.length}</span>
+                        <span class="po-group-subtotal">$0.00</span>
+                    </div>
+                    <div class="collapsible-body">
+                        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                            <table class="striped highlight" style="min-width: 680px; margin: 0;">
+                                ${thead}
+                                <tbody>${filasHtml}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                </li>`;
+        });
+        html += '</ul>';
+
+        cont.innerHTML = html;
+
+        if (typeof M !== 'undefined' && M.Collapsible) {
+            M.Collapsible.init(cont.querySelectorAll('.collapsible'), { accordion: false });
+        }
 
         bindQtyRecalculation();
         recalculateTotalInversion();
     }
+
+    window.togglePoGroups = function (abrir) {
+        document.querySelectorAll('#po-groups .collapsible').forEach(ul => {
+            const inst = (typeof M !== 'undefined' && M.Collapsible) ? M.Collapsible.getInstance(ul) : null;
+            ul.querySelectorAll('li').forEach((li, i) => {
+                if (!inst) { li.classList.toggle('active', abrir); return; }
+                abrir ? inst.open(i) : inst.close(i);
+            });
+        });
+    };
 
     function bindQtyRecalculation() {
         document.querySelectorAll('input[name$="[cantidad]"]').forEach((input) => {
@@ -304,7 +353,7 @@ include __DIR__ . '/includes/header.php';
     function recalculateTotalInversion() {
         let total = 0;
 
-        document.querySelectorAll('#table-po-body tr').forEach((row) => {
+        document.querySelectorAll('#po-groups .po-item-row').forEach((row) => {
             const qtyInput = row.querySelector('input[name$="[cantidad]"]');
             const costInput = row.querySelector('input[name$="[precio_costo]"]');
             const subtotalCell = row.querySelector('.po-subtotal');
@@ -318,6 +367,21 @@ include __DIR__ . '/includes/header.php';
             }
 
             total += subtotal;
+        });
+
+        // Subtotal y conteo por sucursal en la cabecera de cada colapsable.
+        document.querySelectorAll('#po-groups .po-group').forEach((li) => {
+            let sub = 0;
+            const filas = li.querySelectorAll('.po-item-row');
+            filas.forEach((row) => {
+                const qty = Math.max(0, parseInt(row.querySelector('input[name$="[cantidad]"]')?.value || '0', 10));
+                const unitCost = parseFloat(row.querySelector('input[name$="[precio_costo]"]')?.value || '0');
+                sub += qty * unitCost;
+            });
+            const subEl = li.querySelector('.po-group-subtotal');
+            if (subEl) subEl.textContent = '$' + sub.toFixed(2);
+            const countEl = li.querySelector('.po-group-count');
+            if (countEl) countEl.textContent = String(filas.length);
         });
 
         document.getElementById('total-inversion-val').textContent = total.toFixed(2);
@@ -405,11 +469,16 @@ include __DIR__ . '/includes/header.php';
 
                 const row = document.getElementById('po-row-' + index);
                 if (row) {
+                    const grupo = row.closest('.po-group');
                     row.remove();
+                    // Si la sucursal se quedó sin productos, quita su sección colapsable.
+                    if (grupo && grupo.querySelectorAll('.po-item-row').length === 0) {
+                        grupo.remove();
+                    }
                     recalculateTotalInversion();
                 }
 
-                if (document.querySelectorAll('#table-po-body tr').length === 0) {
+                if (document.querySelectorAll('#po-groups .po-item-row').length === 0) {
                     document.getElementById('po-form-wrapper').style.display = 'none';
                     document.getElementById('po-list-container').style.display = 'block';
                     document.getElementById('po-list-container').innerHTML = `
@@ -758,5 +827,21 @@ include __DIR__ . '/includes/header.php';
         background-color: #fff;
     }
     #po-csrf { padding: 0; height: 0; overflow: hidden; }
+
+    /* --- Agrupado por sucursal (colapsable) --- */
+    #po-groups .collapsible { margin: 12px 0; border: none; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+    #po-groups .collapsible-header {
+        display: flex; align-items: center; gap: 10px;
+        font-weight: 600; background: #eceff1; padding: 12px 18px;
+    }
+    #po-groups .collapsible-header .material-icons { color: #1a237e; }
+    #po-groups .po-group-name { font-size: 1.05rem; }
+    #po-groups .po-group-count { margin-left: 4px; }
+    #po-groups .po-group-subtotal { margin-left: auto; color: #2e7d32; font-weight: 700; }
+    #po-groups .collapsible-body { padding: 0; border-bottom: none; }
+    #po-groups .collapsible-body table { margin: 0; }
+    @media print {
+        #po-groups .collapsible-body { display: block !important; }
+    }
 </style>
 <?php include __DIR__ . '/includes/footer.php'; ?>
