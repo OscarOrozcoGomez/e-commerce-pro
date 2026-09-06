@@ -95,16 +95,27 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
+                            <div class="input-field col s12" style="margin: 0 0 4px 0; position: relative;">
+                                <i class="material-icons prefix">search</i>
+                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150...">
+                                <label for="blife_search" class="active">Buscar producto en B-Life</label>
+                                <div id="blife-search-results" style="display:none; position:absolute; z-index:20; left:0; right:0; background:#fff; border:1px solid #bbb; border-radius:4px; max-height:280px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
+                            </div>
                             <div class="input-field col s8" style="margin: 0;">
-                                <input type="text" id="blife_id" placeholder="ID B-Life">
+                                <input type="text" id="blife_id" placeholder="se llena solo al elegir de la lista">
                                 <input type="hidden" name="imagenes_orden_json" id="imagenes_orden_json">
-                                <label for="blife_id" class="active">Sincronización con B-Life (ID de Variante)</label>
+                                <label for="blife_id" class="active">Handle / URL del producto (o pégalo a mano)</label>
                             </div>
                             <div class="col s4">
-                                <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
+                                <button type="button" id="btn-sinc" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
                             </div>
                             <input type="hidden" name="remote_images_urls" id="remote_images_urls">
                             <div id="blife-external-images" class="col s12" style="margin-top: 10px; display: none;"></div>
+                            <div class="col s12" style="font-size: 0.72rem; color: #777; margin-top: 6px;">
+                                <i class="material-icons tiny" style="vertical-align: middle;">info_outline</i>
+                                Trae nombre, ingredientes, modo de uso, SKU, código de barras e imágenes.
+                                <strong>No toca el inventario</strong> (stock, mínimo ni máximo).
+                            </div>
                         </div>
 
                         <div class="input-field">
@@ -356,17 +367,17 @@ include __DIR__ . '/includes/header.php';
     };
 
     window.fetchBlifeData = function(e) {
-        const btn = e.currentTarget;
+        const btn = (e && e.currentTarget) ? e.currentTarget : document.getElementById('btn-sinc');
         const variantId = document.getElementById('blife_id').value.trim();
         if (!variantId) {
-            M.toast({html: 'Ingresa un ID de B-Life', classes: 'orange'});
+            M.toast({html: 'Pega el handle, la URL de blife.mx o el ID del producto', classes: 'orange'});
             return;
         }
         btn.disabled = true;
         const originalText = btn.innerText;
         btn.innerText = '...';
 
-        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${variantId}`)
+        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${encodeURIComponent(variantId)}`)
             .then(r => r.json())
             .then(res => {
                 if(!res.success) throw new Error(res.message);
@@ -408,14 +419,56 @@ include __DIR__ . '/includes/header.php';
                         document.getElementById('modo_uso').value = cleanUso.charAt(0).toUpperCase() + cleanUso.slice(1);
                     }
                     
-                    // 2. Extraer presentación de la variante (ej: 90 Caps)
-                    if (fullData.producto.variante && fullData.producto.variante.title) {
-                        document.getElementById('unidad').value = fullData.producto.variante.title;
+                    // 2. Presentación de la variante (ej: "90 ml", "180 Caps | 1000 mg", "250 g").
+                    //    B-Life NO llena el campo de peso de Shopify, pero el tamaño/contenido
+                    //    viene en el título de la variante. Se manda a "Valor de la Variante"
+                    //    (texto libre) y se INFIERE el "Tipo de Presentación" del select.
+                    const varTitle = (fullData.producto.variante && fullData.producto.variante.title || '').trim();
+                    const esPlaceholder = /^(default title|1\s*(pza\.?|pieza|unidad|u))\.?$/i.test(varTitle);
+                    if (varTitle && !esPlaceholder) {
+                        document.getElementById('nombre_variante').value = varTitle;
+                    }
+
+                    // Inferir el tipo de presentación. B-Life no lo trae como dato; se deduce
+                    // del texto. "ml"/"l" (cremas, líquidos) no tiene opción en la lista -> se
+                    // deja en blanco para captura manual.
+                    const txtPres = (varTitle + ' ' + (fullData.producto.title || '')).toLowerCase();
+                    let tipoPres = '';
+                    if (/\b(c[aá]ps?|c[aá]psulas?)\b/.test(txtPres)) tipoPres = 'Cápsulas';
+                    else if (/\bsoftgels?\b/.test(txtPres)) tipoPres = 'Softgels';
+                    else if (/\b(tabletas?|tabs?)\b/.test(txtPres)) tipoPres = 'Tabletas';
+                    else if (/\bporciones?\b/.test(txtPres)) tipoPres = 'Porciones';
+                    else if (/(\d+\s*(g|gr|grs|gramos?|kg)\b|cont\.?\s*neto)/.test(txtPres)) tipoPres = 'Gramos (g)';
+                    else if (/\d+\s*(pzas?|piezas?|unidades?)\b/.test(txtPres)) tipoPres = 'Unidades';
+                    if (tipoPres) {
+                        const selUnidad = document.getElementById('unidad');
+                        if ([...selUnidad.options].some(o => o.value === tipoPres)) {
+                            selUnidad.value = tipoPres;
+                        }
                     }
 
                     // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
                     if (fullData.producto.title)
                         document.getElementById('nombre').value = fullData.producto.title;
+
+                    // 3b. Descripción comercial (body_html de Shopify, convertido a texto plano)
+                    if (fullData.producto.description)
+                        document.getElementById('descripcion').value = fullData.producto.description;
+
+                    // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
+                    if (fullData.producto.sku)
+                        document.getElementById('sku').value = fullData.producto.sku;
+                    if (fullData.producto.codigo_barras)
+                        document.getElementById('codigo_barras').value = fullData.producto.codigo_barras;
+
+                    // 5. Precio de venta = precio de retail de B-Life (arranque; ajústalo).
+                    //    El "Precio de Costo" (mayoreo) no está en la tienda pública -> lo pones tú.
+                    const pv = fullData.producto.variante && fullData.producto.variante.precio_venta;
+                    const pc = fullData.producto.variante && fullData.producto.variante.precio_comparacion;
+                    if (pv && parseFloat(pv) > 0)
+                        document.getElementById('precio_venta').value = pv;
+                    if (pc && parseFloat(pc) > 0)
+                        document.getElementById('precio_comparacion').value = pc;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
@@ -445,8 +498,12 @@ include __DIR__ . '/includes/header.php';
                     }));
                 }
                 
-                // 3. Guardar solo lo necesario (filtrado)
-                document.getElementById('tabla_nutrimental').value = list.length > 0 ? JSON.stringify(list) : '[]';
+                // 3. Guardar solo lo necesario (filtrado). Si B-Life no devolvió tabla
+                //    nutrimental (hoy nunca lo hace sin token), NO pisamos lo que ya haya
+                //    capturado a mano para no borrarlo ni disparar el aviso de "datos inválidos".
+                if (list.length > 0) {
+                    document.getElementById('tabla_nutrimental').value = JSON.stringify(list);
+                }
 
                 // 4. Capturar y mostrar previsualización de imágenes externas para importación automática
                 console.log("Datos de Variante B-Life recibidos:", fullData.producto?.variante);
@@ -502,13 +559,117 @@ include __DIR__ . '/includes/header.php';
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
                 M.textareaAutoResize(document.getElementById('ingredientes'));
                 M.textareaAutoResize(document.getElementById('modo_uso'));
+                M.textareaAutoResize(document.getElementById('descripcion'));
                 M.updateTextFields();
                 renderNutritionalPreview();
-                M.toast({html: 'Información importada de B-Life', classes: 'green'});
+
+                // La sincronización con B-Life NO toca inventario: no escribe cantidad_actual,
+                // stock_minimo ni stock_maximo, y deja stock_touched en 0 para que al guardar
+                // NO se reescriba inventario_almacen (crítico en producción).
+                if (typeof resetStockTouched === 'function') resetStockTouched();
+
+                M.toast({html: res.blife_note || 'Información importada de B-Life', classes: 'green', displayLength: 5000});
             })
             .catch(err => M.toast({html: 'Error: ' + err.message, classes: 'red'}))
             .finally(() => { btn.disabled = false; btn.innerText = originalText; });
     };
+
+    // --- Buscador de productos de B-Life (evita tener que pegar la URL/handle a mano) ---
+    (function initBlifeSearch() {
+        const input = document.getElementById('blife_search');
+        const box = document.getElementById('blife-search-results');
+        if (!input || !box) return;
+
+        let timer = null;
+        let lastQuery = '';
+
+        const cerrar = () => { box.style.display = 'none'; box.innerHTML = ''; };
+
+        // Los datos vienen del catálogo Shopify de B-Life (título/SKU pueden traer < > " ').
+        // Se escapan antes de inyectarlos en innerHTML para no abrir un XSS almacenado.
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+
+        const pintar = (results) => {
+            if (!results.length) {
+                box.innerHTML = '<div style="padding:10px; color:#888;">Sin coincidencias en B-Life</div>';
+                box.style.display = 'block';
+                return;
+            }
+            box.innerHTML = results.map(r => {
+                const vars = (r.variantes || []).filter(v => v && v.variant_id);
+                const img = r.image
+                    ? `<img src="${esc(r.image)}" style="width:38px; height:38px; object-fit:contain; background:#f5f5f5; border-radius:4px;">`
+                    : '';
+
+                // Shopify NO hace una página por presentación: es una sola página + ?variant=<id>.
+                // Con >1 presentación se listan por separado para sincronizar la elegida (su SKU,
+                // código de barras, precio, imagen y "Valor de la Variante" salen de esa variante).
+                if (vars.length > 1) {
+                    const filas = vars.map(v => `
+                        <div class="blife-result" data-handle="${esc(r.handle + '?variant=' + v.variant_id)}"
+                             style="padding:6px 10px 6px 54px; cursor:pointer; border-bottom:1px solid #f0f0f0; font-size:0.78rem;"
+                             onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
+                            <strong>${esc(v.title || '(sin nombre)')}</strong>
+                            <span style="color:#777;">
+                                ${v.sku ? ' — ' + esc(v.sku) : ''}${v.precio ? ' — $' + esc(v.precio) : ''}
+                            </span>
+                        </div>`).join('');
+                    return `
+                        <div style="display:flex; gap:8px; align-items:center; padding:8px 10px; border-bottom:1px solid #eee; background:#fafafa;">
+                            ${img}
+                            <div style="min-width:0;">
+                                <div style="font-size:0.85rem; font-weight:600;">${esc(r.title)}</div>
+                                <div style="font-size:0.7rem; color:#999;">${vars.length} presentaciones — elige una</div>
+                            </div>
+                        </div>${filas}`;
+                }
+
+                const v0 = vars[0] || {};
+                const handle = v0.variant_id ? r.handle + '?variant=' + v0.variant_id : r.handle;
+                return `
+                    <div class="blife-result" data-handle="${esc(handle)}"
+                         style="display:flex; gap:8px; align-items:center; padding:8px 10px; cursor:pointer; border-bottom:1px solid #eee;"
+                         onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
+                        ${img}
+                        <div style="min-width:0;">
+                            <div style="font-size:0.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.title)}</div>
+                            <div style="font-size:0.72rem; color:#777; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                ${v0.sku ? esc(v0.sku) + ' — ' : ''}${esc(v0.title || r.handle)}
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+            box.style.display = 'block';
+
+            box.querySelectorAll('.blife-result').forEach(el => {
+                el.addEventListener('click', () => {
+                    document.getElementById('blife_id').value = el.getAttribute('data-handle');
+                    cerrar();
+                    input.value = '';
+                    fetchBlifeData(); // dispara la sincronización de inmediato
+                });
+            });
+        };
+
+        const buscar = () => {
+            const q = input.value.trim();
+            if (q.length < 2) { cerrar(); return; }
+            if (q === lastQuery) return;
+            lastQuery = q;
+            fetch(`${BASE_API}?action=blife_search&q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(res => { if (res.success) pintar(res.results || []); })
+                .catch(() => cerrar());
+        };
+
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); });
+        input.addEventListener('focus', () => { if (input.value.trim().length >= 2) buscar(); });
+        document.addEventListener('click', (ev) => {
+            if (ev.target !== input && !box.contains(ev.target)) cerrar();
+        });
+    })();
 
     window.renderNutritionalPreview = function() {
         const raw = document.getElementById('tabla_nutrimental').value.trim();
@@ -1134,6 +1295,8 @@ include __DIR__ . '/includes/header.php';
         colaImagenes = [];
         renderPreviews();
         document.getElementById('blife_id').value = '';
+        const blifeSearch = document.getElementById('blife_search');
+        if (blifeSearch) blifeSearch.value = '';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('mostrar_tabla').checked = true;
