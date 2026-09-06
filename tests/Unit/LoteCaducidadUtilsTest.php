@@ -681,4 +681,29 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->seedLote($idProducto, $codigo, $fechaCaducidad, $cantidad, $idAlmacen);
         return (int) $this->pdo->lastInsertId();
     }
+
+    /**
+     * SQLite tolera reusar un named param en la misma sentencia; MySQL/Percona con
+     * PDO::ATTR_EMULATE_PREPARES=false NO -> lanza SQLSTATE[HY093] en produccion.
+     * Escanea el modulo para que ninguna sentencia preparada vuelva a caer en ese
+     * patron (bug real: loteGuardar/loteRegistrarEntrada usaban :cant y :c dos
+     * veces y "agregar lote" tronaba solo en prod).
+     */
+    public function testNingunaSentenciaPreparadaReusaUnPlaceholderConNombre(): void
+    {
+        $codigo = (string) file_get_contents(__DIR__ . '/../../core/lote_caducidad_utils.php');
+
+        preg_match_all('/prepare\s*\(\s*([\'"])(.*?)\1\s*\)/s', $codigo, $matches);
+        $this->assertNotEmpty($matches[2], 'No se encontro ninguna llamada a prepare().');
+
+        foreach ($matches[2] as $sql) {
+            preg_match_all('/:([a-zA-Z_][a-zA-Z0-9_]*)/', $sql, $ph);
+            $repetidos = array_keys(array_filter(array_count_values($ph[1]), static fn ($n) => $n > 1));
+            $this->assertSame(
+                [],
+                $repetidos,
+                'Placeholder(s) repetidos [' . implode(', ', $repetidos) . '] en: ' . preg_replace('/\s+/', ' ', trim($sql))
+            );
+        }
+    }
 }

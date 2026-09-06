@@ -600,7 +600,7 @@ function loteGuardar(PDO $pdo, array $datos, int $userId): int
              foto_evidencia, notas_seguimiento, creado_por)
          VALUES
             (:id_producto, :id_almacen, :codigo, :fecha, :aprox,
-             :ingreso, :cant, :cant, :costo, :foto, :notas, :creado_por)'
+             :ingreso, :cant_ini, :cant_rest, :costo, :foto, :notas, :creado_por)'
     );
     $stmt->execute([
         ':id_producto' => $n['id_producto'],
@@ -609,7 +609,11 @@ function loteGuardar(PDO $pdo, array $datos, int $userId): int
         ':fecha' => $n['fecha_caducidad'],
         ':aprox' => $n['caducidad_aproximada'],
         ':ingreso' => $hoy,
-        ':cant' => $n['cantidad'],
+        // Un lote nuevo entra completo: restante = inicial. Dos placeholders
+        // distintos a proposito: MySQL/PDO con ATTR_EMULATE_PREPARES=false NO
+        // permite reusar un named param (:cant, :cant) -> SQLSTATE[HY093].
+        ':cant_ini' => $n['cantidad'],
+        ':cant_rest' => $n['cantidad'],
         ':costo' => $n['costo_unitario'],
         ':foto' => $n['foto'],
         ':notas' => $n['notas'],
@@ -642,15 +646,18 @@ function loteRegistrarEntrada(PDO $pdo, array $datos, int $userId): int
         $idLote = (int) $existente['id_lote'];
         $upd = $pdo->prepare(
             "UPDATE lotes_inventario
-             SET cantidad_inicial = cantidad_inicial + :c,
-                 cantidad_restante = cantidad_restante + :c,
+             SET cantidad_inicial = cantidad_inicial + :inc_ini,
+                 cantidad_restante = cantidad_restante + :inc_rest,
                  fecha_caducidad = :fecha,
                  caducidad_aproximada = :aprox,
                  estado = CASE WHEN estado IN ('agotado') THEN 'activo' ELSE estado END
              WHERE id_lote = :id"
         );
         $upd->execute([
-            ':c' => $n['cantidad'],
+            // Placeholders distintos: MySQL/PDO (EMULATE_PREPARES=false) no admite
+            // reusar un named param en la misma sentencia -> SQLSTATE[HY093].
+            ':inc_ini' => $n['cantidad'],
+            ':inc_rest' => $n['cantidad'],
             ':fecha' => $n['fecha_caducidad'],
             ':aprox' => $n['caducidad_aproximada'],
             ':id' => $idLote,
