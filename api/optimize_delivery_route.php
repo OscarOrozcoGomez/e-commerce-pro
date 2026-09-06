@@ -106,6 +106,49 @@ function routeIsLocalNoCostMode(): bool
     return false;
 }
 
+/**
+ * Indica si se debe pedir a Google Routes el modo TRAFFIC_AWARE_OPTIMAL con departureTime
+ * (ETAs con trafico proyectado a la hora real de manejo, SKU mas caro). Se puede apagar
+ * con ROUTE_TRAFFIC_OPTIMAL=0. Sin efecto en modo local sin costo (no se consulta Google).
+ */
+function routeTrafficOptimalEnabled(): bool
+{
+    $raw = getenv('ROUTE_TRAFFIC_OPTIMAL');
+    if ($raw === false) {
+        $raw = $_SERVER['ROUTE_TRAFFIC_OPTIMAL'] ?? $_ENV['ROUTE_TRAFFIC_OPTIMAL'] ?? null;
+    }
+    $parsed = routeParseBoolEnv(is_string($raw) ? $raw : null);
+    return $parsed ?? true;
+}
+
+/**
+ * Convierte la hora de salida del panel ("Y-m-d\TH:i", hora local del servidor) a un
+ * timestamp RFC3339 para el campo departureTime de Google Routes. Devuelve null si esta
+ * vacia o ya paso (Google rechaza departureTime en el pasado): en ese caso se consulta
+ * sin proyeccion de trafico, como antes.
+ */
+function routeBuildDepartureTimeRfc3339(string $horaSalidaRaw): ?string
+{
+    $horaSalidaRaw = trim($horaSalidaRaw);
+    if ($horaSalidaRaw === '') {
+        return null;
+    }
+
+    $parsed = DateTimeImmutable::createFromFormat('Y-m-d\TH:i', $horaSalidaRaw);
+    if (!$parsed instanceof DateTimeImmutable) {
+        return null;
+    }
+
+    // Margen de 60s: Google rechaza tiempos "ahora o antes"; si la salida es inminente o
+    // ya paso, se empuja un minuto al futuro para no perder la proyeccion de trafico.
+    $now = new DateTimeImmutable('now');
+    if ($parsed->getTimestamp() <= $now->getTimestamp() + 60) {
+        return null;
+    }
+
+    return $parsed->format(DateTimeInterface::RFC3339);
+}
+
 function routeCleanPiiValue(string $value): string
 {
     $clean = trim($value);
@@ -251,7 +294,7 @@ function routeBuildLocalFallback(array $origin, array $stops): array
  * @param array<int, array<string, mixed>> $stops
  * @return array{route: array<string, mixed>, usingFallback: bool, fallbackReason: string}|null
  */
-function routeTryComputeRoute(array $origin, array $stops, bool $forceLocalNoCostMode, string $routesKey): ?array
+function routeTryComputeRoute(array $origin, array $stops, bool $forceLocalNoCostMode, string $routesKey, ?string $departureTime = null): ?array
 {
     if ($forceLocalNoCostMode) {
         $fallback = routeBuildLocalFallback($origin, $stops);
@@ -292,6 +335,11 @@ function routeTryComputeRoute(array $origin, array $stops, bool $forceLocalNoCos
         'travelMode' => 'DRIVE',
         'routingPreference' => 'TRAFFIC_AWARE',
     ];
+
+    if ($departureTime !== null && routeTrafficOptimalEnabled()) {
+        $body['routingPreference'] = 'TRAFFIC_AWARE_OPTIMAL';
+        $body['departureTime'] = $departureTime;
+    }
 
     $requestBody = json_encode($body);
     if ($requestBody === false) {
@@ -767,6 +815,11 @@ try {
         $validStops = deliveryOrderStopsByWindowPriority($validStops, $departureForOrdering, $origin);
     }
 
+    // ETA con trafico proyectado a la hora real de salida (si la salida es futura y el
+    // modo esta habilitado). Si es null se consulta como antes (TRAFFIC_AWARE sin hora).
+    $departureTimeRfc3339 = $forceLocalNoCostMode ? null : routeBuildDepartureTimeRfc3339($horaSalidaRaw);
+    $useTrafficOptimal = $departureTimeRfc3339 !== null && routeTrafficOptimalEnabled();
+
     $body = [
         'origin' => [
             'location' => [
@@ -798,6 +851,11 @@ try {
         'travelMode' => 'DRIVE',
         'routingPreference' => 'TRAFFIC_AWARE',
     ];
+
+    if ($useTrafficOptimal) {
+        $body['routingPreference'] = 'TRAFFIC_AWARE_OPTIMAL';
+        $body['departureTime'] = $departureTimeRfc3339;
+    }
 
     $requestBody = json_encode($body);
     if ($requestBody === false) {
@@ -958,7 +1016,7 @@ try {
         $currentOrderIds = array_map(static fn(array $stop): int => (int)$stop['id_pedido'], $orderedByGoogle);
 
         if ($strictOrderIds !== $currentOrderIds) {
-            $retry = routeTryComputeRoute($origin, $strictOrder, $forceLocalNoCostMode, $routesKey);
+            $retry = routeTryComputeRoute($origin, $strictOrder, $forceLocalNoCostMode, $routesKey, $departureTimeRfc3339);
             if ($retry === null) {
                 error_log('optimize_delivery_route: reintento de correccion por ventana de horario fallo, se conserva el orden original.');
             } else {
@@ -1010,6 +1068,9 @@ try {
         'incumplibles_probables' => $riskyStops,
         'ventana_ajuste_aplicado' => $windowCorrectionApplied,
         'paradas_fuera_de_ventana' => $windowViolations,
+        'ruteo_trafico' => $usingFallbackRoute
+            ? 'local'
+            : ($useTrafficOptimal ? 'trafico_proyectado' : 'trafico_actual'),
         'summary' => [
             'paradas_total' => count($orderedWithEta),
             'paradas_en_riesgo' => count($riskyStops),

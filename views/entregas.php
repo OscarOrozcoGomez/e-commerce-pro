@@ -1752,6 +1752,39 @@ function routeFormatEtaHora(eta) {
     return match ? `${match[1]}:${match[2]} hrs` : '';
 }
 
+// Linea de ventana de horario por parada: muestra la ventana prometida al cliente, la
+// holgura real (fin de ventana - ETA) y avisa en color si llegas tarde, sin colchon de
+// seguridad, o antes de que el cliente pueda recibir.
+function routeRenderVentana(stop) {
+    const estado = String((stop && stop.ventana_estado) || 'sin_ventana');
+    const fin = routeSafeText(stop && stop.ventana_fin);
+    if (estado === 'sin_ventana' || !fin) {
+        return '';
+    }
+    const ini = routeEscapeHtml(routeSafeText(stop.ventana_inicio) || '?');
+    const finEsc = routeEscapeHtml(fin);
+    const holguraMin = Math.round(Number(stop.ventana_holgura_s || 0) / 60);
+
+    let color = 'grey-text text-darken-1';
+    let icono = 'schedule';
+    let nota = ` — holgura ${holguraMin} min`;
+    if (estado === 'tarde') {
+        color = 'red-text text-darken-2';
+        icono = 'error_outline';
+        nota = ` — llegas ${Math.abs(holguraMin)} min DESPUES de que cierra`;
+    } else if (estado === 'ajustado') {
+        color = 'orange-text text-darken-4';
+        icono = 'warning';
+        nota = ` — solo ${holguraMin} min de holgura, sin colchon de seguridad`;
+    } else if (estado === 'temprano') {
+        color = 'blue-text text-darken-2';
+        icono = 'hourglass_empty';
+        nota = ' — llegas antes de que abra la ventana';
+    }
+
+    return `<div class="${color}" style="margin-top:2px;"><i class="material-icons tiny" style="vertical-align:middle;">${icono}</i> Ventana ${ini}–${finEsc}${nota}</div>`;
+}
+
 function routeFormatMoney(value) {
     // Number(null) es 0 en JS, no NaN: hay que descartar null/undefined/'' explicitamente
     // para no imprimir "Total: $0.00" cuando en realidad no hay total disponible.
@@ -2082,6 +2115,7 @@ function routeRenderResult(data, options = {}) {
         const warningClass = stop.en_riesgo ? 'route-stop-risk' : '';
         const limitText = stop.fecha_limite_entrega ? `<div><strong>Limite:</strong> ${routeEscapeHtml(stop.fecha_limite_entrega)}</div>` : '';
         const etaText = stop.eta_estimada ? `<div><strong>ETA:</strong> ${routeEscapeHtml(stop.eta_estimada)}</div>` : '';
+        const ventanaText = routeRenderVentana(stop);
         const waPhone = routeBuildWaPhone(stop.telefono);
         const waMessage = routeBuildWaMessage(stop);
         const waLink = waPhone
@@ -2096,6 +2130,7 @@ function routeRenderResult(data, options = {}) {
                 <div>${routeEscapeHtml(routeSafeText(stop.direccion) || 'Sin direccion')}</div>
                 ${limitText}
                 ${etaText}
+                ${ventanaText}
                 ${waLink}
             </li>
         `;
@@ -2113,17 +2148,32 @@ function routeRenderResult(data, options = {}) {
         ? `<div class="card-panel amber lighten-5"><strong>Modo respaldo:</strong> Se calculo el orden por cercania local porque Google Routes API no devolvio una ruta.${fallbackNotice ? `<br><small>${routeEscapeHtml(fallbackNotice)}</small>` : ''}</div>`
         : '';
 
+    const ventanaProblemas = stops.filter((s) => ['tarde', 'ajustado', 'temprano'].indexOf(String(s && s.ventana_estado || '')) !== -1);
+    const ventanaHtml = ventanaProblemas.length
+        ? `<div class="card-panel orange lighten-5"><strong>Ventanas de horario:</strong><ul>${ventanaProblemas.map((s) => {
+            const et = String(s.ventana_estado);
+            const etq = et === 'tarde' ? 'LLEGAS TARDE' : (et === 'temprano' ? 'llegas antes de que abra' : 'sin colchon de seguridad');
+            const etaHora = routeFormatEtaHora(s.eta_estimada) || routeSafeText(s.eta_estimada) || 'N/A';
+            return `<li>Pedido ${routeEscapeHtml(s.numero_pedido || s.id_pedido)} (${routeEscapeHtml(routeSafeText(s.ventana_inicio) || '?')}–${routeEscapeHtml(routeSafeText(s.ventana_fin))}, ETA ${routeEscapeHtml(etaHora)}): ${etq}</li>`;
+        }).join('')}</ul></div>`
+        : '';
+
+    const traficoNota = (data.ruteo_trafico === 'trafico_proyectado')
+        ? ' | <span class="green-text text-darken-2">ETA con trafico proyectado</span>'
+        : '';
+
     content.innerHTML = `
         <span class="card-title">Ruta optimizada generada</span>
         ${storedNoticeHtml}
         <p class="grey-text" style="margin-top:0;">
             Paradas: <strong>${routeEscapeHtml(summary.paradas_total || 0)}</strong> |
             Distancia: <strong>${routeEscapeHtml(((summary.distancia_total_m || 0) / 1000).toFixed(2))} km</strong> |
-            Duracion: <strong>${routeEscapeHtml(summary.duracion_total_hhmm || '00:00')}</strong>
+            Duracion: <strong>${routeEscapeHtml(summary.duracion_total_hhmm || '00:00')}</strong>${traficoNota}
         </p>
         ${fallbackHtml}
         ${warningsHtml}
         ${riskHtml}
+        ${ventanaHtml}
         <ol class="route-stops-list">${stopsHtml}</ol>
         <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
             <a href="${routeEscapeHtml(data.googleMapsUrl || '#')}" target="_blank" class="btn blue darken-2 waves-effect waves-light">

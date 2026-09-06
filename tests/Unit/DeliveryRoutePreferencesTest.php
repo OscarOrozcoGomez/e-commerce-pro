@@ -148,9 +148,9 @@ final class DeliveryRoutePreferencesTest extends TestCase
 
     public function testDeliveryOrderStopsByWindowPriorityKeepsUrgentWindowBeforeUnscheduledWhenNoSlack(): void
     {
-        // 17:10, a 10 min del deadline efectivo (17:00 + 20 min de tolerancia por
-        // distancia, ya que el origen esta a menos de 10km de la parada 10): no alcanza
-        // el margen de 5 min que exige el algoritmo para justificar un desvio.
+        // 17:10, ya pasado el fin de ventana (17:00): con el colchon de seguridad el
+        // deadline efectivo queda incluso antes, asi que no hay ninguna holgura para
+        // justificar un desvio a la parada sin horario.
         $departure = new DateTimeImmutable('2026-08-10 17:10:00'); // lunes
         $origin = ['lat' => 20.6596988, 'lng' => -103.3496092];
 
@@ -254,49 +254,54 @@ final class DeliveryRoutePreferencesTest extends TestCase
         $this->assertSame('16:00', $violations[0]['ventana_fin']);
     }
 
-    public function testDeliveryToleranceSecondsForDistanceUsesTieredScale(): void
+    public function testDeliverySafetyBufferSecondsScalesWithDistanceAndPosition(): void
     {
-        $this->assertSame(20 * 60, deliveryToleranceSecondsForDistance(5000.0));
-        $this->assertSame(20 * 60, deliveryToleranceSecondsForDistance(9999.0));
-        $this->assertSame(30 * 60, deliveryToleranceSecondsForDistance(10000.0));
-        $this->assertSame(30 * 60, deliveryToleranceSecondsForDistance(25000.0));
-        $this->assertSame(60 * 60, deliveryToleranceSecondsForDistance(25001.0));
-        $this->assertSame(60 * 60, deliveryToleranceSecondsForDistance(60000.0));
+        // Sin distancia conocida: solo base (15 min) + 5 min por cada parada previa.
+        $this->assertSame(15 * 60, deliverySafetyBufferSeconds(0.0, 0));
+        $this->assertSame(20 * 60, deliverySafetyBufferSeconds(0.0, 1));
+
+        // Con distancia: base + por-parada + contingencia de trafico por tramo de distancia.
+        $this->assertSame(25 * 60, deliverySafetyBufferSeconds(5000.0, 0));   // 15 + 0 + 10
+        $this->assertSame(30 * 60, deliverySafetyBufferSeconds(20000.0, 0));  // 15 + 0 + 15
+        $this->assertSame(35 * 60, deliverySafetyBufferSeconds(30000.0, 0));  // 15 + 0 + 20
+        $this->assertSame(35 * 60, deliverySafetyBufferSeconds(5000.0, 2));   // 15 + 10 + 10
+
+        // Tope de 45 min aunque la suma pida mas.
+        $this->assertSame(45 * 60, deliverySafetyBufferSeconds(30000.0, 6));  // 15 + 30 + 20 = 65 -> 45
     }
 
     /**
-     * La tolerancia es interna (logistica): no cambia la ventana que se le prometio al
-     * cliente, solo evita que el sistema trate como "incumplida" una llegada apenas tarde
-     * cuando la parada esta lejos del origen. Una parada cercana (<10km) con 25 min de
-     * retraso SI debe marcarse (excede su tolerancia de 20 min); una parada lejana
-     * (>25km) con el mismo retraso NO debe marcarse (esta dentro de su tolerancia de 60 min).
+     * El colchon de seguridad APRIETA el corte en vez de aflojarlo: una parada que llega
+     * dentro de la ventana pero sin margen suficiente antes de que cierre se marca como
+     * violacion (para que el reordenamiento de correccion intente adelantarla), sin importar
+     * que tan lejos este del origen. Una parada que llega con holgura de sobra no se marca.
      */
-    public function testDeliveryFindWindowViolationsAppliesDistanceBasedTolerance(): void
+    public function testDeliveryFindWindowViolationsFlagsArrivalsWithoutSafetyBufferEvenInsideWindow(): void
     {
         $departure = new DateTimeImmutable('2026-08-26 14:00:00'); // miercoles
         $origin = ['lat' => 20.6596988, 'lng' => -103.3496092];
 
-        $stopCercanaConRetraso25Min = [
+        $stopSinColchon = [
             'id_pedido' => 1,
             'numero_pedido' => 'DOM-1',
-            'lat' => 20.6650, // a pocos km del origen
+            'lat' => 20.6650, // a pocos km del origen -> colchon 25 min -> deadline efectivo 15:35
             'lng' => -103.3550,
             'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
-            'eta_estimada' => '2026-08-26 16:25:00', // 25 min tarde
+            'eta_estimada' => '2026-08-26 15:50:00', // dentro de la ventana, pero solo 10 min antes de cerrar
         ];
 
-        $stopLejanaConRetraso25Min = [
+        $stopConHolgura = [
             'id_pedido' => 2,
             'numero_pedido' => 'DOM-2',
-            'lat' => 20.9000, // muy lejos del origen (>25km)
-            'lng' => -103.6000,
+            'lat' => 20.6650,
+            'lng' => -103.3550,
             'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
-            'eta_estimada' => '2026-08-26 16:25:00', // mismo retraso: 25 min tarde
+            'eta_estimada' => '2026-08-26 15:05:00', // llega apenas abre: holgura de sobra
         ];
 
-        $violations = deliveryFindWindowViolations([$stopCercanaConRetraso25Min, $stopLejanaConRetraso25Min], $departure, $origin);
+        $violations = deliveryFindWindowViolations([$stopSinColchon, $stopConHolgura], $departure, $origin);
 
-        $this->assertCount(1, $violations, 'Solo la parada cercana deberia marcarse: su retraso excede su tolerancia de 20 min.');
+        $this->assertCount(1, $violations, 'Solo la parada sin colchon de seguridad debe marcarse.');
         $this->assertSame(1, $violations[0]['id_pedido']);
     }
 
@@ -310,7 +315,7 @@ final class DeliveryRoutePreferencesTest extends TestCase
                 'numero_pedido' => 'DOM-1',
                 'tiempo_servicio_min' => 5,
                 'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
-                'eta_estimada' => '2026-08-26 15:30:00', // dentro de la ventana
+                'eta_estimada' => '2026-08-26 15:30:00', // dentro de la ventana y con colchon (sin origen: colchon base 15 min -> corte 15:45)
             ],
             [
                 'id_pedido' => 2,
@@ -325,8 +330,11 @@ final class DeliveryRoutePreferencesTest extends TestCase
 
         $this->assertCount(1, $violations);
         $this->assertSame(2, $violations[0]['id_pedido']);
+        $this->assertSame('15:00', $violations[0]['ventana_inicio']);
         $this->assertSame('16:00', $violations[0]['ventana_fin']);
-        $this->assertSame(5640, $violations[0]['retraso_s']); // 17:34 - 16:00 = 1h34min tarde
+        // Sin origen: colchon = base 15 min + 5 min por la parada previa (indice 1) = 20 min.
+        // Corte efectivo 15:40; 17:34 - 15:40 = 1h54min.
+        $this->assertSame(6840, $violations[0]['retraso_s']);
     }
 
     /**
@@ -457,5 +465,63 @@ final class DeliveryRoutePreferencesTest extends TestCase
 
         $correctedEtaResult = deliveryBuildOrderedStopsWithEta($strictOrder, $realRoute, $departure);
         $this->assertEmpty($correctedEtaResult['windowViolations'], 'Tras la correccion, la parada con ventana ya no deberia llegar tarde.');
+    }
+
+    /**
+     * deliveryBuildOrderedStopsWithEta anota cada parada con el estado de su ventana para
+     * la vista del repartidor: 'ok' (con colchon), 'ajustado' (dentro de la ventana pero
+     * sin colchon de seguridad), 'tarde' (despues del fin) y 'temprano' (antes de que abra).
+     */
+    public function testDeliveryBuildOrderedStopsWithEtaAnnotatesWindowState(): void
+    {
+        $departure = new DateTimeImmutable('2026-08-26 14:00:00'); // miercoles
+
+        $stops = [
+            [ // llega 14:30, antes de que abra (15:00)
+                'id_pedido' => 1,
+                'tiempo_servicio_min' => 0,
+                'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
+            ],
+            [ // llega 15:50: dentro de 15:00-16:00 pero sin colchon (corte efectivo ~15:40)
+                'id_pedido' => 2,
+                'tiempo_servicio_min' => 0,
+                'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
+            ],
+            [ // llega 17:10: tarde
+                'id_pedido' => 3,
+                'tiempo_servicio_min' => 0,
+                'delivery_preferences' => ['ventanas' => [['dia' => 'miercoles', 'inicio' => '15:00', 'fin' => '16:00']]],
+            ],
+            [ // sin ventana
+                'id_pedido' => 4,
+                'tiempo_servicio_min' => 0,
+                'delivery_preferences' => ['ventanas' => []],
+            ],
+        ];
+
+        // Tramos: 30 min, +50 min, +80 min, +10 min -> ETAs 14:30, 15:20... ajustamos:
+        // leg0 1800s -> 14:30 (id1), leg1 4800s -> 15:50 (id2), leg2 4800s -> 17:10 (id3), leg3 600s (id4)
+        $route = ['legs' => [
+            ['duration' => '1800s'],
+            ['duration' => '4800s'],
+            ['duration' => '4800s'],
+            ['duration' => '600s'],
+        ]];
+
+        $result = deliveryBuildOrderedStopsWithEta($stops, $route, $departure);
+        $byId = [];
+        foreach ($result['orderedWithEta'] as $stop) {
+            $byId[(int) $stop['id_pedido']] = $stop;
+        }
+
+        $this->assertSame('temprano', $byId[1]['ventana_estado']);
+        $this->assertSame('ajustado', $byId[2]['ventana_estado']);
+        $this->assertSame('tarde', $byId[3]['ventana_estado']);
+        $this->assertSame('sin_ventana', $byId[4]['ventana_estado']);
+
+        $this->assertSame('15:00', $byId[2]['ventana_inicio']);
+        $this->assertSame('16:00', $byId[2]['ventana_fin']);
+        // holgura real = fin de ventana (16:00) - ETA (15:50) = 600 s
+        $this->assertSame(600, $byId[2]['ventana_holgura_s']);
     }
 }
