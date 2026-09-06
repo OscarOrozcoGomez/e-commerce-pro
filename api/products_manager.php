@@ -112,6 +112,9 @@ function blifeResolveHandle(string $input): array
         $input = $segs ? (string) end($segs) : '';
     }
 
+    // Quita cualquier querystring / fragmento suelto (p. ej. "mi-handle?variant=123").
+    $input = (string) preg_replace('~[?#].*$~s', '', $input);
+
     // gid://shopify/ProductVariant/123  ó  .../Product/123
     if (preg_match('~(Product|ProductVariant)/(\d+)~i', $input, $m)) {
         if (strcasecmp($m[1], 'ProductVariant') === 0) $variantHint = $variantHint ?? (int) $m[2];
