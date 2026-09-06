@@ -65,6 +65,78 @@ final class CatalogoUtilsTest extends TestCase
         $this->assertSame(2, (int) $collapsed[0]['total_variantes']);
     }
 
+    // ------------------------------------------------------------------
+    // catalogBuildQueries — orden "disponibles primero" + toggle "Ver agotados"
+    // ------------------------------------------------------------------
+
+    private function pdoStub(): PDO
+    {
+        // getPublicSellableWarehouseIds() no toca la conexión (devuelve [1]); basta un PDO real.
+        return new PDO('sqlite::memory:');
+    }
+
+    public function testCatalogBuildQueriesOrdersAvailableFirst(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '');
+
+        $this->assertSame(
+            'ORDER BY (COALESCE(stk.stock_familia, 0) > 0) DESC, p.nombre ASC',
+            $parts['order_by']
+        );
+    }
+
+    public function testCatalogBuildQueriesJoinsFamilyStockInBothMainAndCount(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '');
+
+        foreach (['sql_main', 'sql_count'] as $key) {
+            $this->assertStringContainsString('stk ON stk.root_id = p.id_producto', $parts[$key], $key);
+            $this->assertStringContainsString('SUM(COALESCE(ia.cantidad_actual, 0)) AS stock_familia', $parts[$key], $key);
+            // Los ids de almacén vendible se incrustan como lista literal, no como placeholder.
+            $this->assertStringContainsString('ia.id_almacen IN (1)', $parts[$key], $key);
+        }
+    }
+
+    public function testCatalogBuildQueriesDefaultKeepsAgotadosVisible(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', ''); // incluirAgotados = true por defecto
+
+        $this->assertStringNotContainsString('COALESCE(stk.stock_familia, 0) > 0', $parts['sql_main']);
+        $this->assertStringNotContainsString('COALESCE(stk.stock_familia, 0) > 0', $parts['sql_count']);
+    }
+
+    public function testCatalogBuildQueriesHidesAgotadosInBothQueriesWhenToggledOff(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '', false);
+
+        $this->assertStringContainsString('COALESCE(stk.stock_familia, 0) > 0', $parts['sql_main']);
+        $this->assertStringContainsString('COALESCE(stk.stock_familia, 0) > 0', $parts['sql_count']);
+    }
+
+    public function testCatalogBuildQueriesWithoutFiltersHasNoBoundParams(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '');
+        $this->assertSame([], $parts['params']);
+    }
+
+    public function testCatalogBuildQueriesBindsCategoryAndSearchParams(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), 'Suplementos', 'omega', false);
+
+        $this->assertArrayHasKey(':cat', $parts['params']);
+        $this->assertSame('Suplementos', $parts['params'][':cat']);
+        $this->assertStringContainsString('JOIN producto_categorias', $parts['sql_main']);
+        $this->assertStringContainsString('JOIN producto_categorias', $parts['sql_count']);
+
+        foreach ([':search_name', ':search_code', ':search_variant', ':search_ex', ':search_ex_code', ':search_ex_variant'] as $p) {
+            $this->assertArrayHasKey($p, $parts['params']);
+            $this->assertSame('%omega%', $parts['params'][$p]);
+        }
+
+        // El filtro de agotados y los de categoría/búsqueda conviven en el mismo WHERE.
+        $this->assertStringContainsString('COALESCE(stk.stock_familia, 0) > 0', $parts['sql_main']);
+    }
+
     public function testCatalogBuildPaginationMetaReturnsExpectedHasMore(): void
     {
         $metaPage1 = catalogBuildPaginationMeta(20, 9, 1);
