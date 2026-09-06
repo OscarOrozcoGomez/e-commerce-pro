@@ -447,6 +447,30 @@ include __DIR__ . '/includes/header.php';
                         }
                     }
 
+                    // 2b. Cápsulas por envase / por porción (Control de Caducidades).
+                    //     - Envase: el número del título de la variante ("200 Caps | 500 mg" -> 200).
+                    //     - Porción: el número del modo de uso ("dosis sugerida de 2 cápsulas" -> 2;
+                    //       "dos (2) cápsulas" -> 2). Si no es un producto en cápsulas, se deja vacío.
+                    const capEnvaseEl = document.getElementById('capsulas_por_envase');
+                    const capPorcionEl = document.getElementById('porcion_capsulas');
+                    if (capEnvaseEl && capPorcionEl) {
+                        const esCapsulas = /\b(c[aá]ps?|c[aá]psulas?|softgels?|tabletas?|tabs?)\b/i.test(varTitle + ' ' + (fullData.producto.title || ''));
+                        if (esCapsulas) {
+                            const mEnv = (varTitle.match(/(\d+)\s*(c[aá]ps?|c[aá]psulas?|softgels?|tabletas?|tabs?)\b/i)
+                                || (fullData.producto.description || '').match(/(\d+)\s*(c[aá]psulas?|softgels?|tabletas?)\b/i));
+                            if (mEnv) capEnvaseEl.value = mEnv[1];
+
+                            const usoTxt = fullData.producto.mode_use || '';
+                            const unidadRe = '(?:c[aá]psulas?|softgels?|tabletas?|comprimidos?)';
+                            const mPor = usoTxt.match(new RegExp('\\((\\d+)\\)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe, 'i'))  // "dos (2) cápsulas"
+                                || usoTxt.match(new RegExp('(\\d+)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe + '\\b', 'i'));      // "1 (una) cápsula", "de 4 cápsulas", "2 softgels"
+                            if (mPor) capPorcionEl.value = mPor[1];
+
+                            // Recalcular el "Rinde ≈ N días" que escucha el evento input.
+                            capEnvaseEl.dispatchEvent(new Event('input'));
+                        }
+                    }
+
                     // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
                     if (fullData.producto.title)
                         document.getElementById('nombre').value = fullData.producto.title;
