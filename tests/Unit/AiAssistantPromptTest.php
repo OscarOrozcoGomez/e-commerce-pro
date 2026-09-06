@@ -106,6 +106,14 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('nunca uses las palabras "error", "falla" ni "sistema"', $prompt);
     }
 
+    public function testSystemPromptTellsAlexHowToHandleNonTextMessages(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('no son texto', $prompt);
+        $this->assertStringContainsString('Nunca ignores ese mensaje', $prompt);
+    }
+
     public function testSystemPromptIncludesContinuityRule(): void
     {
         $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
@@ -317,5 +325,22 @@ final class AiAssistantPromptTest extends TestCase
         ];
 
         $this->assertSame('', aiBuildFewShotBlock($reglas));
+    }
+
+    public function testSystemPromptHidesPedidoAgendadoTagFromAlex(): void
+    {
+        $etiquetas = [
+            ['nombre' => 'Cliente Frecuente'],
+            ['nombre' => AI_TAG_PEDIDO_AGENDADO],
+            ['nombre' => 'Mayoreo'],
+        ];
+
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null, $etiquetas);
+
+        // Alex ve las demas etiquetas pero NUNCA "Pedido Agendado": esa la pone
+        // solo el codigo al confirmar un pedido real.
+        $this->assertStringContainsString('Cliente Frecuente', $prompt);
+        $this->assertStringContainsString('Mayoreo', $prompt);
+        $this->assertStringNotContainsString(AI_TAG_PEDIDO_AGENDADO, $prompt);
     }
 }

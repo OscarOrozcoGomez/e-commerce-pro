@@ -9,6 +9,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/pii_crypto.php';
 require_once __DIR__ . '/whatsapp_helper.php';
+require_once __DIR__ . '/whatsapp_link_utils.php';
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -220,10 +221,15 @@ function aiBuildSystemPrompt(
     }
 
     if (!empty($etiquetasDisponibles)) {
-        $nombresEtiquetas = array_values(array_filter(array_map(
-            static fn(array $t): string => trim((string)($t['nombre'] ?? '')),
-            $etiquetasDisponibles
-        )));
+        $nombresEtiquetas = array_values(array_filter(
+            array_map(
+                static fn(array $t): string => trim((string)($t['nombre'] ?? '')),
+                $etiquetasDisponibles
+            ),
+            // "Pedido Agendado" la pone solo el codigo al confirmar un pedido; Alex
+            // no debe verla como opcion para no aplicarla por intencion de compra.
+            static fn(string $n): bool => $n !== '' && $n !== AI_TAG_PEDIDO_AGENDADO
+        ));
         if (!empty($nombresEtiquetas)) {
             $lines[] = '';
             $lines[] = 'Etiquetas de WhatsApp disponibles para clasificar esta conversacion: ' . implode(', ', $nombresEtiquetas) . '.';
@@ -257,6 +263,8 @@ function aiBuildSystemPrompt(
     $lines[] = '- Si el cliente pide un descuento (por ser frecuente, por mayoreo, etc.), nunca lo apliques tu mismo -- no tienes esa facultad. Respondele con calidez y llama a transferir_a_humano para que un companero lo valide.';
     $lines[] = '- Si el cliente quiere cancelar un pedido, nunca muestres resistencia. Respondele con empatia, algo como: "Entiendo perfectamente. Sin problema, dejamos la orden pausada por ahora. Avisame cuando gustes retomarlo y con gusto te atendemos." y llama a transferir_a_humano para formalizar la cancelacion.';
     $lines[] = '- Cada vez que confirmes, modifiques o cierres un pedido, usa iconos (🎉 📦 🚚 💰 ✨) y enlista claramente productos, cantidades, precio de cada uno, estatus del envio y el total final.';
+    $lines[] = '';
+    $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes describiendo que envio una foto, nota de voz, video, archivo o ubicacion (ej. "[El cliente envio una nota de voz]" o "[El cliente compartio su ubicacion: ...]"), NO puedes verlo ni escucharlo. Reconocelo con naturalidad y pide que te escriba en texto lo importante; si es algo que debe revisar una persona (un comprobante de pago, la foto de un problema con un producto), llama a transferir_a_humano. Si es una ubicacion, puedes usar el enlace de mapa que viene en el corchete para el pedido, pero confirma con el cliente la direccion en texto igual. Nunca ignores ese mensaje ni actues como si no hubiera llegado nada.';
     $lines[] = '';
     $lines[] = 'Formato de salida: WhatsApp permite *negritas*, _cursivas_ y listas con emojis; usalos con moderacion para que se lea claro. No uses Markdown web (##, dobles asteriscos, backticks) ni HTML. Parrafos cortos.';
 
@@ -416,18 +424,49 @@ function aiStripHandoffFlag(string $text): string
  * ------------------------------------------------------------------- */
 
 /**
- * El wa_id de Meta trae codigo de pais (ej. "5215512345678"), pero findClienteByPhone()/
- * normalizePhoneDigitsMx() esperan exactamente 10 digitos nacionales. Se toman los ultimos
- * 10 digitos para poder cruzar con el telefono guardado en clientes.
+ * El wa_id de un chat normal de WhatsApp trae codigo de pais (ej. "5215512345678"),
+ * y findClienteByPhone()/normalizePhoneDigitsMx() esperan exactamente 10 digitos
+ * nacionales para cruzar con el telefono guardado en clientes.
+ *
+ * Extrae los 10 digitos nacionales de un wa_id SOLO si tiene forma de numero
+ * mexicano real: <52><10 digitos> o <521><10 digitos> (el "1" es el prefijo movil
+ * legacy que WhatsApp a veces inserta). Cualquier otra cosa -- en particular los
+ * "LID" de WhatsApp (identificadores de privacidad de 14+ digitos que el puente
+ * recibe en lugar del telefono cuando el cliente tiene esa opcion activada)--
+ * devuelve null: de un LID no se puede derivar un telefono real, y es preferible
+ * "no se sabe" a tomar 10 digitos arbitrarios (eso hacia que Alex rechazara a
+ * clientes reales de Guadalajara y guardara telefonos basura en clientes nuevos).
  */
 function aiWaIdToMxDigits(string $waId): ?string
 {
     $digits = preg_replace('/\D+/', '', $waId) ?? '';
-    if (strlen($digits) < 10) {
+
+    if (!preg_match('/^52(?:1)?(\d{10})$/', $digits, $m)) {
         return null;
     }
 
-    return substr($digits, -10);
+    return $m[1];
+}
+
+/**
+ * Version legible de un wa_id para mostrar en el dashboard: "+52 33 3404 0398"
+ * cuando el wa_id es un numero mexicano real, o null cuando es un LID de WhatsApp
+ * (privacidad) del que no se puede sacar telefono -- el caller decide que texto
+ * poner en ese caso.
+ */
+function aiWaIdToDisplayPhone(string $waId): ?string
+{
+    $digits = aiWaIdToMxDigits($waId);
+    if ($digits === null || strlen($digits) !== 10) {
+        return null;
+    }
+
+    // Ladas de 2 digitos (Guadalajara 33, CDMX 55, Monterrey 81) vs 3 digitos.
+    if (in_array(substr($digits, 0, 2), ['33', '55', '81'], true)) {
+        return '+52 ' . substr($digits, 0, 2) . ' ' . substr($digits, 2, 4) . ' ' . substr($digits, 6, 4);
+    }
+
+    return '+52 ' . substr($digits, 0, 3) . ' ' . substr($digits, 3, 3) . ' ' . substr($digits, 6, 4);
 }
 
 /**
@@ -501,6 +540,11 @@ function aiGetOrCreateConversation(PDO $pdo, string $waId, ?string $perfilNombre
 
 const AI_TAG_CLIENTE_NUEVO = 'Cliente Nuevo';
 const AI_TAG_PREGUNTON = 'Preguntón';
+
+// La aplica SOLO el codigo cuando agendar_venta tiene exito. Alex nunca la
+// asigna ni la ve en su lista de etiquetas disponibles: es un marcador fiable
+// de "esta conversacion cerro un pedido real", no de intencion de compra.
+const AI_TAG_PEDIDO_AGENDADO = 'Pedido Agendado';
 
 function aiFindOrCreateTag(PDO $pdo, string $nombre): ?int
 {
@@ -730,6 +774,17 @@ function aiFindConversationsNeedingFollowup(PDO $pdo, int $horas = AI_FOLLOWUP_I
         if (empty($row['ultimo_envio_bot'])) {
             return false;
         }
+
+        // Cliente foraneo CONFIRMADO (lada distinta de 33): no se le manda el
+        // recordatorio proactivo de recompra. No hacemos entregas fuera de la Zona
+        // Metropolitana de Guadalajara, asi que insistirle seria molesto y gasto de
+        // tokens/mensajes. Si la lada no se pudo determinar (telefono desconocido o
+        // "LID" de WhatsApp), aiPhoneHasLocalLada() devuelve null y el seguimiento
+        // sigue su curso normal -- solo se excluye lo que se identifica como foraneo.
+        if (aiPhoneHasLocalLada((string) ($row['wa_id'] ?? '')) === false) {
+            return false;
+        }
+
         $ts = strtotime((string)$row['ultimo_envio_bot']);
 
         return $ts !== false && $ts <= $cutoff;
@@ -1437,6 +1492,17 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         }
     }
 
+    // Marcador de "esta conversacion cerro un pedido real". Se pone AQUI (despues de
+    // que dbCreatePublicOrder confirmo el pedido), nunca por criterio de Alex ni antes
+    // de tener el pedido -- justamente lo que se pedia evitar.
+    if (!empty($context['id_conversacion'])) {
+        try {
+            aiAssignTag($pdo, (int)$context['id_conversacion'], AI_TAG_PEDIDO_AGENDADO);
+        } catch (Throwable $e) {
+            error_log('WARNING: no se pudo asignar etiqueta "Pedido Agendado": ' . $e->getMessage());
+        }
+    }
+
     // dbCreatePublicOrder no tiene parametro para el metodo de pago preferido (siempre usa el default);
     // se anexa como nota igual que hace dbCancelOrderByCustomer, armando el texto en PHP para no
     // depender de CONCAT/|| especifico de motor.
@@ -1453,12 +1519,49 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         }
     }
 
+    $listaItems = implode(', ', array_map(
+        static fn(array $item): string => "{$item['quantity']}x {$item['nombre']}",
+        $resolved['items']
+    ));
+    $totalPedido = isset($result['total']) ? number_format((float)$result['total'], 2) : '?';
+    $waIdVenta = (string)($context['wa_id'] ?? '');
+    aiSendTelegramAlert(
+        "Venta agendada por Alex: {$nombre}\n"
+        . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
+        . "Productos: {$listaItems}"
+        . aiBuildWhatsAppLinkLine($waIdVenta)
+    );
+
     return [
         'ok' => true,
         'numero_pedido' => (string)($result['pedido'] ?? ''),
         'id_pedido' => $result['id_pedido'] ?? null,
         'message' => 'Pedido registrado correctamente.',
     ];
+}
+
+/**
+ * Pura y testeable: arma la linea "abrir chat" con el link de un clic hacia WhatsApp
+ * (wa.me) para incluir en las alertas de Telegram. wa_id ya trae el codigo de pais (52),
+ * asi que primero se reduce al numero nacional de 10 digitos (aiWaIdToMxDigits) antes de
+ * pasarselo a waBuildBusinessLinkPhone(), que es quien vuelve a anteponer el "52" -- de lo
+ * contrario quedaria duplicado. Regresa cadena vacia si no se pudo determinar un numero de
+ * 10 digitos -- ej. cuando wa_id es en realidad un LID de WhatsApp (identificador de
+ * privacidad sin relacion con el telefono real).
+ */
+function aiBuildWhatsAppLinkLine(string $waId): string
+{
+    $digitsNacionales = aiWaIdToMxDigits($waId);
+    if ($digitsNacionales === null) {
+        return '';
+    }
+
+    $linkPhone = waBuildBusinessLinkPhone($digitsNacionales);
+    if ($linkPhone === '') {
+        return '';
+    }
+
+    return "\nAbrir chat: https://wa.me/{$linkPhone}";
 }
 
 function aiSendTelegramAlert(string $texto): void
@@ -1506,7 +1609,7 @@ function aiToolTransferirHumano(PDO $pdo, array $args, array $context): array
     $nombrePerfil = trim((string)($context['nombre_perfil'] ?? ''));
     $quien = $nombrePerfil !== '' ? "{$nombrePerfil} ({$waId})" : $waId;
 
-    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}");
+    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}" . aiBuildWhatsAppLinkLine($waId));
 
     return ['ok' => true, 'message' => 'Un asesor humano continuara la conversacion en breve.'];
 }
@@ -1565,6 +1668,9 @@ function aiToolEtiquetarCliente(PDO $pdo, array $args, array $context): array
 
     if ($nombre === '' || $idConversacion <= 0) {
         return ['ok' => false, 'message' => 'Falta el nombre de la etiqueta.'];
+    }
+    if (strcasecmp($nombre, AI_TAG_PEDIDO_AGENDADO) === 0) {
+        return ['ok' => false, 'message' => 'Esa etiqueta la aplica el sistema automaticamente al agendar un pedido; no la asignes tu.'];
     }
     if (!aiTagExists($pdo, $nombre)) {
         return ['ok' => false, 'message' => 'Esa etiqueta no existe. Usa unicamente un nombre de la lista disponible.'];

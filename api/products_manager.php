@@ -392,11 +392,47 @@ try {
 
             dbSetProductCategories($id, $data['categorias'] ?? []);
             
-            if (isAdmin()) {
-                $id_alm = (int)($data['id_almacen_stock'] ?? 1);
-                $stmtInv = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo) 
-                                          VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
-                $stmtInv->execute([$id, $id_alm, (int)($data['cantidad_actual'] ?? 0), (int)($data['stock_minimo'] ?? 2), (int)($data['stock_maximo'] ?? 5)]);
+            // El inventario_almacen SOLO se escribe si el usuario editó a propósito los campos
+            // de stock de la ficha (stock_touched=1). Antes esto corría en cada guardado, así
+            // que cambiar el nombre/foto/precio de un producto reescribía cantidad_actual,
+            // stock_minimo y stock_maximo del almacén seleccionado (y con el selector de la
+            // lista podía terminar escribiendo en el almacén equivocado).
+            if (isAdmin() && ($data['stock_touched'] ?? '0') === '1') {
+                $id_alm = (int)($data['id_almacen_stock'] ?? 0);
+                if ($id_alm > 0) {
+                    $nuevaCantidad = max(0, (int)($data['cantidad_actual'] ?? 0));
+                    $nuevoMin = max(0, (int)($data['stock_minimo'] ?? 2));
+                    // 0 es válido: "sin objetivo de reorden" para almacenes que no se resurten.
+                    $nuevoMax = max(0, (int)($data['stock_maximo'] ?? 5));
+
+                    // Existencias previas en ese almacén, para el registro de auditoría.
+                    $stmtPrev = $pdo->prepare("SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?");
+                    $stmtPrev->execute([$id, $id_alm]);
+                    $prevRaw = $stmtPrev->fetchColumn();
+                    $cantidadPrevia = ($prevRaw === false) ? null : (int)$prevRaw;
+
+                    $stmtInv = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
+                                              VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
+                    $stmtInv->execute([$id, $id_alm, $nuevaCantidad, $nuevoMin, $nuevoMax]);
+
+                    // Auditoría: dejar rastro del ajuste manual de existencias. Si la tabla de
+                    // movimientos falla, no se rompe el guardado del producto.
+                    if ($cantidadPrevia === null || $cantidadPrevia !== $nuevaCantidad) {
+                        try {
+                            $delta = $nuevaCantidad - (int)($cantidadPrevia ?? 0);
+                            $obs = sprintf(
+                                'Ajuste manual desde ficha de producto (antes: %s, despues: %d)',
+                                $cantidadPrevia === null ? 'sin registro' : (string)$cantidadPrevia,
+                                $nuevaCantidad
+                            );
+                            $stmtMov = $pdo->prepare("INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_destino, cantidad, id_usuario, observacion)
+                                                      VALUES (?, 'ajuste', ?, ?, ?, ?)");
+                            $stmtMov->execute([$id, $id_alm, $delta, $_SESSION['usuario']['id_usuario'] ?? null, $obs]);
+                        } catch (Throwable $movErr) {
+                            error_log('products_manager: no se pudo registrar movimiento de ajuste: ' . $movErr->getMessage());
+                        }
+                    }
+                }
             }
 
             echo json_encode(['success' => true, 'message' => 'Producto guardado con éxito']);

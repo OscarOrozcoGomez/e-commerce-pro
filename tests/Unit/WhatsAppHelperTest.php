@@ -49,6 +49,46 @@ final class WhatsAppHelperTest extends TestCase
         $this->assertTrue($result['from_me']);
     }
 
+    public function testParseBridgePayloadCarriesMessageKindAndDefaultsToText(): void
+    {
+        $audio = waParseBridgePayload([
+            'sender_phone' => '5213312345',
+            'message' => '[El cliente envio una nota de voz]',
+            'message_kind' => 'audio',
+        ]);
+        $this->assertNotNull($audio);
+        $this->assertSame('audio', $audio['message_kind']);
+        $this->assertSame('[El cliente envio una nota de voz]', $audio['texto']);
+
+        // Puente viejo que no manda message_kind -> 'text'.
+        $viejo = waParseBridgePayload(['sender_phone' => '5213312345', 'message' => 'Hola']);
+        $this->assertNotNull($viejo);
+        $this->assertSame('text', $viejo['message_kind']);
+    }
+
+    public function testParseBridgePayloadExtractsProfileNameAndSenderJid(): void
+    {
+        $result = waParseBridgePayload([
+            'sender_phone' => '5213312345',
+            'message' => 'Hola',
+            'profile_name' => 'Juan Pérez',
+            'sender_jid' => '53236337742009@lid',
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertSame('Juan Pérez', $result['profile_name']);
+        $this->assertSame('53236337742009@lid', $result['sender_jid']);
+    }
+
+    public function testParseBridgePayloadProfileNameDefaultsToEmptyForOldBridge(): void
+    {
+        $result = waParseBridgePayload(['sender_phone' => '5213312345', 'message' => 'Hola']);
+
+        $this->assertNotNull($result);
+        $this->assertSame('', $result['profile_name']);
+        $this->assertSame('', $result['sender_jid']);
+    }
+
     public function testParseBridgePayloadReturnsNullWhenPhoneOrMessageMissing(): void
     {
         $this->assertNull(waParseBridgePayload(['message' => 'Hola']));

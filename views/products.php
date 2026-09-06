@@ -236,6 +236,10 @@ include __DIR__ . '/includes/header.php';
                         <?php if (isAdmin()): ?>
                         <div class="row grey lighten-4" style="padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
                             <div class="col s12"><p style="margin:0 0 10px 0;"><strong>Control de Inventario</strong></p></div>
+                            <!-- Solo se escribe inventario_almacen si el usuario tocó de verdad alguno de los
+                                 3 campos de abajo. Sin esto, guardar cualquier cambio de la ficha (nombre,
+                                 foto, precio) reescribía el stock del almacén seleccionado. -->
+                            <input type="hidden" name="stock_touched" id="stock_touched" value="0">
                             <div class="input-field col s12">
                                 <select name="id_almacen_stock" id="id_almacen_stock" class="browser-default" style="border: 1px solid #ccc;">
                                     <!-- Almacenes vía JS -->
@@ -251,7 +255,7 @@ include __DIR__ . '/includes/header.php';
                                 <label for="stock_minimo" class="active">Stock Mínimo</label>
                             </div>
                             <div class="input-field col s4">
-                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="1">
+                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="0">
                                 <label for="stock_maximo" class="active">Stock Máximo</label>
                             </div>
                         </div>
@@ -592,6 +596,12 @@ include __DIR__ . '/includes/header.php';
     document.addEventListener('DOMContentLoaded', () => {
         cargarDependencias();
 
+        // El inventario solo se guarda si el usuario editó a propósito uno de estos campos.
+        ['cantidad_actual', 'stock_minimo', 'stock_maximo'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', marcarStockTocado);
+        });
+
         // Actualizar previsualización cuando se mueva el toggle de mostrar/ocultar
         document.getElementById('mostrar_tabla')?.addEventListener('change', renderNutritionalPreview);
 
@@ -757,6 +767,16 @@ include __DIR__ . '/includes/header.php';
                 tbody.innerHTML = html;
                 aplicarFiltros();
                 autoOpenPendingEdit(res.data);
+
+                // Si hay una ficha en edición, mantener sus campos de stock alineados con el
+                // almacén que ahora se está viendo (evita "muestra el stock del almacén A y
+                // guarda en el almacén B").
+                const accion = document.getElementById('accion');
+                const idProdEditando = document.getElementById('id_producto');
+                if (accion && accion.value === 'editar' && idProdEditando && idProdEditando.value) {
+                    const prodActual = res.data.find(p => String(p.id_producto) === String(idProdEditando.value));
+                    if (prodActual) sincronizarCamposStock(prodActual);
+                }
             })
             .catch(err => {
                 tbody.innerHTML = `<tr><td colspan="8" class="center red-text">${err.message}</td></tr>`;
@@ -849,11 +869,18 @@ include __DIR__ . '/includes/header.php';
         return Math.max(0, parseInt(p?.cantidad_actual ?? p?.chat_stock ?? p?.total_stock) || 0);
     }
 
+    // Umbral de stock respetando el 0: solo cae al default si el valor viene nulo/indefinido.
+    // (0 || default lo pisaba, y por eso la lista seguía pintando "2 / 5" tras poner 0 en la BD.)
+    function stockThreshold(value, fallback) {
+        const n = Number(value);
+        return (value === null || value === undefined || value === '' || Number.isNaN(n)) ? fallback : n;
+    }
+
     function renderRow(p) {
         let imgSrc = getProductImgUrl(p.imagen);
         const hasImg = !!imgSrc;
         const stockActual = getNormalizedProductStock(p);
-        const isLow = stockActual <= (parseInt(p.stock_minimo) || 2);
+        const isLow = stockActual <= stockThreshold(p.stock_minimo, 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
@@ -875,8 +902,8 @@ include __DIR__ . '/includes/header.php';
                     </span>
                 </td>
                 <td class="center-align">
-                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${p.stock_minimo || 2}</strong></span> / 
-                    <span class="blue-text text-darken-2" title="Máximo"><strong>${p.stock_maximo || 5}</strong></span>
+                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${stockThreshold(p.stock_minimo, 2)}</strong></span> /
+                    <span class="blue-text text-darken-2" title="Máximo"><strong>${stockThreshold(p.stock_maximo, 5)}</strong></span>
                 </td>
                 <td>
                     <button type="button" class="btn-floating btn-small blue waves-effect waves-light" onclick='abrirEditar(${jsonP})'>
@@ -969,6 +996,28 @@ include __DIR__ . '/includes/header.php';
 
     // Mantener las funciones de UI existentes pero adaptadas
 
+    function marcarStockTocado() {
+        const flag = document.getElementById('stock_touched');
+        if (flag) flag.value = '1';
+    }
+
+    function resetStockTouched() {
+        const flag = document.getElementById('stock_touched');
+        if (flag) flag.value = '0';
+    }
+
+    // Rellena los 3 campos de stock de la ficha con la fila del almacén dado, sin marcar
+    // stock_touched. Se usa al abrir la ficha y al cambiar el almacén de la lista mientras
+    // se edita, para que lo que se ve siempre corresponda al almacén que se guardará.
+    function sincronizarCamposStock(prod) {
+        if (!document.getElementById('stock_minimo')) return;
+        document.getElementById('cantidad_actual').value = prod?.cantidad_actual ?? 0;
+        document.getElementById('stock_minimo').value = prod?.stock_minimo ?? 2;
+        document.getElementById('stock_maximo').value = prod?.stock_maximo ?? 5;
+        resetStockTouched();
+        if (window.M && M.updateTextFields) M.updateTextFields();
+    }
+
     function abrirEditar(prod) {
         const currentViewWarehouse = document.getElementById('almacen_view_selector')?.value || '';
         const stockWarehouseSelector = document.getElementById('id_almacen_stock');
@@ -1044,11 +1093,7 @@ include __DIR__ . '/includes/header.php';
         const checkVisible = document.getElementById('visible_catalogo');
         checkVisible.checked = (prod.estado === 'activo');
         
-        if (document.getElementById('stock_minimo')) {
-            document.getElementById('cantidad_actual').value = prod.cantidad_actual || 0;
-            document.getElementById('stock_minimo').value = prod.stock_minimo || 2;
-            document.getElementById('stock_maximo').value = prod.stock_maximo || 5;
-        }
+        sincronizarCamposStock(prod);
         
         // Manejo de select múltiple
         const selectCats = document.querySelector('select[name="categorias[]"]');
@@ -1085,7 +1130,8 @@ include __DIR__ . '/includes/header.php';
     
     function cancelarEdicion() {
         document.getElementById('form-producto').reset();
-        colaImagenes = []; 
+        resetStockTouched();
+        colaImagenes = [];
         renderPreviews();
         document.getElementById('blife_id').value = '';
         document.getElementById('remote_images_urls').value = '';
