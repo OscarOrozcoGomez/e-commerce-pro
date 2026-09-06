@@ -207,7 +207,7 @@ include __DIR__ . '/includes/header.php';
                                 <label for="stock_minimo" class="active">Stock Mínimo</label>
                             </div>
                             <div class="input-field col s4">
-                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="1">
+                                <input type="number" id="stock_maximo" name="stock_maximo" value="5" min="0">
                                 <label for="stock_maximo" class="active">Stock Máximo</label>
                             </div>
                         </div>
@@ -807,11 +807,18 @@ include __DIR__ . '/includes/header.php';
         return Math.max(0, parseInt(p?.cantidad_actual ?? p?.chat_stock ?? p?.total_stock) || 0);
     }
 
+    // Umbral de stock respetando el 0: solo cae al default si el valor viene nulo/indefinido.
+    // (0 || default lo pisaba, y por eso la lista seguía pintando "2 / 5" tras poner 0 en la BD.)
+    function stockThreshold(value, fallback) {
+        const n = Number(value);
+        return (value === null || value === undefined || value === '' || Number.isNaN(n)) ? fallback : n;
+    }
+
     function renderRow(p) {
         let imgSrc = getProductImgUrl(p.imagen);
         const hasImg = !!imgSrc;
         const stockActual = getNormalizedProductStock(p);
-        const isLow = stockActual <= (parseInt(p.stock_minimo) || 2);
+        const isLow = stockActual <= stockThreshold(p.stock_minimo, 2);
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
@@ -833,8 +840,8 @@ include __DIR__ . '/includes/header.php';
                     </span>
                 </td>
                 <td class="center-align">
-                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${p.stock_minimo || 2}</strong></span> / 
-                    <span class="blue-text text-darken-2" title="Máximo"><strong>${p.stock_maximo || 5}</strong></span>
+                    <span class="orange-text text-darken-2" title="Mínimo"><strong>${stockThreshold(p.stock_minimo, 2)}</strong></span> /
+                    <span class="blue-text text-darken-2" title="Máximo"><strong>${stockThreshold(p.stock_maximo, 5)}</strong></span>
                 </td>
                 <td>
                     <button type="button" class="btn-floating btn-small blue waves-effect waves-light" onclick='abrirEditar(${jsonP})'>

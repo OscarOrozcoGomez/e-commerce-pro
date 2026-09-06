@@ -391,7 +391,8 @@ try {
                 if ($id_alm > 0) {
                     $nuevaCantidad = max(0, (int)($data['cantidad_actual'] ?? 0));
                     $nuevoMin = max(0, (int)($data['stock_minimo'] ?? 2));
-                    $nuevoMax = max(1, (int)($data['stock_maximo'] ?? 5));
+                    // 0 es válido: "sin objetivo de reorden" para almacenes que no se resurten.
+                    $nuevoMax = max(0, (int)($data['stock_maximo'] ?? 5));
 
                     // Existencias previas en ese almacén, para el registro de auditoría.
                     $stmtPrev = $pdo->prepare("SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?");
