@@ -489,6 +489,17 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
+                        <span class="card-title">Notificaciones de Caducidades</span>
+                        <p>Correos que avisan cuando un lote cambia de severidad (para ponerlo en oferta a tiempo)</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/notificaciones_caducidades.php" class="btn waves-effect waves-light orange darken-3">Configurar</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
                         <span class="card-title">Cancelaciones de Pedidos</span>
                         <p>Consulta los motivos por los que tus clientes cancelan sus pedidos</p>
                     </div>
