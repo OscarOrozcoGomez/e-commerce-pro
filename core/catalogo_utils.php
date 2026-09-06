@@ -460,9 +460,9 @@ function catalogRenderProductCard(array $p): string
 }
 
 /**
- * @return array{sql_main:string, sql_count:string, params:array<string,mixed>}
+ * @return array{sql_main:string, sql_count:string, order_by:string, params:array<string,mixed>}
  */
-function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): array
+function catalogBuildQueries(PDO $pdo, string $categoriaSeleccionada, string $busqueda, bool $incluirAgotados = true): array
 {
     // Nota de rendimiento: las versiones anteriores de estas 4 subconsultas usaban
     // condiciones "OR" (p3.id_producto = p.id_producto OR p3.id_padre = p.id_producto)
@@ -509,11 +509,33 @@ function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): a
         ) fam ON fam.root_id = p.id_producto";
 
     $sqlCount = 'SELECT COUNT(DISTINCT TRIM(p.nombre)) FROM productos p';
+
+    // Stock vendible de la FAMILIA (producto raíz + variantes) sumado sobre los almacenes
+    // que sí surten pedidos públicos. Se usa para (a) ordenar dejando los agotados al final
+    // y (b) ocultarlos cuando el usuario no pidió verlos. Misma tabla derivada + LEFT JOIN
+    // que 'fam' (una sola vez para toda la página, no una subconsulta por fila).
+    $sellableIds = array_values(array_filter(array_map('intval', getPublicSellableWarehouseIds($pdo))));
+    $whInList = $sellableIds ? implode(',', $sellableIds) : '0';
+    $stkJoin = " LEFT JOIN (
+            SELECT COALESCE(NULLIF(pr.id_padre, 0), pr.id_producto) AS root_id,
+                   SUM(COALESCE(ia.cantidad_actual, 0)) AS stock_familia
+            FROM productos pr
+            LEFT JOIN inventario_almacen ia
+                   ON ia.id_producto = pr.id_producto AND ia.id_almacen IN ($whInList)
+            GROUP BY root_id
+        ) stk ON stk.root_id = p.id_producto";
+    $sqlMain  .= $stkJoin;
+    $sqlCount .= $stkJoin;
+
     $params = [];
     $whereClauses = [
         "(p.id_padre IS NULL OR p.id_padre = 0)",
         "(p.estado = 'activo' OR EXISTS (SELECT 1 FROM productos p_child WHERE p_child.id_padre = p.id_producto AND p_child.estado = 'activo'))",
     ];
+
+    if (!$incluirAgotados) {
+        $whereClauses[] = 'COALESCE(stk.stock_familia, 0) > 0';
+    }
 
     if ($categoriaSeleccionada !== '') {
         $joins = ' JOIN producto_categorias pc ON p.id_producto = pc.id_producto JOIN categorias c ON pc.id_categoria = c.id_categoria ';
@@ -546,6 +568,8 @@ function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): a
     return [
         'sql_main' => $sqlMain,
         'sql_count' => $sqlCount,
+        // Disponibles primero, agotados al final; dentro de cada grupo, alfabético.
+        'order_by' => 'ORDER BY (COALESCE(stk.stock_familia, 0) > 0) DESC, p.nombre ASC',
         'params' => $params,
     ];
 }
@@ -553,7 +577,7 @@ function catalogBuildQueries(string $categoriaSeleccionada, string $busqueda): a
 /**
  * @return array{productos:array<int,array<string,mixed>>, total:int, timings:array{count_ms:float, query_ms:float, collapse_ms:float, total_ms:float}}
  */
-function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, string $busqueda, int $page, int $itemsPerPage, bool $accumulated = false): array
+function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, string $busqueda, int $page, int $itemsPerPage, bool $accumulated = false, bool $incluirAgotados = true): array
 {
     $startMs = catalogPerfNowMs();
     $safePage = max(1, $page);
@@ -562,7 +586,7 @@ function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, strin
     $limit = $accumulated ? ($safePage * $safePerPage) : $safePerPage;
     $offset = $accumulated ? 0 : (($safePage - 1) * $safePerPage);
 
-    $parts = catalogBuildQueries($categoriaSeleccionada, $busqueda);
+    $parts = catalogBuildQueries($pdo, $categoriaSeleccionada, $busqueda, $incluirAgotados);
 
     $countStartMs = catalogPerfNowMs();
     $stmtCount = $pdo->prepare($parts['sql_count']);
@@ -572,7 +596,7 @@ function catalogFetchProductsPage(PDO $pdo, string $categoriaSeleccionada, strin
     $countMs = round(catalogPerfNowMs() - $countStartMs, 2);
 
     $queryStartMs = catalogPerfNowMs();
-    $sqlMain = $parts['sql_main'] . ' ORDER BY p.nombre ASC LIMIT :limit OFFSET :offset';
+    $sqlMain = $parts['sql_main'] . ' ' . $parts['order_by'] . ' LIMIT :limit OFFSET :offset';
     $stmtMain = $pdo->prepare($sqlMain);
     catalogBindNamedParams($stmtMain, $parts['params']);
     $stmtMain->bindValue(':limit', $limit, PDO::PARAM_INT);
