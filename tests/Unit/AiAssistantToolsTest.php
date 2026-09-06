@@ -664,6 +664,99 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNull(aiWaIdToDisplayPhone('120363402368777906')); // LID
     }
 
+    public function testAiPhoneHasLocalLadaDistinguishesFromOtherJaliscoLadasStartingWithThree(): void
+    {
+        // Caso real: un pedido se agendo para Villa Purificacion, Jalisco (fuera de la
+        // Zona Metropolitana de Guadalajara) sin que se marcara como fuera de zona.
+        // Riesgo estructural: la lada de Guadalajara (33) es de 2 digitos, pero varias
+        // ladas de OTRAS regiones de Jalisco tienen 3 digitos y tambien empiezan con "3"
+        // -- una comparacion descuidada (ej. solo el primer digito) las confundiria.
+        // aiPhoneHasLocalLada() compara substr(0, strlen('33')) == '33', exactamente 2
+        // caracteres, asi que una lada de 3 digitos que empiece "3X" nunca puede calzar.
+        $this->assertFalse(aiPhoneHasLocalLada('5213171234567')); // lada 317 (region Autlan/Villa Purificacion)
+        $this->assertFalse(aiPhoneHasLocalLada('5213221234567')); // lada 322 (Puerto Vallarta)
+        $this->assertFalse(aiPhoneHasLocalLada('5213411234567')); // lada 341 (region Autlan)
+        $this->assertFalse(aiPhoneHasLocalLada('5213751234567')); // lada 375 (Ciudad Guzman)
+        $this->assertFalse(aiPhoneHasLocalLada('5213421234567')); // lada 342 (Tepatitlan)
+    }
+
+    public function testAiPhoneHasLocalLadaAcceptsCustomLadaParameter(): void
+    {
+        // El segundo parametro es reusable para otra zona/lada si algun dia se necesita
+        // (hoy siempre se llama con el default '33' desde aiBuildSystemPrompt()).
+        $this->assertTrue(aiPhoneHasLocalLada('5215512345678', '55'));
+        $this->assertFalse(aiPhoneHasLocalLada('5213312345678', '55'));
+    }
+
+    public function testAiWaIdToMxDigitsRejectsNonMexicanCountryCode(): void
+    {
+        // Numero de EEUU/Canada (codigo de pais 1): no debe leerse como si el "52"
+        // estuviera escondido en medio de la cadena -- queda indeterminado (null),
+        // nunca un falso positivo de zona local ni "definitivamente foraneo".
+        $this->assertNull(aiWaIdToMxDigits('13105551234'));
+        $this->assertNull(aiPhoneHasLocalLada('13105551234'));
+    }
+
+    public function testAiWaIdToMxDigitsToleratesMessyFormatting(): void
+    {
+        // Un cliente real puede escribir/guardar el numero con espacios, parentesis y
+        // guiones -- preg_replace('/\D+/', ...) los limpia antes de aplicar el patron.
+        $this->assertSame('3312345678', aiWaIdToMxDigits('+52 (1) 33-1234-5678'));
+        $this->assertTrue(aiPhoneHasLocalLada('+52 (1) 33-1234-5678'));
+    }
+
+    public function testAiPhoneHasLocalLadaRejectsEmptyOrWhitespaceOnlyInput(): void
+    {
+        $this->assertNull(aiPhoneHasLocalLada(''));
+        $this->assertNull(aiPhoneHasLocalLada('   '));
+    }
+
+    public function testAiClasificarZonaEntregaRecognizesZmgMunicipiosAsLocal(): void
+    {
+        $this->assertSame('local', aiClasificarZonaEntrega('Av Vallarta 123, Col Americana, Guadalajara, Jal'));
+        $this->assertSame('local', aiClasificarZonaEntrega('Calle Reforma 45, Zapopan'));
+        $this->assertSame('local', aiClasificarZonaEntrega('Col Centro, Tonalá, Jalisco'));
+        $this->assertSame('local', aiClasificarZonaEntrega('San Pedro Tlaquepaque, CP 45500'));
+        $this->assertSame('local', aiClasificarZonaEntrega('Tlajomulco de Zuniga, Jal'));
+    }
+
+    public function testAiClasificarZonaEntregaFlagsRealIncidentAddressAsForanea(): void
+    {
+        // Caso real: pedido agendado a Villa Purificacion, Jalisco -- fuera de la ZMG pero
+        // dentro del estado. Debe marcarse "foraneo", no "local" ni "indeterminado".
+        $this->assertSame(
+            'foraneo',
+            aiClasificarZonaEntrega('Nicolas Bravo 221, Colonia Centro, CP 48900, Villa Purificacion, Jalisco')
+        );
+    }
+
+    public function testAiClasificarZonaEntregaDoesNotConfuseOtherJaliscoMunicipiosWithZmg(): void
+    {
+        // Ninguno de estos es municipio de la ZMG, aunque varios empiecen igual que "Tonala"
+        // o esten en el mismo estado -- deben quedar "foraneo", no "local".
+        $this->assertSame('foraneo', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
+        $this->assertSame('foraneo', aiClasificarZonaEntrega('Puerto Vallarta, Jalisco'));
+        $this->assertSame('foraneo', aiClasificarZonaEntrega('Ciudad Guzman, Jalisco'));
+        $this->assertSame('foraneo', aiClasificarZonaEntrega('Tepatitlan de Morelos, Jalisco'));
+    }
+
+    public function testAiClasificarZonaEntregaReturnsIndeterminadoWithoutEnoughInfo(): void
+    {
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega(''));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('   '));
+        // Sin mencionar Jalisco ni ningun municipio de la ZMG: no se puede saber.
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Calle Falsa 123, CP 00000'));
+    }
+
+    public function testAiCalcularCargoEnvioAppliesChargeOnlyToForaneaWithFewerThanTwoProducts(): void
+    {
+        $this->assertSame(40.00, aiCalcularCargoEnvio('foraneo', 1));
+        $this->assertSame(0.0, aiCalcularCargoEnvio('foraneo', 2));
+        $this->assertSame(0.0, aiCalcularCargoEnvio('foraneo', 3));
+        $this->assertSame(0.0, aiCalcularCargoEnvio('local', 1));
+        $this->assertSame(0.0, aiCalcularCargoEnvio('indeterminado', 1));
+    }
+
     public function testCloseUnresponsiveConversationTagsAndClosesBot(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020007', null);
