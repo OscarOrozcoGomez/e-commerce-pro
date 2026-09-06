@@ -69,6 +69,8 @@ $busqueda = $_GET['search'] ?? '';
 $page = max(1, (int)($_GET['page'] ?? 1));
 $itemsPerPage = 9;
 $isAjaxLoadMore = (($_GET['ajax'] ?? '') === '1');
+// Por defecto los agotados van al final; con ?agotados=1 se muestran, si no se ocultan.
+$incluirAgotados = (($_GET['agotados'] ?? '') === '1');
 $isSearchRequest = trim((string)$busqueda) !== '';
 
 if ($isAjaxLoadMore && session_status() === PHP_SESSION_ACTIVE) {
@@ -87,6 +89,10 @@ $catalogBaseParams = [];
 if (!empty($busqueda)) {
     $catalogBaseParams['search'] = $busqueda;
 }
+if ($incluirAgotados) {
+    // Se arrastra al navegar entre categorías / búsquedas para no "perder" el toggle.
+    $catalogBaseParams['agotados'] = '1';
+}
 
 // --- Lógica para obtener y filtrar productos ---
 // La SQL en si (imagen/precio_desde/precio_comparacion_desde/total_variantes) vive en
@@ -94,7 +100,7 @@ if (!empty($busqueda)) {
 // copias se fueran desalineando con el tiempo (y de hecho ya iban desalineadas en
 // detalles menores). Un solo punto de verdad para la query principal + la de conteo.
 $pdo = getPDO();
-$queryParts = catalogBuildQueries($categoriaSeleccionada, $busqueda);
+$queryParts = catalogBuildQueries($pdo, $categoriaSeleccionada, $busqueda, $incluirAgotados);
 $sql = $queryParts['sql_main'];
 $sqlCount = $queryParts['sql_count'];
 $params = $queryParts['params'];
@@ -131,7 +137,8 @@ if (!$isAjaxLoadMore) {
 }
 
 // --- Aplicar orden y paginación a la consulta principal ---
-$sql .= " ORDER BY p.nombre ASC LIMIT :limit OFFSET :offset";
+// El ORDER BY vive en catalogBuildQueries() (disponibles primero, agotados al final).
+$sql .= ' ' . $queryParts['order_by'] . ' LIMIT :limit OFFSET :offset';
 
 try {
     $stmt = $pdo->prepare($sql);
@@ -248,6 +255,9 @@ include __DIR__ . '/includes/header.php';
                         <?php if(!empty($categoriaSeleccionada)): ?>
                             <input type="hidden" name="categoria" value="<?php echo esc($categoriaSeleccionada); ?>">
                         <?php endif; ?>
+                        <?php if($incluirAgotados): ?>
+                            <input type="hidden" name="agotados" value="1">
+                        <?php endif; ?>
                         <div class="input-field col s12" style="margin: 0; border: none; position: relative;">
                             <i class="material-icons prefix blue-text text-darken-4" style="top: 10px;">search</i>
                             <input type="text" name="search" id="search-input" value="<?php echo esc($busqueda); ?>" placeholder="¿Qué estás buscando hoy?" style="border-bottom: none !important; box-shadow: none !important; margin: 0; height: 45px; padding-left: 3.5rem !important;">
@@ -257,9 +267,30 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <h4 class="grey-text text-darken-3" style="font-weight: 300; margin-bottom: 30px;">
-                <?php echo empty($categoriaSeleccionada) ? 'Explorar Catálogo' : 'Categoría: ' . esc($categoriaSeleccionada); ?>
-            </h4>
+            <?php
+                // URLs para prender/apagar "Ver agotados" conservando categoría y búsqueda.
+                $agotadosParams = [];
+                if (!empty($busqueda)) $agotadosParams['search'] = $busqueda;
+                if (!empty($categoriaSeleccionada)) $agotadosParams['categoria'] = $categoriaSeleccionada;
+                $urlAgotadosOff = $catalogBaseUrl . (!empty($agotadosParams) ? '?' . http_build_query($agotadosParams) : '');
+                $urlAgotadosOn = $catalogBaseUrl . '?' . http_build_query($agotadosParams + ['agotados' => '1']);
+            ?>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 30px;">
+                <h4 class="grey-text text-darken-3" style="font-weight: 300; margin: 0;">
+                    <?php echo empty($categoriaSeleccionada) ? 'Explorar Catálogo' : 'Categoría: ' . esc($categoriaSeleccionada); ?>
+                </h4>
+                <label class="grey-text text-darken-2" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                    <input type="checkbox" id="toggle-agotados" class="filled-in" <?php echo $incluirAgotados ? 'checked' : ''; ?>>
+                    <span style="padding-left: 26px;">Ver agotados</span>
+                </label>
+            </div>
+            <script>
+                document.getElementById('toggle-agotados')?.addEventListener('change', function () {
+                    window.location.href = this.checked
+                        ? <?php echo json_encode($urlAgotadosOn, JSON_UNESCAPED_SLASHES); ?>
+                        : <?php echo json_encode($urlAgotadosOff, JSON_UNESCAPED_SLASHES); ?>;
+                });
+            </script>
 
             <div id="catalog-meta" data-total-products="<?php echo (int)$totalProductos; ?>" data-items-per-page="<?php echo (int)$itemsPerPage; ?>" style="display:none;"></div>
             
@@ -298,6 +329,7 @@ const searchInput = document.getElementById('search-input');
 const clearSearchBtn = document.getElementById('clear-search-btn');
 const searchForm = searchInput ? searchInput.closest('form') : null;
 const catalogApiUrl = '<?php echo BASE_URL; ?>api/catalog_products.php';
+const catalogShowAgotados = <?php echo $incluirAgotados ? 'true' : 'false'; ?>;
 const initialSearchQuery = normalizeFilterText(searchInput ? searchInput.value : '');
 let lastRequestedQuery = initialSearchQuery;
 let searchDebounceTimer = null;
@@ -345,6 +377,7 @@ function triggerServerSearch() {
     url.searchParams.set('page', '1');
     url.searchParams.set('items_per_page', String(getCatalogMeta().itemsPerPage || 9));
     url.searchParams.set('source', 'search');
+    if (catalogShowAgotados) url.searchParams.set('agotados', '1');
 
     if (activeSearchController) {
         activeSearchController.abort();
@@ -453,6 +486,7 @@ function handleLoadMoreClick() {
     url.searchParams.set('page', String(pageToLoad));
     url.searchParams.set('items_per_page', String(meta.itemsPerPage || 9));
     url.searchParams.set('source', 'load_more');
+    if (catalogShowAgotados) url.searchParams.set('agotados', '1');
 
     const currentSearch = normalizeFilterText(searchInput ? searchInput.value : '');
     if (currentSearch !== '') {
