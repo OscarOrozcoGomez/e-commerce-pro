@@ -321,7 +321,7 @@ try {
                 'blife_data' => $blife_data,
                 'handle'     => $handle,
                 'variantes'  => $variantesLista,
-                'blife_note' => 'Se importó nombre, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
+                'blife_note' => 'Se importó nombre, presentación, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
             ]);
             exit;
         }

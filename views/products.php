@@ -359,9 +359,15 @@ include __DIR__ . '/includes/header.php';
                         document.getElementById('modo_uso').value = cleanUso.charAt(0).toUpperCase() + cleanUso.slice(1);
                     }
                     
-                    // 2. Extraer presentación de la variante (ej: 90 Caps)
-                    if (fullData.producto.variante && fullData.producto.variante.title) {
-                        document.getElementById('unidad').value = fullData.producto.variante.title;
+                    // 2. Presentación de la variante (ej: "90 ml", "180 Caps | 1000 mg", "250 g").
+                    //    B-Life NO llena el campo de peso de Shopify, pero el tamaño/contenido
+                    //    viene aquí. Se manda a "Valor de la Variante" (texto libre); también se
+                    //    intenta en "Unidad" por si coincide con una opción del select.
+                    const varTitle = (fullData.producto.variante && fullData.producto.variante.title || '').trim();
+                    const esPlaceholder = /^(default title|1\s*(pza\.?|pieza|unidad|u))\.?$/i.test(varTitle);
+                    if (varTitle && !esPlaceholder) {
+                        document.getElementById('nombre_variante').value = varTitle;
+                        document.getElementById('unidad').value = varTitle;
                     }
 
                     // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
