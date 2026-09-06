@@ -391,6 +391,10 @@ include __DIR__ . '/includes/header.php';
                     if (fullData.producto.title)
                         document.getElementById('nombre').value = fullData.producto.title;
 
+                    // 3b. Descripción comercial (body_html de Shopify, convertido a texto plano)
+                    if (fullData.producto.description)
+                        document.getElementById('descripcion').value = fullData.producto.description;
+
                     // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
                     if (fullData.producto.sku)
                         document.getElementById('sku').value = fullData.producto.sku;
@@ -486,6 +490,7 @@ include __DIR__ . '/includes/header.php';
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
                 M.textareaAutoResize(document.getElementById('ingredientes'));
                 M.textareaAutoResize(document.getElementById('modo_uso'));
+                M.textareaAutoResize(document.getElementById('descripcion'));
                 M.updateTextFields();
                 renderNutritionalPreview();
 

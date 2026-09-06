@@ -130,6 +130,20 @@ function blifeResolveHandle(string $input): array
     throw new Exception("No reconozco «{$input}». Pega el handle del producto, su URL de blife.mx, o el ID numérico de producto/variante.");
 }
 
+/** Convierte HTML corto (body_html de Shopify) a texto plano con saltos de párrafo. */
+function blifeHtmlToText(string $html): string
+{
+    $t = preg_replace('~<br\s*/?>~i', "\n", $html);
+    $t = preg_replace('~</(p|div|li|h[1-6])>~i', "\n\n", (string) $t);
+    $t = preg_replace('~<li[^>]*>~i', '• ', (string) $t);
+    $t = html_entity_decode(strip_tags((string) $t), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $t = str_replace("\xC2\xA0", ' ', (string) $t);       // &nbsp;
+    $t = preg_replace('~[ \t]+~', ' ', $t);
+    $t = preg_replace('~ *\n *~', "\n", (string) $t);
+    $t = preg_replace('~\n{3,}~', "\n\n", (string) $t);
+    return trim((string) $t);
+}
+
 /** Saca el texto de una pestaña del tema (metafield renderizado) del HTML del producto. */
 function blifeTabText(string $html, string $tabPrefix, int $productId): string
 {
@@ -285,6 +299,7 @@ try {
             $blife_data = [
                 'producto' => [
                     'title'       => (string)($prod['title'] ?? ''),
+                    'description' => blifeHtmlToText((string)($prod['body_html'] ?? '')),
                     'ingredients' => $ingredientes,
                     'mode_use'    => $modoUso,
                     'sku'         => $sku,
@@ -324,7 +339,7 @@ try {
                 'blife_data' => $blife_data,
                 'handle'     => $handle,
                 'variantes'  => $variantesLista,
-                'blife_note' => 'Se importó nombre, presentación, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
+                'blife_note' => 'Se importó nombre, descripción, presentación, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
             ]);
             exit;
         }
