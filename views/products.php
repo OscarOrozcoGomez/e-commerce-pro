@@ -359,20 +359,56 @@ include __DIR__ . '/includes/header.php';
                         document.getElementById('modo_uso').value = cleanUso.charAt(0).toUpperCase() + cleanUso.slice(1);
                     }
                     
-                    // 2. Extraer presentación de la variante (ej: 90 Caps)
-                    if (fullData.producto.variante && fullData.producto.variante.title) {
-                        document.getElementById('unidad').value = fullData.producto.variante.title;
+                    // 2. Presentación de la variante (ej: "90 ml", "180 Caps | 1000 mg", "250 g").
+                    //    B-Life NO llena el campo de peso de Shopify, pero el tamaño/contenido
+                    //    viene en el título de la variante. Se manda a "Valor de la Variante"
+                    //    (texto libre) y se INFIERE el "Tipo de Presentación" del select.
+                    const varTitle = (fullData.producto.variante && fullData.producto.variante.title || '').trim();
+                    const esPlaceholder = /^(default title|1\s*(pza\.?|pieza|unidad|u))\.?$/i.test(varTitle);
+                    if (varTitle && !esPlaceholder) {
+                        document.getElementById('nombre_variante').value = varTitle;
+                    }
+
+                    // Inferir el tipo de presentación. B-Life no lo trae como dato; se deduce
+                    // del texto. "ml"/"l" (cremas, líquidos) no tiene opción en la lista -> se
+                    // deja en blanco para captura manual.
+                    const txtPres = (varTitle + ' ' + (fullData.producto.title || '')).toLowerCase();
+                    let tipoPres = '';
+                    if (/\b(c[aá]ps?|c[aá]psulas?)\b/.test(txtPres)) tipoPres = 'Cápsulas';
+                    else if (/\bsoftgels?\b/.test(txtPres)) tipoPres = 'Softgels';
+                    else if (/\b(tabletas?|tabs?)\b/.test(txtPres)) tipoPres = 'Tabletas';
+                    else if (/\bporciones?\b/.test(txtPres)) tipoPres = 'Porciones';
+                    else if (/(\d+\s*(g|gr|grs|gramos?|kg)\b|cont\.?\s*neto)/.test(txtPres)) tipoPres = 'Gramos (g)';
+                    else if (/\d+\s*(pzas?|piezas?|unidades?)\b/.test(txtPres)) tipoPres = 'Unidades';
+                    if (tipoPres) {
+                        const selUnidad = document.getElementById('unidad');
+                        if ([...selUnidad.options].some(o => o.value === tipoPres)) {
+                            selUnidad.value = tipoPres;
+                        }
                     }
 
                     // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
                     if (fullData.producto.title)
                         document.getElementById('nombre').value = fullData.producto.title;
 
+                    // 3b. Descripción comercial (body_html de Shopify, convertido a texto plano)
+                    if (fullData.producto.description)
+                        document.getElementById('descripcion').value = fullData.producto.description;
+
                     // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
                     if (fullData.producto.sku)
                         document.getElementById('sku').value = fullData.producto.sku;
                     if (fullData.producto.codigo_barras)
                         document.getElementById('codigo_barras').value = fullData.producto.codigo_barras;
+
+                    // 5. Precio de venta = precio de retail de B-Life (arranque; ajústalo).
+                    //    El "Precio de Costo" (mayoreo) no está en la tienda pública -> lo pones tú.
+                    const pv = fullData.producto.variante && fullData.producto.variante.precio_venta;
+                    const pc = fullData.producto.variante && fullData.producto.variante.precio_comparacion;
+                    if (pv && parseFloat(pv) > 0)
+                        document.getElementById('precio_venta').value = pv;
+                    if (pc && parseFloat(pc) > 0)
+                        document.getElementById('precio_comparacion').value = pc;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
@@ -463,6 +499,7 @@ include __DIR__ . '/includes/header.php';
                 M.textareaAutoResize(document.getElementById('tabla_nutrimental'));
                 M.textareaAutoResize(document.getElementById('ingredientes'));
                 M.textareaAutoResize(document.getElementById('modo_uso'));
+                M.textareaAutoResize(document.getElementById('descripcion'));
                 M.updateTextFields();
                 renderNutritionalPreview();
 
@@ -501,18 +538,45 @@ include __DIR__ . '/includes/header.php';
                 return;
             }
             box.innerHTML = results.map(r => {
-                const presentaciones = (r.variantes || [])
-                    .map(v => v.title).filter(Boolean).join(' · ');
-                const sku = (r.variantes && r.variantes[0] && r.variantes[0].sku) || '';
+                const vars = (r.variantes || []).filter(v => v && v.variant_id);
+                const img = r.image
+                    ? `<img src="${esc(r.image)}" style="width:38px; height:38px; object-fit:contain; background:#f5f5f5; border-radius:4px;">`
+                    : '';
+
+                // Shopify NO hace una página por presentación: es una sola página + ?variant=<id>.
+                // Con >1 presentación se listan por separado para sincronizar la elegida (su SKU,
+                // código de barras, precio, imagen y "Valor de la Variante" salen de esa variante).
+                if (vars.length > 1) {
+                    const filas = vars.map(v => `
+                        <div class="blife-result" data-handle="${esc(r.handle + '?variant=' + v.variant_id)}"
+                             style="padding:6px 10px 6px 54px; cursor:pointer; border-bottom:1px solid #f0f0f0; font-size:0.78rem;"
+                             onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
+                            <strong>${esc(v.title || '(sin nombre)')}</strong>
+                            <span style="color:#777;">
+                                ${v.sku ? ' — ' + esc(v.sku) : ''}${v.precio ? ' — $' + esc(v.precio) : ''}
+                            </span>
+                        </div>`).join('');
+                    return `
+                        <div style="display:flex; gap:8px; align-items:center; padding:8px 10px; border-bottom:1px solid #eee; background:#fafafa;">
+                            ${img}
+                            <div style="min-width:0;">
+                                <div style="font-size:0.85rem; font-weight:600;">${esc(r.title)}</div>
+                                <div style="font-size:0.7rem; color:#999;">${vars.length} presentaciones — elige una</div>
+                            </div>
+                        </div>${filas}`;
+                }
+
+                const v0 = vars[0] || {};
+                const handle = v0.variant_id ? r.handle + '?variant=' + v0.variant_id : r.handle;
                 return `
-                    <div class="blife-result" data-handle="${esc(r.handle)}"
+                    <div class="blife-result" data-handle="${esc(handle)}"
                          style="display:flex; gap:8px; align-items:center; padding:8px 10px; cursor:pointer; border-bottom:1px solid #eee;"
                          onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
-                        ${r.image ? `<img src="${esc(r.image)}" style="width:38px; height:38px; object-fit:contain; background:#f5f5f5; border-radius:4px;">` : ''}
+                        ${img}
                         <div style="min-width:0;">
                             <div style="font-size:0.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.title)}</div>
                             <div style="font-size:0.72rem; color:#777; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                ${sku ? esc(sku) + ' — ' : ''}${esc(presentaciones || r.handle)}
+                                ${v0.sku ? esc(v0.sku) + ' — ' : ''}${esc(v0.title || r.handle)}
                             </div>
                         </div>
                     </div>`;

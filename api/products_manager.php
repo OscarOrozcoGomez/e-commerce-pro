@@ -112,6 +112,9 @@ function blifeResolveHandle(string $input): array
         $input = $segs ? (string) end($segs) : '';
     }
 
+    // Quita cualquier querystring / fragmento suelto (p. ej. "mi-handle?variant=123").
+    $input = (string) preg_replace('~[?#].*$~s', '', $input);
+
     // gid://shopify/ProductVariant/123  ó  .../Product/123
     if (preg_match('~(Product|ProductVariant)/(\d+)~i', $input, $m)) {
         if (strcasecmp($m[1], 'ProductVariant') === 0) $variantHint = $variantHint ?? (int) $m[2];
@@ -125,6 +128,20 @@ function blifeResolveHandle(string $input): array
         return [strtolower($input), $variantHint];
     }
     throw new Exception("No reconozco «{$input}». Pega el handle del producto, su URL de blife.mx, o el ID numérico de producto/variante.");
+}
+
+/** Convierte HTML corto (body_html de Shopify) a texto plano con saltos de párrafo. */
+function blifeHtmlToText(string $html): string
+{
+    $t = preg_replace('~<br\s*/?>~i', "\n", $html);
+    $t = preg_replace('~</(p|div|li|h[1-6])>~i', "\n\n", (string) $t);
+    $t = preg_replace('~<li[^>]*>~i', '• ', (string) $t);
+    $t = html_entity_decode(strip_tags((string) $t), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $t = str_replace("\xC2\xA0", ' ', (string) $t);       // &nbsp;
+    $t = preg_replace('~[ \t]+~', ' ', $t);
+    $t = preg_replace('~ *\n *~', "\n", (string) $t);
+    $t = preg_replace('~\n{3,}~', "\n\n", (string) $t);
+    return trim((string) $t);
 }
 
 /** Saca el texto de una pestaña del tema (metafield renderizado) del HTML del producto. */
@@ -278,18 +295,28 @@ try {
             // (gtin) queda como respaldo por si Shopify deja de exponerlo en el .json.
             $barcode   = trim((string)($variante['barcode'] ?? '')) ?: trim((string)($variantMeta[$variantId]['barcode'] ?? ''));
 
+            // Precio de retail de B-Life (arranque para "Precio de Venta"; el usuario lo ajusta).
+            // El costo real (mayoreo) no está en la tienda pública, ese lo pone el usuario.
+            $precioVenta = (float)($variante['price'] ?? 0);
+            $precioComp  = (float)($variante['compare_at_price'] ?? 0);
+
             // 6. Respuesta con la MISMA forma que consumía fetchBlifeData() en views/products.php.
             $blife_data = [
                 'producto' => [
                     'title'       => (string)($prod['title'] ?? ''),
+                    'description' => blifeHtmlToText((string)($prod['body_html'] ?? '')),
                     'ingredients' => $ingredientes,
                     'mode_use'    => $modoUso,
                     'sku'         => $sku,
                     'codigo_barras' => $barcode,
+                    'precio_venta'       => $precioVenta > 0 ? number_format($precioVenta, 2, '.', '') : '',
+                    'precio_comparacion' => $precioComp  > 0 ? number_format($precioComp, 2, '.', '') : '',
                     'variante'    => [
                         'title'          => (string)($variante['title'] ?? ($prod['options'][0]['values'][0] ?? '')),
                         'sku'            => $sku,
                         'codigo_barras'  => $barcode,
+                        'precio_venta'       => $precioVenta > 0 ? number_format($precioVenta, 2, '.', '') : '',
+                        'precio_comparacion' => $precioComp  > 0 ? number_format($precioComp, 2, '.', '') : '',
                         'featuredImage'  => $galeria[0] ?? '',
                         'secondaryImage' => $galeria[1] ?? '',
                         'gallery'        => array_slice($galeria, 2),
@@ -321,7 +348,7 @@ try {
                 'blife_data' => $blife_data,
                 'handle'     => $handle,
                 'variantes'  => $variantesLista,
-                'blife_note' => 'Se importó nombre, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
+                'blife_note' => 'Se importó nombre, descripción, presentación, ingredientes, modo de uso, SKU, precio de venta e imágenes de B-Life. Falta el precio de costo (mayoreo) y la tabla nutrimental.' . $sinCodigo,
             ]);
             exit;
         }
