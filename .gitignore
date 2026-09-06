@@ -3,6 +3,9 @@
 /assets/img/entregas/
 /core/uploads/
 
+# PDFs sueltos en assets/ (catálogo Be Life, etc.): pesados, viven solo en el servidor
+/assets/*.pdf
+
 # Cache generado en runtime (indices de resolucion de imagenes, etc.)
 /core/cache/
 
