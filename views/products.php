@@ -95,16 +95,27 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
+                            <div class="input-field col s12" style="margin: 0 0 4px 0; position: relative;">
+                                <i class="material-icons prefix">search</i>
+                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150...">
+                                <label for="blife_search" class="active">Buscar producto en B-Life</label>
+                                <div id="blife-search-results" style="display:none; position:absolute; z-index:20; left:0; right:0; background:#fff; border:1px solid #bbb; border-radius:4px; max-height:280px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
+                            </div>
                             <div class="input-field col s8" style="margin: 0;">
-                                <input type="text" id="blife_id" placeholder="ID B-Life">
+                                <input type="text" id="blife_id" placeholder="se llena solo al elegir de la lista">
                                 <input type="hidden" name="imagenes_orden_json" id="imagenes_orden_json">
-                                <label for="blife_id" class="active">Sincronización con B-Life (ID de Variante)</label>
+                                <label for="blife_id" class="active">Handle / URL del producto (o pégalo a mano)</label>
                             </div>
                             <div class="col s4">
-                                <button type="button" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
+                                <button type="button" id="btn-sinc" class="btn blue darken-2 waves-effect" onclick="fetchBlifeData(event)">SINC</button>
                             </div>
                             <input type="hidden" name="remote_images_urls" id="remote_images_urls">
                             <div id="blife-external-images" class="col s12" style="margin-top: 10px; display: none;"></div>
+                            <div class="col s12" style="font-size: 0.72rem; color: #777; margin-top: 6px;">
+                                <i class="material-icons tiny" style="vertical-align: middle;">info_outline</i>
+                                Trae nombre, ingredientes, modo de uso, SKU, código de barras e imágenes.
+                                <strong>No toca el inventario</strong> (stock, mínimo ni máximo).
+                            </div>
                         </div>
 
                         <div class="input-field">
@@ -296,17 +307,17 @@ include __DIR__ . '/includes/header.php';
     };
 
     window.fetchBlifeData = function(e) {
-        const btn = e.currentTarget;
+        const btn = (e && e.currentTarget) ? e.currentTarget : document.getElementById('btn-sinc');
         const variantId = document.getElementById('blife_id').value.trim();
         if (!variantId) {
-            M.toast({html: 'Ingresa un ID de B-Life', classes: 'orange'});
+            M.toast({html: 'Pega el handle, la URL de blife.mx o el ID del producto', classes: 'orange'});
             return;
         }
         btn.disabled = true;
         const originalText = btn.innerText;
         btn.innerText = '...';
 
-        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${variantId}`)
+        fetch(`${BASE_API}?action=fetch_blife_info&variant_id=${encodeURIComponent(variantId)}`)
             .then(r => r.json())
             .then(res => {
                 if(!res.success) throw new Error(res.message);
@@ -356,6 +367,12 @@ include __DIR__ . '/includes/header.php';
                     // 3. Normalizar nombre base para agrupamiento (Sin el conteo de caps al final)
                     if (fullData.producto.title)
                         document.getElementById('nombre').value = fullData.producto.title;
+
+                    // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
+                    if (fullData.producto.sku)
+                        document.getElementById('sku').value = fullData.producto.sku;
+                    if (fullData.producto.codigo_barras)
+                        document.getElementById('codigo_barras').value = fullData.producto.codigo_barras;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
@@ -385,8 +402,12 @@ include __DIR__ . '/includes/header.php';
                     }));
                 }
                 
-                // 3. Guardar solo lo necesario (filtrado)
-                document.getElementById('tabla_nutrimental').value = list.length > 0 ? JSON.stringify(list) : '[]';
+                // 3. Guardar solo lo necesario (filtrado). Si B-Life no devolvió tabla
+                //    nutrimental (hoy nunca lo hace sin token), NO pisamos lo que ya haya
+                //    capturado a mano para no borrarlo ni disparar el aviso de "datos inválidos".
+                if (list.length > 0) {
+                    document.getElementById('tabla_nutrimental').value = JSON.stringify(list);
+                }
 
                 // 4. Capturar y mostrar previsualización de imágenes externas para importación automática
                 console.log("Datos de Variante B-Life recibidos:", fullData.producto?.variante);
@@ -444,11 +465,87 @@ include __DIR__ . '/includes/header.php';
                 M.textareaAutoResize(document.getElementById('modo_uso'));
                 M.updateTextFields();
                 renderNutritionalPreview();
-                M.toast({html: 'Información importada de B-Life', classes: 'green'});
+
+                // La sincronización con B-Life NO toca inventario: no escribe cantidad_actual,
+                // stock_minimo ni stock_maximo, y deja stock_touched en 0 para que al guardar
+                // NO se reescriba inventario_almacen (crítico en producción).
+                if (typeof resetStockTouched === 'function') resetStockTouched();
+
+                M.toast({html: res.blife_note || 'Información importada de B-Life', classes: 'green', displayLength: 5000});
             })
             .catch(err => M.toast({html: 'Error: ' + err.message, classes: 'red'}))
             .finally(() => { btn.disabled = false; btn.innerText = originalText; });
     };
+
+    // --- Buscador de productos de B-Life (evita tener que pegar la URL/handle a mano) ---
+    (function initBlifeSearch() {
+        const input = document.getElementById('blife_search');
+        const box = document.getElementById('blife-search-results');
+        if (!input || !box) return;
+
+        let timer = null;
+        let lastQuery = '';
+
+        const cerrar = () => { box.style.display = 'none'; box.innerHTML = ''; };
+
+        // Los datos vienen del catálogo Shopify de B-Life (título/SKU pueden traer < > " ').
+        // Se escapan antes de inyectarlos en innerHTML para no abrir un XSS almacenado.
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+
+        const pintar = (results) => {
+            if (!results.length) {
+                box.innerHTML = '<div style="padding:10px; color:#888;">Sin coincidencias en B-Life</div>';
+                box.style.display = 'block';
+                return;
+            }
+            box.innerHTML = results.map(r => {
+                const presentaciones = (r.variantes || [])
+                    .map(v => v.title).filter(Boolean).join(' · ');
+                const sku = (r.variantes && r.variantes[0] && r.variantes[0].sku) || '';
+                return `
+                    <div class="blife-result" data-handle="${esc(r.handle)}"
+                         style="display:flex; gap:8px; align-items:center; padding:8px 10px; cursor:pointer; border-bottom:1px solid #eee;"
+                         onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#fff'">
+                        ${r.image ? `<img src="${esc(r.image)}" style="width:38px; height:38px; object-fit:contain; background:#f5f5f5; border-radius:4px;">` : ''}
+                        <div style="min-width:0;">
+                            <div style="font-size:0.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.title)}</div>
+                            <div style="font-size:0.72rem; color:#777; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                ${sku ? esc(sku) + ' — ' : ''}${esc(presentaciones || r.handle)}
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+            box.style.display = 'block';
+
+            box.querySelectorAll('.blife-result').forEach(el => {
+                el.addEventListener('click', () => {
+                    document.getElementById('blife_id').value = el.getAttribute('data-handle');
+                    cerrar();
+                    input.value = '';
+                    fetchBlifeData(); // dispara la sincronización de inmediato
+                });
+            });
+        };
+
+        const buscar = () => {
+            const q = input.value.trim();
+            if (q.length < 2) { cerrar(); return; }
+            if (q === lastQuery) return;
+            lastQuery = q;
+            fetch(`${BASE_API}?action=blife_search&q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(res => { if (res.success) pintar(res.results || []); })
+                .catch(() => cerrar());
+        };
+
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); });
+        input.addEventListener('focus', () => { if (input.value.trim().length >= 2) buscar(); });
+        document.addEventListener('click', (ev) => {
+            if (ev.target !== input && !box.contains(ev.target)) cerrar();
+        });
+    })();
 
     window.renderNutritionalPreview = function() {
         const raw = document.getElementById('tabla_nutrimental').value.trim();
@@ -1067,6 +1164,8 @@ include __DIR__ . '/includes/header.php';
         colaImagenes = [];
         renderPreviews();
         document.getElementById('blife_id').value = '';
+        const blifeSearch = document.getElementById('blife_search');
+        if (blifeSearch) blifeSearch.value = '';
         document.getElementById('remote_images_urls').value = '';
         document.getElementById('blife-external-images').innerHTML = '';
         document.getElementById('mostrar_tabla').checked = true;
