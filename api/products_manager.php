@@ -295,6 +295,11 @@ try {
             // (gtin) queda como respaldo por si Shopify deja de exponerlo en el .json.
             $barcode   = trim((string)($variante['barcode'] ?? '')) ?: trim((string)($variantMeta[$variantId]['barcode'] ?? ''));
 
+            // Precio de retail de B-Life (arranque para "Precio de Venta"; el usuario lo ajusta).
+            // El costo real (mayoreo) no está en la tienda pública, ese lo pone el usuario.
+            $precioVenta = (float)($variante['price'] ?? 0);
+            $precioComp  = (float)($variante['compare_at_price'] ?? 0);
+
             // 6. Respuesta con la MISMA forma que consumía fetchBlifeData() en views/products.php.
             $blife_data = [
                 'producto' => [
@@ -304,10 +309,14 @@ try {
                     'mode_use'    => $modoUso,
                     'sku'         => $sku,
                     'codigo_barras' => $barcode,
+                    'precio_venta'       => $precioVenta > 0 ? number_format($precioVenta, 2, '.', '') : '',
+                    'precio_comparacion' => $precioComp  > 0 ? number_format($precioComp, 2, '.', '') : '',
                     'variante'    => [
                         'title'          => (string)($variante['title'] ?? ($prod['options'][0]['values'][0] ?? '')),
                         'sku'            => $sku,
                         'codigo_barras'  => $barcode,
+                        'precio_venta'       => $precioVenta > 0 ? number_format($precioVenta, 2, '.', '') : '',
+                        'precio_comparacion' => $precioComp  > 0 ? number_format($precioComp, 2, '.', '') : '',
                         'featuredImage'  => $galeria[0] ?? '',
                         'secondaryImage' => $galeria[1] ?? '',
                         'gallery'        => array_slice($galeria, 2),
@@ -339,7 +348,7 @@ try {
                 'blife_data' => $blife_data,
                 'handle'     => $handle,
                 'variantes'  => $variantesLista,
-                'blife_note' => 'Se importó nombre, descripción, presentación, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
+                'blife_note' => 'Se importó nombre, descripción, presentación, ingredientes, modo de uso, SKU, precio de venta e imágenes de B-Life. Falta el precio de costo (mayoreo) y la tabla nutrimental.' . $sinCodigo,
             ]);
             exit;
         }

@@ -400,6 +400,15 @@ include __DIR__ . '/includes/header.php';
                         document.getElementById('sku').value = fullData.producto.sku;
                     if (fullData.producto.codigo_barras)
                         document.getElementById('codigo_barras').value = fullData.producto.codigo_barras;
+
+                    // 5. Precio de venta = precio de retail de B-Life (arranque; ajústalo).
+                    //    El "Precio de Costo" (mayoreo) no está en la tienda pública -> lo pones tú.
+                    const pv = fullData.producto.variante && fullData.producto.variante.precio_venta;
+                    const pc = fullData.producto.variante && fullData.producto.variante.precio_comparacion;
+                    if (pv && parseFloat(pv) > 0)
+                        document.getElementById('precio_venta').value = pv;
+                    if (pc && parseFloat(pc) > 0)
+                        document.getElementById('precio_comparacion').value = pc;
                 }
 
                 // 2. Intentar extraer la lista de nutrientes
