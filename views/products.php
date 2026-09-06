@@ -454,17 +454,30 @@ include __DIR__ . '/includes/header.php';
                     const capEnvaseEl = document.getElementById('capsulas_por_envase');
                     const capPorcionEl = document.getElementById('porcion_capsulas');
                     if (capEnvaseEl && capPorcionEl) {
-                        const esCapsulas = /\b(c[aá]ps?|c[aá]psulas?|softgels?|tabletas?|tabs?)\b/i.test(varTitle + ' ' + (fullData.producto.title || ''));
+                        const unidadRe = '(?:c[aá]ps?\\.?|c[aá]psulas?|softgels?|tabletas?|tabs?|comprimidos?)';
+                        const textoTipo = varTitle + ' ' + (fullData.producto.title || '');
+                        const esCapsulas = new RegExp('\\b' + unidadRe + '\\b', 'i').test(textoTipo)
+                            || ['Cápsulas', 'Softgels', 'Tabletas'].includes(tipoPres);
+
                         if (esCapsulas) {
-                            const mEnv = (varTitle.match(/(\d+)\s*(c[aá]ps?|c[aá]psulas?|softgels?|tabletas?|tabs?)\b/i)
-                                || (fullData.producto.description || '').match(/(\d+)\s*(c[aá]psulas?|softgels?|tabletas?)\b/i));
+                            // Envase: nº del título de la variante; si no, del nombre o la descripción.
+                            const mEnv = varTitle.match(new RegExp('(\\d+)\\s*' + unidadRe + '\\b', 'i'))
+                                || (fullData.producto.title || '').match(new RegExp('(\\d+)\\s*' + unidadRe + '\\b', 'i'))
+                                || (fullData.producto.description || '').match(new RegExp('(\\d+)\\s*(?:c[aá]psulas?|softgels?|tabletas?)\\b', 'i'));
                             if (mEnv) capEnvaseEl.value = mEnv[1];
 
+                            // Porción: nº del modo de uso. B-Life escribe casi siempre "dos (2)
+                            // cápsulas (1.6 g)"; a veces solo "de 4 cápsulas" o "dos cápsulas".
                             const usoTxt = fullData.producto.mode_use || '';
-                            const unidadRe = '(?:c[aá]psulas?|softgels?|tabletas?|comprimidos?)';
-                            const mPor = usoTxt.match(new RegExp('\\((\\d+)\\)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe, 'i'))  // "dos (2) cápsulas"
-                                || usoTxt.match(new RegExp('(\\d+)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe + '\\b', 'i'));      // "1 (una) cápsula", "de 4 cápsulas", "2 softgels"
-                            if (mPor) capPorcionEl.value = mPor[1];
+                            const palabras = { un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6 };
+                            let mPor = usoTxt.match(new RegExp('\\((\\d+)\\)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe, 'i'))   // "dos (2) cápsulas"
+                                || usoTxt.match(new RegExp('(\\d+)\\s*(?:\\([^)]*\\)\\s*)?' + unidadRe + '\\b', 'i'));     // "1 (una) cápsula", "de 4 cápsulas"
+                            if (mPor) {
+                                capPorcionEl.value = mPor[1];
+                            } else {
+                                const mw = usoTxt.match(new RegExp('\\b(un|uno|una|dos|tres|cuatro|cinco|seis)\\s+(?:\\([^)]*\\)\\s*)?' + unidadRe, 'i'));
+                                if (mw) capPorcionEl.value = String(palabras[mw[1].toLowerCase()]);
+                            }
 
                             // Recalcular el "Rinde ≈ N días" que escucha el evento input.
                             capEnvaseEl.dispatchEvent(new Event('input'));
