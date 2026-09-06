@@ -17,6 +17,161 @@ $pdo = getPDO();
 $action = $_GET['action'] ?? '';
 $usuario = $_SESSION['usuario'];
 
+/**
+ * B-Life apagó su microservicio backend.blife-mx.com/nutritional-information (hoy responde
+ * 409 a todo). Su tienda vive en Shopify, así que la sincronización lee de ahí:
+ *   - products/<handle>.json  -> nombre, variantes, precios, SKU e imágenes
+ *   - products/<handle>       -> pestañas del tema con ingredientes y modo de uso (metafields)
+ * La tabla nutrimental (metafield custom.tabla_nutrimental) no se expone sin token de
+ * Storefront API, así que esa parte queda para captura manual.
+ */
+const BLIFE_SHOP = 'https://blifemx.myshopify.com';
+
+/** GET simple con cURL. Devuelve [body, http_code, curl_error]. */
+function blifeHttpGet(string $url, int $timeout = 15): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false, // XAMPP local no siempre tiene el bundle de CAs
+        CURLOPT_TIMEOUT        => $timeout,
+        CURLOPT_HTTPHEADER     => [
+            'Accept: */*',
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+        ],
+    ]);
+    $body = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+    return [$body === false ? '' : (string) $body, $code, $err];
+}
+
+/**
+ * Catálogo completo de la tienda Shopify de B-Life (products.json paginado), cacheado en
+ * disco 6 h para no descargar ~1.5 MB en cada clic de "SINC".
+ * @return array<int,array<string,mixed>>
+ */
+function blifeCatalog(bool $force = false): array
+{
+    $cacheFile = sys_get_temp_dir() . '/blife_catalog.json';
+    if (!$force && is_file($cacheFile) && (time() - (int) filemtime($cacheFile) < 6 * 3600)) {
+        $cached = json_decode((string) file_get_contents($cacheFile), true);
+        if (is_array($cached) && $cached) return $cached;
+    }
+
+    $all = [];
+    for ($page = 1; $page <= 6; $page++) {
+        [$body, $code] = blifeHttpGet(BLIFE_SHOP . "/products.json?limit=250&page=$page", 20);
+        if ($code !== 200) break;
+        $chunk = json_decode($body, true)['products'] ?? null;
+        if (!is_array($chunk) || !$chunk) break;
+        $all = array_merge($all, $chunk);
+        if (count($chunk) < 250) break;
+    }
+    if ($all) @file_put_contents($cacheFile, json_encode($all));
+    return $all;
+}
+
+/** Busca un id numérico (de producto o de variante Shopify) en el catálogo. [handle, variantId|null]. */
+function blifeHandleFromNumericId(int $n, ?int $variantHint): array
+{
+    foreach ([false, true] as $force) { // 2ª pasada: refresca caché por si es un producto nuevo
+        foreach (blifeCatalog($force) as $p) {
+            if ((int) ($p['id'] ?? 0) === $n) return [(string) ($p['handle'] ?? ''), $variantHint];
+            foreach ($p['variants'] ?? [] as $v) {
+                if ((int) ($v['id'] ?? 0) === $n) return [(string) ($p['handle'] ?? ''), $n];
+            }
+        }
+    }
+    throw new Exception("No encontré ningún producto ni variante con ID «{$n}» en la tienda de B-Life.");
+}
+
+/**
+ * Traduce lo que pega el usuario (handle, URL de blife.mx/Shopify, id de producto o id de
+ * variante) al handle del producto en la tienda. Devuelve [handle, variantId|null].
+ */
+function blifeResolveHandle(string $input): array
+{
+    $input = trim($input);
+    if ($input === '') throw new Exception("Pega el identificador o la URL del producto de B-Life.");
+
+    $variantHint = null;
+    if (preg_match('~[?&]variant=(\d+)~', $input, $m)) $variantHint = (int) $m[1];
+
+    // ID viejo de B-Life (Mongo ObjectId de 24 hex): ya no sirve para nada.
+    if (preg_match('~^[a-f0-9]{24}$~i', $input)) {
+        throw new Exception("Ese es un ID viejo de B-Life que su API ya no reconoce. Usa el handle del producto o su URL de blife.mx.");
+    }
+
+    // Si es URL, quédate con el último segmento del path (/Product/123 ó /coleccion/mi-handle).
+    if (preg_match('~^https?://~i', $input)) {
+        $path = (string) (parse_url($input, PHP_URL_PATH) ?: '');
+        $segs = array_values(array_filter(explode('/', $path), 'strlen'));
+        $input = $segs ? (string) end($segs) : '';
+    }
+
+    // gid://shopify/ProductVariant/123  ó  .../Product/123
+    if (preg_match('~(Product|ProductVariant)/(\d+)~i', $input, $m)) {
+        if (strcasecmp($m[1], 'ProductVariant') === 0) $variantHint = $variantHint ?? (int) $m[2];
+        $input = $m[2];
+    }
+
+    if (ctype_digit($input)) {
+        return blifeHandleFromNumericId((int) $input, $variantHint);
+    }
+    if (preg_match('~^[A-Za-z0-9][A-Za-z0-9\-]{2,}$~', $input)) {
+        return [strtolower($input), $variantHint];
+    }
+    throw new Exception("No reconozco «{$input}». Pega el handle del producto, su URL de blife.mx, o el ID numérico de producto/variante.");
+}
+
+/** Saca el texto de una pestaña del tema (metafield renderizado) del HTML del producto. */
+function blifeTabText(string $html, string $tabPrefix, int $productId): string
+{
+    $pattern = '~id="' . preg_quote($tabPrefix, '~') . '-' . $productId . '"[^>]*>(.*?)</div>~is';
+    if (!preg_match($pattern, $html, $m)) return '';
+
+    $txt = preg_replace('~<br\s*/?>~i', "\n", $m[1]);
+    $txt = html_entity_decode(strip_tags((string) $txt), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $txt = preg_replace('~[ \t]+~', ' ', (string) $txt);
+    $txt = preg_replace('~\s*\n\s*~', "\n", (string) $txt);
+    return trim((string) $txt);
+}
+
+/**
+ * Mapa variantId => ['sku' => ..., 'barcode' => ...] a partir del JSON-LD (ProductGroup /
+ * hasVariant) que Shopify incrusta en la página del producto. El SKU también viene en
+ * products.json; el código de barras (gtin) SOLO aparece aquí.
+ * @return array<int,array{sku:string,barcode:string}>
+ */
+function blifeVariantMetaFromJsonLd(string $html): array
+{
+    $out = [];
+    if (!preg_match_all('~<script type="application/ld\+json"[^>]*>(.*?)</script>~is', $html, $mm)) {
+        return $out;
+    }
+    foreach ($mm[1] as $raw) {
+        $data = json_decode(trim($raw), true);
+        if (!is_array($data)) continue;
+        $groups = isset($data['@graph']) && is_array($data['@graph']) ? $data['@graph'] : [$data];
+        foreach ($groups as $node) {
+            $variants = $node['hasVariant'] ?? null;
+            if (!is_array($variants)) continue;
+            foreach ($variants as $v) {
+                $ref = (string)($v['@id'] ?? $v['url'] ?? '');
+                if (!preg_match('~variant=(\d+)~', $ref, $vm)) continue;
+                $out[(int)$vm[1]] = [
+                    'sku'     => trim((string)($v['sku'] ?? '')),
+                    'barcode' => trim((string)($v['gtin'] ?? $v['gtin13'] ?? $v['gtin12'] ?? $v['gtin8'] ?? '')),
+                ];
+            }
+        }
+    }
+    return $out;
+}
+
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($action === 'list') {
@@ -58,32 +213,164 @@ try {
             }
         }
         elseif ($action === 'fetch_blife_info') {
-            $variant_id = $_GET['variant_id'] ?? '';
-            if (empty($variant_id)) throw new Exception("ID de variante requerido");
+            $rawId = trim((string)($_GET['variant_id'] ?? ''));
 
-            $url = "https://backend.blife-mx.com/nutritional-information/get-by-variant-id/" . $variant_id;
-            
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Útil en entornos locales como XAMPP
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
-                'Referer: https://blife.mx/',
-                'Cookie: connect.sid=s%3Ae5ccf23c-c139-4165-82cf-ca226e77832b.AeGgR1Hq8dlTZimdmSSWC4Cm0cggyYIzbZe0GNdFWE0; session_uid=e5ccf23c-c139-4165-82cf-ca226e77832b'
+            // 1. Identificador -> handle del producto en la tienda Shopify de B-Life.
+            [$handle, $variantHint] = blifeResolveHandle($rawId);
+
+            // 2. Datos estructurados (nombre, variantes, precios, SKU, imágenes).
+            [$jsonBody, $jsonCode, $jsonErr] = blifeHttpGet(BLIFE_SHOP . '/products/' . rawurlencode($handle) . '.json');
+            if ($jsonErr !== '') {
+                throw new Exception("No se pudo conectar con la tienda de B-Life: $jsonErr");
+            }
+            if ($jsonCode === 404) {
+                throw new Exception("B-Life no tiene un producto con handle «{$handle}».");
+            }
+            if ($jsonCode !== 200) {
+                error_log("fetch_blife_info handle=$handle json_http=$jsonCode body=" . substr($jsonBody, 0, 300));
+                throw new Exception("B-Life devolvió $jsonCode al pedir «{$handle}».");
+            }
+            $prod = json_decode($jsonBody, true)['product'] ?? null;
+            if (!is_array($prod)) {
+                throw new Exception("Respuesta inesperada de B-Life para «{$handle}».");
+            }
+            $productId = (int)($prod['id'] ?? 0);
+
+            // 3. Variante elegida: la que pidió el usuario o la primera.
+            $variants = $prod['variants'] ?? [];
+            $variante = [];
+            if ($variantHint) {
+                foreach ($variants as $v) {
+                    if ((int)($v['id'] ?? 0) === $variantHint) { $variante = $v; break; }
+                }
+            }
+            if (!$variante) $variante = $variants[0] ?? [];
+
+            // 4. Imágenes: la destacada de la variante al frente, luego el resto del producto.
+            $normImg = static function ($src): string {
+                $src = trim((string)$src);
+                if ($src === '') return '';
+                if (strpos($src, '//') === 0) $src = 'https:' . $src;
+                return $src;
+            };
+            $galeria = [];
+            foreach ($prod['images'] ?? [] as $img) {
+                $u = $normImg($img['src'] ?? '');
+                if ($u !== '') $galeria[] = $u;
+            }
+            $destacada = $normImg($variante['featured_image']['src'] ?? '');
+            if ($destacada !== '') {
+                $galeria = array_values(array_filter($galeria, static fn($u) => $u !== $destacada));
+                array_unshift($galeria, $destacada);
+            }
+            $galeria = array_values(array_unique($galeria));
+
+            // 5. Página del producto: pestañas del tema (ingredientes / modo de uso) y el
+            //    JSON-LD, de donde sale el código de barras (gtin), que products.json no trae.
+            [$htmlBody, $htmlCode] = blifeHttpGet(BLIFE_SHOP . '/products/' . rawurlencode($handle));
+            $ingredientes = $htmlCode === 200 ? blifeTabText($htmlBody, 'ingredientes', $productId) : '';
+            $modoUso      = $htmlCode === 200 ? blifeTabText($htmlBody, 'modo-uso', $productId) : '';
+            $variantMeta  = $htmlCode === 200 ? blifeVariantMetaFromJsonLd($htmlBody) : [];
+
+            $variantId = (int)($variante['id'] ?? 0);
+            $sku       = trim((string)($variante['sku'] ?? '')) ?: trim((string)($variantMeta[$variantId]['sku'] ?? ''));
+            // El código de barras viene en products/<handle>.json (campo barcode). El JSON-LD
+            // (gtin) queda como respaldo por si Shopify deja de exponerlo en el .json.
+            $barcode   = trim((string)($variante['barcode'] ?? '')) ?: trim((string)($variantMeta[$variantId]['barcode'] ?? ''));
+
+            // 6. Respuesta con la MISMA forma que consumía fetchBlifeData() en views/products.php.
+            $blife_data = [
+                'producto' => [
+                    'title'       => (string)($prod['title'] ?? ''),
+                    'ingredients' => $ingredientes,
+                    'mode_use'    => $modoUso,
+                    'sku'         => $sku,
+                    'codigo_barras' => $barcode,
+                    'variante'    => [
+                        'title'          => (string)($variante['title'] ?? ($prod['options'][0]['values'][0] ?? '')),
+                        'sku'            => $sku,
+                        'codigo_barras'  => $barcode,
+                        'featuredImage'  => $galeria[0] ?? '',
+                        'secondaryImage' => $galeria[1] ?? '',
+                        'gallery'        => array_slice($galeria, 2),
+                    ],
+                ],
+                // La tabla nutrimental (custom.tabla_nutrimental) no se expone sin token de
+                // Storefront API. Se deja vacía para captura manual.
+                'rows' => [],
+            ];
+
+            // Todas las variantes del producto, por si quieres alimentar un bot.
+            $variantesLista = [];
+            foreach ($variants as $v) {
+                $vid = (int)($v['id'] ?? 0);
+                $variantesLista[] = [
+                    'variant_id'    => $vid,
+                    'title'         => (string)($v['title'] ?? ''),
+                    'sku'           => trim((string)($v['sku'] ?? '')) ?: trim((string)($variantMeta[$vid]['sku'] ?? '')),
+                    'codigo_barras' => trim((string)($v['barcode'] ?? '')) ?: trim((string)($variantMeta[$vid]['barcode'] ?? '')),
+                    'precio'        => (string)($v['price'] ?? ''),
+                    'precio_comparacion' => (string)($v['compare_at_price'] ?? ''),
+                ];
+            }
+
+            $sinCodigo = $barcode === '' ? ' No encontré código de barras para esta variante.' : '';
+
+            echo json_encode([
+                'success'    => true,
+                'blife_data' => $blife_data,
+                'handle'     => $handle,
+                'variantes'  => $variantesLista,
+                'blife_note' => 'Se importó nombre, ingredientes, modo de uso, SKU e imágenes de B-Life. La tabla nutrimental hay que capturarla a mano (B-Life ya no la expone).' . $sinCodigo,
             ]);
-
-            $response_curl = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            if ($http_code !== 200) throw new Exception("Error consultando API externa ($http_code)");
-            echo json_encode(['success' => true, 'blife_data' => json_decode($response_curl, true)]);
             exit;
         }
-    } 
+        elseif ($action === 'blife_search') {
+            // Busca en el catálogo cacheado de B-Life por nombre, SKU o código de barras,
+            // para no tener que ir a buscar la URL/handle a mano.
+            $q = mb_strtolower(trim((string)($_GET['q'] ?? '')));
+            if (mb_strlen($q) < 2) {
+                echo json_encode(['success' => true, 'results' => []]);
+                exit;
+            }
+
+            $tokens = array_values(array_filter(preg_split('~\s+~', $q) ?: []));
+            $results = [];
+            foreach (blifeCatalog() as $p) {
+                $title = (string)($p['title'] ?? '');
+                $skus  = [];
+                $barcodes = [];
+                foreach ($p['variants'] ?? [] as $v) {
+                    if (!empty($v['sku']))     $skus[] = (string)$v['sku'];
+                    if (!empty($v['barcode'])) $barcodes[] = (string)$v['barcode'];
+                }
+                $haystack = mb_strtolower($title . ' ' . implode(' ', $skus) . ' ' . implode(' ', $barcodes));
+
+                $match = true;
+                foreach ($tokens as $t) {
+                    if (mb_strpos($haystack, $t) === false) { $match = false; break; }
+                }
+                if (!$match) continue;
+
+                $results[] = [
+                    'handle'    => (string)($p['handle'] ?? ''),
+                    'title'     => $title,
+                    'image'     => (string)($p['images'][0]['src'] ?? ''),
+                    'variantes' => array_map(static fn($v) => [
+                        'variant_id'    => (int)($v['id'] ?? 0),
+                        'title'         => (string)($v['title'] ?? ''),
+                        'sku'           => (string)($v['sku'] ?? ''),
+                        'codigo_barras' => (string)($v['barcode'] ?? ''),
+                        'precio'        => (string)($v['price'] ?? ''),
+                    ], $p['variants'] ?? []),
+                ];
+                if (count($results) >= 25) break;
+            }
+
+            echo json_encode(['success' => true, 'results' => $results]);
+            exit;
+        }
+    }
     elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = $_POST;
         if (!validateCsrfToken($data['csrf_token'] ?? '')) {
