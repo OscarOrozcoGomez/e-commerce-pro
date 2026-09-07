@@ -15,6 +15,18 @@ if (isCliente()) {
 $usuario = $_SESSION['usuario'];
 $pageTitle = 'Dashboard - Sistema POS';
 
+// Resumen de lotes por severidad de caducidad para la tarjeta "Control de Caducidades".
+$resumenCaducidades = [
+    'critico' => 0, 'urgente' => 0, 'planificar' => 0, 'caducado' => 0,
+    'urgen' => 0, 'total' => 0, 'mas_urgente' => null,
+];
+try {
+    require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+    $resumenCaducidades = loteResumenSeveridad(getPDO()) + $resumenCaducidades;
+} catch (Throwable $e) {
+    // La tabla de lotes puede no existir todavia en este entorno.
+}
+
 $aiPendientesCount = 0;
 $aiErroresPendientesCount = 0;
 $aiAsistenteActivo = true;
@@ -489,11 +501,39 @@ include __DIR__ . '/includes/header.php';
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
-                        <span class="card-title">Notificaciones de Caducidades</span>
-                        <p>Correos que avisan cuando un lote cambia de severidad (para ponerlo en oferta a tiempo)</p>
+                        <span class="card-title">Control de Caducidades</span>
+                        <?php if (($resumenCaducidades['total'] ?? 0) > 0): ?>
+                            <p style="margin-bottom: 10px;">
+                                <?php if ($resumenCaducidades['caducado'] > 0): ?>
+                                    <span class="new badge black white-text" data-badge-caption=" caducados" style="float:none; margin-left:0;"><?php echo (int) $resumenCaducidades['caducado']; ?></span>
+                                <?php endif; ?>
+                                <?php if ($resumenCaducidades['critico'] > 0): ?>
+                                    <span class="new badge red darken-1 white-text" data-badge-caption=" críticos" style="float:none; margin-left:0;"><?php echo (int) $resumenCaducidades['critico']; ?></span>
+                                <?php endif; ?>
+                                <?php if ($resumenCaducidades['urgente'] > 0): ?>
+                                    <span class="new badge deep-orange darken-1 white-text" data-badge-caption=" urgentes" style="float:none; margin-left:0;"><?php echo (int) $resumenCaducidades['urgente']; ?></span>
+                                <?php endif; ?>
+                                <?php if ($resumenCaducidades['planificar'] > 0): ?>
+                                    <span class="new badge amber darken-2 white-text" data-badge-caption=" a planificar" style="float:none; margin-left:0;"><?php echo (int) $resumenCaducidades['planificar']; ?></span>
+                                <?php endif; ?>
+                                <?php if ($resumenCaducidades['urgen'] === 0 && $resumenCaducidades['planificar'] === 0): ?>
+                                    <span class="green-text">Ningún lote urge por ahora.</span>
+                                <?php endif; ?>
+                            </p>
+                            <?php if (!empty($resumenCaducidades['mas_urgente'])): $mu = $resumenCaducidades['mas_urgente']; ?>
+                                <p class="grey-text" style="font-size: .82rem; margin: 0;">
+                                    Lo más urgente: <strong><?php echo esc((string) ($mu['producto_nombre'] ?? '')); ?></strong>
+                                    · lote <?php echo esc((string) ($mu['codigo_lote'] ?? '')); ?>
+                                    · <?php echo (int) $mu['dias_hasta_caducar']; ?> días
+                                </p>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <p>Registra lotes al editar un producto. Aquí verás cuáles no alcanzan a venderse antes de caducar.</p>
+                        <?php endif; ?>
                     </div>
                     <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/notificaciones_caducidades.php" class="btn waves-effect waves-light orange darken-3">Configurar</a>
+                        <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="btn waves-effect waves-light orange darken-3">Ver lotes</a>
+                        <a href="<?php echo BASE_URL; ?>views/notificaciones_caducidades.php" class="btn-flat">Notificaciones</a>
                     </div>
                 </div>
             </div>

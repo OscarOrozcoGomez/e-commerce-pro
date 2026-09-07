@@ -15,16 +15,38 @@ if (!isAuthenticated() || (!isAdmin() && !isEncargado())) {
 $pdo = getPDO();
 $userId = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
 
-// Lectura: lotes (con proyección) de un producto, para pintarlos al editarlo en products.php.
+// Lectura GET:
+//   ?id_producto=N       -> lotes de un producto (para la ficha en products.php)
+//   ?modo=lista [+filtros] -> TODOS los lotes con proyección (para views/caducidades.php):
+//                             severidad, id_almacen, categoria, q, solo_con_excedente
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $idProducto = (int) ($_GET['id_producto'] ?? 0);
-    if ($idProducto <= 0) {
+    $modoLista = ($_GET['modo'] ?? '') === 'lista';
+
+    if ($idProducto <= 0 && !$modoLista) {
         echo json_encode(['success' => false, 'message' => 'Producto inválido']);
         exit;
     }
+
     try {
-        $proy = loteFetchProyecciones($pdo, ['id_producto' => $idProducto]);
-        echo json_encode(['success' => true, 'data' => $proy['lotes'], 'ventana_dias' => $proy['ventana_dias']], JSON_UNESCAPED_UNICODE);
+        if ($idProducto > 0) {
+            $filtros = ['id_producto' => $idProducto];
+        } else {
+            $filtros = [];
+            foreach (['severidad', 'id_almacen', 'categoria', 'q'] as $k) {
+                if (isset($_GET[$k]) && trim((string) $_GET[$k]) !== '') {
+                    $filtros[$k] = $_GET[$k];
+                }
+            }
+            if (!empty($_GET['solo_con_excedente'])) {
+                $filtros['solo_con_excedente'] = true;
+            }
+        }
+        $proy = loteFetchProyecciones($pdo, $filtros);
+        echo json_encode(
+            ['success' => true, 'data' => $proy['lotes'], 'ventana_dias' => $proy['ventana_dias']],
+            JSON_UNESCAPED_UNICODE
+        );
     } catch (Throwable $e) {
         error_log('lotes_manager (GET): ' . $e->getMessage());
         echo json_encode(['success' => false, 'message' => 'No se pudieron cargar los lotes.']);
