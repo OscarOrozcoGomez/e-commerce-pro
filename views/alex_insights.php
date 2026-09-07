@@ -6,8 +6,11 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/alex_insights_utils.php';
 
 requireAuth();
-// Permiso 'ver_insights_ia' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('ver_insights_ia') && !isAdmin() && !isEncargado()) {
+// Permiso 'ver_insights_ia' abre esta vista; solo el admin queda como respaldo.
+// El encargado NO entra por rol (se alinea con ai_assistant_settings.php y
+// ai_diagnostics.php, las otras vistas del cluster de Alex): si un encargado
+// concreto lo necesita, se le concede 'ver_insights_ia' desde el panel.
+if (!hasPermission('ver_insights_ia') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
