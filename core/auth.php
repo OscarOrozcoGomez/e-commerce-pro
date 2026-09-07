@@ -1203,12 +1203,21 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
     $direccion = esc((string) ($order['direccion'] ?? ''));
     $total = (float) ($order['total'] ?? 0.0);
 
-    // Link para abrir el chat del cliente en WhatsApp. Prioridad: link ya armado
-    // por quien crea el pedido (ej. Alex, que tiene el wa_id de la conversacion);
-    // si no, se deriva del telefono del pedido. Para conversaciones que llegaron
-    // como "LID" (WhatsApp no comparte el numero) no hay de donde sacarlo -> sin boton.
-    $waHref = trim((string) ($order['whatsapp_link'] ?? ''));
-    if ($waHref === '') {
+    // Enlace para escribirle al cliente por WhatsApp desde el correo:
+    //   - $waDigits: telefono en digitos con lada de pais (52 + 10 nacionales).
+    //     Sale de order['whatsapp_link'] si quien crea el pedido lo trae (ej. Alex,
+    //     con el numero de la conversacion) y es un wa.me/<digitos>; si no, del
+    //     telefono del pedido, quitando lada 52/521. Conversaciones "LID" (WhatsApp
+    //     no comparte el numero) se quedan sin enlace -> sin boton.
+    //   - $waHref: pasa por /wa.php, que en Android abre WhatsApp Business
+    //     (com.whatsapp.w4b) en vez del WhatsApp personal; en iOS/escritorio cae
+    //     a wa.me (Apple no deja elegir entre las dos apps).
+    $waLinkExplicito = trim((string) ($order['whatsapp_link'] ?? ''));
+    $waDigits = '';
+    if ($waLinkExplicito !== '' && preg_match('#wa\.me/(\d{10,15})#', $waLinkExplicito, $m)) {
+        $waDigits = $m[1];
+    }
+    if ($waDigits === '') {
         $telDigits = preg_replace('/\D+/', '', (string) ($order['telefono'] ?? '')) ?? '';
         if (strlen($telDigits) === 12 && strncmp($telDigits, '52', 2) === 0) {
             $telDigits = substr($telDigits, 2);
@@ -1216,8 +1225,15 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
             $telDigits = substr($telDigits, 3);
         }
         if (strlen($telDigits) === 10) {
-            $waHref = 'https://wa.me/52' . $telDigits;
+            $waDigits = '52' . $telDigits;
         }
+    }
+    $waHref = '';
+    if ($waDigits !== '') {
+        $waHref = appAbsoluteAssetUrl('wa.php') . '?p=' . $waDigits;
+    } elseif ($waLinkExplicito !== '') {
+        // Deep link propio ya armado que no es wa.me: usarlo tal cual.
+        $waHref = $waLinkExplicito;
     }
     $waHref = filter_var($waHref, FILTER_VALIDATE_URL) ? $waHref : '';
 

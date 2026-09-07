@@ -5,6 +5,27 @@ use PHPUnit\Framework\TestCase;
 
 final class AuthUtilsTest extends TestCase
 {
+    /** @var string|null */
+    private $hostBackup;
+
+    protected function setUp(): void
+    {
+        // buildNewOrderNotificationHtml() arma URLs absolutas desde HTTP_HOST
+        // (contexto web/webhook real). En los tests lo fijamos para poder
+        // verificar el enlace de /wa.php.
+        $this->hostBackup = $_SERVER['HTTP_HOST'] ?? null;
+        $_SERVER['HTTP_HOST'] = 'bellezaybienestar.com.mx';
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->hostBackup === null) {
+            unset($_SERVER['HTTP_HOST']);
+        } else {
+            $_SERVER['HTTP_HOST'] = $this->hostBackup;
+        }
+    }
+
     public function testIsPasswordSecureReturnsTrueForStrongPassword(): void
     {
         $this->assertTrue(isPasswordSecure('Abcd1234!@'));
@@ -83,8 +104,9 @@ final class AuthUtilsTest extends TestCase
             'total' => 100.0,
         ], []);
 
-        // El telefono se vuelve un enlace wa.me y aparece el boton verde.
-        $this->assertStringContainsString('https://wa.me/523312345678', $html);
+        // El telefono se vuelve un enlace (via /wa.php, que fuerza WhatsApp
+        // Business en Android) y aparece el boton verde.
+        $this->assertStringContainsString('/wa.php?p=523312345678', $html);
         $this->assertStringContainsString('Escribir al cliente por WhatsApp', $html);
     }
 
@@ -98,8 +120,8 @@ final class AuthUtilsTest extends TestCase
             'total' => 50.0,
         ], []);
 
-        $this->assertStringContainsString('https://wa.me/5219998887766', $html);
-        $this->assertStringNotContainsString('https://wa.me/523312345678', $html);
+        $this->assertStringContainsString('/wa.php?p=5219998887766', $html);
+        $this->assertStringNotContainsString('523312345678', $html);
     }
 
     public function testNewOrderNotificationHtmlOmitsWhatsAppButtonWithoutUsablePhone(): void
@@ -112,7 +134,7 @@ final class AuthUtilsTest extends TestCase
         ], []);
 
         $this->assertStringNotContainsString('Escribir al cliente por WhatsApp', $html);
-        $this->assertStringNotContainsString('wa.me', $html);
+        $this->assertStringNotContainsString('wa.php?p=', $html);
         // En vez de omitir el link en silencio, el correo avisa que no hay numero.
         $this->assertStringContainsString('Sin número de WhatsApp para este pedido', $html);
     }
