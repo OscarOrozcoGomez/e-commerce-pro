@@ -369,7 +369,7 @@
                             <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
                         <?php endif; ?>
 
-                        <?php if (hasPermission('ver_conversaciones_whatsapp') || hasPermission('gestionar_asistente_ia')): ?>
+                        <?php if (hasPermission('ver_conversaciones_whatsapp')): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
                         <?php endif; ?>
 
@@ -455,7 +455,7 @@
                 // solo traia Dashboard/Pickup/Mensajes/Favoritos.
                 $mostrarBlogsMovil = hasPermission('gestionar_blogs');
                 $mostrarUsuariosMovil = hasPermission('gestionar_usuarios');
-                $mostrarConversacionesWaMovil = hasPermission('ver_conversaciones_whatsapp') || hasPermission('gestionar_asistente_ia');
+                $mostrarConversacionesWaMovil = hasPermission('ver_conversaciones_whatsapp');
                 $mostrarSaludMovil = isAdmin();
                 ?>
                 <?php if ($mostrarBlogsMovil || $mostrarUsuariosMovil || $mostrarConversacionesWaMovil || $mostrarSaludMovil): ?>

@@ -7,13 +7,10 @@ require_once __DIR__ . '/../core/ai_assistant.php';
 require_once __DIR__ . '/../core/whatsapp_contactos_utils.php';
 
 requireAuth();
-// Permiso 'ver_conversaciones_whatsapp' abre esta vista; 'gestionar_asistente_ia' y el
-// rol admin se mantienen como respaldo para no quitarle acceso a nadie.
-if (
-    !hasPermission('ver_conversaciones_whatsapp')
-    && !hasPermission('gestionar_asistente_ia')
-    && !isAdmin()
-) {
+// Vista con PII de clientes (hilos de WhatsApp): admin-only por defecto. El admin
+// decide desde el panel a quien concederle 'ver_conversaciones_whatsapp' (por
+// persona o por rol). Sin fallback de rol ni de 'gestionar_asistente_ia'.
+if (!hasPermission('ver_conversaciones_whatsapp') && !isAdmin()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

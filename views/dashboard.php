@@ -712,6 +712,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php if (hasPermission('ver_insights_ia')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -723,6 +724,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
 
         <div class="row dashboard-actions">
