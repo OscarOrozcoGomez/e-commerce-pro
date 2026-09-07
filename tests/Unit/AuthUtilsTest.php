@@ -113,5 +113,19 @@ final class AuthUtilsTest extends TestCase
 
         $this->assertStringNotContainsString('Escribir al cliente por WhatsApp', $html);
         $this->assertStringNotContainsString('wa.me', $html);
+        // En vez de omitir el link en silencio, el correo avisa que no hay numero.
+        $this->assertStringContainsString('Sin número de WhatsApp para este pedido', $html);
+    }
+
+    public function testNewOrderNotificationHtmlHidesMissingWhatsAppNoteWhenLinkExists(): void
+    {
+        $html = buildNewOrderNotificationHtml([
+            'numero_pedido' => 'WEB-TEST',
+            'cliente_nombre' => 'Cliente',
+            'telefono' => '3312345678',
+            'total' => 10.0,
+        ], []);
+
+        $this->assertStringNotContainsString('Sin número de WhatsApp para este pedido', $html);
     }
 }

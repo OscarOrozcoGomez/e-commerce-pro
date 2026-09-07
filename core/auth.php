@@ -1267,6 +1267,13 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
     $waButtonHtml = $waHref !== ''
         ? '<a href="' . $waHrefEsc . '" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin:6px;">Escribir al cliente por WhatsApp</a>'
         : '';
+    // Cuando no se pudo armar el link (ej. la conversacion llego como "LID" y
+    // WhatsApp no comparte el numero), lo decimos explicito en vez de que el
+    // boton falte sin explicacion: asi queda claro que hay que buscar al
+    // cliente por otro medio.
+    $waNotaHtml = $waHref === ''
+        ? '<div style="margin-top:8px;color:#8a6d3b;font-size:13px;">⚠️ Sin número de WhatsApp para este pedido: contacta al cliente por otro medio.</div>'
+        : '';
 
     return '
     <div style="background:#f4f6f7;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
@@ -1282,6 +1289,7 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
                     <div><strong>Teléfono:</strong> ' . $telefonoHtml . '</div>
                     <div><strong>Entrega:</strong> ' . $entrega . '</div>
                     ' . $direccionHtml . '
+                    ' . $waNotaHtml . '
                 </div>
 
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
