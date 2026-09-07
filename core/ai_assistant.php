@@ -1541,11 +1541,24 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         $result = dbCreatePublicOrder($data);
     } catch (Throwable $e) {
         error_log('ERROR en aiToolAgendarVenta al llamar dbCreatePublicOrder: ' . $e->getMessage());
+        aiSendTelegramAlert(
+            "No se pudo registrar un pedido con Alex (fallo tecnico).\n"
+            . "Cliente: {$nombre}\n"
+            . 'Error: ' . $e->getMessage()
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+        );
         return ['ok' => false, 'message' => 'No fue posible registrar el pedido, intentemos de nuevo en un momento.'];
     }
 
     if (empty($result['success'])) {
-        return ['ok' => false, 'message' => (string)($result['message'] ?? 'No fue posible registrar el pedido.')];
+        $motivoFallo = (string)($result['message'] ?? 'No fue posible registrar el pedido.');
+        aiSendTelegramAlert(
+            "No se pudo registrar un pedido con Alex.\n"
+            . "Cliente: {$nombre}\n"
+            . "Motivo: {$motivoFallo}"
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+        );
+        return ['ok' => false, 'message' => $motivoFallo];
     }
 
     if (!empty($idCliente) && $idCliente > 0) {
@@ -2455,6 +2468,12 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
                     'tool_excepcion',
                     $textoUsuario,
                     ['tool' => $functionName, 'args' => $args, 'excepcion' => $e->getMessage()]
+                );
+                aiSendTelegramAlert(
+                    "Alex tuvo un error tecnico usando la herramienta '{$functionName}'.\n"
+                    . 'Cliente: ' . (string)($context['nombre_perfil'] ?? '') . "\n"
+                    . 'Error: ' . $e->getMessage()
+                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
                 );
                 $toolResult = ['ok' => false, 'message' => 'Error interno al ejecutar la herramienta.'];
             }
