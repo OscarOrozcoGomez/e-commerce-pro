@@ -41,22 +41,20 @@ test.describe('Comportamiento en el Sitio (comportamiento_sitio.php)', () => {
     await expect(page).toHaveURL(/views\/dashboard\.php/);
   });
 
-  test('con la iniciativa apagada, muestra el aviso y no las tablas ni los filtros', async ({ page }) => {
+  // Un solo test, secuencial: 'comportamiento_sitio' es un flag GLOBAL de un jalon (ver
+  // comentario arriba) -- dos tests separados tocandolo en paralelo (workers>1) se pisan
+  // entre si. Cubre ambos estados (apagado/default y prendido) sin ese riesgo de carrera.
+  test('la vista responde al flag "Comportamiento en el Sitio" (aviso apagado / reporte prendido)', async ({ page }) => {
     await loginAsStaff(page, 'admin');
-    await setComportamientoSitioActivo(page, false);
 
+    await setComportamientoSitioActivo(page, false);
     await page.goto('views/comportamiento_sitio.php');
     await expect(page.getByText('Esta sección está apagada.')).toBeVisible();
     await expect(page.locator('input[name="fecha_inicio"]')).toHaveCount(0);
-  });
 
-  test('con la iniciativa prendida, se ven los filtros, los totales, y las 3 secciones de reporte', async ({ page }) => {
-    await loginAsStaff(page, 'admin');
     await setComportamientoSitioActivo(page, true);
-
     await page.goto('views/comportamiento_sitio.php');
     await expect(page.getByText('Esta sección está apagada.')).toHaveCount(0);
-
     await expect(page.locator('input[name="fecha_inicio"]')).toBeVisible();
     await expect(page.locator('input[name="fecha_fin"]')).toBeVisible();
 
