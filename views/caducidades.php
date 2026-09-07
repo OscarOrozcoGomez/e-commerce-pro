@@ -6,7 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 
 requireAuth();
-if (!isAdmin() && !isEncargado()) {
+// Permiso 'gestionar_caducidades' abre esta vista; el rol se mantiene como respaldo.
+if (!hasPermission('gestionar_caducidades') && !isAdmin() && !isEncargado()) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
