@@ -45,6 +45,7 @@ const PERMISOS_EN_USO = [
     'gestionar_cancelaciones',
     'gestionar_asistente_ia',
     'ver_insights_ia',
+    'ver_conversaciones_whatsapp',
     'ver_notificaciones_pickup',
     // Control de caducidades por lote (views/caducidades.php + api/lotes_manager.php).
     'gestionar_caducidades',
