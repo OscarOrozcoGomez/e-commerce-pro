@@ -35,7 +35,6 @@ final class PermisosEnUsoTienenMigracionTest extends TestCase
         'gestionar_usuarios',
         'realizar_ventas',
         'inventario',
-        'transferir_stock',
         'gestionar_clientes',
     ];
 

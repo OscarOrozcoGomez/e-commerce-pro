@@ -405,6 +405,19 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php if (hasPermission('transferir_stock') || isAdmin()): ?>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Transferir entre Almacenes</span>
+                        <p>Mover mercancía de una sucursal a otra: descuenta el origen y abastece el destino al instante</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/transfer_stock.php" class="btn waves-effect waves-light deep-purple darken-1">Transferir</a>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
 
         <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
@@ -825,6 +838,19 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php if (hasPermission('transferir_stock') || isAdmin()): ?>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Transferir entre Almacenes</span>
+                        <p>Mover mercancía de una sucursal a otra: descuenta el origen y abastece el destino al instante</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/transfer_stock.php" class="btn waves-effect waves-light deep-purple darken-1">Transferir</a>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">article</i> Contenido</h5></div></div>
