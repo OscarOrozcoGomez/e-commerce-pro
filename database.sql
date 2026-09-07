@@ -307,6 +307,7 @@ CREATE TABLE IF NOT EXISTS `pedidos` (
   `tipo_entrega` VARCHAR(30) DEFAULT NULL,
   `subtotal` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `descuento_total` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `costo_envio` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `total` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `direccion_entrega` TEXT DEFAULT NULL,
   `telefono_entrega` VARCHAR(30) DEFAULT NULL,

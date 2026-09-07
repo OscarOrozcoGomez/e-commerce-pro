@@ -279,6 +279,9 @@ $showPickupTracking = $isPickupOrder && $pickupBadge !== '';
                         <?php if ((float)($pedido['descuento_total'] ?? 0) > 0): ?>
                             <h6 class="red-text">Descuento: -$<?php echo number_format((float)$pedido['descuento_total'], 2); ?></h6>
                         <?php endif; ?>
+                        <?php if ((float)($pedido['costo_envio'] ?? 0) > 0): ?>
+                            <h6 class="blue-text text-darken-2">Envío a domicilio: +$<?php echo number_format((float)$pedido['costo_envio'], 2); ?></h6>
+                        <?php endif; ?>
                         <h4 class="indigo-text text-darken-4" style="margin: 10px 0; font-weight: bold;">Total: $<?php echo number_format((float)$pedido['total'], 2); ?></h4>
                     </div>
                 </div>
