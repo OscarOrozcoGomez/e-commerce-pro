@@ -1439,7 +1439,17 @@ include __DIR__ . '/includes/header.php';
             cont.innerHTML = '<p class="grey-text small" style="margin:0;">Sin lotes registrados todavía.</p>';
             return;
         }
-        let html = '<table class="striped condensed"><thead><tr>' +
+        const ss = lotes[0].stock_sistema;
+        const sl = lotes[0].stock_lotes;
+        let html = '';
+        if (ss !== null && ss !== undefined && sl > ss) {
+            html += `<div class="red lighten-4 red-text text-darken-4" style="padding:6px 10px; border-radius:4px; margin-bottom:8px; font-size:.85rem;">
+                <i class="material-icons tiny" style="vertical-align:middle;">warning</i>
+                Los lotes suman <strong>${sl}</strong> u. pero el stock del sistema es <strong>${ss}</strong> u.
+                No podrás agregar más lotes hasta corregir el stock en Inventario.
+            </div>`;
+        }
+        html += '<table class="striped condensed"><thead><tr>' +
             '<th>Lote</th><th>Caduca</th><th>Días</th><th>Restante</th><th>Severidad</th><th></th>' +
             '</tr></thead><tbody>';
         lotes.forEach(l => {

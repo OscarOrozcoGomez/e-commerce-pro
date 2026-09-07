@@ -706,4 +706,294 @@ final class LoteCaducidadUtilsTest extends TestCase
             );
         }
     }
+
+    /* ---- Los lotes no pueden rebasar el stock del sistema ---------------- */
+
+    public function testGuardarLoteRechazaSiLosLotesRebasanElStockDelSistema(): void
+    {
+        $this->seedProducto(1, 'Con inventario');
+        $this->seedInventario(1, 1, 1); // stock del sistema = 1
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/stock del sistema es 1/');
+
+        loteGuardar($this->pdo, [
+            'id_producto' => 1,
+            'codigo_lote' => 'L1',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 2,
+        ], 7);
+    }
+
+    public function testGuardarLoteSumaLosLotesExistentesParaComparar(): void
+    {
+        $this->seedProducto(1, 'Tres lotes de 2');
+        $this->seedInventario(1, 1, 5); // el sistema dice 5
+        $this->seedLote(1, 'A', $this->enDias(120), 2);
+        $this->seedLote(1, 'B', $this->enDias(120), 2);
+
+        // 2 + 2 + 2 = 6 > 5 -> rechaza el tercero
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/6 unidades/');
+
+        loteGuardar($this->pdo, [
+            'id_producto' => 1,
+            'codigo_lote' => 'C',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 2,
+        ], 7);
+    }
+
+    public function testGuardarLotePermiteJustoHastaElStockDelSistema(): void
+    {
+        $this->seedProducto(1, 'Al limite');
+        $this->seedInventario(1, 1, 6);
+        $this->seedLote(1, 'A', $this->enDias(120), 4);
+
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1,
+            'codigo_lote' => 'B',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 2, // 4 + 2 = 6 == stock -> pasa
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testEditarUnLoteNoSeCuentaDosVecesContraElStock(): void
+    {
+        $this->seedProducto(1, 'Editar');
+        $this->seedInventario(1, 1, 3);
+        $idLote = $this->seedLoteId(1, 'A', $this->enDias(120), 3);
+
+        // Reeditar el MISMO lote a 3 no debe fallar (no se suma a si mismo).
+        $id = loteGuardar($this->pdo, [
+            'id_lote' => $idLote,
+            'id_producto' => 1,
+            'codigo_lote' => 'A',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 3,
+        ], 7);
+        $this->assertSame($idLote, $id);
+    }
+
+    public function testSinRegistroDeInventarioNoSeBloquea(): void
+    {
+        $this->seedProducto(1, 'Sin inventario');
+
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1,
+            'codigo_lote' => 'L1',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 999,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testStockDelSistemaEnCeroNoBloquea(): void
+    {
+        $this->seedProducto(1, 'Stock cero');
+        $this->seedInventario(1, 1, 0); // rastreado pero en 0
+
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1,
+            'codigo_lote' => 'L1',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 50,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testAjustarCantidadRechazaSiRebasaElStockDelSistema(): void
+    {
+        $this->seedProducto(1, 'Ajuste');
+        $this->seedInventario(1, 1, 5);
+        $idLote = $this->seedLoteId(1, 'A', $this->enDias(120), 3);
+
+        $this->expectException(InvalidArgumentException::class);
+        loteAjustarCantidad($this->pdo, $idLote, 9, 7); // 9 > 5
+    }
+
+    public function testRegistrarEntradaNoSeBloqueaPorElDescuadre(): void
+    {
+        // El flujo de Entradas de Inventario sube stock y lote juntos: no debe
+        // rechazar aunque en ese instante el lote parezca rebasar el stock.
+        $this->seedProducto(1, 'Entrada');
+        $this->seedInventario(1, 1, 1);
+
+        $id = loteRegistrarEntrada($this->pdo, [
+            'id_producto' => 1,
+            'codigo_lote' => 'L1',
+            'fecha_caducidad' => $this->enDias(120),
+            'cantidad' => 10,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    /* ---- Stock del sistema: negativos y edge cases para hacerlo tronar --- */
+
+    public function testStockSeSumaEntreTodosLosAlmacenes(): void
+    {
+        // El limite es el TOTAL del producto, no el de un almacen.
+        $this->seedAlmacen(2, 'Sucursal');
+        $this->seedProducto(1, 'Multi almacen');
+        $this->seedInventario(1, 1, 3);
+        $this->seedInventario(1, 2, 4); // total = 7
+
+        $ok = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'A',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 7,
+        ], 7);
+        $this->assertGreaterThan(0, $ok);
+
+        $this->expectException(InvalidArgumentException::class);
+        loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'B',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 1, // 7 + 1 > 7
+        ], 7);
+    }
+
+    public function testLotesRetiradosYAgotadosNoCuentanContraElStock(): void
+    {
+        $this->seedProducto(1, 'Con retirados');
+        $this->seedInventario(1, 1, 2);
+        $idViejo = $this->seedLoteId(1, 'VIEJO', $this->enDias(120), 500);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'retirado' WHERE id_lote = {$idViejo}");
+        $idAgotado = $this->seedLoteId(1, 'AGOTADO', $this->enDias(120), 500);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'agotado' WHERE id_lote = {$idAgotado}");
+
+        // Solo cuentan activo/caducado -> los 2 de arriba se ignoran, cabe uno de 2.
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'NUEVO',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 2,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testLoteCaducadoSiCuentaContraElStock(): void
+    {
+        $this->seedProducto(1, 'Con caducado');
+        $this->seedInventario(1, 1, 5);
+        $idCad = $this->seedLoteId(1, 'CAD', $this->enDias(120), 5);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'caducado' WHERE id_lote = {$idCad}");
+
+        $this->expectException(InvalidArgumentException::class);
+        loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'NUEVO',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 1, // 5 (caducado) + 1 > 5
+        ], 7);
+    }
+
+    public function testCantidadCeroNuncaBloqueaAunConDescuadrePrevio(): void
+    {
+        $this->seedProducto(1, 'Cero');
+        $this->seedInventario(1, 1, 1);
+        $this->seedLote(1, 'A', $this->enDias(120), 1); // ya en el limite
+
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'B',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 0,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testMoverUnLoteAOtroProductoSeValidaContraElStockDelDestino(): void
+    {
+        $this->seedProducto(1, 'Origen amplio');
+        $this->seedProducto(2, 'Destino chico');
+        $this->seedInventario(1, 1, 100);
+        $this->seedInventario(2, 1, 1);
+        $idLote = $this->seedLoteId(1, 'X', $this->enDias(120), 5);
+
+        // Reasignar el lote (5 u.) al producto 2, cuyo stock es 1 -> rechazo.
+        $this->expectException(InvalidArgumentException::class);
+        loteGuardar($this->pdo, [
+            'id_lote' => $idLote,
+            'id_producto' => 2, 'codigo_lote' => 'X',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 5,
+        ], 7);
+    }
+
+    public function testElDescuadreDeOtroProductoNoAfecta(): void
+    {
+        $this->seedProducto(1, 'Producto en descuadre');
+        $this->seedProducto(2, 'Producto sano');
+        $this->seedInventario(1, 1, 1);
+        $this->seedInventario(2, 1, 100);
+        $this->seedLote(1, 'MALO', $this->enDias(120), 999); // descuadre brutal en el 1
+
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 2, 'codigo_lote' => 'BUENO',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 50,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testSinTablaInventarioAlmacenNoTruena(): void
+    {
+        $this->seedProducto(1, 'Sin tabla inventario');
+        $this->pdo->exec('DROP TABLE inventario_almacen');
+
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'L1',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => 10000,
+        ], 7);
+        $this->assertGreaterThan(0, $id);
+    }
+
+    public function testAjustarUnLoteAExactamenteElStockPasaYUnoMasNo(): void
+    {
+        $this->seedProducto(1, 'Ajuste al filo');
+        $this->seedInventario(1, 1, 4);
+        $a = $this->seedLoteId(1, 'A', $this->enDias(120), 1);
+        $this->seedLote(1, 'B', $this->enDias(120), 1);
+
+        // A(->3) + B(1) = 4 == stock -> pasa
+        loteAjustarCantidad($this->pdo, $a, 3, 7);
+        $this->assertSame(3, (int) $this->pdo->query("SELECT cantidad_restante FROM lotes_inventario WHERE id_lote = {$a}")->fetchColumn());
+
+        // A(->4) + B(1) = 5 > 4 -> rechazo
+        $this->expectException(InvalidArgumentException::class);
+        loteAjustarCantidad($this->pdo, $a, 4, 7);
+    }
+
+    public function testAjustarLoteInexistenteNoTruena(): void
+    {
+        $this->seedProducto(1, 'x');
+        $this->seedInventario(1, 1, 5);
+
+        // id_lote que no existe -> no encuentra id_producto -> no valida, UPDATE no toca nada.
+        loteAjustarCantidad($this->pdo, 999999, 3, 7);
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM lotes_inventario')->fetchColumn());
+    }
+
+    public function testMensajeDeRechazoTraeAmbasCifras(): void
+    {
+        $this->seedProducto(1, 'Mensaje');
+        $this->seedInventario(1, 1, 3);
+        $this->seedLote(1, 'A', $this->enDias(120), 3);
+
+        try {
+            loteGuardar($this->pdo, [
+                'id_producto' => 1, 'codigo_lote' => 'B',
+                'fecha_caducidad' => $this->enDias(120), 'cantidad' => 4,
+            ], 7);
+            $this->fail('Debio lanzar InvalidArgumentException.');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('7 unidades', $e->getMessage()); // 3 + 4
+            $this->assertStringContainsString('stock del sistema es 3', $e->getMessage());
+        }
+    }
+
+    public function testCantidadNegativaLaRechazaLaValidacionDeDatosNoLaDeStock(): void
+    {
+        $this->seedProducto(1, 'Negativa');
+        $this->seedInventario(1, 1, 10);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cantidad invalida.');
+        loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'L1',
+            'fecha_caducidad' => $this->enDias(120), 'cantidad' => -5,
+        ], 7);
+    }
 }
