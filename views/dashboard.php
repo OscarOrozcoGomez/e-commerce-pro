@@ -1126,8 +1126,22 @@ include __DIR__ . '/includes/header.php';
         font-size: 0.9rem;
     }
 
+    .dashboard-actions {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
+        align-items: stretch;
+    }
+
     .dashboard-actions .col {
         display: flex;
+        float: none !important;
+        width: auto !important;
+        margin-left: 0 !important;
+        left: auto !important;
+        right: auto !important;
+        min-width: 0;
+        padding: 0;
     }
 
     .dashboard-actions .card {
