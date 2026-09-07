@@ -262,6 +262,115 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertArrayNotHasKey('message', $result);
     }
 
+    public function testAiFindBestFuzzyMatchCorrectsRealCustomerTypo(): void
+    {
+        // Incidente real: cliente escribio "ashuangs" queriendo decir "Ashwagandha".
+        $this->assertSame(
+            'Ashwagandha',
+            aiFindBestFuzzyMatch('ashuangs', ['Ashwagandha', 'Colageno', 'Creatina'])
+        );
+    }
+
+    public function testAiFindBestFuzzyMatchIsCaseAndAccentInsensitive(): void
+    {
+        $this->assertSame('Colágeno', aiFindBestFuzzyMatch('COLAJENO', ['Colágeno', 'Omega 3']));
+    }
+
+    public function testAiFindBestFuzzyMatchToleratesDoubleLetterTypos(): void
+    {
+        $this->assertSame('Magnesio', aiFindBestFuzzyMatch('magnessio', ['Magnesio', 'Zinc']));
+        $this->assertSame('Magnesio', aiFindBestFuzzyMatch('mangesio', ['Magnesio', 'Zinc']));
+    }
+
+    public function testAiFindBestFuzzyMatchDoesNotConfuseDifferentProductsThatShareLetters(): void
+    {
+        // "proteina" y "creatina" dan 62.5% de similitud por caracteres compartidos, pero
+        // son productos completamente distintos -- el filtro de prefijo comun evita que se
+        // confundan entre si (no comparten ni el primer caracter).
+        $this->assertNull(aiFindBestFuzzyMatch('proteina', ['Creatina Monohidratada']));
+        $this->assertNull(aiFindBestFuzzyMatch('vitamina', ['Melatonina']));
+        $this->assertNull(aiFindBestFuzzyMatch('probioticos', ['Proteina Whey']));
+    }
+
+    public function testAiFindBestFuzzyMatchIgnoresShortWordsToAvoidFalsePositives(): void
+    {
+        $this->assertNull(aiFindBestFuzzyMatch('que', ['Quercetina']));
+        $this->assertNull(aiFindBestFuzzyMatch('', ['Omega 3']));
+    }
+
+    public function testAiFindBestFuzzyMatchReturnsNullWithoutCandidates(): void
+    {
+        $this->assertNull(aiFindBestFuzzyMatch('ashuangs', []));
+    }
+
+    public function testAiCorregirBusquedaPorTipeoCorrectsUsingRealCatalogWords(): void
+    {
+        $this->seedProducto(200, 'Ashwagandha Adaptogeno Natural', 'ASH200', null, 349.00);
+        $this->seedInventario(200, 1, 10);
+
+        $this->assertSame('Ashwagandha', aiCorregirBusquedaPorTipeo($this->pdo, 'ashuangs'));
+    }
+
+    public function testAiCorregirBusquedaPorTipeoReturnsNullWhenNoActiveProducts(): void
+    {
+        $this->assertNull(aiCorregirBusquedaPorTipeo($this->pdo, 'ashuangs'));
+    }
+
+    public function testAiCorregirBusquedaPorTipeoReturnsNullWhenNothingWasCorrected(): void
+    {
+        $this->seedProducto(201, 'Ashwagandha Adaptogeno Natural', 'ASH201', null, 349.00);
+        $this->seedInventario(201, 1, 10);
+
+        // "xilofono" no se parece a ninguna palabra real del catalogo sembrado.
+        $this->assertNull(aiCorregirBusquedaPorTipeo($this->pdo, 'xilofono'));
+    }
+
+    public function testAiToolConsultarInventarioFallsBackToFuzzyMatchWhenExactSearchFindsNothing(): void
+    {
+        $this->seedProducto(202, 'Ashwagandha Adaptogeno Natural', 'ASH202', null, 349.00);
+        $this->seedInventario(202, 1, 10);
+
+        $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'ashuangs']);
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(1, $result['productos']);
+        $this->assertSame(202, $result['productos'][0]['id_producto']);
+        $this->assertSame(1, $result['total_encontrados']);
+    }
+
+    public function testAiToolConsultarInventarioDoesNotFuzzyMatchUnrelatedProducts(): void
+    {
+        // El catalogo solo tiene Creatina; una busqueda de "proteina" (que no vendemos)
+        // debe seguir reportando cero resultados, no ofrecer Creatina por error.
+        $this->seedProducto(203, 'Creatina Monohidratada', 'CRE203', null, 450.00);
+        $this->seedInventario(203, 1, 10);
+
+        $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'proteina']);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame([], $result['productos']);
+        $this->assertSame(0, $result['total_encontrados']);
+    }
+
+    public function testAiBuildSystemPromptTeachesAlexThatBlifeIsTheOnlyBrand(): void
+    {
+        // "Be Life" SI debe aparecer, pero solo como ejemplo de error de dedo que Alex debe
+        // reconocer -- lo que se corrigio fue que el prompt se refiriera A SI MISMO como
+        // "Be Life" en vez de "Blife" (ver testAiGetToolDefinitionsDoesNotContainTheBeLifeBrandTypo).
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('Nuestra unica marca es Blife', $prompt);
+        $this->assertStringContainsString('"Be Life"', $prompt);
+    }
+
+    public function testAiGetToolDefinitionsDoesNotContainTheBeLifeBrandTypo(): void
+    {
+        $definicionesJson = (string)json_encode(aiGetToolDefinitions());
+
+        $this->assertStringNotContainsStringIgnoringCase('be life', $definicionesJson);
+        $this->assertStringContainsString('Blife', $definicionesJson);
+    }
+
     public function testAiCountInventoryMatchesMatchesActualRowCountIgnoringLimit(): void
     {
         for ($i = 200; $i < 220; $i++) {

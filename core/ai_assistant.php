@@ -169,6 +169,9 @@ function aiBuildSystemPrompt(
         $lines[] = "Eres {$persona}, asistente de ventas virtual de la tienda, atendiendo por WhatsApp.";
         $lines[] = 'Tono: persuasivo, profesional y empatico. Espanol de Mexico, natural y cercano.';
         $lines[] = '';
+        $lines[] = 'Nuestra unica marca es Blife -- no vendemos ni comparamos con otras marcas. Es comun que el cliente la escriba mal al teclear rapido (ejemplos reales: "Be Life", "By Life", "B Life"): si menciona algo asi, entiende que se refiere a Blife y sigue la conversacion con normalidad, nunca le digas que no tienes esa marca registrada ni que busques con un companero.';
+        $lines[] = 'Lo mismo aplica a nombres de producto: los clientes escriben rapido desde el celular y cometen errores de dedo o fonetica (ej. "ashuangs" por "ashwagandha"). Antes de buscar, interpreta cual es el producto real que quiso decir y usa el nombre correcto al llamar a consultar_inventario. Esa funcion tambien intenta corregir errores de escritura por su cuenta si tu primer intento no encuentra nada -- confia en el resultado que te regrese antes de decirle al cliente que no tenemos algo.';
+        $lines[] = '';
         $lines[] = 'REGLA MAS IMPORTANTE: jamas menciones un precio, existencia o caracteristica de un producto sin haber llamado antes a la funcion consultar_inventario. Si no tienes el dato, dile amablemente al cliente que lo vas a verificar con el equipo.';
         $lines[] = 'No inventes productos, precios ni promociones que no vengan de tus funciones.';
         $lines[] = '';
@@ -229,7 +232,7 @@ function aiBuildSystemPrompt(
         $lines[] = "El cliente no escribia desde hace aproximadamente {$diasInactivo} dia(s). No lo saludes como si fuera la primera vez: retoma el hilo de forma natural usando el historial de esta conversacion (por ejemplo, menciona brevemente en que habian quedado) antes de seguir.";
     }
     if ($esLadaLocal === false) {
-        $lines[] = 'El telefono de este cliente no tiene lada 33 (Guadalajara). Las entregas fisicas contra entrega solo aplican dentro de la Zona Metropolitana de Guadalajara. Si todavia no lo has confirmado en esta conversacion, pregunta con transparencia y amabilidad si se encuentra actualmente en la zona o si necesita el envio a un domicilio ahi, antes de avanzar con precios o pedidos. Ejemplo de tono: "Notamos que tu numero no es de la zona local de Guadalajara (lada 33). Te comento que en Be Life realizamos entregas contra entrega unicamente dentro de la Zona Metropolitana de Guadalajara. Te encuentras por aqui o necesitas el envio a un domicilio local?"';
+        $lines[] = 'El telefono de este cliente no tiene lada 33 (Guadalajara). Las entregas fisicas contra entrega solo aplican dentro de la Zona Metropolitana de Guadalajara. Si todavia no lo has confirmado en esta conversacion, pregunta con transparencia y amabilidad si se encuentra actualmente en la zona o si necesita el envio a un domicilio ahi, antes de avanzar con precios o pedidos. Ejemplo de tono: "Notamos que tu numero no es de la zona local de Guadalajara (lada 33). Te comento que en Blife realizamos entregas contra entrega unicamente dentro de la Zona Metropolitana de Guadalajara. Te encuentras por aqui o necesitas el envio a un domicilio local?"';
     }
 
     if (!empty($etiquetasDisponibles)) {
@@ -366,7 +369,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'enviar_catalogo',
-                'description' => 'Envia el catalogo de productos en PDF directo al chat. Usala cuando el cliente pida el catalogo, la lista de productos o el PDF de la marca Be Life.',
+                'description' => 'Envia el catalogo de productos en PDF directo al chat. Usala cuando el cliente pida el catalogo, la lista de productos o el PDF de la marca Blife.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => new stdClass(),
@@ -1293,6 +1296,110 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
     return (int)$stmt->fetchColumn();
 }
 
+/**
+ * Busca, dentro de $candidatos, la palabra mas parecida a $termino -- respaldo 100% en
+ * codigo (sin gastar tokens de DeepSeek) para cuando un cliente escribe un producto o
+ * marca con errores de dedo/fonetica (ej. "ashuangs" por "ashwagandha") y la busqueda
+ * exacta por LIKE no encuentra nada. Funcion pura, sin acceso a base de datos, para
+ * poder probarla sin fixtures.
+ *
+ * Exige que compartan al menos $prefijoMinimo caracteres iniciales ademas del umbral de
+ * similitud (similar_text) -- solo el umbral de similitud deja pasar falsos positivos
+ * peligrosos en este catalogo (ej. "proteina" vs "creatina" da 62.5% de similitud pero
+ * son productos completamente distintos; con el filtro de prefijo se descarta porque no
+ * comparten ni el primer caracter).
+ */
+function aiFindBestFuzzyMatch(string $termino, array $candidatos, float $umbralMinimo = 50.0, int $prefijoMinimo = 2): ?string
+{
+    $terminoNormalizado = aiStripAccentsLower(trim($termino));
+    if (mb_strlen($terminoNormalizado) < 4) {
+        // Palabras muy cortas ("ir", "que", "por") dan demasiados falsos positivos.
+        return null;
+    }
+
+    $mejorCandidato = null;
+    $mejorPuntuacion = 0.0;
+
+    foreach ($candidatos as $candidato) {
+        $candidatoNormalizado = aiStripAccentsLower(trim((string)$candidato));
+        if ($candidatoNormalizado === '' || $candidatoNormalizado === $terminoNormalizado) {
+            continue;
+        }
+
+        $prefijoComun = 0;
+        $longitudMinima = min(mb_strlen($terminoNormalizado), mb_strlen($candidatoNormalizado));
+        while (
+            $prefijoComun < $longitudMinima
+            && mb_substr($terminoNormalizado, $prefijoComun, 1) === mb_substr($candidatoNormalizado, $prefijoComun, 1)
+        ) {
+            $prefijoComun++;
+        }
+        if ($prefijoComun < $prefijoMinimo) {
+            continue;
+        }
+
+        similar_text($terminoNormalizado, $candidatoNormalizado, $porcentaje);
+        if ($porcentaje >= $umbralMinimo && $porcentaje > $mejorPuntuacion) {
+            $mejorPuntuacion = $porcentaje;
+            $mejorCandidato = (string)$candidato;
+        }
+    }
+
+    return $mejorCandidato;
+}
+
+/**
+ * Intenta corregir $busqueda palabra por palabra contra los nombres de productos activos
+ * del catalogo real, para reintentar la busqueda cuando la primera pasada (LIKE exacto)
+ * no encontro nada. Regresa null si no hubo ninguna correccion (para no disparar una
+ * segunda consulta identica a la original).
+ */
+function aiCorregirBusquedaPorTipeo(PDO $pdo, string $busqueda): ?string
+{
+    $palabras = array_values(array_filter(
+        preg_split('/\s+/', trim($busqueda)) ?: [],
+        static fn(string $p): bool => mb_strlen($p) >= 4
+    ));
+    if (empty($palabras)) {
+        return null;
+    }
+
+    $stmt = $pdo->query("SELECT DISTINCT nombre FROM productos WHERE estado = 'activo'");
+    $nombresCatalogo = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : [];
+    if (empty($nombresCatalogo)) {
+        return null;
+    }
+
+    $palabrasCatalogo = [];
+    foreach ($nombresCatalogo as $nombre) {
+        foreach (preg_split('/\s+/', trim((string)$nombre)) ?: [] as $palabra) {
+            if (mb_strlen($palabra) >= 4) {
+                $palabrasCatalogo[aiStripAccentsLower($palabra)] = $palabra;
+            }
+        }
+    }
+    if (empty($palabrasCatalogo)) {
+        return null;
+    }
+
+    $huboCorreccion = false;
+    $palabrasCorregidas = array_map(
+        static function (string $palabra) use ($palabrasCatalogo, &$huboCorreccion): string {
+            $mejor = aiFindBestFuzzyMatch($palabra, array_values($palabrasCatalogo));
+            if ($mejor !== null) {
+                $huboCorreccion = true;
+
+                return $mejor;
+            }
+
+            return $palabra;
+        },
+        $palabras
+    );
+
+    return $huboCorreccion ? implode(' ', $palabrasCorregidas) : null;
+}
+
 function aiToolConsultarInventario(PDO $pdo, array $args): array
 {
     $busqueda = trim((string)($args['busqueda_texto'] ?? ''));
@@ -1301,6 +1408,19 @@ function aiToolConsultarInventario(PDO $pdo, array $args): array
     }
 
     $resultados = aiSearchInventory($pdo, $busqueda, AI_INVENTORY_SEARCH_LIMIT);
+    if (empty($resultados)) {
+        // Sin resultados exactos: intenta una correccion de tipeo 100% por codigo antes de
+        // rendirse. Si encuentra algo, usa el termino corregido tambien para el conteo total
+        // de abajo, para que "total_encontrados" sea consistente con "productos".
+        $busquedaCorregida = aiCorregirBusquedaPorTipeo($pdo, $busqueda);
+        if ($busquedaCorregida !== null) {
+            $resultadosCorregidos = aiSearchInventory($pdo, $busquedaCorregida, AI_INVENTORY_SEARCH_LIMIT);
+            if (!empty($resultadosCorregidos)) {
+                $resultados = $resultadosCorregidos;
+                $busqueda = $busquedaCorregida;
+            }
+        }
+    }
     if (empty($resultados)) {
         return ['ok' => true, 'productos' => [], 'total_encontrados' => 0, 'message' => 'No se encontraron productos activos que coincidan con esa busqueda.'];
     }
@@ -1489,6 +1609,18 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
     } catch (Throwable $e) {
         error_log('ERROR en aiToolAgendarVenta al crear/resolver cliente: ' . $e->getMessage());
         $idCliente = $idClienteExistente;
+    }
+
+    // Enlaza el contacto de WhatsApp con el cliente resuelto si aun no lo estaba, para
+    // que la vista "Contactos de WhatsApp" muestre el nombre real y su ficha. No pisa
+    // un enlace ya existente (guarda AND id_cliente IS NULL).
+    if (!empty($idCliente) && $idCliente > 0 && !empty($context['id_conversacion'])) {
+        try {
+            $pdo->prepare('UPDATE whatsapp_conversaciones SET id_cliente = ? WHERE id_conversacion = ? AND id_cliente IS NULL')
+                ->execute([(int) $idCliente, (int) $context['id_conversacion']]);
+        } catch (Throwable $e) {
+            error_log('WARNING: no se pudo enlazar la conversacion #' . (int) $context['id_conversacion'] . ' con el cliente #' . (int) $idCliente . ': ' . $e->getMessage());
+        }
     }
 
     if ($direccion === '') {
