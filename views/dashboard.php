@@ -586,6 +586,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/ai_assistant_settings.php" class="btn waves-effect waves-light green darken-2">Configurar</a>
+                        <a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php" class="btn-flat waves-effect">Conversaciones</a>
                         <a href="<?php echo BASE_URL; ?>views/ai_diagnostics.php" class="btn-flat waves-effect">Diagnostico</a>
                     </div>
                 </div>

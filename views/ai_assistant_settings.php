@@ -112,6 +112,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
                 </h4>
                 <div>
+                    <a href="whatsapp_contactos.php" class="btn-flat waves-effect">Contactos por dia</a>
                     <a href="ai_diagnostics.php" class="btn-flat waves-effect">Diagnostico de errores</a>
                     <a href="dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Volver al Dashboard</a>
                 </div>

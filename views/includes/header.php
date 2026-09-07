@@ -369,6 +369,10 @@
                             <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
                         <?php endif; ?>
 
+                        <?php if (hasPermission('ver_conversaciones_whatsapp') || hasPermission('gestionar_asistente_ia')): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
+                        <?php endif; ?>
+
                         <?php if (isAdmin()): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
                         <?php endif; ?>
@@ -451,9 +455,10 @@
                 // solo traia Dashboard/Pickup/Mensajes/Favoritos.
                 $mostrarBlogsMovil = hasPermission('gestionar_blogs');
                 $mostrarUsuariosMovil = hasPermission('gestionar_usuarios');
+                $mostrarConversacionesWaMovil = hasPermission('ver_conversaciones_whatsapp') || hasPermission('gestionar_asistente_ia');
                 $mostrarSaludMovil = isAdmin();
                 ?>
-                <?php if ($mostrarBlogsMovil || $mostrarUsuariosMovil || $mostrarSaludMovil): ?>
+                <?php if ($mostrarBlogsMovil || $mostrarUsuariosMovil || $mostrarConversacionesWaMovil || $mostrarSaludMovil): ?>
                     <li><div class="divider"></div></li>
                     <li><a class="subheader">Administración</a></li>
                 <?php endif; ?>
@@ -463,6 +468,9 @@
                 <?php if ($mostrarUsuariosMovil): ?>
                     <li><a href="<?php echo BASE_URL; ?>views/users.php"><i class="material-icons">people</i> Usuarios</a></li>
                     <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
+                <?php endif; ?>
+                <?php if ($mostrarConversacionesWaMovil): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
                 <?php endif; ?>
                 <?php if ($mostrarSaludMovil): ?>
                     <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
