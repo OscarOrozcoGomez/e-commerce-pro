@@ -77,7 +77,7 @@ include __DIR__ . '/includes/header.php';
                         </button>
                         <div style="text-align: right; margin-left: auto;">
                             <div id="cart-subtotal-line" style="display:none; font-size: 0.9rem; color: #616161;">Productos: $<span id="cart-subtotal-display">0.00</span></div>
-                            <div id="cart-shipping-line" style="display:none; font-size: 0.92rem; margin: 2px 0;"></div>
+                            <div id="cart-shipping-line" style="display:none;"></div>
                             <h5 style="margin: 0; font-weight: bold;">Total: $<span id="cart-total-display">0.00</span></h5>
                         </div>
                     </div>
@@ -219,6 +219,7 @@ include __DIR__ . '/includes/header.php';
     let deliveryZoneQuoteTimer = null;
     let latestDeliveryZoneQuote = null;
     let deliveryZoneQuoteInFlight = 0;
+    let lastShownShippingFee = null;
     // IDs de producto que el backend rechazo al confirmar el pedido por falta de stock
     // (a diferencia de latestPickupStockCheck, esto aplica a cualquier tipo de entrega).
     let orderSubmitSinStockIds = new Set();
@@ -759,6 +760,14 @@ include __DIR__ . '/includes/header.php';
         return q && Number.isFinite(q.costo_envio) ? Math.max(0, q.costo_envio) : 0;
     }
 
+    function replayAttentionAnimation(el) {
+        // Reinicia la animacion de "sacudida" para que se dispare de nuevo cada vez
+        // que el cargo aparece o cambia de monto.
+        el.classList.remove('cart-shipping-attn');
+        void el.offsetWidth; // fuerza reflow
+        el.classList.add('cart-shipping-attn');
+    }
+
     function renderShippingLine(subtotalNum, distinctCount) {
         const line = document.getElementById('cart-shipping-line');
         const subLine = document.getElementById('cart-subtotal-line');
@@ -767,49 +776,69 @@ include __DIR__ . '/includes/header.php';
 
         const tipo = document.getElementById('tipo_entrega')?.value || '';
         const q = latestDeliveryZoneQuote;
+        const resetBox = () => {
+            line.classList.remove('cart-shipping-alert', 'cart-shipping-attn', 'cart-shipping-soft');
+            line.style.color = '';
+            line.style.display = '';
+        };
 
         if (tipo !== 'Domicilio') {
+            resetBox();
             line.style.display = 'none';
+            lastShownShippingFee = null;
             if (subLine) subLine.style.display = 'none';
             return;
         }
 
         if (deliveryZoneQuoteInFlight > 0 && !q) {
-            line.style.display = 'block';
-            line.style.color = '#9e9e9e';
+            resetBox();
+            line.classList.add('cart-shipping-soft');
             line.innerHTML = '<i class="material-icons tiny" style="vertical-align:middle;">hourglass_empty</i> Calculando envío…';
             if (subLine) subLine.style.display = 'none';
             return;
         }
 
         if (!q) {
+            resetBox();
             line.style.display = 'none';
+            lastShownShippingFee = null;
             if (subLine) subLine.style.display = 'none';
             return;
         }
 
         const fee = Math.max(0, Number(q.costo_envio) || 0);
         const freeItems = parseInt(q.free_ship_items, 10) || 2;
-        let html = '';
-        let color = '#616161';
+
+        resetBox();
 
         if (fee > 0) {
-            color = '#c62828';
-            html = `<i class="material-icons tiny" style="vertical-align:middle;">local_shipping</i> Envío fuera de la periferia de Guadalajara: <strong>+$${fee.toFixed(2)}</strong>`;
-        } else if (q.zona === 'foraneo') {
-            color = '#2e7d32';
-            html = `<i class="material-icons tiny" style="vertical-align:middle;">local_shipping</i> Envío foráneo: <strong>GRATIS</strong> por llevar ${freeItems} o más productos`;
-        } else if (q.zona === 'local') {
-            color = '#2e7d32';
-            html = `<i class="material-icons tiny" style="vertical-align:middle;">check_circle</i> Envío a domicilio sin costo (dentro de la periferia)`;
+            line.classList.add('cart-shipping-alert');
+            line.innerHTML =
+                '<i class="material-icons cart-shipping-icon">local_shipping</i>' +
+                '<div class="cart-shipping-text">' +
+                    'Tu domicilio queda <strong>fuera de la periferia de Guadalajara</strong>, ' +
+                    'se agrega un cargo de envío de ' +
+                    `<span class="cart-shipping-amount">+$${fee.toFixed(2)}</span>` +
+                '</div>';
+            // Sacudida solo cuando el monto es nuevo o cambio (no en cada re-render).
+            if (lastShownShippingFee !== fee) {
+                replayAttentionAnimation(line);
+            }
+            lastShownShippingFee = fee;
         } else {
-            color = '#9e9e9e';
-            html = `<i class="material-icons tiny" style="vertical-align:middle;">info</i> El costo de envío de tu zona se confirma al finalizar el pedido`;
+            lastShownShippingFee = null;
+            line.classList.add('cart-shipping-soft');
+            if (q.zona === 'foraneo') {
+                line.style.color = '#2e7d32';
+                line.innerHTML = `<i class="material-icons tiny" style="vertical-align:middle;">celebration</i> Envío foráneo <strong>GRATIS</strong> por llevar ${freeItems} o más productos`;
+            } else if (q.zona === 'local') {
+                line.style.color = '#2e7d32';
+                line.innerHTML = `<i class="material-icons tiny" style="vertical-align:middle;">check_circle</i> Envío a domicilio sin costo (dentro de la periferia)`;
+            } else {
+                line.style.color = '#9e9e9e';
+                line.innerHTML = `<i class="material-icons tiny" style="vertical-align:middle;">info</i> El costo de envío de tu zona se confirma al finalizar el pedido`;
+            }
         }
-
-        line.style.display = 'block';
-        line.style.color = color;
-        line.innerHTML = html;
 
         // Solo desglosamos "Productos / Total" cuando hay un cargo real que explicar.
         if (subLine && subDisplay) {
@@ -1392,6 +1421,72 @@ include __DIR__ . '/includes/header.php';
     .cart-qty-input-warning {
         border-color: #c62828;
         background: #ffebee;
+    }
+
+    /* ----- Aviso de envio foraneo en el carrito ----- */
+    #cart-shipping-line { border-radius: 10px; transition: background-color .25s ease; }
+
+    #cart-shipping-line.cart-shipping-soft {
+        display: block;
+        font-size: 0.92rem;
+        margin: 2px 0;
+        text-align: right;
+    }
+
+    #cart-shipping-line.cart-shipping-alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        max-width: 340px;
+        margin: 10px 0 4px auto;
+        padding: 12px 14px;
+        text-align: left;
+        color: #7f1d1d;
+        background: #fff4f2;
+        border: 1px solid #ef9a9a;
+        border-left: 5px solid #c62828;
+        box-shadow: 0 0 0 0 rgba(198, 40, 40, 0);
+        animation: cartShippingGlow 2s ease-in-out infinite;
+    }
+    #cart-shipping-line.cart-shipping-alert.cart-shipping-attn {
+        animation: cartShippingShake .7s cubic-bezier(.36,.07,.19,.97) both,
+                   cartShippingGlow 2s ease-in-out .7s infinite;
+    }
+    #cart-shipping-line .cart-shipping-icon {
+        font-size: 22px;
+        line-height: 1.2;
+        color: #c62828;
+        flex-shrink: 0;
+    }
+    #cart-shipping-line .cart-shipping-text { line-height: 1.35; }
+    #cart-shipping-line .cart-shipping-amount {
+        display: inline-block;
+        margin-left: 2px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        background: #c62828;
+        color: #fff;
+        font-weight: 800;
+        font-size: 0.98rem;
+        white-space: nowrap;
+    }
+
+    @keyframes cartShippingShake {
+        10%, 90% { transform: translateX(-2px); }
+        20%, 80% { transform: translateX(4px); }
+        30%, 50%, 70% { transform: translateX(-8px); }
+        40%, 60% { transform: translateX(8px); }
+    }
+    @keyframes cartShippingGlow {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0); }
+        50%      { box-shadow: 0 0 16px 2px rgba(198, 40, 40, .45); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        #cart-shipping-line.cart-shipping-alert,
+        #cart-shipping-line.cart-shipping-alert.cart-shipping-attn {
+            animation: none;
+        }
     }
 </style>
 
