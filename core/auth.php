@@ -45,6 +45,8 @@ const PERMISOS_EN_USO = [
     'gestionar_asistente_ia',
     'ver_insights_ia',
     'ver_notificaciones_pickup',
+    // Control de caducidades por lote (views/caducidades.php + api/lotes_manager.php).
+    'gestionar_caducidades',
 ];
 
 /**
@@ -1203,6 +1205,40 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
     $direccion = esc((string) ($order['direccion'] ?? ''));
     $total = (float) ($order['total'] ?? 0.0);
 
+    // Enlace para escribirle al cliente por WhatsApp desde el correo:
+    //   - $waDigits: telefono en digitos con lada de pais (52 + 10 nacionales).
+    //     Sale de order['whatsapp_link'] si quien crea el pedido lo trae (ej. Alex,
+    //     con el numero de la conversacion) y es un wa.me/<digitos>; si no, del
+    //     telefono del pedido, quitando lada 52/521. Conversaciones "LID" (WhatsApp
+    //     no comparte el numero) se quedan sin enlace -> sin boton.
+    //   - $waHref: pasa por /wa.php, que en Android abre WhatsApp Business
+    //     (com.whatsapp.w4b) en vez del WhatsApp personal; en iOS/escritorio cae
+    //     a wa.me (Apple no deja elegir entre las dos apps).
+    $waLinkExplicito = trim((string) ($order['whatsapp_link'] ?? ''));
+    $waDigits = '';
+    if ($waLinkExplicito !== '' && preg_match('#wa\.me/(\d{10,15})#', $waLinkExplicito, $m)) {
+        $waDigits = $m[1];
+    }
+    if ($waDigits === '') {
+        $telDigits = preg_replace('/\D+/', '', (string) ($order['telefono'] ?? '')) ?? '';
+        if (strlen($telDigits) === 12 && strncmp($telDigits, '52', 2) === 0) {
+            $telDigits = substr($telDigits, 2);
+        } elseif (strlen($telDigits) === 13 && strncmp($telDigits, '521', 3) === 0) {
+            $telDigits = substr($telDigits, 3);
+        }
+        if (strlen($telDigits) === 10) {
+            $waDigits = '52' . $telDigits;
+        }
+    }
+    $waHref = '';
+    if ($waDigits !== '') {
+        $waHref = appAbsoluteAssetUrl('wa.php') . '?p=' . $waDigits;
+    } elseif ($waLinkExplicito !== '') {
+        // Deep link propio ya armado que no es wa.me: usarlo tal cual.
+        $waHref = $waLinkExplicito;
+    }
+    $waHref = filter_var($waHref, FILTER_VALIDATE_URL) ? $waHref : '';
+
     $filas = '';
     foreach ($items as $item) {
         $nombre = trim((string) ($item['nombre'] ?? 'Producto'));
@@ -1239,6 +1275,24 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
         ? '<div style="margin-top:4px;"><strong>Dirección:</strong> ' . $direccion . '</div>'
         : '';
 
+    // Si tenemos link de WhatsApp, el telefono se vuelve clickable (abre el chat
+    // en WhatsApp / WhatsApp Business) y ademas mostramos un boton verde abajo.
+    $waHrefEsc = esc($waHref);
+    $telefonoHtml = $telefono !== '' ? $telefono : '<span style="color:#90a4ae;">No proporcionado</span>';
+    if ($waHref !== '' && $telefono !== '') {
+        $telefonoHtml = '<a href="' . $waHrefEsc . '" style="color:#1a237e;text-decoration:none;font-weight:600;">' . $telefono . '</a>';
+    }
+    $waButtonHtml = $waHref !== ''
+        ? '<a href="' . $waHrefEsc . '" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin:6px;">Escribir al cliente por WhatsApp</a>'
+        : '';
+    // Cuando no se pudo armar el link (ej. la conversacion llego como "LID" y
+    // WhatsApp no comparte el numero), lo decimos explicito en vez de que el
+    // boton falte sin explicacion: asi queda claro que hay que buscar al
+    // cliente por otro medio.
+    $waNotaHtml = $waHref === ''
+        ? '<div style="margin-top:8px;color:#8a6d3b;font-size:13px;">⚠️ Sin número de WhatsApp para este pedido: contacta al cliente por otro medio.</div>'
+        : '';
+
     return '
     <div style="background:#f4f6f7;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
         <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
@@ -1250,9 +1304,10 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
                 <div style="background:#e8eaf6;border-radius:8px;padding:14px 16px;font-size:14px;color:#283593;margin-bottom:18px;">
                     <div style="font-size:16px;font-weight:700;margin-bottom:6px;">Pedido ' . $numeroPedido . '</div>
                     <div><strong>Cliente:</strong> ' . $clienteNombre . '</div>
-                    <div><strong>Teléfono:</strong> ' . $telefono . '</div>
+                    <div><strong>Teléfono:</strong> ' . $telefonoHtml . '</div>
                     <div><strong>Entrega:</strong> ' . $entrega . '</div>
                     ' . $direccionHtml . '
+                    ' . $waNotaHtml . '
                 </div>
 
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -1272,7 +1327,8 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
                 </div>
 
                 <div style="margin-top:24px;text-align:center;">
-                    <a href="' . esc(appAbsoluteAssetUrl('views/dashboard.php')) . '" style="display:inline-block;background:#1a237e;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">Ver en el panel de administración</a>
+                    <a href="' . esc(appAbsoluteAssetUrl('views/dashboard.php')) . '" style="display:inline-block;background:#1a237e;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin:6px;">Ver en el panel de administración</a>
+                    ' . $waButtonHtml . '
                 </div>
             </div>
         </div>

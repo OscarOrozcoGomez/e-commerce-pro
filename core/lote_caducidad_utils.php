@@ -448,6 +448,55 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
 }
 
 /**
+ * Resumen para el tablero: cuantos lotes hay en cada severidad y cual es el mas
+ * urgente. "urgen" = critico + urgente + caducado (los que hay que liquidar ya).
+ *
+ * @return array{
+ *   critico:int, urgente:int, planificar:int, vigilar:int, caducado:int,
+ *   sin_rotacion:int, sin_historico:int, ok:int,
+ *   urgen:int, total:int, mas_urgente:?array<string,mixed>
+ * }
+ */
+function loteResumenSeveridad(PDO $pdo): array
+{
+    $conteo = [
+        'critico' => 0, 'urgente' => 0, 'planificar' => 0, 'vigilar' => 0,
+        'caducado' => 0, 'sin_rotacion' => 0, 'sin_historico' => 0, 'ok' => 0,
+    ];
+    $resumen = $conteo + ['urgen' => 0, 'total' => 0, 'mas_urgente' => null];
+
+    if (!loteTablaExiste($pdo, 'lotes_inventario')) {
+        return $resumen;
+    }
+
+    $lotes = loteFetchProyecciones($pdo)['lotes'];
+    $urgentes = ['critico', 'urgente', 'caducado'];
+    $masUrgente = null;
+
+    foreach ($lotes as $l) {
+        $sev = (string) ($l['severidad'] ?? '');
+        if (array_key_exists($sev, $conteo)) {
+            $conteo[$sev]++;
+        }
+        if (in_array($sev, $urgentes, true)) {
+            if ($masUrgente === null
+                || (int) $l['dias_hasta_caducar'] < (int) $masUrgente['dias_hasta_caducar']
+            ) {
+                $masUrgente = $l;
+            }
+        }
+    }
+
+    $resumen = $conteo + [
+        'urgen' => $conteo['critico'] + $conteo['urgente'] + $conteo['caducado'],
+        'total' => count($lotes),
+        'mas_urgente' => $masUrgente,
+    ];
+
+    return $resumen;
+}
+
+/**
  * SUM(cantidad_actual) del sistema vs SUM(cantidad_restante) de lotes, por producto.
  *
  * @param int[] $idsProducto
@@ -558,13 +607,71 @@ function loteNormalizarDatos(array $d): array
 }
 
 /**
- * Crea o actualiza un lote por id_lote (0 = nuevo). Devuelve el id_lote.
+ * Impide que la suma de cantidad_restante de los lotes activos/caducados de un
+ * producto rebase el stock del sistema (SUM inventario_almacen.cantidad_actual).
+ * Cuenta la cantidad que se va a guardar y EXCLUYE el lote que se edita.
+ *
+ * No bloquea si el producto no tiene registro de inventario, ni si su stock del
+ * sistema es 0 (suele significar "no rastreado / aun no recibido"; bloquearlo
+ * atraparia el flujo normal de capturar el lote conforme llega la mercancia).
+ *
+ * @throws InvalidArgumentException con un mensaje pensado para el usuario final.
  */
-function loteGuardar(PDO $pdo, array $datos, int $userId): int
+function loteAssertNoRebasaStockSistema(PDO $pdo, int $idProducto, int $cantidadNueva, int $idLoteExcluir = 0): void
+{
+    if ($idProducto <= 0
+        || !loteTablaExiste($pdo, 'inventario_almacen')
+        || !loteTablaExiste($pdo, 'lotes_inventario')
+    ) {
+        return;
+    }
+
+    // SUM() sobre cero renglones = NULL -> distingue "sin registro de inventario"
+    // de "stock realmente en 0".
+    $stmt = $pdo->prepare('SELECT SUM(cantidad_actual) FROM inventario_almacen WHERE id_producto = :p');
+    $stmt->execute([':p' => $idProducto]);
+    $raw = $stmt->fetchColumn();
+    if ($raw === null || $raw === false || (int) $raw <= 0) {
+        return;
+    }
+    $stockSistema = (int) $raw;
+
+    $stmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(cantidad_restante), 0)
+         FROM lotes_inventario
+         WHERE id_producto = :p AND estado IN ('activo','caducado') AND id_lote <> :excl"
+    );
+    $stmt->execute([':p' => $idProducto, ':excl' => $idLoteExcluir]);
+    $otrosLotes = (int) $stmt->fetchColumn();
+
+    $totalProyectado = $otrosLotes + max(0, $cantidadNueva);
+    if ($totalProyectado > $stockSistema) {
+        throw new InvalidArgumentException(sprintf(
+            'Los lotes de este producto sumarían %d unidades, pero el stock del sistema es %d. '
+            . 'Baja la cantidad del lote o corrige el stock en Inventario antes de guardar.',
+            $totalProyectado,
+            $stockSistema
+        ));
+    }
+}
+
+/**
+ * Crea o actualiza un lote por id_lote (0 = nuevo). Devuelve el id_lote.
+ *
+ * $validarContraStock: cuando es true (default, flujo de la ficha de producto)
+ * rechaza el guardado si los lotes rebasarian el stock del sistema. El flujo de
+ * "Entradas de Inventario" lo pasa en false porque ahi el stock y el lote suben
+ * juntos en la misma operacion.
+ */
+function loteGuardar(PDO $pdo, array $datos, int $userId, bool $validarContraStock = true): int
 {
     $idLote = (int) ($datos['id_lote'] ?? 0);
     $n = loteNormalizarDatos($datos);
     $hoy = date('Y-m-d');
+
+    if ($validarContraStock) {
+        loteAssertNoRebasaStockSistema($pdo, $n['id_producto'], $n['cantidad'], $idLote);
+    }
 
     if ($idLote > 0) {
         $stmt = $pdo->prepare(
@@ -609,6 +716,9 @@ function loteGuardar(PDO $pdo, array $datos, int $userId): int
         ':fecha' => $n['fecha_caducidad'],
         ':aprox' => $n['caducidad_aproximada'],
         ':ingreso' => $hoy,
+        // Un lote nuevo entra completo: restante = inicial. Dos placeholders
+        // distintos a proposito: MySQL/PDO con ATTR_EMULATE_PREPARES=false NO
+        // permite reusar un named param (:cant, :cant) -> SQLSTATE[HY093].
         ':cant_ini' => $n['cantidad'],
         ':cant_rest' => $n['cantidad'],
         ':costo' => $n['costo_unitario'],
@@ -643,15 +753,18 @@ function loteRegistrarEntrada(PDO $pdo, array $datos, int $userId): int
         $idLote = (int) $existente['id_lote'];
         $upd = $pdo->prepare(
             "UPDATE lotes_inventario
-             SET cantidad_inicial = cantidad_inicial + :c,
-                 cantidad_restante = cantidad_restante + :c,
+             SET cantidad_inicial = cantidad_inicial + :inc_ini,
+                 cantidad_restante = cantidad_restante + :inc_rest,
                  fecha_caducidad = :fecha,
                  caducidad_aproximada = :aprox,
                  estado = CASE WHEN estado IN ('agotado') THEN 'activo' ELSE estado END
              WHERE id_lote = :id"
         );
         $upd->execute([
-            ':c' => $n['cantidad'],
+            // Placeholders distintos: MySQL/PDO (EMULATE_PREPARES=false) no admite
+            // reusar un named param en la misma sentencia -> SQLSTATE[HY093].
+            ':inc_ini' => $n['cantidad'],
+            ':inc_rest' => $n['cantidad'],
             ':fecha' => $n['fecha_caducidad'],
             ':aprox' => $n['caducidad_aproximada'],
             ':id' => $idLote,
@@ -660,7 +773,7 @@ function loteRegistrarEntrada(PDO $pdo, array $datos, int $userId): int
         return $idLote;
     }
 
-    return loteGuardar($pdo, $datos + ['id_lote' => 0], $userId);
+    return loteGuardar($pdo, $datos + ['id_lote' => 0], $userId, false);
 }
 
 /**
@@ -671,6 +784,12 @@ function loteAjustarCantidad(PDO $pdo, int $idLote, int $nuevaCantidad, int $use
     if ($idLote <= 0 || $nuevaCantidad < 0) {
         throw new InvalidArgumentException('Datos de ajuste invalidos.');
     }
+
+    $stmt = $pdo->prepare('SELECT id_producto FROM lotes_inventario WHERE id_lote = :id');
+    $stmt->execute([':id' => $idLote]);
+    $idProducto = (int) ($stmt->fetchColumn() ?: 0);
+    loteAssertNoRebasaStockSistema($pdo, $idProducto, $nuevaCantidad, $idLote);
+
     $estado = $nuevaCantidad === 0 ? 'agotado' : 'activo';
     $stmt = $pdo->prepare(
         "UPDATE lotes_inventario

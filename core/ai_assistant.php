@@ -54,6 +54,18 @@ const AI_HANDOFF_TEXT_FLAG = '[PASE_A_HUMANO]';
 // mucha variedad" cuando en realidad se truncaron los resultados.
 const AI_INVENTORY_SEARCH_LIMIT = 12;
 
+// Municipios de la Zona Metropolitana de Guadalajara donde la entrega personal es
+// gratuita (politica_envio_texto). Sin acentos y en minusculas -- aiClasificarZonaEntrega()
+// normaliza la direccion del cliente antes de comparar contra esta lista.
+const AI_ZMG_MUNICIPIOS_GRATUITOS = [
+    'guadalajara', 'zapopan', 'tlaquepaque', 'tonala', 'tlajomulco',
+    'el salto', 'ixtlahuacan de los membrillos', 'juanacatlan',
+];
+
+// Cargo de envio para entregas foraneas (fuera de la ZMG) con menos de 2 productos
+// distintos -- gratis en cualquier zona si el pedido incluye 2 o mas.
+const AI_CARGO_ENVIO_FORANEO = 40.00;
+
 function aiIsTestMode(): bool
 {
     $raw = strtolower((string)(getEnvVar('AI_ASSISTANT_TEST_MODE', '0') ?? '0'));
@@ -263,6 +275,7 @@ function aiBuildSystemPrompt(
     $lines[] = '- Si el cliente pide un descuento (por ser frecuente, por mayoreo, etc.), nunca lo apliques tu mismo -- no tienes esa facultad. Respondele con calidez y llama a transferir_a_humano para que un companero lo valide.';
     $lines[] = '- Si el cliente quiere cancelar un pedido, nunca muestres resistencia. Respondele con empatia, algo como: "Entiendo perfectamente. Sin problema, dejamos la orden pausada por ahora. Avisame cuando gustes retomarlo y con gusto te atendemos." y llama a transferir_a_humano para formalizar la cancelacion.';
     $lines[] = '- Cada vez que confirmes, modifiques o cierres un pedido, usa iconos (🎉 📦 🚚 💰 ✨) y enlista claramente productos, cantidades, precio de cada uno, estatus del envio y el total final.';
+    $lines[] = '- El costo de envio NUNCA lo calculas ni lo decides tu: agendar_venta ya revisa la direccion por su cuenta y te regresa el total real (que puede incluir un cargo agregado) y un mensaje indicandote si aplica. Usa siempre el total y el mensaje que te regresa la funcion, no el que tu mismo calculaste antes -- si cambio, es porque la direccion quedo fuera de la Zona Metropolitana de Guadalajara.';
     $lines[] = '';
     $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes describiendo que envio una foto, nota de voz, video, archivo o ubicacion (ej. "[El cliente envio una nota de voz]" o "[El cliente compartio su ubicacion: ...]"), NO puedes verlo ni escucharlo. Reconocelo con naturalidad y pide que te escriba en texto lo importante; si es algo que debe revisar una persona (un comprobante de pago, la foto de un problema con un producto), llama a transferir_a_humano. Si es una ubicacion, puedes usar el enlace de mapa que viene en el corchete para el pedido, pero confirma con el cliente la direccion en texto igual. Nunca ignores ese mensaje ni actues como si no hubiera llegado nada.';
     $lines[] = '';
@@ -482,6 +495,64 @@ function aiPhoneHasLocalLada(string $waId, string $lada = '33'): ?bool
     }
 
     return substr($digits, 0, strlen($lada)) === $lada;
+}
+
+/**
+ * Pura: minusculas + sin acentos comunes, para comparar texto libre de clientes sin
+ * depender de que escriban los acentos bien.
+ */
+function aiStripAccentsLower(string $texto): string
+{
+    $texto = mb_strtolower(trim($texto));
+
+    return strtr($texto, ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n', 'ü' => 'u']);
+}
+
+/**
+ * Clasifica una direccion de entrega en 'local' (municipio de la ZMG, envio gratis),
+ * 'foraneo' (menciona Jalisco pero ningun municipio de la ZMG -- aplica cargo de envio
+ * salvo promocion de 2+ productos) o 'indeterminado' (no se pudo determinar nada, ej.
+ * direccion vacia o sin ninguna pista de estado/municipio -- nunca se asume local ni
+ * foraneo por falta de dato, se deja para revision del admin via ai_diagnostics.php).
+ * Pura y testeable -- coincidencia de texto simple, mismo criterio ya usado en el
+ * proyecto para busqueda de inventario/deteccion de temas, no interpretacion por IA.
+ */
+function aiClasificarZonaEntrega(string $direccion): string
+{
+    $normalizado = aiStripAccentsLower($direccion);
+    if ($normalizado === '') {
+        return 'indeterminado';
+    }
+
+    foreach (AI_ZMG_MUNICIPIOS_GRATUITOS as $municipio) {
+        if (mb_stripos($normalizado, $municipio) !== false) {
+            return 'local';
+        }
+    }
+
+    if (mb_stripos($normalizado, 'jalisco') !== false) {
+        return 'foraneo';
+    }
+
+    return 'indeterminado';
+}
+
+/**
+ * Pura: cargo de envio segun zona y cantidad de PRODUCTOS DISTINTOS del pedido (no
+ * piezas totales) -- la promocion real es "2 o mas productos Be Life, envio gratis en
+ * cualquier zona" (ver ai_asistente_config.mensaje_bienvenida).
+ */
+function aiCalcularCargoEnvio(string $zonaEntrega, int $productosDistintos): float
+{
+    if ($zonaEntrega !== 'foraneo') {
+        return 0.0;
+    }
+
+    if ($productosDistintos >= 2) {
+        return 0.0;
+    }
+
+    return AI_CARGO_ENVIO_FORANEO;
 }
 
 function aiGetOrCreateConversation(PDO $pdo, string $waId, ?string $perfilNombre): array
@@ -1470,11 +1541,24 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         $result = dbCreatePublicOrder($data);
     } catch (Throwable $e) {
         error_log('ERROR en aiToolAgendarVenta al llamar dbCreatePublicOrder: ' . $e->getMessage());
+        aiSendTelegramAlert(
+            "No se pudo registrar un pedido con Alex (fallo tecnico).\n"
+            . "Cliente: {$nombre}\n"
+            . 'Error: ' . $e->getMessage()
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+        );
         return ['ok' => false, 'message' => 'No fue posible registrar el pedido, intentemos de nuevo en un momento.'];
     }
 
     if (empty($result['success'])) {
-        return ['ok' => false, 'message' => (string)($result['message'] ?? 'No fue posible registrar el pedido.')];
+        $motivoFallo = (string)($result['message'] ?? 'No fue posible registrar el pedido.');
+        aiSendTelegramAlert(
+            "No se pudo registrar un pedido con Alex.\n"
+            . "Cliente: {$nombre}\n"
+            . "Motivo: {$motivoFallo}"
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+        );
+        return ['ok' => false, 'message' => $motivoFallo];
     }
 
     if (!empty($idCliente) && $idCliente > 0) {
@@ -1519,6 +1603,41 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         }
     }
 
+    // Cargo de envio foraneo: nunca se le confia al LLM decidir si la direccion es local
+    // o no ni cuanto cobrar -- se calcula aqui, por codigo, sobre la direccion ya guardada
+    // en el pedido, y se refleja en el total real y en lo que Alex le dice al cliente.
+    $zonaEntrega = aiClasificarZonaEntrega($direccion);
+    $cargoEnvio = aiCalcularCargoEnvio($zonaEntrega, count($resolved['items']));
+    if ($zonaEntrega === 'indeterminado') {
+        // No se asume nada (ni local ni foraneo) por falta de dato en la direccion, pero
+        // queda registrado para que un admin lo revise en el panel de diagnostico.
+        aiLogDiagnosticError(
+            $pdo,
+            (int)($context['id_conversacion'] ?? 0) ?: null,
+            'zona_entrega_indeterminada',
+            $nombre,
+            ['direccion' => $direccion, 'id_pedido' => $result['id_pedido'] ?? null]
+        );
+    }
+    if ($cargoEnvio > 0 && !empty($result['id_pedido'])) {
+        try {
+            $idPedido = (int)$result['id_pedido'];
+            $stmtPedido = $pdo->prepare('SELECT total, observaciones FROM pedidos WHERE id_pedido = ?');
+            $stmtPedido->execute([$idPedido]);
+            $filaPedido = $stmtPedido->fetch(PDO::FETCH_ASSOC);
+            if (is_array($filaPedido)) {
+                $nuevoTotal = round((float)$filaPedido['total'] + $cargoEnvio, 2);
+                $nuevaObs = trim((string)$filaPedido['observaciones'])
+                    . " | Envio foraneo (fuera de ZMG): +\$" . number_format($cargoEnvio, 2) . ' MXN';
+                $pdo->prepare('UPDATE pedidos SET total = ?, observaciones = ? WHERE id_pedido = ?')
+                    ->execute([$nuevoTotal, $nuevaObs, $idPedido]);
+                $result['total'] = $nuevoTotal;
+            }
+        } catch (Throwable $e) {
+            error_log('WARNING: no se pudo aplicar el cargo de envio foraneo: ' . $e->getMessage());
+        }
+    }
+
     $listaItems = implode(', ', array_map(
         static fn(array $item): string => "{$item['quantity']}x {$item['nombre']}",
         $resolved['items']
@@ -1529,14 +1648,25 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         "Venta agendada por Alex: {$nombre}\n"
         . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
         . "Productos: {$listaItems}"
+        . ($cargoEnvio > 0 ? "\nIncluye cargo de envio foraneo: +\${$cargoEnvio} MXN" : '')
         . aiBuildWhatsAppLinkLine($waIdVenta)
     );
+
+    $mensajeRespuesta = 'Pedido registrado correctamente.';
+    if ($cargoEnvio > 0) {
+        $mensajeRespuesta .= " La direccion esta fuera de la Zona Metropolitana de Guadalajara, asi que se agrego un cargo de envio de \$" . number_format($cargoEnvio, 2) . " MXN (total actualizado: \${$totalPedido} MXN). Menciona este cargo y el total final al cliente.";
+    } elseif ($zonaEntrega === 'foraneo') {
+        $mensajeRespuesta .= ' La direccion esta fuera de la Zona Metropolitana de Guadalajara, pero el pedido incluye 2 o mas productos distintos, asi que el envio sigue siendo gratis por la promocion vigente -- puedes mencionarselo al cliente.';
+    }
 
     return [
         'ok' => true,
         'numero_pedido' => (string)($result['pedido'] ?? ''),
         'id_pedido' => $result['id_pedido'] ?? null,
-        'message' => 'Pedido registrado correctamente.',
+        'total' => $result['total'] ?? null,
+        'zona_entrega' => $zonaEntrega,
+        'cargo_envio_foraneo' => $cargoEnvio,
+        'message' => $mensajeRespuesta,
     ];
 }
 
@@ -1584,13 +1714,39 @@ function aiSendTelegramAlert(string $texto): void
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    curl_exec($ch);
+    $response = curl_exec($ch);
     $curlError = curl_error($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
     if ($curlError !== '') {
-        error_log('WARNING: fallo notificacion Telegram del asistente IA: ' . $curlError);
+        error_log('WARNING: fallo notificacion Telegram del asistente IA (error de conexion): ' . $curlError);
+        return;
     }
+
+    // Un curl sin error de red puede igual traer un rechazo de la API de Telegram (ej. 403
+    // "bot can't initiate conversation with a user" si el chat nunca le escribio primero al
+    // bot, o 401 si el token ya no es valido) -- antes esto se quedaba en silencio total
+    // porque solo se revisaba curl_error(), nunca el codigo HTTP ni el cuerpo de la respuesta.
+    if ($httpCode < 200 || $httpCode >= 300) {
+        $descripcion = aiExtractTelegramErrorDescription((string)$response);
+        error_log("WARNING: Telegram rechazo la notificacion (HTTP {$httpCode}): {$descripcion}");
+    }
+}
+
+/**
+ * Pura: saca el campo "description" del cuerpo JSON de error de la API de Telegram
+ * (ej. {"ok":false,"error_code":403,"description":"Forbidden: bot can't initiate
+ * conversation with a user"}), o el cuerpo crudo si no es el JSON esperado.
+ */
+function aiExtractTelegramErrorDescription(string $rawResponse): string
+{
+    $decoded = json_decode($rawResponse, true);
+    if (is_array($decoded) && isset($decoded['description'])) {
+        return (string)$decoded['description'];
+    }
+
+    return substr($rawResponse, 0, 200);
 }
 
 function aiToolTransferirHumano(PDO $pdo, array $args, array $context): array
@@ -2312,6 +2468,12 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
                     'tool_excepcion',
                     $textoUsuario,
                     ['tool' => $functionName, 'args' => $args, 'excepcion' => $e->getMessage()]
+                );
+                aiSendTelegramAlert(
+                    "Alex tuvo un error tecnico usando la herramienta '{$functionName}'.\n"
+                    . 'Cliente: ' . (string)($context['nombre_perfil'] ?? '') . "\n"
+                    . 'Error: ' . $e->getMessage()
+                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
                 );
                 $toolResult = ['ok' => false, 'message' => 'Error interno al ejecutar la herramienta.'];
             }
