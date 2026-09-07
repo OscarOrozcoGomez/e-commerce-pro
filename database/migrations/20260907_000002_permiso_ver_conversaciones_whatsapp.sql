@@ -1,13 +1,13 @@
 -- Migracion: clave de permiso para la vista "Contactos de WhatsApp" (lectura de hilos
--- de conversacion de Alex). Idempotente.
+-- de conversacion de Alex, con PII de clientes). Idempotente.
 --
--- views/whatsapp_contactos.php (PR #144) ya comprueba
---   hasPermission('ver_conversaciones_whatsapp') || hasPermission('gestionar_asistente_ia') || isAdmin()
+-- views/whatsapp_contactos.php (PR #144) comprueba hasPermission('ver_conversaciones_whatsapp')
 -- y la clave esta en PERMISOS_EN_USO (core/auth.php), pero faltaba la fila en `permisos`:
 -- sin ella el panel de Roles y Permisos no la lista y ningun admin puede concederla por
--- rol o por persona. El acceso hoy es neutral (admin por short-circuit, quien tenga
--- 'gestionar_asistente_ia' por el fallback), asi que nadie gana ni pierde nada al aplicarla.
--- Sin filas en rol_permisos.
+-- rol o por persona.
+--
+-- Sin filas en rol_permisos: la vista queda admin-only por defecto (el admin entra por
+-- el short-circuit de hasPermission()) y desde ahi el admin decide a quien concedersela.
 
 INSERT INTO permisos (clave, nombre, descripcion, categoria, estado)
 SELECT 'ver_conversaciones_whatsapp', 'Ver conversaciones de WhatsApp',
