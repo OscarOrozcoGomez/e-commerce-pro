@@ -1,16 +1,10 @@
 import { test, expect } from './fixtures';
-import { loginAsStaff, E2E_PRODUCT_NAME } from './helpers';
+import { loginAsStaff, E2E_PRODUCT_NAME, fechaFutura } from './helpers';
 
 // views/calendario_campanas.php es un formulario clasico que se auto-postea (sin AJAX).
 // Solo lista campañas con fecha_fin >= CURDATE(), asi que los tests usan fechas futuras y
 // eliminan al final la campaña que crean, para no dejar filas de prueba acumulandose en una
 // tabla que cualquier otra persona/test podria ver como "vigente".
-
-function fechaFutura(diasDesdeHoy: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + diasDesdeHoy);
-  return d.toISOString().slice(0, 10);
-}
 
 test.describe('Stock vs. Calendario de Campañas (calendario_campanas.php)', () => {
   test('un vendedor no puede acceder', async ({ page }) => {

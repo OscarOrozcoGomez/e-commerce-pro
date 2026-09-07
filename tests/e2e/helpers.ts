@@ -207,3 +207,18 @@ export async function completeDomicilioCheckout(page: Page): Promise<number> {
   const url = new URL(page.url());
   return Number(url.searchParams.get('id'));
 }
+
+/**
+ * Fecha futura en formato YYYY-MM-DD (para inputs type="date"), en componentes de
+ * fecha LOCALES -- toISOString() convierte a UTC, que puede adelantar o atrasar un
+ * día segun la hora local en que corre el test (ej. America/Mexico_City es UTC-6:
+ * pasadas las 6pm locales, "hoy" en UTC ya es "mañana").
+ */
+export function fechaFutura(diasDesdeHoy: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + diasDesdeHoy);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}

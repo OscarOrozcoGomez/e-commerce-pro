@@ -600,7 +600,7 @@ function loteGuardar(PDO $pdo, array $datos, int $userId): int
              foto_evidencia, notas_seguimiento, creado_por)
          VALUES
             (:id_producto, :id_almacen, :codigo, :fecha, :aprox,
-             :ingreso, :cant, :cant, :costo, :foto, :notas, :creado_por)'
+             :ingreso, :cant_ini, :cant_rest, :costo, :foto, :notas, :creado_por)'
     );
     $stmt->execute([
         ':id_producto' => $n['id_producto'],
@@ -609,7 +609,8 @@ function loteGuardar(PDO $pdo, array $datos, int $userId): int
         ':fecha' => $n['fecha_caducidad'],
         ':aprox' => $n['caducidad_aproximada'],
         ':ingreso' => $hoy,
-        ':cant' => $n['cantidad'],
+        ':cant_ini' => $n['cantidad'],
+        ':cant_rest' => $n['cantidad'],
         ':costo' => $n['costo_unitario'],
         ':foto' => $n['foto'],
         ':notas' => $n['notas'],
