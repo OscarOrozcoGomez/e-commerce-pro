@@ -50,6 +50,13 @@ const E2E_PO_CANCEL_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0006';
 const E2E_PO_LIFECYCLE_STOCK_MINIMO = 5;
 const E2E_PO_LIFECYCLE_STOCK_MAXIMO = 10;
 
+// Producto de uso exclusivo de tests/e2e/productos-incompletos.staff.spec.ts (views/
+// productos_incompletos.php): a proposito sin precio_venta, sin precio_costo, sin sku,
+// sin codigo_barras y sin fila en inventario_almacen -- las 5 banderas de "falta" a la
+// vez. Se busca por nombre (no por codigo_barras, que aqui es NULL a proposito) para
+// mantenerlo idempotente sin resembrar duplicados.
+const E2E_PRODUCTO_INCOMPLETO_NOMBRE = 'Playwright E2E Producto Incompleto';
+
 $productsToSeed = [
     ['nombre' => E2E_PRODUCT_NAME, 'codigo_barras' => E2E_PRODUCT_BARCODE, 'precio' => 99.99, 'stock' => 9999],
     ['nombre' => E2E_LOW_STOCK_PRODUCT_NAME, 'codigo_barras' => E2E_LOW_STOCK_PRODUCT_BARCODE, 'precio' => 49.99, 'stock' => 1],
@@ -386,6 +393,28 @@ try {
 
         echo "Seed OK: {$nombreLifecycle} -> id_producto={$idProductoLifecycle}, id_almacen={$idAlmacen}, stock_minimo=" . E2E_PO_LIFECYCLE_STOCK_MINIMO . "\n";
     }
+
+    // Producto deliberadamente incompleto (sin precio_venta/precio_costo/sku/codigo_barras
+    // ni fila en inventario_almacen). Se busca por nombre porque no tiene codigo_barras.
+    $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE nombre = :nombre AND id_padre IS NULL LIMIT 1');
+    $stmt->execute(['nombre' => E2E_PRODUCTO_INCOMPLETO_NOMBRE]);
+    $idProductoIncompleto = (int) $stmt->fetchColumn();
+
+    if ($idProductoIncompleto <= 0) {
+        $stmt = $pdo->prepare(
+            "INSERT INTO productos (nombre, precio_venta, precio_costo, estado)
+             VALUES (:nombre, 0, 0, 'activo')"
+        );
+        $stmt->execute(['nombre' => E2E_PRODUCTO_INCOMPLETO_NOMBRE]);
+        $idProductoIncompleto = (int) $pdo->lastInsertId();
+    } else {
+        // Por si un test anterior le agrego algo -- se deja siempre incompleto de verdad.
+        $pdo->prepare(
+            "UPDATE productos SET precio_venta = 0, precio_costo = 0, sku = NULL, codigo_barras = NULL, estado = 'activo' WHERE id_producto = ?"
+        )->execute([$idProductoIncompleto]);
+        $pdo->prepare('DELETE FROM inventario_almacen WHERE id_producto = ?')->execute([$idProductoIncompleto]);
+    }
+    echo 'Seed OK: ' . E2E_PRODUCTO_INCOMPLETO_NOMBRE . " -> id_producto={$idProductoIncompleto} (sin precio/sku/codigo_barras/inventario)\n";
 
     // La tabla clientes no tiene una llave unica sobre nombre, asi que la
     // idempotencia se resuelve buscando primero en vez de ON DUPLICATE KEY.

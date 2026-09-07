@@ -20,6 +20,9 @@ export const E2E_PURCHASE_ORDER_PRODUCT_NAME = 'Playwright E2E Purchase Order Pr
 // pestana "Ordenes Abiertas" -> surtir/cancelar). Debe coincidir con scripts/seed_e2e_test_data.php.
 export const E2E_PO_SURTIR_PRODUCT_NAME = 'Playwright E2E PO Surtir Product';
 export const E2E_PO_CANCEL_PRODUCT_NAME = 'Playwright E2E PO Cancel Product';
+// Sin precio_venta/precio_costo/sku/codigo_barras ni fila en inventario_almacen a
+// proposito, para views/productos_incompletos.php.
+export const E2E_PRODUCTO_INCOMPLETO_NOMBRE = 'Playwright E2E Producto Incompleto';
 // Cliente fijo (no autoregistrado) con domicilio guardado, para views/sales.php.
 export const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
 
