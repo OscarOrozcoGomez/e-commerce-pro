@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/cliente_scope_utils.php';
 
 header('Content-Type: application/json');
 
@@ -62,10 +63,19 @@ try {
     }
 
     $pdo = getPDO();
-    $stmt = $pdo->prepare('SELECT id_cliente FROM clientes WHERE id_cliente = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id_almacen FROM clientes WHERE id_cliente = ? LIMIT 1');
     $stmt->execute([$idCliente]);
-    if (!$stmt->fetchColumn()) {
+    $clienteRow = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($clienteRow === false) {
         throw new Exception('El cliente ya no existe.');
+    }
+    // Un encargado no puede editar el telefono de un cliente de otra sucursal.
+    if (!clienteScopeAllows(
+        $clienteRow['id_almacen'] !== null ? (int)$clienteRow['id_almacen'] : null,
+        getCurrentAlmacenId(),
+        isAdmin()
+    )) {
+        throw new Exception('Ese cliente pertenece a otra sucursal.');
     }
 
     $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?')
