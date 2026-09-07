@@ -1203,6 +1203,24 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
     $direccion = esc((string) ($order['direccion'] ?? ''));
     $total = (float) ($order['total'] ?? 0.0);
 
+    // Link para abrir el chat del cliente en WhatsApp. Prioridad: link ya armado
+    // por quien crea el pedido (ej. Alex, que tiene el wa_id de la conversacion);
+    // si no, se deriva del telefono del pedido. Para conversaciones que llegaron
+    // como "LID" (WhatsApp no comparte el numero) no hay de donde sacarlo -> sin boton.
+    $waHref = trim((string) ($order['whatsapp_link'] ?? ''));
+    if ($waHref === '') {
+        $telDigits = preg_replace('/\D+/', '', (string) ($order['telefono'] ?? '')) ?? '';
+        if (strlen($telDigits) === 12 && strncmp($telDigits, '52', 2) === 0) {
+            $telDigits = substr($telDigits, 2);
+        } elseif (strlen($telDigits) === 13 && strncmp($telDigits, '521', 3) === 0) {
+            $telDigits = substr($telDigits, 3);
+        }
+        if (strlen($telDigits) === 10) {
+            $waHref = 'https://wa.me/52' . $telDigits;
+        }
+    }
+    $waHref = filter_var($waHref, FILTER_VALIDATE_URL) ? $waHref : '';
+
     $filas = '';
     foreach ($items as $item) {
         $nombre = trim((string) ($item['nombre'] ?? 'Producto'));
@@ -1239,6 +1257,17 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
         ? '<div style="margin-top:4px;"><strong>Dirección:</strong> ' . $direccion . '</div>'
         : '';
 
+    // Si tenemos link de WhatsApp, el telefono se vuelve clickable (abre el chat
+    // en WhatsApp / WhatsApp Business) y ademas mostramos un boton verde abajo.
+    $waHrefEsc = esc($waHref);
+    $telefonoHtml = $telefono !== '' ? $telefono : '<span style="color:#90a4ae;">No proporcionado</span>';
+    if ($waHref !== '' && $telefono !== '') {
+        $telefonoHtml = '<a href="' . $waHrefEsc . '" style="color:#1a237e;text-decoration:none;font-weight:600;">' . $telefono . '</a>';
+    }
+    $waButtonHtml = $waHref !== ''
+        ? '<a href="' . $waHrefEsc . '" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin:6px;">Escribir al cliente por WhatsApp</a>'
+        : '';
+
     return '
     <div style="background:#f4f6f7;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
         <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
@@ -1250,7 +1279,7 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
                 <div style="background:#e8eaf6;border-radius:8px;padding:14px 16px;font-size:14px;color:#283593;margin-bottom:18px;">
                     <div style="font-size:16px;font-weight:700;margin-bottom:6px;">Pedido ' . $numeroPedido . '</div>
                     <div><strong>Cliente:</strong> ' . $clienteNombre . '</div>
-                    <div><strong>Teléfono:</strong> ' . $telefono . '</div>
+                    <div><strong>Teléfono:</strong> ' . $telefonoHtml . '</div>
                     <div><strong>Entrega:</strong> ' . $entrega . '</div>
                     ' . $direccionHtml . '
                 </div>
@@ -1272,7 +1301,8 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
                 </div>
 
                 <div style="margin-top:24px;text-align:center;">
-                    <a href="' . esc(appAbsoluteAssetUrl('views/dashboard.php')) . '" style="display:inline-block;background:#1a237e;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">Ver en el panel de administración</a>
+                    <a href="' . esc(appAbsoluteAssetUrl('views/dashboard.php')) . '" style="display:inline-block;background:#1a237e;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin:6px;">Ver en el panel de administración</a>
+                    ' . $waButtonHtml . '
                 </div>
             </div>
         </div>

@@ -73,4 +73,45 @@ final class AuthUtilsTest extends TestCase
         $this->assertSame(3, resolveCheckoutWarehouse(3));
         $this->assertSame(3, resolveCheckoutWarehouse('3'));
     }
+
+    public function testNewOrderNotificationHtmlDerivesWhatsAppLinkFromPhone(): void
+    {
+        $html = buildNewOrderNotificationHtml([
+            'numero_pedido' => 'WEB-TEST',
+            'cliente_nombre' => 'Gpe Elizabeth',
+            'telefono' => '3312345678',
+            'total' => 100.0,
+        ], []);
+
+        // El telefono se vuelve un enlace wa.me y aparece el boton verde.
+        $this->assertStringContainsString('https://wa.me/523312345678', $html);
+        $this->assertStringContainsString('Escribir al cliente por WhatsApp', $html);
+    }
+
+    public function testNewOrderNotificationHtmlPrefersExplicitWhatsAppLink(): void
+    {
+        $html = buildNewOrderNotificationHtml([
+            'numero_pedido' => 'WEB-TEST',
+            'cliente_nombre' => 'Cliente',
+            'telefono' => '3312345678',
+            'whatsapp_link' => 'https://wa.me/5219998887766',
+            'total' => 50.0,
+        ], []);
+
+        $this->assertStringContainsString('https://wa.me/5219998887766', $html);
+        $this->assertStringNotContainsString('https://wa.me/523312345678', $html);
+    }
+
+    public function testNewOrderNotificationHtmlOmitsWhatsAppButtonWithoutUsablePhone(): void
+    {
+        $html = buildNewOrderNotificationHtml([
+            'numero_pedido' => 'WEB-TEST',
+            'cliente_nombre' => 'Cliente LID',
+            'telefono' => '',
+            'total' => 25.0,
+        ], []);
+
+        $this->assertStringNotContainsString('Escribir al cliente por WhatsApp', $html);
+        $this->assertStringNotContainsString('wa.me', $html);
+    }
 }
