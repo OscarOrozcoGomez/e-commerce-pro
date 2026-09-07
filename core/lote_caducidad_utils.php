@@ -448,6 +448,55 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
 }
 
 /**
+ * Resumen para el tablero: cuantos lotes hay en cada severidad y cual es el mas
+ * urgente. "urgen" = critico + urgente + caducado (los que hay que liquidar ya).
+ *
+ * @return array{
+ *   critico:int, urgente:int, planificar:int, vigilar:int, caducado:int,
+ *   sin_rotacion:int, sin_historico:int, ok:int,
+ *   urgen:int, total:int, mas_urgente:?array<string,mixed>
+ * }
+ */
+function loteResumenSeveridad(PDO $pdo): array
+{
+    $conteo = [
+        'critico' => 0, 'urgente' => 0, 'planificar' => 0, 'vigilar' => 0,
+        'caducado' => 0, 'sin_rotacion' => 0, 'sin_historico' => 0, 'ok' => 0,
+    ];
+    $resumen = $conteo + ['urgen' => 0, 'total' => 0, 'mas_urgente' => null];
+
+    if (!loteTablaExiste($pdo, 'lotes_inventario')) {
+        return $resumen;
+    }
+
+    $lotes = loteFetchProyecciones($pdo)['lotes'];
+    $urgentes = ['critico', 'urgente', 'caducado'];
+    $masUrgente = null;
+
+    foreach ($lotes as $l) {
+        $sev = (string) ($l['severidad'] ?? '');
+        if (array_key_exists($sev, $conteo)) {
+            $conteo[$sev]++;
+        }
+        if (in_array($sev, $urgentes, true)) {
+            if ($masUrgente === null
+                || (int) $l['dias_hasta_caducar'] < (int) $masUrgente['dias_hasta_caducar']
+            ) {
+                $masUrgente = $l;
+            }
+        }
+    }
+
+    $resumen = $conteo + [
+        'urgen' => $conteo['critico'] + $conteo['urgente'] + $conteo['caducado'],
+        'total' => count($lotes),
+        'mas_urgente' => $masUrgente,
+    ];
+
+    return $resumen;
+}
+
+/**
  * SUM(cantidad_actual) del sistema vs SUM(cantidad_restante) de lotes, por producto.
  *
  * @param int[] $idsProducto

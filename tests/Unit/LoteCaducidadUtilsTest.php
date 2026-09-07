@@ -996,4 +996,58 @@ final class LoteCaducidadUtilsTest extends TestCase
             'fecha_caducidad' => $this->enDias(120), 'cantidad' => -5,
         ], 7);
     }
+
+    /* ---- loteResumenSeveridad (tarjeta del dashboard) ------------------- */
+
+    public function testResumenSeveridadCuentaPorNivelYMarcaLosQueUrgen(): void
+    {
+        $this->seedProducto(1, 'Rota rapido');
+        $this->seedVentaHistorica(1, 90);                  // ~1 u/dia
+        $this->seedLote(1, 'CRIT', $this->enDias(10), 40);  // excedente + <30d -> critico
+        $this->seedLote(1, 'CAD', $this->enDias(-3), 5);    // caducado
+        $this->seedProducto(2, 'Rota lento');
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(2, 'PLAN', $this->enDias(150), 500); // excedente + 90-179d -> planificar
+
+        $r = loteResumenSeveridad($this->pdo);
+
+        $this->assertSame(1, $r['critico']);
+        $this->assertSame(1, $r['caducado']);
+        $this->assertSame(1, $r['planificar']);
+        $this->assertSame(2, $r['urgen']);   // critico + caducado
+        $this->assertSame(3, $r['total']);
+    }
+
+    public function testResumenSeveridadMasUrgenteEsElDeMenosDias(): void
+    {
+        $this->seedProducto(1, 'P');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'A', $this->enDias(20), 40);
+        $this->seedLote(1, 'B', $this->enDias(3), 40);
+        $this->seedLote(1, 'C', $this->enDias(-10), 40);
+
+        $r = loteResumenSeveridad($this->pdo);
+
+        $this->assertNotNull($r['mas_urgente']);
+        $this->assertSame('C', $r['mas_urgente']['codigo_lote']); // -10 dias es el menor
+    }
+
+    public function testResumenSeveridadSinLotesEsCeroYSinCrash(): void
+    {
+        $r = loteResumenSeveridad($this->pdo);
+
+        $this->assertSame(0, $r['total']);
+        $this->assertSame(0, $r['urgen']);
+        $this->assertNull($r['mas_urgente']);
+    }
+
+    public function testResumenSeveridadSinTablaLotesNoTruena(): void
+    {
+        $this->pdo->exec('DROP TABLE lotes_inventario');
+
+        $r = loteResumenSeveridad($this->pdo);
+
+        $this->assertSame(0, $r['total']);
+        $this->assertArrayHasKey('critico', $r);
+    }
 }
