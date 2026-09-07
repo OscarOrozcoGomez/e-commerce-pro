@@ -11,6 +11,29 @@ if (!hasPermission('inventario') && !isAdmin() && !isEncargado()) {
 }
 
 $pageTitle = 'Lista de Compra Sugerida';
+
+// Para el tab "Cargar Pedido": un admin elige sucursal destino; un encargado va
+// fijo a la suya.
+$poEsAdmin = isAdmin();
+$poAlmacenActual = getCurrentAlmacenId();
+$poAlmacenes = [];
+$poAlmacenActualNombre = '';
+if ($poEsAdmin) {
+    try {
+        $poAlmacenes = getPDO()->query('SELECT id_almacen, nombre FROM almacenes ORDER BY nombre')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $poAlmacenes = [];
+    }
+} elseif ($poAlmacenActual !== null) {
+    try {
+        $st = getPDO()->prepare('SELECT nombre FROM almacenes WHERE id_almacen = ?');
+        $st->execute([(int) $poAlmacenActual]);
+        $poAlmacenActualNombre = (string) $st->fetchColumn();
+    } catch (Throwable $e) {
+        $poAlmacenActualNombre = '';
+    }
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -29,9 +52,10 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <div class="col s12">
             <ul class="tabs" id="po-tabs">
-                <li class="tab col s4"><a class="active" href="#tab-lista">Lista de Compra</a></li>
-                <li class="tab col s4"><a href="#tab-pospuestos">Pospuestos <span class="new badge blue" data-badge-caption="" id="pospuestos-badge" style="display:none;">0</span></a></li>
-                <li class="tab col s4"><a href="#tab-ordenes">Órdenes Abiertas <span class="new badge green" data-badge-caption="" id="ordenes-badge" style="display:none;">0</span></a></li>
+                <li class="tab col s3"><a class="active" href="#tab-lista">Lista de Compra</a></li>
+                <li class="tab col s3"><a href="#tab-pospuestos">Pospuestos <span class="new badge blue" data-badge-caption="" id="pospuestos-badge" style="display:none;">0</span></a></li>
+                <li class="tab col s3"><a href="#tab-ordenes">Órdenes Abiertas <span class="new badge green" data-badge-caption="" id="ordenes-badge" style="display:none;">0</span></a></li>
+                <li class="tab col s3"><a href="#tab-importar">Cargar Pedido</a></li>
             </ul>
         </div>
     </div>
@@ -145,6 +169,65 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                                 <p>Cargando órdenes...</p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= TAB 4: CARGAR PEDIDO DE PROVEEDOR ================= -->
+    <div id="tab-importar">
+        <div class="row">
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Cargar pedido de proveedor</span>
+                        <p class="grey-text">
+                            Pega el texto del correo del proveedor o sube una captura. Se detectan los productos
+                            y las cantidades; revisas el mapeo y se surte el inventario. Si un producto está en
+                            una orden de compra abierta de la sucursal, esa orden se surte y se cierra; lo demás
+                            entra como entrada directa.
+                        </p>
+
+                        <?php if ($poEsAdmin): ?>
+                            <label>Sucursal destino</label>
+                            <select id="import-almacen" class="browser-default" style="max-width: 320px; margin-bottom: 16px;">
+                                <?php foreach ($poAlmacenes as $a): ?>
+                                    <option value="<?php echo (int) $a['id_almacen']; ?>"<?php echo ((int) $a['id_almacen'] === (int) $poAlmacenActual) ? ' selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($a['nombre'], ENT_QUOTES, 'UTF-8'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php else: ?>
+                            <p>Sucursal: <strong><?php echo htmlspecialchars($poAlmacenActualNombre ?: '—', ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                            <input type="hidden" id="import-almacen" value="<?php echo (int) $poAlmacenActual; ?>">
+                        <?php endif; ?>
+
+                        <div style="margin: 10px 0;">
+                            <input type="file" accept="image/*" capture="environment" id="import-imagen" style="display:none;">
+                            <button type="button" class="btn-flat waves-effect" onclick="document.getElementById('import-imagen').click()">
+                                <i class="material-icons left">photo_camera</i> Escanear imagen
+                            </button>
+                            <span id="import-ocr-status" class="grey-text"></span>
+                        </div>
+
+                        <textarea id="import-texto" class="browser-default"
+                            placeholder="Collagen Blend &#215; 2&#10;D3 | Vitamina D3 &#215; 3&#10;Maca Blend &#215; 2"
+                            style="width:100%; min-height:170px; padding:10px; font-family:inherit;"></textarea>
+
+                        <div style="margin-top: 12px;">
+                            <button type="button" class="btn blue darken-2 waves-effect waves-light" onclick="analizarImport(this)">
+                                <i class="material-icons left">search</i> Analizar
+                            </button>
+                        </div>
+
+                        <div id="import-review" style="margin-top: 20px;"></div>
+
+                        <div id="import-commit-wrapper" style="display:none; margin-top: 16px; text-align:right;">
+                            <button type="button" class="btn-large green darken-2 waves-effect waves-light" onclick="cargarYSurtir()">
+                                <i class="material-icons left">inventory</i> Cargar y surtir
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -807,6 +890,207 @@ include __DIR__ . '/includes/header.php';
                 const card = ordenCard(id);
                 if (card) card.remove();
                 poToast(res.message || 'Orden cancelada', 'blue');
+                cargarOrdenes();
+                cargarListaCompra();
+            })
+            .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'));
+        });
+    }
+
+    // ============================================================
+    // TAB 4: CARGAR PEDIDO DE PROVEEDOR (sin IA)
+    // ============================================================
+    let importRows = [];       // filas devueltas por el preview, indexadas por posición
+    let _tesseractLoading = null;
+
+    function importAlmacenId() {
+        const el = document.getElementById('import-almacen');
+        return el ? (parseInt(el.value, 10) || 0) : 0;
+    }
+
+    // OCR local en el navegador (Tesseract.js): sin API, sin key, sin LLM.
+    function loadTesseract() {
+        if (window.Tesseract) return Promise.resolve(window.Tesseract);
+        if (_tesseractLoading) return _tesseractLoading;
+        _tesseractLoading = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+            s.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error('OCR no disponible'));
+            s.onerror = () => reject(new Error('No se pudo cargar el OCR (sin conexión). Pega el texto del correo.'));
+            document.head.appendChild(s);
+        });
+        return _tesseractLoading;
+    }
+
+    const _importImgInput = document.getElementById('import-imagen');
+    if (_importImgInput) {
+        _importImgInput.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+
+            const status = document.getElementById('import-ocr-status');
+            status.textContent = ' Cargando OCR...';
+            try {
+                const T = await loadTesseract();
+                status.textContent = ' Leyendo imagen 0%';
+                const { data } = await T.recognize(file, 'spa+eng', {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            status.textContent = ' Leyendo imagen ' + Math.round((m.progress || 0) * 100) + '%';
+                        }
+                    }
+                });
+                const ta = document.getElementById('import-texto');
+                const nuevo = (data && data.text ? data.text : '').trim();
+                ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + nuevo;
+                status.textContent = ' Texto extraído. Revísalo y da Analizar.';
+            } catch (err) {
+                status.textContent = '';
+                poToast(err.message || 'No se pudo leer la imagen', 'red');
+            }
+        });
+    }
+
+    function analizarImport(btn) {
+        const texto = (document.getElementById('import-texto').value || '').trim();
+        if (!texto) {
+            poToast('Pega o escanea el pedido primero', 'orange');
+            return;
+        }
+        if (btn) btn.disabled = true;
+
+        fetch(PO_BASE + 'api/purchase_order_import_preview.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csrf_token: getCsrf(), texto, id_almacen: importAlmacenId() })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) {
+                poToast('Error: ' + res.message, 'red');
+                return;
+            }
+            renderImportReview(res.rows || [], res.warnings || []);
+        })
+        .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'))
+        .finally(() => { if (btn) btn.disabled = false; });
+    }
+
+    function renderImportReview(rows, warnings) {
+        importRows = rows;
+        const cont = document.getElementById('import-review');
+        const wrapper = document.getElementById('import-commit-wrapper');
+
+        if (rows.length === 0) {
+            cont.innerHTML = '<div class="card-panel amber lighten-4">No se detectaron productos en el texto. Revisa el formato (una línea por producto, con la cantidad tipo "× 2").</div>';
+            wrapper.style.display = 'none';
+            return;
+        }
+
+        let warnHtml = '';
+        if (warnings.length) {
+            warnHtml = '<div class="card-panel amber lighten-4"><strong>Revisa estas líneas:</strong>'
+                + '<ul class="browser-default" style="margin:6px 0 0 18px;">'
+                + warnings.map(w => '<li>' + escHtml(w.texto)
+                    + (w.tipo === 'sin_match' ? ' — sin coincidencia clara en el catálogo' : ' — no se pudo leer la cantidad')
+                    + '</li>').join('')
+                + '</ul></div>';
+        }
+
+        const filas = rows.map((row, i) => {
+            const opts = (row.candidatos || []).map(c =>
+                `<option value="${c.id_producto}"${c.id_producto === row.sugerido_id_producto ? ' selected' : ''}>`
+                + `${escHtml(c.nombre)} (${Math.round(c.score)}%)</option>`
+            ).join('');
+            const origen = row.id_detalle
+                ? `<span class="new badge green" data-badge-caption="">OC ${escHtml(row.referencia || '')}</span>`
+                : '<span class="grey-text">Entrada directa</span>';
+            return `
+                <tr data-i="${i}">
+                    <td>${escHtml(row.raw)}</td>
+                    <td>
+                        <select class="browser-default import-prod" style="min-width:220px;">
+                            <option value="0">— ignorar —</option>
+                            ${opts}
+                        </select>
+                    </td>
+                    <td style="width:110px;">
+                        <input type="number" min="0" value="${parseInt(row.cantidad, 10) || 0}"
+                            class="browser-default import-qty" style="width:100%; text-align:center; border:1px solid #9e9e9e; border-radius:4px; padding:5px;">
+                    </td>
+                    <td>${origen}</td>
+                </tr>`;
+        }).join('');
+
+        cont.innerHTML = warnHtml + `
+            <div style="overflow-x:auto;">
+                <table class="striped highlight" style="min-width: 620px;">
+                    <thead>
+                        <tr><th>Detectado</th><th>Producto</th><th class="center-align">Cantidad</th><th>Origen</th></tr>
+                    </thead>
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>`;
+        wrapper.style.display = 'block';
+    }
+
+    function collectImportRows() {
+        const out = [];
+        document.querySelectorAll('#import-review tbody tr').forEach(tr => {
+            const i = Number(tr.getAttribute('data-i'));
+            const pid = parseInt(tr.querySelector('.import-prod').value, 10) || 0;
+            const qty = Math.max(0, parseInt(tr.querySelector('.import-qty').value || '0', 10));
+            if (pid <= 0 || qty <= 0) return;
+
+            const src = importRows[i] || {};
+            // El id_detalle sólo aplica si el producto elegido sigue siendo el sugerido de esa fila.
+            const idDetalle = (src.id_detalle && pid === src.sugerido_id_producto) ? src.id_detalle : null;
+            out.push({ id_producto: pid, cantidad: qty, id_detalle: idDetalle });
+        });
+        return out;
+    }
+
+    function cargarYSurtir() {
+        const rows = collectImportRows();
+        if (rows.length === 0) {
+            poToast('No hay renglones válidos (elige producto y cantidad)', 'orange');
+            return;
+        }
+        const conOc = rows.filter(r => r.id_detalle).length;
+
+        Swal.fire({
+            title: '¿Cargar y surtir?',
+            html: `Se aplicarán <strong>${rows.length}</strong> renglón(es) al inventario.`
+                + (conOc > 0 ? `<br>${conOc} corresponden a órdenes de compra abiertas, que se cerrarán.` : ''),
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#2e7d32',
+            confirmButtonText: 'Sí, surtir'
+        }).then((result) => {
+            if (!result.isConfirmed) return;
+
+            fetch(PO_BASE + 'api/purchase_order_import_commit.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ csrf_token: getCsrf(), id_almacen: importAlmacenId(), rows })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) {
+                    poToast('Error: ' + res.message, 'red');
+                    return;
+                }
+                poToast(
+                    `Surtido: ${res.entradas_directas} entrada(s) directa(s), `
+                    + `${res.ordenes_cerradas} orden(es) cerrada(s), ${res.ignoradas} ignorada(s)`,
+                    'green'
+                );
+                document.getElementById('import-texto').value = '';
+                document.getElementById('import-review').innerHTML = '';
+                document.getElementById('import-commit-wrapper').style.display = 'none';
+                document.getElementById('import-ocr-status').textContent = '';
+                importRows = [];
                 cargarOrdenes();
                 cargarListaCompra();
             })
