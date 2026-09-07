@@ -20,6 +20,7 @@ require_once __DIR__ . '/../core/finance_utils.php';
 require_once __DIR__ . '/../core/pickup_offer_utils.php';
 require_once __DIR__ . '/../core/settlement_utils.php';
 require_once __DIR__ . '/../core/purchase_order_utils.php';
+require_once __DIR__ . '/../core/stock_transfer_utils.php';
 require_once __DIR__ . '/../core/whatsapp_helper.php';
 require_once __DIR__ . '/../core/ai_assistant.php';
 require_once __DIR__ . '/../core/whatsapp_contactos_utils.php';

@@ -1,49 +1,84 @@
 <?php
+
 declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/stock_transfer_utils.php';
 
 header('Content-Type: application/json');
+
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco (no-op sin sesion).
 refreshSessionPermissions();
+
 // Fase 4: el permiso 'transferir_stock' abre este endpoint; el rol admin se mantiene como respaldo.
-if (!hasPermission('transferir_stock') && !isAdmin()) { echo json_encode(['success' => false, 'message' => 'No autorizado']); exit; }
+if (!isAuthenticated() || (!hasPermission('transferir_stock') && !isAdmin())) {
+    echo json_encode(['success' => false, 'message' => 'No autorizado']);
+    exit;
+}
 
-$pdo = getPDO();
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Método no permitido.']);
+    exit;
+}
+
+// CSRF: el formulario (views/transfer_stock.php) ya envía csrfInput() dentro del FormData.
+if (!validateCsrfToken((string) ($_POST['csrf_token'] ?? ''))) {
+    echo json_encode(['success' => false, 'message' => 'Token de seguridad inválido. Recarga la página e inténtalo de nuevo.']);
+    exit;
+}
+
 try {
-    $pdo->beginTransaction();
+    $idOrigen    = (int) ($_POST['id_origen'] ?? 0);
+    $idDestino   = (int) ($_POST['id_destino'] ?? 0);
+    $observacion = (string) ($_POST['observacion'] ?? '');
+    $userId      = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
 
-    $id_prod = (int)$_POST['id_producto'];
-    $id_ori = (int)$_POST['id_origen'];
-    $id_des = (int)$_POST['id_destino'];
-    $qty = (int)$_POST['cantidad'];
-    $obs = "Transferencia: " . ($_POST['observacion'] ?? 'Sin nota');
-
-    // 1. Validar stock en origen
-    $stmt = $pdo->prepare("SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?");
-    $stmt->execute([$id_prod, $id_ori]);
-    $stock_actual = (int)$stmt->fetchColumn();
-
-    if ($stock_actual < $qty) {
-        throw new Exception("Stock insuficiente en origen. Disponible: $stock_actual");
+    // La vista manda una lista de productos en `items` (JSON). Se acepta también el
+    // formato antiguo de un solo producto por si hay integraciones que lo usen.
+    $items = [];
+    if (isset($_POST['items']) && $_POST['items'] !== '') {
+        $decoded = json_decode((string) $_POST['items'], true);
+        if (!is_array($decoded)) {
+            throw new InvalidArgumentException('La lista de productos no es válida.');
+        }
+        $items = $decoded;
+    } elseif (isset($_POST['id_producto'])) {
+        $items = [[
+            'id_producto' => $_POST['id_producto'],
+            'cantidad'    => $_POST['cantidad'] ?? 0,
+        ]];
+    } else {
+        throw new InvalidArgumentException('No se recibió ningún producto para transferir.');
     }
 
-    // 2. Restar de origen
-    $pdo->prepare("UPDATE inventario_almacen SET cantidad_actual = cantidad_actual - ? WHERE id_producto = ? AND id_almacen = ?")
-        ->execute([$qty, $id_prod, $id_ori]);
+    $resultado = stockTransferExecuteBatch(getPDO(), $idOrigen, $idDestino, $items, $userId, $observacion);
 
-    // 3. Sumar a destino (usando INSERT ... ON DUPLICATE por si el producto no existe en el destino)
-    $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual) 
-                   VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE cantidad_actual = cantidad_actual + VALUES(cantidad_actual)")
-        ->execute([$id_prod, $id_des, $qty]);
+    $mensaje = sprintf(
+        '%d producto(s) transferido(s) (%d unidad(es) en total).',
+        $resultado['lineas'],
+        $resultado['unidades_totales']
+    );
+    if (($resultado['unidades_sin_lote'] ?? 0) > 0) {
+        $mensaje .= sprintf(
+            ' %d unidad(es) se movieron sin detalle de lote; ajústalo desde Control de Caducidades si lo necesitas.',
+            $resultado['unidades_sin_lote']
+        );
+    }
 
-    // 4. Registrar movimientos (Salida y Entrada)
-    $stmtMov = $pdo->prepare("INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_origen, id_almacen_destino, cantidad, id_usuario, observacion) VALUES (?, 'transferencia', ?, ?, ?, ?, ?)");
-    $stmtMov->execute([$id_prod, $id_ori, $id_des, $qty, $_SESSION['usuario']['id_usuario'], $obs]);
-
-    $pdo->commit();
-    echo json_encode(['success' => true, 'message' => 'Mercancía transferida correctamente']);
-} catch (Exception $e) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    echo json_encode([
+        'success' => true,
+        'message' => $mensaje,
+        'data'    => $resultado,
+    ]);
+} catch (InvalidArgumentException $e) {
+    http_response_code(422);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+} catch (RuntimeException $e) {
+    http_response_code(409);
+    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+} catch (Throwable $e) {
+    error_log('transfer_stock.php: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'No se pudo completar la transferencia. Inténtalo de nuevo.']);
 }
