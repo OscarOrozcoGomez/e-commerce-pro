@@ -1541,11 +1541,24 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         $result = dbCreatePublicOrder($data);
     } catch (Throwable $e) {
         error_log('ERROR en aiToolAgendarVenta al llamar dbCreatePublicOrder: ' . $e->getMessage());
+        aiSendTelegramAlert(
+            "No se pudo registrar un pedido con Alex (fallo tecnico).\n"
+            . "Cliente: {$nombre}\n"
+            . 'Error: ' . $e->getMessage()
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+        );
         return ['ok' => false, 'message' => 'No fue posible registrar el pedido, intentemos de nuevo en un momento.'];
     }
 
     if (empty($result['success'])) {
-        return ['ok' => false, 'message' => (string)($result['message'] ?? 'No fue posible registrar el pedido.')];
+        $motivoFallo = (string)($result['message'] ?? 'No fue posible registrar el pedido.');
+        aiSendTelegramAlert(
+            "No se pudo registrar un pedido con Alex.\n"
+            . "Cliente: {$nombre}\n"
+            . "Motivo: {$motivoFallo}"
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+        );
+        return ['ok' => false, 'message' => $motivoFallo];
     }
 
     if (!empty($idCliente) && $idCliente > 0) {
@@ -1701,13 +1714,39 @@ function aiSendTelegramAlert(string $texto): void
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    curl_exec($ch);
+    $response = curl_exec($ch);
     $curlError = curl_error($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
     if ($curlError !== '') {
-        error_log('WARNING: fallo notificacion Telegram del asistente IA: ' . $curlError);
+        error_log('WARNING: fallo notificacion Telegram del asistente IA (error de conexion): ' . $curlError);
+        return;
     }
+
+    // Un curl sin error de red puede igual traer un rechazo de la API de Telegram (ej. 403
+    // "bot can't initiate conversation with a user" si el chat nunca le escribio primero al
+    // bot, o 401 si el token ya no es valido) -- antes esto se quedaba en silencio total
+    // porque solo se revisaba curl_error(), nunca el codigo HTTP ni el cuerpo de la respuesta.
+    if ($httpCode < 200 || $httpCode >= 300) {
+        $descripcion = aiExtractTelegramErrorDescription((string)$response);
+        error_log("WARNING: Telegram rechazo la notificacion (HTTP {$httpCode}): {$descripcion}");
+    }
+}
+
+/**
+ * Pura: saca el campo "description" del cuerpo JSON de error de la API de Telegram
+ * (ej. {"ok":false,"error_code":403,"description":"Forbidden: bot can't initiate
+ * conversation with a user"}), o el cuerpo crudo si no es el JSON esperado.
+ */
+function aiExtractTelegramErrorDescription(string $rawResponse): string
+{
+    $decoded = json_decode($rawResponse, true);
+    if (is_array($decoded) && isset($decoded['description'])) {
+        return (string)$decoded['description'];
+    }
+
+    return substr($rawResponse, 0, 200);
 }
 
 function aiToolTransferirHumano(PDO $pdo, array $args, array $context): array
@@ -2429,6 +2468,12 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
                     'tool_excepcion',
                     $textoUsuario,
                     ['tool' => $functionName, 'args' => $args, 'excepcion' => $e->getMessage()]
+                );
+                aiSendTelegramAlert(
+                    "Alex tuvo un error tecnico usando la herramienta '{$functionName}'.\n"
+                    . 'Cliente: ' . (string)($context['nombre_perfil'] ?? '') . "\n"
+                    . 'Error: ' . $e->getMessage()
+                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
                 );
                 $toolResult = ['ok' => false, 'message' => 'Error interno al ejecutar la herramienta.'];
             }

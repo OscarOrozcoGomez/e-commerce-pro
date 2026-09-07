@@ -46,6 +46,38 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194'));
     }
 
+    public function testAiExtractTelegramErrorDescriptionParsesRealTelegramErrorBody(): void
+    {
+        // Caso real: el bot nunca fue iniciado por el chat destino -- Telegram regresa
+        // HTTP 403 con este cuerpo exacto. Antes de este fix, ni siquiera se leia el body.
+        $body = '{"ok":false,"error_code":403,"description":"Forbidden: bot can\'t initiate conversation with a user"}';
+
+        $this->assertSame(
+            "Forbidden: bot can't initiate conversation with a user",
+            aiExtractTelegramErrorDescription($body)
+        );
+    }
+
+    public function testAiExtractTelegramErrorDescriptionParsesRevokedTokenError(): void
+    {
+        $body = '{"ok":false,"error_code":401,"description":"Unauthorized"}';
+
+        $this->assertSame('Unauthorized', aiExtractTelegramErrorDescription($body));
+    }
+
+    public function testAiExtractTelegramErrorDescriptionFallsBackToRawBodyWhenNotJson(): void
+    {
+        $this->assertSame('<html>502 Bad Gateway</html>', aiExtractTelegramErrorDescription('<html>502 Bad Gateway</html>'));
+        $this->assertSame('', aiExtractTelegramErrorDescription(''));
+    }
+
+    public function testAiExtractTelegramErrorDescriptionTruncatesVeryLongBodies(): void
+    {
+        $cuerpoLargo = str_repeat('x', 500);
+
+        $this->assertSame(200, strlen(aiExtractTelegramErrorDescription($cuerpoLargo)));
+    }
+
     public function testAiSearchInventorySumsStockAcrossWarehouses(): void
     {
         $this->seedProducto(10, 'Omega 3', 'OMG3', null, 299.00);
