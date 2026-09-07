@@ -1611,18 +1611,6 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         $idCliente = $idClienteExistente;
     }
 
-    // Enlaza el contacto de WhatsApp con el cliente resuelto si aun no lo estaba, para
-    // que la vista "Contactos de WhatsApp" muestre el nombre real y su ficha. No pisa
-    // un enlace ya existente (guarda AND id_cliente IS NULL).
-    if (!empty($idCliente) && $idCliente > 0 && !empty($context['id_conversacion'])) {
-        try {
-            $pdo->prepare('UPDATE whatsapp_conversaciones SET id_cliente = ? WHERE id_conversacion = ? AND id_cliente IS NULL')
-                ->execute([(int) $idCliente, (int) $context['id_conversacion']]);
-        } catch (Throwable $e) {
-            error_log('WARNING: no se pudo enlazar la conversacion #' . (int) $context['id_conversacion'] . ' con el cliente #' . (int) $idCliente . ': ' . $e->getMessage());
-        }
-    }
-
     if ($direccion === '') {
         aiLogDiagnosticError($pdo, (int)($context['id_conversacion'] ?? 0) ?: null, 'venta_sin_direccion', $nombre, ['id_cliente' => $idCliente]);
         if (!empty($context['id_conversacion'])) {
