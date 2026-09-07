@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
+require_once __DIR__ . '/../core/sale_delivery_mode.php';
+require_once __DIR__ . '/../core/cliente_scope_utils.php';
 
 header('Content-Type: application/json');
 
@@ -99,6 +101,23 @@ try {
     $mapsLinkEntrega = trim((string)($_POST['maps_link_entrega'] ?? ''));
     $observaciones = trim((string)($_POST['observaciones'] ?? ''));
 
+    // Venta "en sucursal": el cliente esta presente en el mostrador. No hay reparto,
+    // por lo tanto no se pide domicilio, el envio foraneo no aplica y el cobro es
+    // inmediato (estado 'pagado'). Ver core/sale_delivery_mode.php: el default es
+    // 'Domicilio' ante cualquier valor ausente/desconocido, asi que las integraciones
+    // que nunca mandaban 'tipo_entrega' siguen comportandose igual.
+    $esVentaSucursal = saleDeliveryModeIsCounter($_POST['tipo_entrega'] ?? null);
+
+    // Agendar a domicilio exige el permiso 'asignar_entregas' (rol encargado/admin como
+    // respaldo). Sin el, solo se permite la venta de mostrador. La UI ya oculta la
+    // opcion en sales.php; esto es el candado del lado servidor.
+    if (!saleDeliveryModeIsAllowedForUser(
+        $_POST['tipo_entrega'] ?? null,
+        hasPermission('asignar_entregas') || canManageDeliveryOrders()
+    )) {
+        throw new Exception('No tienes permiso para agendar pedidos a domicilio; solo puedes registrar ventas en sucursal.');
+    }
+
     $bypassInventario = resolveVentaSinInventario($observaciones, isAdmin() || isEncargado(), SALE_INVENTORY_BYPASS_KEYWORD);
     $ventaSinInventario = $bypassInventario['sin_inventario'];
     $observaciones = $bypassInventario['observaciones'];
@@ -107,12 +126,14 @@ try {
         throw new Exception('Si capturas teléfono, debe tener 10 dígitos.');
     }
 
-    if ($idClienteSeleccionado <= 0) {
-        throw new Exception('Debes seleccionar un cliente existente.');
-    }
+    if (!$esVentaSucursal) {
+        if ($idClienteSeleccionado <= 0) {
+            throw new Exception('Debes seleccionar un cliente existente.');
+        }
 
-    if ($clienteTelefono === '') {
-        throw new Exception('Debes capturar el teléfono de entrega.');
+        if ($clienteTelefono === '') {
+            throw new Exception('Debes capturar el teléfono de entrega.');
+        }
     }
 
     $hasPedidosTipoEntrega = $columnExists($pdo, 'pedidos', 'tipo_entrega');
@@ -126,7 +147,7 @@ try {
     $hasClienteDireccionesLongitud = $hasClienteDireccionesTable && $columnExists($pdo, 'cliente_direcciones', 'longitud');
     $hasPedidosAfectaInventario = $columnExists($pdo, 'pedidos', 'afecta_inventario');
 
-    if ($customerAddressSelection !== '' && !ctype_digit($customerAddressSelection)) {
+    if (!$esVentaSucursal && $customerAddressSelection !== '' && !ctype_digit($customerAddressSelection)) {
         throw new Exception('Debes seleccionar una direccion guardada del cliente.');
     }
 
@@ -190,35 +211,54 @@ try {
         $clienteTelefonoFinal = $clienteTelefono;
         $selectedAddressId = ctype_digit($customerAddressSelection) ? (int)$customerAddressSelection : 0;
 
-        $stmtCliente = $pdo->prepare('SELECT id_cliente, nombre, telefono FROM clientes WHERE id_cliente = ? LIMIT 1');
-        $stmtCliente->execute([$idClienteSeleccionado]);
-        $clienteExistente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
-        if (!$clienteExistente) {
-            throw new Exception('El cliente seleccionado no existe.');
-        }
+        if ($idClienteSeleccionado > 0) {
+            $stmtCliente = $pdo->prepare('SELECT id_cliente, nombre, telefono, id_almacen FROM clientes WHERE id_cliente = ? LIMIT 1');
+            $stmtCliente->execute([$idClienteSeleccionado]);
+            $clienteExistente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
+            if (!$clienteExistente) {
+                throw new Exception('El cliente seleccionado no existe.');
+            }
 
-        $idCliente = (int)$clienteExistente['id_cliente'];
-        $nombreActual = $decryptValue((string)($clienteExistente['nombre'] ?? ''));
-        $telefonoActual = $decryptValue((string)($clienteExistente['telefono'] ?? ''));
-        $clienteNombreFinal = $nombreActual;
-        $clienteTelefonoFinal = $telefonoActual;
+            // Un encargado/vendedor no puede registrar una venta a un cliente de otra sucursal.
+            if (!clienteScopeAllows(
+                $clienteExistente['id_almacen'] !== null ? (int)$clienteExistente['id_almacen'] : null,
+                getCurrentAlmacenId(),
+                isAdmin()
+            )) {
+                throw new Exception('El cliente seleccionado pertenece a otra sucursal.');
+            }
 
-        if ($clienteNombreFinal === '') {
-            throw new Exception('El cliente seleccionado no tiene nombre valido.');
-        }
-        if ($clienteTelefonoFinal === '' && $clienteTelefono !== '') {
-            $clienteTelefonoFinal = $clienteTelefono;
-            $stmtUpdateTelefono = $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?');
-            $stmtUpdateTelefono->execute([$storeValue($clienteTelefonoFinal), $idCliente]);
-        }
-        if ($clienteTelefonoFinal === '') {
-            throw new Exception('El cliente seleccionado no tiene telefono. Capturalo para continuar.');
+            $idCliente = (int)$clienteExistente['id_cliente'];
+            $nombreActual = $decryptValue((string)($clienteExistente['nombre'] ?? ''));
+            $telefonoActual = $decryptValue((string)($clienteExistente['telefono'] ?? ''));
+            $clienteNombreFinal = $nombreActual;
+            $clienteTelefonoFinal = $telefonoActual;
+
+            if ($clienteNombreFinal === '') {
+                throw new Exception('El cliente seleccionado no tiene nombre valido.');
+            }
+            if ($clienteTelefonoFinal === '' && $clienteTelefono !== '') {
+                $clienteTelefonoFinal = $clienteTelefono;
+                $stmtUpdateTelefono = $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?');
+                $stmtUpdateTelefono->execute([$storeValue($clienteTelefonoFinal), $idCliente]);
+            }
+            if (!$esVentaSucursal && $clienteTelefonoFinal === '') {
+                throw new Exception('El cliente seleccionado no tiene telefono. Capturalo para continuar.');
+            }
+        } elseif (!$esVentaSucursal) {
+            throw new Exception('Debes seleccionar un cliente existente.');
+        } else {
+            // Venta de mostrador sin cliente registrado: pedido "invitado" (id_cliente NULL),
+            // el mismo patron que ya usan otros flujos de mostrador/invitado.
+            $idCliente = null;
+            $clienteNombreFinal = $clienteNombre !== '' ? $clienteNombre : 'Mostrador';
+            $clienteTelefonoFinal = $clienteTelefono; // puede quedar vacio
         }
 
         $latitudEntrega = null;
         $longitudEntrega = null;
 
-        if ($hasClienteDireccionesTable) {
+        if (!$esVentaSucursal && $hasClienteDireccionesTable) {
             if ($selectedAddressId > 0) {
                 $columnasDir = ['direccion', 'maps_link'];
                 if ($hasClienteDireccionesLatitud) {
@@ -283,20 +323,24 @@ try {
             }
         }
 
-        if ($direccionEntrega === '') {
+        if ($esVentaSucursal) {
+            // En mostrador no hay entrega: descartamos cualquier dato de domicilio.
+            $direccionEntrega = '';
+            $mapsLinkEntrega = '';
+            $latitudEntrega = null;
+            $longitudEntrega = null;
+        } elseif ($direccionEntrega === '') {
             throw new Exception('La direccion guardada del cliente no es valida.');
         }
 
-        $numeroPedido = 'DOM-' . date('YmdHis') . '-' . substr(uniqid(), -4);
-        $observacionesChunks = [
-            'ENTREGA: Domicilio',
-            'Cliente: ' . $clienteNombreFinal,
-            'Tel: ' . $clienteTelefonoFinal,
-            'Dir: ' . $direccionEntrega,
-        ];
-        if ($observaciones !== '') {
-            $observacionesChunks[] = 'Notas: ' . $observaciones;
-        }
+        $numeroPedido = saleDeliveryModeFolioPrefix($esVentaSucursal) . date('YmdHis') . '-' . substr(uniqid(), -4);
+        $observacionesChunks = saleDeliveryModeObservacionesChunks(
+            $esVentaSucursal,
+            $clienteNombreFinal,
+            $clienteTelefonoFinal,
+            $direccionEntrega,
+            $observaciones
+        );
         if ($mapsLinkEntrega !== '') {
             $observacionesChunks[] = 'Maps: ' . $mapsLinkEntrega;
         }
@@ -306,20 +350,26 @@ try {
 
         // Cargo de envio foraneo -- mismo criterio que el checkout web y el bot
         // (core/delivery_zone_utils.php). Usa las coordenadas de la direccion si se
-        // heredaron/resolvieron; si no, cae al texto. Solo aplica a domicilio.
+        // heredaron/resolvieron; si no, cae al texto. Solo aplica a domicilio: en
+        // venta de sucursal no hay reparto, asi que el envio siempre es $0.
         $hasPedidosCostoEnvio = $columnExists($pdo, 'pedidos', 'costo_envio');
-        $productosDistintosVenta = count(array_unique(array_map(
-            static fn($p) => (int)$p['id_producto'],
-            $productos
-        )));
-        $zonaEnvioVenta = deliveryZoneResolveForOrder(
-            $latitudEntrega !== null ? (float)$latitudEntrega : null,
-            $longitudEntrega !== null ? (float)$longitudEntrega : null,
-            $direccionEntrega,
-            'Domicilio',
-            $productosDistintosVenta
-        );
-        $costoEnvioVenta = round((float)$zonaEnvioVenta['costo_envio'], 2);
+        if ($esVentaSucursal) {
+            $zonaEnvioVenta = ['zona' => 'sucursal', 'costo_envio' => 0.0];
+            $costoEnvioVenta = 0.0;
+        } else {
+            $productosDistintosVenta = count(array_unique(array_map(
+                static fn($p) => (int)$p['id_producto'],
+                $productos
+            )));
+            $zonaEnvioVenta = deliveryZoneResolveForOrder(
+                $latitudEntrega !== null ? (float)$latitudEntrega : null,
+                $longitudEntrega !== null ? (float)$longitudEntrega : null,
+                $direccionEntrega,
+                'Domicilio',
+                $productosDistintosVenta
+            );
+            $costoEnvioVenta = round((float)$zonaEnvioVenta['costo_envio'], 2);
+        }
         $total = round($subtotal - $descuentoTotal + $costoEnvioVenta, 2);
         if ($costoEnvioVenta > 0) {
             $observacionesChunks[] = 'Envio foraneo (fuera de periferia GDL): +$' . number_format($costoEnvioVenta, 2, '.', '');
@@ -355,7 +405,8 @@ try {
             ':usuario' => $usuario['id_usuario'],
             ':almacen' => $almacenVentaId,
             ':metodo_pago' => $idMetodoPago,
-            ':estado' => 'pendiente_pago',
+            // Mostrador: el cliente paga en el acto, el pedido nace 'pagado'.
+            ':estado' => saleDeliveryModeInitialEstado($esVentaSucursal),
             ':subtotal' => $subtotal,
             ':descuento_total' => $descuentoTotal,
             ':total' => $total,
@@ -365,7 +416,11 @@ try {
         if ($hasPedidosTipoEntrega) {
             $pedidoColumns[] = 'tipo_entrega';
             $pedidoPlaceholders[] = ':tipo_entrega';
-            $pedidoParams[':tipo_entrega'] = 'Domicilio';
+            $pedidoParams[':tipo_entrega'] = $esVentaSucursal ? 'Sucursal' : 'Domicilio';
+        }
+        if ($esVentaSucursal && $columnExists($pdo, 'pedidos', 'fecha_pago')) {
+            $pedidoColumns[] = 'fecha_pago';
+            $pedidoPlaceholders[] = 'NOW()';
         }
         if ($hasPedidosCostoEnvio) {
             $pedidoColumns[] = 'costo_envio';
@@ -485,7 +540,7 @@ try {
                     ':almacen' => $almacenVentaId,
                     ':cantidad' => $producto['cantidad'],
                     ':usuario' => $usuario['id_usuario'],
-                    ':observacion' => 'Pedido a domicilio ' . $numeroPedido,
+                    ':observacion' => ($esVentaSucursal ? 'Venta en sucursal ' : 'Pedido a domicilio ') . $numeroPedido,
                 ]);
             }
         }
@@ -497,13 +552,19 @@ try {
 
         $pdo->commit();
 
-        logAudit('PEDIDO_DOMICILIO_AGENDADO', 'pedidos', $idPedido, "Pedido agendado: $numeroPedido. Total: $total");
+        logAudit(
+            $esVentaSucursal ? 'VENTA_SUCURSAL_REGISTRADA' : 'PEDIDO_DOMICILIO_AGENDADO',
+            'pedidos',
+            $idPedido,
+            ($esVentaSucursal ? "Venta en sucursal registrada: " : "Pedido agendado: ") . "$numeroPedido. Total: $total"
+        );
         if ($ventaSinInventario) {
             logAudit('PEDIDO_SIN_AFECTAR_INVENTARIO', 'pedidos', $idPedido, "Pedido $numeroPedido creado sin afectar inventario por usuario ID {$usuario['id_usuario']}.");
         }
 
         $response['success'] = true;
-        $response['message'] = 'Pedido agendado correctamente: ' . $numeroPedido;
+        $response['message'] = ($esVentaSucursal ? 'Venta registrada correctamente: ' : 'Pedido agendado correctamente: ') . $numeroPedido;
+        $response['tipo_entrega'] = $esVentaSucursal ? 'Sucursal' : 'Domicilio';
         $response['id_pedido'] = $idPedido;
         $response['id_cliente'] = $idCliente;
         $response['numero_pedido'] = $numeroPedido;

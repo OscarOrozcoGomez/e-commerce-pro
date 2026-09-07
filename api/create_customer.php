@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/cliente_scope_utils.php';
 
 header('Content-Type: application/json');
 
@@ -72,11 +73,14 @@ try {
     }
 
     $pdo = getPDO();
-    $stmtInsert = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, estado) VALUES (?, ?, ?, 'activo')");
+    // El cliente nace en la sucursal de quien lo captura (NULL si es un admin sin
+    // sucursal); de eso depende que su encargado lo vea despues -- ver cliente_scope_utils.
+    $stmtInsert = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_almacen, estado) VALUES (?, ?, ?, ?, 'activo')");
     $stmtInsert->execute([
         $storeValue($nombre),
         $storeValue($email !== '' ? $email : null),
         $storeValue($telefonoNormalizado !== '' ? $telefonoNormalizado : null),
+        clienteScopeAlmacenParaNuevo(getCurrentAlmacenId()),
     ]);
     $nuevoClienteId = (int)$pdo->lastInsertId();
 

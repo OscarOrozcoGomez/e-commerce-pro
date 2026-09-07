@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
+require_once __DIR__ . '/../core/cliente_scope_utils.php';
 
 requireAuth();
 // Fase 4: el permiso 'realizar_ventas' abre esta vista; el rol se mantiene como respaldo.
@@ -12,7 +13,11 @@ if (!hasPermission('realizar_ventas') && !canScheduleSalesOrders()) {
     exit;
 }
 
-$pageTitle = 'Agendar Pedido a Domicilio';
+// Agendar pedidos a domicilio exige el permiso 'asignar_entregas' (con el rol de
+// encargado/admin como respaldo, patron Fase 4 -- ver views/asignar_entregas.php).
+// Quien no lo tiene (p. ej. un vendedor) solo puede registrar ventas de mostrador.
+$puedeAgendarDomicilio = hasPermission('asignar_entregas') || canManageDeliveryOrders();
+$pageTitle = $puedeAgendarDomicilio ? 'Registrar Venta / Pedido' : 'Registrar Venta en Sucursal';
 $pdo = getPDO();
 $error = '';
 $canManageCustomers = isAdmin() || isEncargado();
@@ -82,13 +87,16 @@ try {
     $stmtMeta->execute();
     $hasClienteDireccionesTable = ((int)$stmtMeta->fetchColumn()) > 0;
 
+    // Alcance por sucursal: un encargado/vendedor solo puede buscar y venderle a
+    // clientes de SU sucursal (un admin ve todos). Mismo criterio que manage_customers.php.
+    $clienteScope = clienteScopeSqlFilter(getCurrentAlmacenId(), isAdmin(), 'c');
     $sql = "SELECT c.id_cliente, c.nombre, COALESCE(c.telefono, '') AS telefono
             FROM clientes c
-            WHERE c.estado = 'activo'
+            WHERE c.estado = 'activo' AND {$clienteScope['sql']}
             ORDER BY c.nombre ASC
             LIMIT 500";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute();
+    $stmt->execute($clienteScope['params']);
     $clientesActivos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
@@ -250,6 +258,31 @@ include __DIR__ . '/includes/header.php';
                     <form class="formulario-venta" method="POST" action="<?php echo BASE_URL; ?>api/ventas.php">
                         <?php echo csrfInput(); ?>
 
+                        <div class="row tipo-entrega-row" style="margin-bottom: 8px;">
+                            <div class="col s12">
+                                <div class="tipo-entrega-switch" style="display:flex; flex-wrap:wrap; gap:6px 22px; padding:10px 14px; border:1px solid #cfd8dc; border-radius:6px; background:#fafafa;">
+<?php if ($puedeAgendarDomicilio): ?>
+                                    <span style="font-weight:600; color:#37474f; margin-right:4px;">Tipo de venta:</span>
+                                    <label style="margin:0;">
+                                        <input name="tipo_entrega" type="radio" value="Domicilio" class="tipo-entrega-radio" checked>
+                                        <span>A domicilio</span>
+                                    </label>
+                                    <label style="margin:0;">
+                                        <input name="tipo_entrega" type="radio" value="Sucursal" class="tipo-entrega-radio">
+                                        <span>En sucursal (cliente presente)</span>
+                                    </label>
+<?php else: ?>
+                                    <input name="tipo_entrega" type="radio" value="Sucursal" class="tipo-entrega-radio" checked hidden>
+                                    <span style="font-weight:600; color:#37474f;">
+                                        <i class="material-icons tiny" style="vertical-align:middle;">storefront</i>
+                                        Venta en sucursal (mostrador)
+                                    </span>
+<?php endif; ?>
+                                </div>
+                                <span class="helper-text tipo-entrega-hint" style="display:block; margin-top:4px;"></span>
+                            </div>
+                        </div>
+
                         <div class="row">
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">person_outline</i>
@@ -271,9 +304,9 @@ include __DIR__ . '/includes/header.php';
                         <div class="row">
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">phone</i>
-                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Telefono del cliente seleccionado" maxlength="19" inputmode="numeric" autocomplete="tel-national" required>
+                                <input type="tel" class="cliente_telefono" name="cliente_telefono" placeholder="Telefono del cliente seleccionado" maxlength="19" inputmode="numeric" autocomplete="tel-national">
                                 <label class="active">Telefono</label>
-                                <span class="helper-text">Obligatorio para la entrega a domicilio.</span>
+                                <span class="helper-text telefono-helper-text">Obligatorio para la entrega a domicilio.</span>
                                 <div class="cliente-sin-telefono-alert" style="display:none; margin-top:6px; font-size:0.85rem;">
                                     <span class="orange-text text-darken-3">Este cliente no tiene telefono registrado.</span>
                                     <a href="#!" class="cliente-editar-telefono-link blue-text" style="margin-left:4px;">Agregarlo ahora</a>
@@ -281,7 +314,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
 
-                        <div class="row">
+                        <div class="row delivery-only-row">
                             <div class="col s12 customer-address-block" style="display:none; margin-bottom: 10px;">
                                 <label style="display:block; margin-bottom:8px; font-weight:600; color:#37474f;">Domicilios guardados del cliente</label>
                                 <select class="browser-default customer-address-select" name="customer_address_id" style="border: 1px solid #cfd8dc; border-radius: 4px; padding: 10px; height: auto; width: 100%;">
@@ -291,7 +324,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
 
-                        <div class="row">
+                        <div class="row delivery-only-row">
                             <div class="col s12">
                                 <input type="hidden" class="direccion_entrega" name="direccion_entrega" value="">
                                 <div class="delivery-address-preview" style="display:none;">
@@ -305,7 +338,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
 
-                        <div class="row">
+                        <div class="row delivery-only-row">
                             <div class="input-field col s12">
                                 <i class="material-icons prefix">map</i>
                                 <input type="url" class="maps_link_entrega" name="maps_link_entrega" placeholder="Link guardado del domicilio" autocomplete="off">
@@ -314,7 +347,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
 
-                        <div class="row">
+                        <div class="row delivery-only-row">
                             <div class="col s12">
                                 <div class="sales-map-preview z-depth-1" style="height: 180px; width: 100%; border-radius: 4px; display: none; border: 1px solid #ddd;"></div>
                             </div>
@@ -362,7 +395,7 @@ include __DIR__ . '/includes/header.php';
                             <label>Observaciones</label>
                         </div>
 
-                        <button type="submit" class="btn waves-effect waves-light green btn-large w-100">
+                        <button type="submit" class="btn waves-effect waves-light green btn-large w-100 btn-enviar-venta">
                             Agendar Pedido <i class="material-icons right">local_shipping</i>
                         </button>
                     </form>
@@ -373,7 +406,7 @@ include __DIR__ . '/includes/header.php';
         <div class="col s12 m4">
             <div class="card blue-grey darken-1">
                 <div class="card-content white-text">
-                    <span class="card-title">Resumen del Pedido</span>
+                    <span class="card-title resumen-titulo">Resumen del Pedido</span>
                     <div style="margin-top: 20px;">
                         <div class="row" style="margin-bottom: 5px;">
                             <div class="col s6">Subtotal:</div>
@@ -390,7 +423,7 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="divider" style="background: rgba(255,255,255,0.2); margin: 10px 0;"></div>
                         <div class="row" style="margin-bottom: 0; color: #c5e1a5;">
-                            <div class="col s12">
+                            <div class="col s12 resumen-cobro-text">
                                 El cobro se realizará al momento de la entrega por el repartidor asignado.
                             </div>
                         </div>
@@ -897,6 +930,7 @@ include __DIR__ . '/includes/header.php';
 
             tabs.push({
                 id,
+                tipo_entrega: getTipoEntrega(context),
                 id_cliente: String(context.querySelector('.cliente_id')?.value || ''),
                 cliente_nombre: (context.querySelector('.cliente_nombre')?.value || '').trim(),
                 cliente_telefono: (context.querySelector('.cliente_telefono')?.value || '').trim(),
@@ -1682,9 +1716,17 @@ include __DIR__ . '/includes/header.php';
 
         initProductoDropdown(context, id, buscador);
 
+        context.querySelectorAll('.tipo-entrega-radio').forEach((radio) => {
+            radio.addEventListener('change', () => aplicarModoEntrega(context));
+        });
+
         context.querySelector('.formulario-venta').addEventListener('submit', (e) => procesarVenta(e, id));
 
         if (draftTab && typeof draftTab === 'object') {
+            if (draftTab.tipo_entrega === 'Sucursal') {
+                const sucursalRadio = context.querySelector('.tipo-entrega-radio[value="Sucursal"]');
+                if (sucursalRadio) sucursalRadio.checked = true;
+            }
             if (clienteIdInput) clienteIdInput.value = String(draftTab.id_cliente || '');
             if (clienteNombreInput) clienteNombreInput.value = String(draftTab.cliente_nombre || '');
             if (clienteTelefonoInput) clienteTelefonoInput.value = String(draftTab.cliente_telefono || '');
@@ -1742,6 +1784,7 @@ include __DIR__ . '/includes/header.php';
         }
 
         updateDeliveryMapLink(context);
+        aplicarModoEntrega(context);
 
         if (tabsInstance) tabsInstance.select(`venta-${id}`);
         setTimeout(() => buscador.focus(), 200);
@@ -1751,6 +1794,64 @@ include __DIR__ . '/includes/header.php';
     function actualizarTituloTab(id, nombre = '') {
         const tabTitle = document.querySelector(`#tab-li-${id} .tab-title`);
         if (tabTitle) tabTitle.textContent = nombre.trim() !== '' ? nombre.substring(0, 15) : `Pedido ${id.substring(1)}`;
+    }
+
+    // "En sucursal": el cliente ya esta en el mostrador, no hay entrega ni domicilio.
+    // Ocultamos todo lo de ruta/direccion y ajustamos textos; el resto del flujo
+    // (buscador, descuentos, inventario) es identico. El servidor recibe tipo_entrega.
+    function getTipoEntrega(context) {
+        return context?.querySelector('.tipo-entrega-radio:checked')?.value === 'Sucursal' ? 'Sucursal' : 'Domicilio';
+    }
+
+    function aplicarModoEntrega(context) {
+        if (!context) return;
+        const esSucursal = getTipoEntrega(context) === 'Sucursal';
+        context.dataset.tipoEntrega = esSucursal ? 'Sucursal' : 'Domicilio';
+
+        context.querySelectorAll('.delivery-only-row').forEach((row) => {
+            row.style.display = esSucursal ? 'none' : '';
+        });
+
+        const hint = context.querySelector('.tipo-entrega-hint');
+        if (hint) {
+            hint.textContent = esSucursal
+                ? 'Venta cobrada en el mostrador. No se pide domicilio y el inventario se descuenta al registrar.'
+                : 'El pedido se agenda para reparto: el cliente debe tener un domicilio valido.';
+        }
+
+        const telHelper = context.querySelector('.telefono-helper-text');
+        if (telHelper) {
+            telHelper.textContent = esSucursal
+                ? 'Opcional para venta en sucursal.'
+                : 'Obligatorio para la entrega a domicilio.';
+        }
+
+        const titulo = context.querySelector('.resumen-titulo');
+        if (titulo) titulo.textContent = esSucursal ? 'Resumen de la Venta' : 'Resumen del Pedido';
+
+        const cobro = context.querySelector('.resumen-cobro-text');
+        if (cobro) {
+            cobro.textContent = esSucursal
+                ? 'Venta cobrada en sucursal al registrarla.'
+                : 'El cobro se realizará al momento de la entrega por el repartidor asignado.';
+        }
+
+        const btn = context.querySelector('.btn-enviar-venta');
+        if (btn && !btn.disabled) {
+            btn.innerHTML = esSucursal
+                ? 'Registrar Venta <i class="material-icons right">point_of_sale</i>'
+                : 'Agendar Pedido <i class="material-icons right">local_shipping</i>';
+        }
+
+        if (esSucursal) {
+            // No arrastramos una direccion de un cliente elegido antes de cambiar a mostrador.
+            const dir = context.querySelector('.direccion_entrega');
+            if (dir) dir.value = '';
+            const addrSelect = context.querySelector('.customer-address-select');
+            if (addrSelect) addrSelect.value = '';
+        }
+
+        scheduleSalesDraftSave();
     }
 
     function abrirModalCerrarVenta(id) {
@@ -1969,30 +2070,39 @@ include __DIR__ . '/includes/header.php';
             return;
         }
 
+        const esSucursal = getTipoEntrega(context) === 'Sucursal';
         const clienteId = String(context.querySelector('.cliente_id')?.value || '').trim();
         const telefonoCliente = (context.querySelector('.cliente_telefono')?.value || '').trim();
         const customerAddressId = String(context.querySelector('.customer-address-select')?.value || '').trim();
         const direccionEntrega = (context.querySelector('.direccion_entrega')?.value || '').trim();
 
-        if (clienteId === '') {
-            M.toast({ html: 'Selecciona un cliente existente.', classes: 'red darken-2' });
-            return;
-        }
-        if (telefonoCliente === '') {
-            M.toast({ html: 'Captura el telefono del cliente para continuar.', classes: 'red darken-2' });
-            return;
-        }
-        if (!/^\d+$/.test(customerAddressId) && direccionEntrega === '') {
-            M.toast({ html: 'Selecciona una direccion guardada. Si el cliente no tiene, agregala en Administrar Clientes.', classes: 'red darken-2' });
-            return;
-        }
-        if (isPlaceholderAddressText(direccionEntrega)) {
-            M.toast({ html: 'El domicilio guardado no tiene una direccion real ("Por confirmar"). Actualizala en Administrar Clientes antes de agendar.', classes: 'red darken-2' });
-            return;
+        // En venta de sucursal el cliente esta presente: no exigimos cliente registrado
+        // (si no se elige, el servidor la guarda como venta de mostrador sin cliente),
+        // ni telefono, ni domicilio.
+        if (!esSucursal) {
+            if (clienteId === '') {
+                M.toast({ html: 'Selecciona un cliente existente.', classes: 'red darken-2' });
+                return;
+            }
+            if (telefonoCliente === '') {
+                M.toast({ html: 'Captura el telefono del cliente para continuar.', classes: 'red darken-2' });
+                return;
+            }
+            if (!/^\d+$/.test(customerAddressId) && direccionEntrega === '') {
+                M.toast({ html: 'Selecciona una direccion guardada. Si el cliente no tiene, agregala en Administrar Clientes.', classes: 'red darken-2' });
+                return;
+            }
+            if (isPlaceholderAddressText(direccionEntrega)) {
+                M.toast({ html: 'El domicilio guardado no tiene una direccion real ("Por confirmar"). Actualizala en Administrar Clientes antes de agendar.', classes: 'red darken-2' });
+                return;
+            }
         }
 
         const form = e.target;
         const submitButton = form.querySelector('button[type="submit"]');
+        const labelBoton = esSucursal
+            ? 'Registrar Venta <i class="material-icons right">point_of_sale</i>'
+            : 'Agendar Pedido <i class="material-icons right">local_shipping</i>';
         submitButton.disabled = true;
         submitButton.innerHTML = 'Procesando...';
 
@@ -2000,7 +2110,7 @@ include __DIR__ . '/includes/header.php';
             .then((response) => response.json())
             .then((data) => {
                 if (data.success) {
-                    M.toast({ html: data.message || 'Pedido agendado con éxito', classes: 'green darken-2' });
+                    M.toast({ html: data.message || (esSucursal ? 'Venta registrada con éxito' : 'Pedido agendado con éxito'), classes: 'green darken-2' });
                     document.getElementById(`tab-li-${tabId}`).remove();
                     context.remove();
                     saveSalesDraftNow();
@@ -2008,13 +2118,13 @@ include __DIR__ . '/includes/header.php';
                 } else {
                     M.toast({ html: data.message || 'Error al procesar el pedido', classes: 'red darken-2' });
                     submitButton.disabled = false;
-                    submitButton.innerHTML = 'Agendar Pedido <i class="material-icons right">local_shipping</i>';
+                    submitButton.innerHTML = labelBoton;
                 }
             })
             .catch((error) => {
                 console.error(error);
                 submitButton.disabled = false;
-                submitButton.innerHTML = 'Agendar Pedido <i class="material-icons right">local_shipping</i>';
+                submitButton.innerHTML = labelBoton;
             });
     }
 </script>
