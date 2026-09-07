@@ -509,50 +509,26 @@ function aiStripAccentsLower(string $texto): string
 }
 
 /**
- * Clasifica una direccion de entrega en 'local' (municipio de la ZMG, envio gratis),
- * 'foraneo' (menciona Jalisco pero ningun municipio de la ZMG -- aplica cargo de envio
- * salvo promocion de 2+ productos) o 'indeterminado' (no se pudo determinar nada, ej.
- * direccion vacia o sin ninguna pista de estado/municipio -- nunca se asume local ni
- * foraneo por falta de dato, se deja para revision del admin via ai_diagnostics.php).
- * Pura y testeable -- coincidencia de texto simple, mismo criterio ya usado en el
- * proyecto para busqueda de inventario/deteccion de temas, no interpretacion por IA.
+ * Clasifica una direccion de entrega (SOLO texto) en 'local' | 'foraneo' | 'indeterminado'.
+ *
+ * @deprecated Delega en deliveryZoneClassifyByText() (core/delivery_zone_utils.php), que
+ * es la version compartida por el checkout web, el panel de vendedor y el bot. Se conserva
+ * como wrapper para no romper llamadas ni tests existentes; para nuevos usos con
+ * coordenadas usa deliveryZoneClassify() / deliveryZoneResolveForOrder().
  */
 function aiClasificarZonaEntrega(string $direccion): string
 {
-    $normalizado = aiStripAccentsLower($direccion);
-    if ($normalizado === '') {
-        return 'indeterminado';
-    }
-
-    foreach (AI_ZMG_MUNICIPIOS_GRATUITOS as $municipio) {
-        if (mb_stripos($normalizado, $municipio) !== false) {
-            return 'local';
-        }
-    }
-
-    if (mb_stripos($normalizado, 'jalisco') !== false) {
-        return 'foraneo';
-    }
-
-    return 'indeterminado';
+    return deliveryZoneClassifyByText($direccion);
 }
 
 /**
- * Pura: cargo de envio segun zona y cantidad de PRODUCTOS DISTINTOS del pedido (no
- * piezas totales) -- la promocion real es "2 o mas productos Be Life, envio gratis en
- * cualquier zona" (ver ai_asistente_config.mensaje_bienvenida).
+ * Cargo de envio segun zona y cantidad de PRODUCTOS DISTINTOS del pedido.
+ *
+ * @deprecated Delega en deliveryZoneShippingFee() (core/delivery_zone_utils.php).
  */
 function aiCalcularCargoEnvio(string $zonaEntrega, int $productosDistintos): float
 {
-    if ($zonaEntrega !== 'foraneo') {
-        return 0.0;
-    }
-
-    if ($productosDistintos >= 2) {
-        return 0.0;
-    }
-
-    return AI_CARGO_ENVIO_FORANEO;
+    return deliveryZoneShippingFee($zonaEntrega, $productosDistintos);
 }
 
 function aiGetOrCreateConversation(PDO $pdo, string $waId, ?string $perfilNombre): array
@@ -1604,10 +1580,11 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
     }
 
     // Cargo de envio foraneo: nunca se le confia al LLM decidir si la direccion es local
-    // o no ni cuanto cobrar -- se calcula aqui, por codigo, sobre la direccion ya guardada
-    // en el pedido, y se refleja en el total real y en lo que Alex le dice al cliente.
-    $zonaEntrega = aiClasificarZonaEntrega($direccion);
-    $cargoEnvio = aiCalcularCargoEnvio($zonaEntrega, count($resolved['items']));
+    // o no ni cuanto cobrar. Ahora lo calcula y lo persiste dbCreatePublicOrder() (mismo
+    // criterio que el checkout web y el panel de vendedor, via core/delivery_zone_utils.php),
+    // asi que aqui solo se leen los valores que ya quedaron guardados en el pedido.
+    $zonaEntrega = (string)($result['zona_entrega'] ?? deliveryZoneClassifyByText($direccion));
+    $cargoEnvio = round((float)($result['costo_envio'] ?? 0.0), 2);
     if ($zonaEntrega === 'indeterminado') {
         // No se asume nada (ni local ni foraneo) por falta de dato en la direccion, pero
         // queda registrado para que un admin lo revise en el panel de diagnostico.
@@ -1618,24 +1595,6 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             $nombre,
             ['direccion' => $direccion, 'id_pedido' => $result['id_pedido'] ?? null]
         );
-    }
-    if ($cargoEnvio > 0 && !empty($result['id_pedido'])) {
-        try {
-            $idPedido = (int)$result['id_pedido'];
-            $stmtPedido = $pdo->prepare('SELECT total, observaciones FROM pedidos WHERE id_pedido = ?');
-            $stmtPedido->execute([$idPedido]);
-            $filaPedido = $stmtPedido->fetch(PDO::FETCH_ASSOC);
-            if (is_array($filaPedido)) {
-                $nuevoTotal = round((float)$filaPedido['total'] + $cargoEnvio, 2);
-                $nuevaObs = trim((string)$filaPedido['observaciones'])
-                    . " | Envio foraneo (fuera de ZMG): +\$" . number_format($cargoEnvio, 2) . ' MXN';
-                $pdo->prepare('UPDATE pedidos SET total = ?, observaciones = ? WHERE id_pedido = ?')
-                    ->execute([$nuevoTotal, $nuevaObs, $idPedido]);
-                $result['total'] = $nuevoTotal;
-            }
-        } catch (Throwable $e) {
-            error_log('WARNING: no se pudo aplicar el cargo de envio foraneo: ' . $e->getMessage());
-        }
     }
 
     $listaItems = implode(', ', array_map(

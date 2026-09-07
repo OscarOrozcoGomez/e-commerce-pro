@@ -304,6 +304,27 @@ try {
             $observacionesChunks[] = 'VENTA SIN AFECTAR INVENTARIO (autorizado por ' . (string)($usuario['nombre'] ?? $usuario['id_usuario']) . ')';
         }
 
+        // Cargo de envio foraneo -- mismo criterio que el checkout web y el bot
+        // (core/delivery_zone_utils.php). Usa las coordenadas de la direccion si se
+        // heredaron/resolvieron; si no, cae al texto. Solo aplica a domicilio.
+        $hasPedidosCostoEnvio = $columnExists($pdo, 'pedidos', 'costo_envio');
+        $productosDistintosVenta = count(array_unique(array_map(
+            static fn($p) => (int)$p['id_producto'],
+            $productos
+        )));
+        $zonaEnvioVenta = deliveryZoneResolveForOrder(
+            $latitudEntrega !== null ? (float)$latitudEntrega : null,
+            $longitudEntrega !== null ? (float)$longitudEntrega : null,
+            $direccionEntrega,
+            'Domicilio',
+            $productosDistintosVenta
+        );
+        $costoEnvioVenta = round((float)$zonaEnvioVenta['costo_envio'], 2);
+        $total = round($subtotal - $descuentoTotal + $costoEnvioVenta, 2);
+        if ($costoEnvioVenta > 0) {
+            $observacionesChunks[] = 'Envio foraneo (fuera de periferia GDL): +$' . number_format($costoEnvioVenta, 2, '.', '');
+        }
+
         $pedidoColumns = [
             'numero_pedido',
             'id_cliente',
@@ -345,6 +366,11 @@ try {
             $pedidoColumns[] = 'tipo_entrega';
             $pedidoPlaceholders[] = ':tipo_entrega';
             $pedidoParams[':tipo_entrega'] = 'Domicilio';
+        }
+        if ($hasPedidosCostoEnvio) {
+            $pedidoColumns[] = 'costo_envio';
+            $pedidoPlaceholders[] = ':costo_envio';
+            $pedidoParams[':costo_envio'] = $costoEnvioVenta;
         }
         if ($hasPedidosDireccionEntrega) {
             $pedidoColumns[] = 'direccion_entrega';
@@ -482,7 +508,12 @@ try {
         $response['id_cliente'] = $idCliente;
         $response['numero_pedido'] = $numeroPedido;
         $response['descuento_total'] = $descuentoTotal;
+        $response['costo_envio'] = $costoEnvioVenta;
+        $response['zona_entrega'] = $zonaEnvioVenta['zona'];
         $response['total'] = $total;
+        if ($costoEnvioVenta > 0) {
+            $response['message'] .= ' (incluye envio foraneo +$' . number_format($costoEnvioVenta, 2) . ')';
+        }
     } catch (Exception $e) {
         $pdo->rollBack();
         throw $e;
