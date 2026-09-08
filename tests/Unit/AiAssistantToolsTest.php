@@ -513,6 +513,69 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('Blife', $definicionesJson);
     }
 
+    public function testAiGetOnDemandTemplateCodesExcludesSeguimientoAndCatalogo(): void
+    {
+        $this->seedTemplate('seguimiento_24h', 'texto', 'Hola de nuevo!', null);
+        $this->seedTemplate('catalogo_pdf', 'documento', 'Catalogo Blife', 'https://cdn.example.com/catalogo.pdf');
+        $this->seedTemplate('foto_ashwagandha', 'imagen', 'Foto de Ashwagandha', 'https://cdn.example.com/ash.jpg');
+
+        $codigos = array_column(aiGetOnDemandTemplateCodes($this->pdo), 'codigo');
+
+        $this->assertSame(['foto_ashwagandha'], $codigos);
+    }
+
+    public function testAiGetOnDemandTemplateCodesExcludesInactiveTemplates(): void
+    {
+        $this->seedTemplate('nota_pedido', 'texto', 'Nota de pedido', null, 0);
+
+        $this->assertSame([], aiGetOnDemandTemplateCodes($this->pdo));
+    }
+
+    public function testAiBuildSystemPromptForbidsInventingTemplateCodesWhenNoneAreAvailable(): void
+    {
+        // Diagnostico real (2026-09-06): Alex mando enviar_plantilla con "info_maca_blend",
+        // un codigo que jamas existio, porque el prompt nunca le decia que codigos son reales.
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null, [], [], null, null, null, []);
+
+        $this->assertStringContainsString('no hay ninguna plantilla adicional disponible', $prompt);
+        $this->assertStringContainsString('no la llames por ningun motivo', $prompt);
+    }
+
+    public function testAiBuildSystemPromptListsRealTemplateCodesWhenAvailable(): void
+    {
+        $prompt = aiBuildSystemPrompt(
+            ['nombre_persona' => 'Alex'],
+            null,
+            [],
+            [],
+            null,
+            null,
+            null,
+            [['codigo' => 'foto_ashwagandha', 'tipo' => 'imagen', 'texto' => 'Foto de Ashwagandha']]
+        );
+
+        $this->assertStringContainsString('foto_ashwagandha', $prompt);
+        $this->assertStringContainsString('jamas inventes uno que no este en esta lista', $prompt);
+        $this->assertStringNotContainsString('no hay ninguna plantilla adicional disponible', $prompt);
+    }
+
+    public function testAiGetToolDefinitionsDoesNotContainTheStaleCatalogoBeLifeExample(): void
+    {
+        $definicionesJson = (string)json_encode(aiGetToolDefinitions());
+
+        $this->assertStringNotContainsString('catalogo_be_life', $definicionesJson);
+    }
+
+    public function testAiBuildSystemPromptTellsAlexHowToHandleInsufficientStock(): void
+    {
+        // Diagnostico real (2026-09-06): un cliente quiso 2 de "Maca Blend" habiendo solo 1
+        // disponible -- agendar_venta fallo limpio, pero el prompt no decia que ofrecer.
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('no hay suficiente existencia', $prompt);
+        $this->assertStringContainsString('ajustar la cantidad a lo disponible', $prompt);
+    }
+
     public function testAiGetToolDefinitionsNeverSuggestsTarjetaAsAValidPaymentMethod(): void
     {
         // La descripcion original decia "Efectivo, transferencia, tarjeta u otro metodo"
@@ -671,6 +734,78 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('tool', $history[2]['role']);
         $this->assertSame('call_1', $history[2]['tool_call_id']);
         $this->assertSame('No tenemos existencia por ahora.', $history[3]['content']);
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesRemovesLeadingToolRole(): void
+    {
+        $mensajes = [
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{"ok":true}'],
+            ['role' => 'assistant', 'content' => 'Aqui tienes.'],
+            ['role' => 'user', 'content' => 'Gracias'],
+        ];
+
+        $resultado = aiTrimOrphanedLeadingToolMessages($mensajes);
+
+        $this->assertCount(2, $resultado);
+        $this->assertSame('assistant', $resultado[0]['role']);
+        $this->assertSame('user', $resultado[1]['role']);
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesRemovesMultipleLeadingToolCalls(): void
+    {
+        // Caso real (produccion, tool_calls paralelos): 2 mensajes 'tool' huerfanos
+        // seguidos al inicio de la ventana, no solo uno.
+        $mensajes = [
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
+            ['role' => 'tool', 'tool_call_id' => 'call_2', 'content' => '{}'],
+            ['role' => 'assistant', 'content' => 'Listo.'],
+        ];
+
+        $resultado = aiTrimOrphanedLeadingToolMessages($mensajes);
+
+        $this->assertCount(1, $resultado);
+        $this->assertSame('assistant', $resultado[0]['role']);
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesLeavesWellFormedHistoryUntouched(): void
+    {
+        $mensajes = [
+            ['role' => 'user', 'content' => 'Hola'],
+            ['role' => 'assistant', 'content' => null, 'tool_calls' => [['id' => 'call_1']]],
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
+        ];
+
+        $this->assertSame($mensajes, aiTrimOrphanedLeadingToolMessages($mensajes));
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesHandlesEmptyAndAllToolArrays(): void
+    {
+        $this->assertSame([], aiTrimOrphanedLeadingToolMessages([]));
+        $this->assertSame([], aiTrimOrphanedLeadingToolMessages([
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
+        ]));
+    }
+
+    public function testAiLoadConversationHistoryNeverStartsWithAnOrphanedToolMessage(): void
+    {
+        // Reproduce el incidente real (panel de diagnostico, deepseek_conexion HTTP 400):
+        // con una ventana chica, el LIMIT corta justo despues del 'assistant' con
+        // tool_calls, dejando el 'tool' de respuesta como primer mensaje de la ventana.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000099', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Tienen melatonina?');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', null, [
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'consultar_inventario', 'arguments' => '{"busqueda_texto":"melatonina"}']],
+        ]);
+        aiAppendMessage($this->pdo, $idConversacion, 'tool', '{"ok":true,"productos":[]}', null, 'call_1', 'consultar_inventario');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'No tengo esa por ahora.', null, null, null, null, true);
+
+        // maxTurns=2 fuerza que la ventana empiece justo en el mensaje 'tool' (el
+        // 'assistant' que lo origino, mas viejo, queda fuera del LIMIT).
+        $history = aiLoadConversationHistory($this->pdo, $idConversacion, 2);
+
+        $this->assertNotSame('tool', $history[0]['role'] ?? null);
     }
 
     public function testTransferirAHumanoPausesConversation(): void

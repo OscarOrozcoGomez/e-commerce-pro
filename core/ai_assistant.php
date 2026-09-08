@@ -159,7 +159,8 @@ function aiBuildSystemPrompt(
     array $reglasAprendizaje = [],
     ?float $horasInactividad = null,
     ?bool $esLadaLocal = null,
-    ?string $perfilClienteTexto = null
+    ?string $perfilClienteTexto = null,
+    array $plantillasDisponibles = []
 ): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
@@ -266,6 +267,18 @@ function aiBuildSystemPrompt(
         }
     }
 
+    $lines[] = '';
+    if (!empty($plantillasDisponibles)) {
+        $codigosPlantillas = array_values(array_filter(
+            array_map(static fn(array $p): string => trim((string)($p['codigo'] ?? '')), $plantillasDisponibles),
+            static fn(string $c): bool => $c !== ''
+        ));
+        $lines[] = 'Plantillas de enviar_plantilla disponibles ahorita (codigo exacto): ' . implode(', ', $codigosPlantillas) . '.';
+        $lines[] = 'Usa enviar_plantilla UNICAMENTE con uno de esos codigos, jamas inventes uno que no este en esta lista -- si ninguno aplica a lo que pide el cliente, no llames a esta funcion.';
+    } else {
+        $lines[] = 'Ahorita no hay ninguna plantilla adicional disponible para enviar_plantilla -- no la llames por ningun motivo, ni inventes un codigo_plantilla. Si el cliente pide informacion, ingredientes o modo de uso de un producto, usa lo que ya te regreso consultar_inventario (paso 3) en vez de buscar una plantilla. Si pide una foto y no tienes una real disponible, nunca inventes que la mandaste -- dile con naturalidad que se la confirmas con el equipo.';
+    }
+
     $fewShot = aiBuildFewShotBlock($reglasAprendizaje);
     if ($fewShot !== '') {
         $lines[] = '';
@@ -294,6 +307,7 @@ function aiBuildSystemPrompt(
     $lines[] = '- Si el cliente quiere cancelar un pedido, nunca muestres resistencia. Respondele con empatia, algo como: "Entiendo perfectamente. Sin problema, dejamos la orden pausada por ahora. Avisame cuando gustes retomarlo y con gusto te atendemos." y llama a transferir_a_humano para formalizar la cancelacion.';
     $lines[] = '- Cada vez que confirmes, modifiques o cierres un pedido, usa iconos (🎉 📦 🚚 💰 ✨) y enlista claramente productos, cantidades, precio de cada uno, estatus del envio y el total final.';
     $lines[] = '- El costo de envio NUNCA lo calculas ni lo decides tu: agendar_venta ya revisa la direccion por su cuenta y te regresa el total real (que puede incluir un cargo agregado) y un mensaje indicandote si aplica. Usa siempre el total y el mensaje que te regresa la funcion, no el que tu mismo calculaste antes -- si cambio, es porque la direccion quedo fuera de la Zona Metropolitana de Guadalajara.';
+    $lines[] = '- Si agendar_venta (o consultar_inventario) te regresa que no hay suficiente existencia de un producto, di el numero disponible tal cual te lo regreso la funcion y ofrece opciones concretas: ajustar la cantidad a lo disponible, cambiar a otra presentacion si existe, o avisar cuando el cliente quiera que le confirmen la fecha de reabastecimiento (llama a transferir_a_humano si insiste en la cantidad original). Nunca dejes la conversacion en un punto muerto ni digas solo que "no hay" sin ofrecer una alternativa.';
     $lines[] = '';
     $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes describiendo que envio una foto, nota de voz, video, archivo o ubicacion (ej. "[El cliente envio una nota de voz]" o "[El cliente compartio su ubicacion: ...]"), NO puedes verlo ni escucharlo. Reconocelo con naturalidad y pide que te escriba en texto lo importante; si es algo que debe revisar una persona (un comprobante de pago, la foto de un problema con un producto), llama a transferir_a_humano. Si es una ubicacion, puedes usar el enlace de mapa que viene en el corchete para el pedido, pero confirma con el cliente la direccion en texto igual. Nunca ignores ese mensaje ni actues como si no hubiera llegado nada.';
     $lines[] = '';
@@ -374,7 +388,7 @@ function aiGetToolDefinitions(): array
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
-                        'codigo_plantilla' => ['type' => 'string', 'description' => 'Codigo exacto de la plantilla, ej: catalogo_be_life.'],
+                        'codigo_plantilla' => ['type' => 'string', 'description' => 'Codigo exacto de una plantilla activa de la lista que te dieron en tus instrucciones. Nunca inventes un codigo que no este ahi.'],
                     ],
                     'required' => ['codigo_plantilla'],
                 ],
@@ -768,6 +782,32 @@ function aiGetAllTags(PDO $pdo): array
     return $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 }
 
+/**
+ * Plantillas activas que Alex puede mandar bajo demanda via enviar_plantilla, cuando el
+ * cliente pide algo que no cubren consultar_inventario/enviar_catalogo (ej. foto de
+ * producto, nota de pedido). Se excluyen a proposito dos codigos de uso especial que
+ * NUNCA debe elegir el LLM por su cuenta:
+ *   - 'seguimiento_24h': solo la manda el cron de reactivacion por inactividad
+ *     (aiGetFollowupTemplateText()), no tiene sentido que Alex la envie a peticion.
+ *   - 'catalogo_pdf': ya tiene su propio wrapper fijo, enviar_catalogo() -- mandarla por
+ *     enviar_plantilla directo seria redundante y menos claro para el LLM.
+ * Diagnostico real (panel de incidentes, 2026-09-06): Alex intento enviar_plantilla con
+ * "info_maca_blend" -- un codigo que jamas existio -- porque el prompt nunca le decia
+ * que codigos son reales. Esta lista, igual que aiGetAllTags() para etiquetas, cierra
+ * ese hueco: si no esta en la lista, no existe.
+ */
+function aiGetOnDemandTemplateCodes(PDO $pdo): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT codigo, tipo, texto FROM whatsapp_templates
+         WHERE activo = 1 AND codigo NOT IN ('seguimiento_24h', 'catalogo_pdf')
+         ORDER BY codigo ASC"
+    );
+    $stmt->execute();
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
 function aiSetConversationState(PDO $pdo, int $idConversacion, string $estadoBot, ?string $motivo = null): void
 {
     $pdo->prepare('UPDATE whatsapp_conversaciones SET estado_bot = ?, motivo_transferencia = ? WHERE id_conversacion = ?')
@@ -1078,7 +1118,39 @@ function aiLoadConversationHistory(PDO $pdo, int $idConversacion, int $maxTurns 
         }
     }
 
-    return $messages;
+    return aiTrimOrphanedLeadingToolMessages($messages);
+}
+
+/**
+ * Quita mensajes con role 'tool' huerfanos al inicio de la ventana de historial. Ocurre
+ * cuando el LIMIT de aiLoadConversationHistory() corta la ventana justo despues del
+ * mensaje 'assistant' que origino ese tool_call (ese assistant queda fuera de la
+ * ventana, mas viejo que el limite), dejando un 'tool' como primer mensaje sin su
+ * llamada correspondiente dentro del payload. DeepSeek (API compatible con OpenAI)
+ * rechaza esos payloads con HTTP 400 ("messages with role 'tool' must be a response to
+ * a preceding message with 'tool_calls'").
+ *
+ * Diagnostico real confirmado contra produccion (incidentes 'deepseek_conexion' del
+ * 2026-09-05/06, panel de diagnostico): conversaciones donde Alex hace varias busquedas
+ * de consultar_inventario seguidas ("melatonina" -> "melato" -> "malato de magnesio" ->
+ * "malato") empujan mensajes 'tool' justo al borde de la ventana de
+ * AI_ASSISTANT_MAX_HISTORY_MESSAGES. No hace falta sanear el otro extremo (que la
+ * ventana termine con un 'assistant' con tool_calls colgando sin su 'tool' de
+ * respuesta): aiLoadConversationHistory() siempre se llama ANTES de que el turno actual
+ * genere sus propios tool_calls, asi que si un 'assistant' con tool_calls sobrevive
+ * dentro de la ventana, sus 'tool' de respuesta (mas nuevos, guardados justo despues en
+ * el mismo turno) tambien sobreviven -- solo el extremo inicial puede quedar cortado a
+ * la mitad de un intercambio. Pura y testeable.
+ */
+function aiTrimOrphanedLeadingToolMessages(array $messages): array
+{
+    $inicio = 0;
+    $total = count($messages);
+    while ($inicio < $total && ($messages[$inicio]['role'] ?? '') === 'tool') {
+        $inicio++;
+    }
+
+    return $inicio > 0 ? array_slice($messages, $inicio) : $messages;
 }
 
 /**
@@ -2643,6 +2715,7 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
     aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
 
     $etiquetasDisponibles = aiGetAllTags($pdo);
+    $plantillasDisponibles = aiGetOnDemandTemplateCodes($pdo);
     $reglasAprendizaje = aiGetActiveLearningRules($pdo);
 
     // Perfil de cliente generado por codigo (compras reales + temas detectados por
@@ -2661,7 +2734,8 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         $reglasAprendizaje,
         $horasInactividad,
         $esLadaLocal,
-        $perfilClienteTexto
+        $perfilClienteTexto,
+        $plantillasDisponibles
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],
