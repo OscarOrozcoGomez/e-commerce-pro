@@ -40,12 +40,15 @@ test.describe('Vendedor: agendar pedido (sales.php)', () => {
       await route.fulfill({ response });
     });
 
-    await form.getByRole('button', { name: 'Agendar Pedido' }).click();
+    // Un vendedor no tiene 'asignar_entregas' (puedeAgendarDomicilio=false), asi que
+    // sales.php lo deja fijo en modo "En sucursal (mostrador)" -- el boton dice "Registrar
+    // Venta", no "Agendar Pedido" (ese texto es solo para quien puede elegir Domicilio).
+    await form.getByRole('button', { name: 'Registrar Venta' }).click();
     await expect.poll(() => ventaResult).not.toBeNull();
     expect(ventaResult!.success).toBe(true);
   });
 
-  test('no deja agendar sin seleccionar un cliente existente', async ({ page }) => {
+  test('un vendedor puede registrar una venta de mostrador sin seleccionar un cliente existente', async ({ page }) => {
     await loginAsStaff(page, 'vendedor');
     await page.goto('views/sales.php');
 
@@ -56,12 +59,19 @@ test.describe('Vendedor: agendar pedido (sales.php)', () => {
     await item.waitFor({ state: 'visible' });
     await item.click();
 
-    // El teléfono se llena a mano (sin resolver un cliente real) para satisfacer el
-    // `required` nativo del campo y así llegar al guardrail de JS que sí valida
-    // "hay un cliente seleccionado" ("Selecciona un cliente existente.").
-    await form.locator('.cliente_telefono').fill('3311234567');
-    await form.getByRole('button', { name: 'Agendar Pedido' }).click();
+    // Modo "En sucursal (mostrador)" (el unico al que un vendedor tiene acceso, ver arriba):
+    // procesarVenta() salta a proposito los guardrails de cliente/telefono/direccion --
+    // "el cliente esta presente: si no se elige, el servidor la guarda como venta de
+    // mostrador sin cliente". No hace falta seleccionar ni capturar nada de eso.
+    let ventaResult: { success?: boolean } | null = null;
+    await page.route('**/api/ventas.php', async (route) => {
+      const response = await route.fetch();
+      ventaResult = await response.json();
+      await route.fulfill({ response });
+    });
 
-    await expect(page.getByText('Selecciona un cliente existente.')).toBeVisible();
+    await form.getByRole('button', { name: 'Registrar Venta' }).click();
+    await expect.poll(() => ventaResult).not.toBeNull();
+    expect(ventaResult!.success).toBe(true);
   });
 });

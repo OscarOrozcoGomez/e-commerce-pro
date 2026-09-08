@@ -2,17 +2,17 @@ import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { loginAsStaff, E2E_PRODUCT_NAME, E2E_LOW_STOCK_PRODUCT_NAME } from './helpers';
 
-// El buscador de producto usa M.Autocomplete (sin resolucion alterna por blur, a diferencia
-// de otros buscadores del proyecto), asi que hay que interactuar con su dropdown real.
-async function seleccionarProductoTransferencia(page: Page, nombreProducto: string): Promise<void> {
-  // M.Autocomplete (a diferencia de otros buscadores del proyecto) no tiene una resolucion
-  // alterna por blur, y su dropdown no reacciona a .fill() (no dispara eventos de tecleo
-  // real) -- hay que escribir caracter por caracter para que se abra.
-  const buscador = page.locator('#p-search');
-  await buscador.pressSequentially(nombreProducto, { delay: 20 });
-  const item = page.locator('.autocomplete-content li').filter({ hasText: nombreProducto }).first();
+// transfer_stock.php reescrito (multi-producto, PR #147): ya no usa M.Autocomplete -- el
+// buscador (#p-search) tiene su propio dropdown (#p-dropdown, .item) que reacciona al evento
+// 'input' normal, y cada producto se agrega como una LINEA a una lista (#lineas-body) antes
+// de "EJECUTAR TRANSFERENCIA" -- no hay un solo campo de cantidad para toda la operacion.
+async function agregarLineaTransferencia(page: Page, nombreProducto: string, cantidad: number): Promise<void> {
+  await page.locator('#p-search').fill(nombreProducto);
+  const item = page.locator('#p-dropdown .item').filter({ hasText: nombreProducto }).first();
   await item.waitFor({ state: 'visible' });
   await item.click();
+  await page.locator('#p-cantidad').fill(String(cantidad));
+  await page.getByRole('button', { name: 'Agregar' }).click();
 }
 
 test.describe('Transferencia entre Almacenes (transfer_stock.php)', () => {
@@ -32,27 +32,27 @@ test.describe('Transferencia entre Almacenes (transfer_stock.php)', () => {
     await loginAsStaff(page, 'admin');
     await page.goto('views/transfer_stock.php');
 
-    await seleccionarProductoTransferencia(page, E2E_PRODUCT_NAME);
     await page.locator('#id_origen').selectOption({ label: 'Almacén Central' });
     await page.locator('#id_destino').selectOption({ label: 'Papelería Liz' });
-    await page.locator('#cantidad').fill('5');
-    await page.locator('#observacion').fill('Transferencia de prueba Playwright');
+    await agregarLineaTransferencia(page, E2E_PRODUCT_NAME, 5);
+    await expect(page.locator('#lineas-body tr.linea')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /EJECUTAR TRANSFERENCIA/ })).toBeEnabled();
 
-    await page.getByRole('button', { name: 'EJECUTAR TRANSFERENCIA' }).click();
-    await expect(page.getByText('Mercancía transferida correctamente')).toBeVisible();
+    await page.locator('#observacion').fill('Transferencia de prueba Playwright');
+    await page.getByRole('button', { name: /EJECUTAR TRANSFERENCIA/ }).click();
+    await expect(page.getByText('¡Transferencia realizada!')).toBeVisible();
   });
 
   test('el mismo origen y destino se bloquea antes de enviar', async ({ page }) => {
     await loginAsStaff(page, 'admin');
     await page.goto('views/transfer_stock.php');
 
-    await seleccionarProductoTransferencia(page, E2E_PRODUCT_NAME);
     await page.locator('#id_origen').selectOption({ label: 'Almacén Central' });
     await page.locator('#id_destino').selectOption({ label: 'Almacén Central' });
-    await page.locator('#cantidad').fill('5');
+    await agregarLineaTransferencia(page, E2E_PRODUCT_NAME, 5);
 
-    await page.getByRole('button', { name: 'EJECUTAR TRANSFERENCIA' }).click();
-    await expect(page.getByText('El origen y destino no pueden ser iguales')).toBeVisible();
+    await page.getByRole('button', { name: /EJECUTAR TRANSFERENCIA/ }).click();
+    await expect(page.getByText('El origen y el destino no pueden ser iguales.')).toBeVisible();
   });
 
   test('transferir mas stock del disponible en origen falla con el mensaje correcto', async ({ page }) => {
@@ -60,12 +60,11 @@ test.describe('Transferencia entre Almacenes (transfer_stock.php)', () => {
     await page.goto('views/transfer_stock.php');
 
     // Stock=1 en Almacen Central (ver scripts/seed_e2e_test_data.php); se piden 5.
-    await seleccionarProductoTransferencia(page, E2E_LOW_STOCK_PRODUCT_NAME);
     await page.locator('#id_origen').selectOption({ label: 'Almacén Central' });
     await page.locator('#id_destino').selectOption({ label: 'Papelería Liz' });
-    await page.locator('#cantidad').fill('5');
+    await agregarLineaTransferencia(page, E2E_LOW_STOCK_PRODUCT_NAME, 5);
 
-    await page.getByRole('button', { name: 'EJECUTAR TRANSFERENCIA' }).click();
-    await expect(page.getByText(/Stock insuficiente en origen/)).toBeVisible();
+    await page.getByRole('button', { name: /EJECUTAR TRANSFERENCIA/ }).click();
+    await expect(page.getByText(/Stock disponible insuficiente en origen/)).toBeVisible();
   });
 });

@@ -39,7 +39,7 @@ test.describe('Checkout: Recoger en Sucursal', () => {
     await fillSucursalCheckoutForm(page);
 
     await expect(page.getByText('En este momento no esta completo en stock de sucursal.', { exact: false })).toBeVisible();
-    await expect(page.getByText('2 a 3 horas', { exact: false })).toBeVisible();
+    await expect(page.getByText('1 a 2 horas', { exact: false })).toBeVisible();
     // No completamos el pedido aquí a propósito: el producto de stock bajo solo
     // tiene 1 unidad compartida entre corridas, y una transferencia real la
     // consumiría, dejando "sin_stock" para la siguiente corrida sin volver a

@@ -63,7 +63,7 @@ test.describe('Agendar pedido (sales.php): edge cases', () => {
     await expect(form.locator('.cliente-sin-telefono-alert')).toBeHidden();
   });
 
-  test('no deja agendar sin telefono del cliente (campo vacio bloqueado por el navegador)', async ({ page }) => {
+  test('no deja agendar sin telefono del cliente (guardrail de JS, el campo ya no es "required" nativo)', async ({ page }) => {
     await loginAsStaff(page, 'encargado');
     await page.goto('views/sales.php');
     const form = page.locator('.formulario-venta').first();
@@ -72,12 +72,10 @@ test.describe('Agendar pedido (sales.php): edge cases', () => {
     await agregarProductoPorNombre(form, E2E_PRODUCT_NAME);
     await expect(form.locator('.producto-item')).toHaveCount(1);
 
-    // El campo es "required" nativo del navegador, asi que un telefono realmente vacio ni
-    // siquiera llega al guardrail de JS (procesarVenta) -- el navegador bloquea el submit
-    // primero. Confirmamos esa validacion nativa en vez de un toast que nunca se dispara.
+    // .cliente_telefono ya no tiene el atributo "required": la validacion vive entera en
+    // procesarVenta() (mismo guardrail de JS que el caso de "solo espacios" de abajo).
     await form.getByRole('button', { name: 'Agendar Pedido' }).click();
-    const telefonoValido = await form.locator('.cliente_telefono').evaluate((el: HTMLInputElement) => el.validity.valid);
-    expect(telefonoValido).toBe(false);
+    await expect(page.getByText('Captura el telefono del cliente para continuar.')).toBeVisible();
     await expect(form.locator('.producto-item')).toHaveCount(1);
   });
 

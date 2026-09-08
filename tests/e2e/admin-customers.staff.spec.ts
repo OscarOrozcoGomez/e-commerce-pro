@@ -38,7 +38,9 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
 
     const nombreEditado = `${nombreOriginal} Editado`;
     const modalEditar = page.locator('.modal.open').filter({ hasText: 'Editar cliente' });
-    await expect(modalEditar).toBeVisible();
+    // El alcance por sucursal (clienteScopeUtils) agrego trabajo async antes de que el modal
+    // termine de abrir; el timeout default a veces se queda corto bajo carga concurrente.
+    await expect(modalEditar).toBeVisible({ timeout: 15000 });
     await modalEditar.locator('input[name="nombre"]').fill(nombreEditado);
     await modalEditar.locator('input[name="telefono"]').fill('3319876543');
     await modalEditar.getByRole('button', { name: 'Guardar cambios' }).click();
