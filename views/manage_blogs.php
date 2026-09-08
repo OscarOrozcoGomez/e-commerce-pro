@@ -165,13 +165,23 @@ include __DIR__ . '/includes/header.php';
             .replace(/^-+|-+$/g, '');
     }
 
-    tinymce.init({
-        selector: '#editor-html',
-        plugins: 'link image lists code table',
-        toolbar: 'undo redo | bold italic | alignleft aligncenter alignright | bullist numlist | code',
-        height: 400,
-        menubar: false
-    });
+    // El script de TinyMCE se carga desde cdn.tiny.cloud (ver arriba). Si esa carga falla --
+    // CSP, red caida, bloqueador de contenido -- "tinymce" queda indefinido y esta llamada
+    // lanzaria un error que abortaria el resto de este bloque <script>, incluido el listener
+    // de autogeneracion de slug mas abajo. Se protege con un try/catch para que ese listener
+    // (y cargarArticulo/resetForm) sigan funcionando aunque el editor enriquecido no cargue;
+    // en ese caso el usuario sigue pudiendo escribir HTML plano en el textarea de respaldo.
+    try {
+        tinymce.init({
+            selector: '#editor-html',
+            plugins: 'link image lists code table',
+            toolbar: 'undo redo | bold italic | alignleft aligncenter alignright | bullist numlist | code',
+            height: 400,
+            menubar: false
+        });
+    } catch (err) {
+        console.warn('No se pudo inicializar TinyMCE:', err);
+    }
 
     document.addEventListener('DOMContentLoaded', function() {
         const tituloInput = document.getElementById('titulo');
@@ -200,7 +210,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('slug').value = art.slug;
         document.getElementById('extracto').value = art.extracto;
         document.getElementById('estado').value = art.estado;
-        tinymce.get('editor-html').setContent(art.contenido);
+        if (typeof tinymce !== 'undefined' && tinymce.get('editor-html')) {
+            tinymce.get('editor-html').setContent(art.contenido);
+        } else {
+            document.getElementById('editor-html').value = art.contenido;
+        }
         document.getElementById('form-title').textContent = 'Editando Artículo';
         slugEditedManually = true;
         M.updateTextFields();
@@ -211,7 +225,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('form-blog').reset();
         document.getElementById('id_blog').value = '';
         document.getElementById('slug').value = '';
-        tinymce.get('editor-html').setContent('');
+        if (typeof tinymce !== 'undefined' && tinymce.get('editor-html')) {
+            tinymce.get('editor-html').setContent('');
+        } else {
+            document.getElementById('editor-html').value = '';
+        }
         document.getElementById('form-title').textContent = 'Escribir Artículo';
         slugEditedManually = false;
     }
