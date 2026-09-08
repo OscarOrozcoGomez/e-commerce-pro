@@ -10,6 +10,7 @@ require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/pii_crypto.php';
 require_once __DIR__ . '/whatsapp_helper.php';
 require_once __DIR__ . '/whatsapp_link_utils.php';
+require_once __DIR__ . '/lote_caducidad_utils.php'; // loteDiasTratamiento() -- ver aiBuildRendimientoEstimadoTexto()
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -178,7 +179,8 @@ function aiBuildSystemPrompt(
         $lines[] = 'Flujo de atencion:';
         $lines[] = '1. Saluda y da seguimiento a lo que el cliente ya pregunto antes en esta conversacion (tienes el historial completo).';
         $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. El catalogo tiene productos de varias categorias (vitaminas, minerales, suplementos, etc.) y muchos vienen en varias presentaciones/tamanos (por ejemplo 120, 240 o 500 capsulas) a precios distintos -- si consultar_inventario te regresa varias presentaciones del mismo producto, mencionalas todas para que el cliente elija la que le convenga, no asumas una sola. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
-        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla). Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
+        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental/rendimiento_estimado que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla). Preséntalo bonito y facil de leer, con iconos por seccion (🌿 para ingredientes, 📊 para informacion nutrimental, y dentro de la tabla usa el icono que mejor represente cada nutriente: ⚡ energetico/calorias, 🥑 grasas, 🍞 carbohidratos, 💪 proteinas, 🧂 sodio, etc.), no como parrafo corrido ni como JSON. Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
+        $lines[] = '3b. Si el producto es en capsulas y consultar_inventario te regreso rendimiento_estimado, mencionalo cuando el cliente pregunte cuanto le dura o le rinde, o al confirmar la compra de ese producto -- deja claro que esa es la dosis SUGERIDA por la marca, no una regla obligatoria. Si el cliente pregunta que pasa si toma menos o mas capsulas al dia de lo sugerido, respondele que es completamente su criterio, pero reitera la dosis sugerida por la marca y que el producto tiene fecha de caducidad -- nunca le prometas ni le garantices cuanto le va a rendir si decide tomar una dosis distinta a la sugerida.';
         $lines[] = '4. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
         $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
         $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad) y metodo de pago preferido.';
@@ -295,7 +297,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_inventario',
-                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso y/o tabla_nutrimental (solo si el dato existe para ese producto) -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene o su informacion nutrimental.',
+                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1226,6 +1228,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
 
     $sql = "SELECT p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
                    p.ingredientes, p.modo_uso, p.tabla_nutrimental,
+                   p.capsulas_por_envase, p.porcion_capsulas,
                    COALESCE(SUM(ia.cantidad_actual), 0) AS stock_total
             FROM productos p
             LEFT JOIN inventario_almacen ia ON ia.id_producto = p.id_producto
@@ -1246,7 +1249,8 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         $params[':term6'] = $term;
     }
     $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
-                       p.ingredientes, p.modo_uso, p.tabla_nutrimental
+                       p.ingredientes, p.modo_uso, p.tabla_nutrimental,
+                       p.capsulas_por_envase, p.porcion_capsulas
               ORDER BY p.nombre ASC, p.nombre_variante ASC
               LIMIT ' . $safeLimit;
 
@@ -1279,9 +1283,42 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         if ($tablaNutrimental !== '') {
             $producto['tabla_nutrimental'] = $tablaNutrimental;
         }
+        $rendimientoEstimado = aiBuildRendimientoEstimadoTexto(
+            isset($row['capsulas_por_envase']) && $row['capsulas_por_envase'] !== null ? (int)$row['capsulas_por_envase'] : null,
+            isset($row['porcion_capsulas']) && $row['porcion_capsulas'] !== null ? (int)$row['porcion_capsulas'] : null
+        );
+        if ($rendimientoEstimado !== '') {
+            $producto['rendimiento_estimado'] = $rendimientoEstimado;
+        }
 
         return $producto;
     }, $rows);
+}
+
+/**
+ * Cuantos dias/meses alcanza un envase en capsulas, segun la dosis SUGERIDA por la marca
+ * (capsulas_por_envase / porcion_capsulas -- mismo calculo que ya usa Control de Caducidades,
+ * ver loteDiasTratamiento() en core/lote_caducidad_utils.php). A diferencia de esa funcion
+ * (que asume 1 capsula/dia si porcion_capsulas falta, aceptable para su alerta interna de
+ * caducidad), aqui NUNCA se asume una dosis que el admin no capturo explicitamente --
+ * decirle al cliente una dosis inventada como si fuera "la sugerida por la marca" seria
+ * peor que no decir nada. Pura y testeable.
+ */
+function aiBuildRendimientoEstimadoTexto(?int $capsulasPorEnvase, ?int $porcionCapsulas): string
+{
+    if ($capsulasPorEnvase === null || $capsulasPorEnvase <= 0 || $porcionCapsulas === null || $porcionCapsulas <= 0) {
+        return '';
+    }
+
+    $dias = loteDiasTratamiento($capsulasPorEnvase, $porcionCapsulas);
+    if ($dias === null || $dias <= 0) {
+        return '';
+    }
+
+    $meses = round($dias / 30, 1);
+    $plural = $porcionCapsulas === 1 ? 'capsula' : 'capsulas';
+
+    return "Dosis sugerida por la marca: {$porcionCapsulas} {$plural} al dia. Con {$capsulasPorEnvase} capsulas por envase, alcanza para aproximadamente {$dias} dias (~{$meses} meses) a esa dosis.";
 }
 
 /**

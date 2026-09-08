@@ -165,6 +165,54 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('10 kcal', $resultados[0]['tabla_nutrimental']);
     }
 
+    public function testAiSearchInventoryIncludesRendimientoEstimadoCuandoAmbosDatosExisten(): void
+    {
+        // Ejemplo real que reporto el usuario: 240 capsulas por envase, dosis sugerida
+        // por la marca de 3 al dia -- debe alcanzar para 80 dias (240 / 3), no 90 (ese
+        // numero era de un producto distinto con otros valores).
+        $this->seedProducto(22, 'Citrato de Magnesio', 'MAG22', null, 399.00, 'activo', null, null, null, null, null, 240, 3);
+
+        $resultados = aiSearchInventory($this->pdo, 'Citrato de Magnesio');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame(
+            'Dosis sugerida por la marca: 3 capsulas al dia. Con 240 capsulas por envase, alcanza para aproximadamente 80 dias (~2.7 meses) a esa dosis.',
+            $resultados[0]['rendimiento_estimado']
+        );
+    }
+
+    public function testAiSearchInventoryOmitsRendimientoEstimadoWhenOnlyOneOfTheTwoFieldsIsSet(): void
+    {
+        // Nunca se debe asumir una dosis que el admin no capturo explicitamente -- a
+        // diferencia de loteDiasTratamiento() (que para Caducidades asume 1/dia), aqui se
+        // omite por completo si falta cualquiera de los dos datos.
+        $this->seedProducto(23, 'Solo capsulas por envase', 'CAP23', null, 199.00, 'activo', null, null, null, null, null, 240, null);
+        $this->seedProducto(24, 'Solo porcion capsulas', 'CAP24', null, 199.00, 'activo', null, null, null, null, null, null, 3);
+
+        $resultados = aiSearchInventory($this->pdo, 'capsulas');
+
+        foreach ($resultados as $producto) {
+            $this->assertArrayNotHasKey('rendimiento_estimado', $producto);
+        }
+    }
+
+    public function testAiBuildRendimientoEstimadoTextoUsesSingularForOneCapsulePerDay(): void
+    {
+        $this->assertSame(
+            'Dosis sugerida por la marca: 1 capsula al dia. Con 90 capsulas por envase, alcanza para aproximadamente 90 dias (~3 meses) a esa dosis.',
+            aiBuildRendimientoEstimadoTexto(90, 1)
+        );
+    }
+
+    public function testAiBuildRendimientoEstimadoTextoReturnsEmptyWithMissingOrInvalidData(): void
+    {
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(null, 3));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(240, null));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(0, 3));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(240, 0));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(-10, 3));
+    }
+
     public function testAiFormatTablaNutrimentalHandlesFlatRowsShape(): void
     {
         $json = '[{"label":"Contenido energetico","porcion":"0.058 kJ 0.014 kcal","total":"11.6 kJ 2.8 kcal"},{"label":"Proteinas","porcion":"0.0035 g","total":"0.7 g"}]';
@@ -1383,7 +1431,9 @@ final class AiAssistantToolsTest extends TestCase
                 ingredientes TEXT NULL,
                 beneficios TEXT NULL,
                 modo_uso TEXT NULL,
-                tabla_nutrimental TEXT NULL
+                tabla_nutrimental TEXT NULL,
+                capsulas_por_envase INTEGER NULL,
+                porcion_capsulas INTEGER NULL
             )'
         );
         $this->pdo->exec(
@@ -1525,12 +1575,14 @@ final class AiAssistantToolsTest extends TestCase
         ?string $ingredientes = null,
         ?string $beneficios = null,
         ?string $modoUso = null,
-        ?string $tablaNutrimental = null
+        ?string $tablaNutrimental = null,
+        ?int $capsulasPorEnvase = null,
+        ?int $porcionCapsulas = null
     ): void {
         $this->pdo->prepare(
-            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental]);
+            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental, capsulas_por_envase, porcion_capsulas)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental, $capsulasPorEnvase, $porcionCapsulas]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void
