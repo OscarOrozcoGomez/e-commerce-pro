@@ -736,6 +736,78 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('No tenemos existencia por ahora.', $history[3]['content']);
     }
 
+    public function testAiTrimOrphanedLeadingToolMessagesRemovesLeadingToolRole(): void
+    {
+        $mensajes = [
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{"ok":true}'],
+            ['role' => 'assistant', 'content' => 'Aqui tienes.'],
+            ['role' => 'user', 'content' => 'Gracias'],
+        ];
+
+        $resultado = aiTrimOrphanedLeadingToolMessages($mensajes);
+
+        $this->assertCount(2, $resultado);
+        $this->assertSame('assistant', $resultado[0]['role']);
+        $this->assertSame('user', $resultado[1]['role']);
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesRemovesMultipleLeadingToolCalls(): void
+    {
+        // Caso real (produccion, tool_calls paralelos): 2 mensajes 'tool' huerfanos
+        // seguidos al inicio de la ventana, no solo uno.
+        $mensajes = [
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
+            ['role' => 'tool', 'tool_call_id' => 'call_2', 'content' => '{}'],
+            ['role' => 'assistant', 'content' => 'Listo.'],
+        ];
+
+        $resultado = aiTrimOrphanedLeadingToolMessages($mensajes);
+
+        $this->assertCount(1, $resultado);
+        $this->assertSame('assistant', $resultado[0]['role']);
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesLeavesWellFormedHistoryUntouched(): void
+    {
+        $mensajes = [
+            ['role' => 'user', 'content' => 'Hola'],
+            ['role' => 'assistant', 'content' => null, 'tool_calls' => [['id' => 'call_1']]],
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
+        ];
+
+        $this->assertSame($mensajes, aiTrimOrphanedLeadingToolMessages($mensajes));
+    }
+
+    public function testAiTrimOrphanedLeadingToolMessagesHandlesEmptyAndAllToolArrays(): void
+    {
+        $this->assertSame([], aiTrimOrphanedLeadingToolMessages([]));
+        $this->assertSame([], aiTrimOrphanedLeadingToolMessages([
+            ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
+        ]));
+    }
+
+    public function testAiLoadConversationHistoryNeverStartsWithAnOrphanedToolMessage(): void
+    {
+        // Reproduce el incidente real (panel de diagnostico, deepseek_conexion HTTP 400):
+        // con una ventana chica, el LIMIT corta justo despues del 'assistant' con
+        // tool_calls, dejando el 'tool' de respuesta como primer mensaje de la ventana.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000099', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Tienen melatonina?');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', null, [
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'consultar_inventario', 'arguments' => '{"busqueda_texto":"melatonina"}']],
+        ]);
+        aiAppendMessage($this->pdo, $idConversacion, 'tool', '{"ok":true,"productos":[]}', null, 'call_1', 'consultar_inventario');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'No tengo esa por ahora.', null, null, null, null, true);
+
+        // maxTurns=2 fuerza que la ventana empiece justo en el mensaje 'tool' (el
+        // 'assistant' que lo origino, mas viejo, queda fuera del LIMIT).
+        $history = aiLoadConversationHistory($this->pdo, $idConversacion, 2);
+
+        $this->assertNotSame('tool', $history[0]['role'] ?? null);
+    }
+
     public function testTransferirAHumanoPausesConversation(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000003', null);

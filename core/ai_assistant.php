@@ -1118,7 +1118,39 @@ function aiLoadConversationHistory(PDO $pdo, int $idConversacion, int $maxTurns 
         }
     }
 
-    return $messages;
+    return aiTrimOrphanedLeadingToolMessages($messages);
+}
+
+/**
+ * Quita mensajes con role 'tool' huerfanos al inicio de la ventana de historial. Ocurre
+ * cuando el LIMIT de aiLoadConversationHistory() corta la ventana justo despues del
+ * mensaje 'assistant' que origino ese tool_call (ese assistant queda fuera de la
+ * ventana, mas viejo que el limite), dejando un 'tool' como primer mensaje sin su
+ * llamada correspondiente dentro del payload. DeepSeek (API compatible con OpenAI)
+ * rechaza esos payloads con HTTP 400 ("messages with role 'tool' must be a response to
+ * a preceding message with 'tool_calls'").
+ *
+ * Diagnostico real confirmado contra produccion (incidentes 'deepseek_conexion' del
+ * 2026-09-05/06, panel de diagnostico): conversaciones donde Alex hace varias busquedas
+ * de consultar_inventario seguidas ("melatonina" -> "melato" -> "malato de magnesio" ->
+ * "malato") empujan mensajes 'tool' justo al borde de la ventana de
+ * AI_ASSISTANT_MAX_HISTORY_MESSAGES. No hace falta sanear el otro extremo (que la
+ * ventana termine con un 'assistant' con tool_calls colgando sin su 'tool' de
+ * respuesta): aiLoadConversationHistory() siempre se llama ANTES de que el turno actual
+ * genere sus propios tool_calls, asi que si un 'assistant' con tool_calls sobrevive
+ * dentro de la ventana, sus 'tool' de respuesta (mas nuevos, guardados justo despues en
+ * el mismo turno) tambien sobreviven -- solo el extremo inicial puede quedar cortado a
+ * la mitad de un intercambio. Pura y testeable.
+ */
+function aiTrimOrphanedLeadingToolMessages(array $messages): array
+{
+    $inicio = 0;
+    $total = count($messages);
+    while ($inicio < $total && ($messages[$inicio]['role'] ?? '') === 'tool') {
+        $inicio++;
+    }
+
+    return $inicio > 0 ? array_slice($messages, $inicio) : $messages;
 }
 
 /**
