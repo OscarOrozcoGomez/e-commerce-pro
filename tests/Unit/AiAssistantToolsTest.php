@@ -513,6 +513,35 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('Blife', $definicionesJson);
     }
 
+    public function testAiGetToolDefinitionsNeverSuggestsTarjetaAsAValidPaymentMethod(): void
+    {
+        // La descripcion original decia "Efectivo, transferencia, tarjeta u otro metodo"
+        // como si "tarjeta" fuera un ejemplo valido -- solo aceptamos efectivo/transferencia.
+        // "tarjeta" SI puede aparecer, pero unicamente como ejemplo de lo que NUNCA se debe
+        // mandar (igual que "Be Life" aparece solo como ejemplo de typo a reconocer).
+        $definicionesJson = (string)json_encode(aiGetToolDefinitions());
+
+        $this->assertStringNotContainsStringIgnoringCase('tarjeta u otro metodo', $definicionesJson);
+        $this->assertStringContainsString('Nunca mandes \"tarjeta\"', $definicionesJson);
+    }
+
+    public function testAiBuildSystemPromptOnlyOffersMiercolesYSabadoForDeliveryAndEscalatesOtherDays(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('UNICAMENTE los miercoles y los sabados', $prompt);
+        $this->assertStringContainsString('el cliente se adapta a nuestro itinerario', $prompt);
+        $this->assertStringContainsString('llama a transferir_a_humano', $prompt);
+    }
+
+    public function testAiBuildSystemPromptOnlyAcceptsEfectivoOTransferenciaAsPaymentMethods(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('SOLO aceptamos efectivo o transferencia', $prompt);
+        $this->assertStringContainsString('nunca ofrezcas ni aceptes tarjeta', $prompt);
+    }
+
     public function testAiLeyendaNoMedicamentoMatchesTheExactLegalTextShownInProductDetail(): void
     {
         $this->assertSame(
