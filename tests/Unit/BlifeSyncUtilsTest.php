@@ -25,8 +25,16 @@ final class BlifeSyncUtilsTest extends TestCase
                 'id' => 8945698701466,
                 'handle' => 'omega-3-platinum',
                 'variants' => [
-                    ['id' => 48099709878426, 'title' => '180 Caps'],
-                    ['id' => 48099709911194, 'title' => '90 Caps'],
+                    ['id' => 48099709878426, 'title' => '180 Caps', 'sku' => 'BLIFEOMEGA3PLATINUM'],
+                    ['id' => 48099709911194, 'title' => '90 Caps', 'sku' => 'BLIFEOMEGA3PLATINUM90C'],
+                ],
+            ],
+            [
+                'id' => 7777777777777,
+                'handle' => 'womens-multi-matur3-suplemento-natural-mujer-capsulas',
+                'variants' => [
+                    ['id' => 48022784770202, 'title' => '180 Caps | 500 mg', 'sku' => 'BLIFEWOMENSMULTMATUR3180'],
+                    ['id' => 48022784802970, 'title' => '90 Caps | 500 mg', 'sku' => 'BLIFEWOMENSMULTMATUR390'],
                 ],
             ],
         ];
@@ -137,6 +145,95 @@ final class BlifeSyncUtilsTest extends TestCase
         // El número resuelve a un PRODUCTO -> se conserva el hint del ?variant=.
         $r = blifeResolveHandle('8945698701466?variant=48099709911194', $this->fakeCatalog());
         $this->assertSame(['omega-3-platinum', 48099709911194], $r);
+    }
+
+    // ------------------------------------------------------------------
+    // blifeResolveHandle — SKU pegado en el campo (BLIFEWOMENSMULTMATUR3180)
+    // ------------------------------------------------------------------
+
+    public function testResolveHandleAcceptsExactSkuAndReturnsItsVariant(): void
+    {
+        $this->assertSame(
+            ['womens-multi-matur3-suplemento-natural-mujer-capsulas', 48022784770202],
+            blifeResolveHandle('BLIFEWOMENSMULTMATUR3180', $this->fakeCatalog())
+        );
+    }
+
+    public function testResolveHandleSkuLookupIsCaseInsensitive(): void
+    {
+        $this->assertSame(
+            ['womens-multi-matur3-suplemento-natural-mujer-capsulas', 48022784802970],
+            blifeResolveHandle('blifewomensmultmatur390', $this->fakeCatalog())
+        );
+    }
+
+    public function testResolveHandleUnknownSkuFallsBackToLiteralHandle(): void
+    {
+        // Sin guiones y no está en el catálogo -> se trata como handle (y luego .json dará 404).
+        $this->assertSame(['blifenoexiste999', null], blifeResolveHandle('BLIFENOEXISTE999', $this->fakeCatalog()));
+    }
+
+    public function testResolveHandleWithHyphenIsNeverTreatedAsSku(): void
+    {
+        // Un handle real lleva guiones: no debe intentar resolución por SKU.
+        $this->assertSame(
+            ['omega-3-platinum', null],
+            blifeResolveHandle('omega-3-platinum', $this->fakeCatalog())
+        );
+    }
+
+    public function testResolveHandleExplicitVariantParamWinsOverSkuVariant(): void
+    {
+        // El ?variant= gana sobre la variante que resolvería el SKU.
+        $this->assertSame(
+            ['womens-multi-matur3-suplemento-natural-mujer-capsulas', 48022784802970],
+            blifeResolveHandle('BLIFEWOMENSMULTMATUR3180?variant=48022784802970', $this->fakeCatalog())
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // blifeHandleFromSku
+    // ------------------------------------------------------------------
+
+    public function testHandleFromSkuMatchesExactAndCaseInsensitive(): void
+    {
+        $cat = $this->fakeCatalog();
+        $this->assertSame(['omega-3-platinum', 48099709911194], blifeHandleFromSku('BLIFEOMEGA3PLATINUM90C', $cat));
+        $this->assertSame(['omega-3-platinum', 48099709911194], blifeHandleFromSku('  blifeomega3platinum90c ', $cat));
+    }
+
+    public function testHandleFromSkuReturnsNullWhenMissingOrEmpty(): void
+    {
+        $cat = $this->fakeCatalog();
+        $this->assertNull(blifeHandleFromSku('NO-EXISTE', $cat));
+        $this->assertNull(blifeHandleFromSku('', $cat));
+        $this->assertNull(blifeHandleFromSku('   ', $cat));
+        $this->assertNull(blifeHandleFromSku('BLIFEOMEGA', $cat)); // coincidencia parcial NO cuenta
+    }
+
+    // ------------------------------------------------------------------
+    // blifeNormalizeText — buscador acento-insensible
+    // ------------------------------------------------------------------
+
+    /**
+     * @dataProvider normalizeProvider
+     */
+    public function testNormalizeTextStripsAccentsAndLowercases(string $in, string $out): void
+    {
+        $this->assertSame($out, blifeNormalizeText($in));
+    }
+
+    public static function normalizeProvider(): array
+    {
+        return [
+            ['Multivitamínico para Mujer', 'multivitaminico para mujer'],
+            ['JABÓN ÍNTIMO', 'jabon intimo'],
+            ['ÑOÑO piñata', 'nono pinata'],
+            ['Pingüino àèìòù', 'pinguino aeiou'],
+            ['  con   espacios  ', 'con   espacios'],
+            ['', ''],
+            ['SIN-ACENTOS-123', 'sin-acentos-123'],
+        ];
     }
 
     // ------------------------------------------------------------------

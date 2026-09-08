@@ -69,6 +69,45 @@ if (!function_exists('blifeCatalog')) {
     }
 }
 
+if (!function_exists('blifeNormalizeText')) {
+    /** minúsculas + sin diacríticos del español, para buscar "multivitaminico" == "multivitamínico". */
+    function blifeNormalizeText(string $s): string
+    {
+        $s = mb_strtolower(trim($s), 'UTF-8');
+        return strtr($s, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u', 'ñ' => 'n',
+            'à' => 'a', 'è' => 'e', 'ì' => 'i', 'ò' => 'o', 'ù' => 'u',
+        ]);
+    }
+}
+
+if (!function_exists('blifeHandleFromSku')) {
+    /**
+     * Busca un SKU exacto (case-insensitive) en el catálogo. B-Life los escribe en
+     * MAYÚSCULAS y sin guiones (BLIFEWOMENSMULTMATUR3180), a diferencia de los handles.
+     * @return array{0:string,1:int|null}|null  [handle, variantId] o null si no está.
+     */
+    function blifeHandleFromSku(string $sku, ?array $catalogo = null): ?array
+    {
+        $sku = strtoupper(trim($sku));
+        if ($sku === '') return null;
+
+        $pasadas = $catalogo !== null ? [$catalogo] : [null, null];
+        foreach ($pasadas as $i => $listaFija) {
+            $lista = $catalogo !== null ? $listaFija : blifeCatalog($i === 1);
+            foreach ($lista as $p) {
+                foreach ($p['variants'] ?? [] as $v) {
+                    if (strtoupper(trim((string) ($v['sku'] ?? ''))) === $sku) {
+                        $vid = (int) ($v['id'] ?? 0);
+                        return [(string) ($p['handle'] ?? ''), $vid ?: null];
+                    }
+                }
+            }
+        }
+        return null;
+    }
+}
+
 if (!function_exists('blifeHandleFromNumericId')) {
     /**
      * Busca un id numérico (de producto o de variante Shopify) en el catálogo.
@@ -139,6 +178,14 @@ if (!function_exists('blifeResolveHandle')) {
             return blifeHandleFromNumericId((int) $input, $variantHint, $catalogo);
         }
         if (preg_match('~^[A-Za-z0-9][A-Za-z0-9\-]{2,}$~', $input)) {
+            // Sin guiones: puede ser un SKU (los handles de B-Life siempre llevan guion).
+            // Si el SKU existe en el catálogo se resuelve a su handle + esa variante.
+            if (strpos($input, '-') === false) {
+                $porSku = blifeHandleFromSku($input, $catalogo);
+                if ($porSku !== null) {
+                    return [$porSku[0], $variantHint ?? $porSku[1]];
+                }
+            }
             return [strtolower($input), $variantHint];
         }
         throw new Exception("No reconozco «{$input}». Pega el handle del producto, su URL de blife.mx, o el ID numérico de producto/variante.");

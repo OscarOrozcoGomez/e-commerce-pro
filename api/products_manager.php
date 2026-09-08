@@ -190,7 +190,9 @@ try {
         elseif ($action === 'blife_search') {
             // Busca en el catálogo cacheado de B-Life por nombre, SKU o código de barras,
             // para no tener que ir a buscar la URL/handle a mano.
-            $q = mb_strtolower(trim((string)($_GET['q'] ?? '')));
+            // Normaliza (minúsculas + sin acentos) para que "multivitaminico mujer" encuentre
+            // "Multivitamínico para Mujer ...".
+            $q = blifeNormalizeText((string)($_GET['q'] ?? ''));
             if (mb_strlen($q) < 2) {
                 echo json_encode(['success' => true, 'results' => []]);
                 exit;
@@ -206,7 +208,7 @@ try {
                     if (!empty($v['sku']))     $skus[] = (string)$v['sku'];
                     if (!empty($v['barcode'])) $barcodes[] = (string)$v['barcode'];
                 }
-                $haystack = mb_strtolower($title . ' ' . implode(' ', $skus) . ' ' . implode(' ', $barcodes));
+                $haystack = blifeNormalizeText($title . ' ' . implode(' ', $skus) . ' ' . implode(' ', $barcodes));
 
                 $match = true;
                 foreach ($tokens as $t) {
