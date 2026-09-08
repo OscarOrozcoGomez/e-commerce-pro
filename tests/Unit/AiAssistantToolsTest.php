@@ -513,6 +513,28 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('Blife', $definicionesJson);
     }
 
+    public function testAiLeyendaNoMedicamentoMatchesTheExactLegalTextShownInProductDetail(): void
+    {
+        $this->assertSame(
+            'Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.',
+            AI_LEYENDA_NO_MEDICAMENTO
+        );
+
+        // Guarda contra que ambas fuentes se desincronicen (product_detail.php es la
+        // leyenda "oficial" que ya ve el cliente en la pagina publica del producto).
+        $productDetailSource = (string) file_get_contents(__DIR__ . '/../../product_detail.php');
+        $this->assertStringContainsString(AI_LEYENDA_NO_MEDICAMENTO, $productDetailSource);
+    }
+
+    public function testAiBuildSystemPromptIncludesLegalDisclaimerAndForbidsMedicalRecommendationLanguage(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString(AI_LEYENDA_NO_MEDICAMENTO, $prompt);
+        $this->assertStringContainsString('Somos distribuidores, no profesionales de la salud', $prompt);
+        $this->assertStringContainsString('"te recomiendo"', $prompt);
+    }
+
     public function testAiCountInventoryMatchesMatchesActualRowCountIgnoringLimit(): void
     {
         for ($i = 200; $i < 220; $i++) {
