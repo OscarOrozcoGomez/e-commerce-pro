@@ -513,6 +513,69 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('Blife', $definicionesJson);
     }
 
+    public function testAiGetOnDemandTemplateCodesExcludesSeguimientoAndCatalogo(): void
+    {
+        $this->seedTemplate('seguimiento_24h', 'texto', 'Hola de nuevo!', null);
+        $this->seedTemplate('catalogo_pdf', 'documento', 'Catalogo Blife', 'https://cdn.example.com/catalogo.pdf');
+        $this->seedTemplate('foto_ashwagandha', 'imagen', 'Foto de Ashwagandha', 'https://cdn.example.com/ash.jpg');
+
+        $codigos = array_column(aiGetOnDemandTemplateCodes($this->pdo), 'codigo');
+
+        $this->assertSame(['foto_ashwagandha'], $codigos);
+    }
+
+    public function testAiGetOnDemandTemplateCodesExcludesInactiveTemplates(): void
+    {
+        $this->seedTemplate('nota_pedido', 'texto', 'Nota de pedido', null, 0);
+
+        $this->assertSame([], aiGetOnDemandTemplateCodes($this->pdo));
+    }
+
+    public function testAiBuildSystemPromptForbidsInventingTemplateCodesWhenNoneAreAvailable(): void
+    {
+        // Diagnostico real (2026-09-06): Alex mando enviar_plantilla con "info_maca_blend",
+        // un codigo que jamas existio, porque el prompt nunca le decia que codigos son reales.
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null, [], [], null, null, null, []);
+
+        $this->assertStringContainsString('no hay ninguna plantilla adicional disponible', $prompt);
+        $this->assertStringContainsString('no la llames por ningun motivo', $prompt);
+    }
+
+    public function testAiBuildSystemPromptListsRealTemplateCodesWhenAvailable(): void
+    {
+        $prompt = aiBuildSystemPrompt(
+            ['nombre_persona' => 'Alex'],
+            null,
+            [],
+            [],
+            null,
+            null,
+            null,
+            [['codigo' => 'foto_ashwagandha', 'tipo' => 'imagen', 'texto' => 'Foto de Ashwagandha']]
+        );
+
+        $this->assertStringContainsString('foto_ashwagandha', $prompt);
+        $this->assertStringContainsString('jamas inventes uno que no este en esta lista', $prompt);
+        $this->assertStringNotContainsString('no hay ninguna plantilla adicional disponible', $prompt);
+    }
+
+    public function testAiGetToolDefinitionsDoesNotContainTheStaleCatalogoBeLifeExample(): void
+    {
+        $definicionesJson = (string)json_encode(aiGetToolDefinitions());
+
+        $this->assertStringNotContainsString('catalogo_be_life', $definicionesJson);
+    }
+
+    public function testAiBuildSystemPromptTellsAlexHowToHandleInsufficientStock(): void
+    {
+        // Diagnostico real (2026-09-06): un cliente quiso 2 de "Maca Blend" habiendo solo 1
+        // disponible -- agendar_venta fallo limpio, pero el prompt no decia que ofrecer.
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('no hay suficiente existencia', $prompt);
+        $this->assertStringContainsString('ajustar la cantidad a lo disponible', $prompt);
+    }
+
     public function testAiGetToolDefinitionsNeverSuggestsTarjetaAsAValidPaymentMethod(): void
     {
         // La descripcion original decia "Efectivo, transferencia, tarjeta u otro metodo"
