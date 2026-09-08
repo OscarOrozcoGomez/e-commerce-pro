@@ -71,11 +71,15 @@ include __DIR__ . '/includes/header.php';
                             <!-- Se llena con JS -->
                         </tbody>
                     </table>
-                    <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap;">
                         <button type="button" onclick="clearCart()" class="btn-flat red-text waves-effect" id="btn-empty-cart" style="display: none; font-weight: bold;">
                             <i class="material-icons left">delete_sweep</i> VACIAR CARRITO
                         </button>
-                        <h5 style="margin: 0; font-weight: bold;">Total: $<span id="cart-total-display">0.00</span></h5>
+                        <div style="text-align: right; margin-left: auto;">
+                            <div id="cart-subtotal-line" style="display:none; font-size: 0.9rem; color: #616161;">Productos: $<span id="cart-subtotal-display">0.00</span></div>
+                            <div id="cart-shipping-line" style="display:none;"></div>
+                            <h5 style="margin: 0; font-weight: bold;">Total: $<span id="cart-total-display">0.00</span></h5>
+                        </div>
                     </div>
                     <div id="pickup-offer-banner" class="card-panel amber lighten-5" style="display:none; margin-top: 16px; border-left: 5px solid #ff8f00;">
                         <p id="pickup-offer-message" style="margin: 0; color: #6d4c41;"></p>
@@ -206,9 +210,16 @@ include __DIR__ . '/includes/header.php';
     const PICKUP_OFFER_SETTINGS = <?php echo json_encode($pickupOfferSettings, JSON_UNESCAPED_UNICODE); ?>;
     const CAN_VIEW_PICKUP_OFFER = <?php echo $canViewPickupOffer ? 'true' : 'false'; ?>;
     const PICKUP_STOCK_CHECK_URL = '<?php echo BASE_URL; ?>api/pickup_stock_check.php';
+    const DELIVERY_ZONE_QUOTE_URL = '<?php echo BASE_URL; ?>api/delivery_zone_quote.php';
     const CHECKOUT_DELIVERY_STORAGE_KEY = 'checkoutDeliveryType';
     let pickupStockCheckTimer = null;
     let latestPickupStockCheck = null;
+    // Cotizacion en vivo del envio foraneo (fuera de la periferia de Guadalajara). Se
+    // muestra en el carrito ANTES de confirmar para que el cliente sepa lo que va a pagar.
+    let deliveryZoneQuoteTimer = null;
+    let latestDeliveryZoneQuote = null;
+    let deliveryZoneQuoteInFlight = 0;
+    let lastShownShippingFee = null;
     // IDs de producto que el backend rechazo al confirmar el pedido por falta de stock
     // (a diferencia de latestPickupStockCheck, esto aplica a cualquier tipo de entrega).
     let orderSubmitSinStockIds = new Set();
@@ -355,6 +366,7 @@ include __DIR__ . '/includes/header.php';
             mapCart.setZoom(17);
             markerCart.setPosition(place.geometry.location);
             M.updateTextFields();
+            scheduleDeliveryZoneQuote();
         });
     }
 
@@ -452,7 +464,14 @@ include __DIR__ . '/includes/header.php';
                 </tr>`;
         });
 
-        document.getElementById('cart-total-display').textContent = total.toFixed(2);
+        const distinctCount = new Set(
+            cart.map((it) => parseInt(it.id_producto || it.id, 10) || 0).filter((id) => id > 0)
+        ).size;
+        const shippingCost = getActiveShippingCost();
+        const grandTotal = total + shippingCost;
+
+        document.getElementById('cart-total-display').textContent = grandTotal.toFixed(2);
+        renderShippingLine(total, distinctCount);
         renderPickupOfferBanner(total, totalPieces, cart.length > 0);
 
         // Mostrar u ocultar el botón de vaciar según si hay items
@@ -573,6 +592,7 @@ include __DIR__ . '/includes/header.php';
         renderCart();
         updateCartBadge();
         schedulePickupStockCheck();
+        scheduleDeliveryZoneQuote();
     }
 
     function persistCartAndRefresh(cart) {
@@ -581,6 +601,7 @@ include __DIR__ . '/includes/header.php';
         renderCart();
         updateCartBadge();
         schedulePickupStockCheck();
+        scheduleDeliveryZoneQuote();
     }
 
     function changeItemQty(index, delta) {
@@ -739,6 +760,153 @@ include __DIR__ . '/includes/header.php';
         pickupStockCheckTimer = setTimeout(checkPickupStockHint, 180);
     }
 
+    /* ----- Cotizacion de envio foraneo en vivo ----- */
+
+    function getActiveShippingCost() {
+        const tipo = document.getElementById('tipo_entrega')?.value || '';
+        if (tipo !== 'Domicilio') return 0;
+        const q = latestDeliveryZoneQuote;
+        return q && Number.isFinite(q.costo_envio) ? Math.max(0, q.costo_envio) : 0;
+    }
+
+    function replayAttentionAnimation(el) {
+        // Reinicia la animacion de "sacudida" para que se dispare de nuevo cada vez
+        // que el cargo aparece o cambia de monto.
+        el.classList.remove('cart-shipping-attn');
+        void el.offsetWidth; // fuerza reflow
+        el.classList.add('cart-shipping-attn');
+    }
+
+    function renderShippingLine(subtotalNum, distinctCount) {
+        const line = document.getElementById('cart-shipping-line');
+        const subLine = document.getElementById('cart-subtotal-line');
+        const subDisplay = document.getElementById('cart-subtotal-display');
+        if (!line) return;
+
+        const tipo = document.getElementById('tipo_entrega')?.value || '';
+        const q = latestDeliveryZoneQuote;
+        const resetBox = () => {
+            line.classList.remove('cart-shipping-alert', 'cart-shipping-attn', 'cart-shipping-soft');
+            line.style.color = '';
+            line.style.display = '';
+        };
+
+        if (tipo !== 'Domicilio') {
+            resetBox();
+            line.style.display = 'none';
+            lastShownShippingFee = null;
+            if (subLine) subLine.style.display = 'none';
+            return;
+        }
+
+        if (deliveryZoneQuoteInFlight > 0 && !q) {
+            resetBox();
+            line.classList.add('cart-shipping-soft');
+            line.innerHTML = '<i class="material-icons tiny" style="vertical-align:middle;">hourglass_empty</i> Calculando envío…';
+            if (subLine) subLine.style.display = 'none';
+            return;
+        }
+
+        if (!q) {
+            resetBox();
+            line.style.display = 'none';
+            lastShownShippingFee = null;
+            if (subLine) subLine.style.display = 'none';
+            return;
+        }
+
+        const fee = Math.max(0, Number(q.costo_envio) || 0);
+        const freeItems = parseInt(q.free_ship_items, 10) || 2;
+
+        resetBox();
+
+        if (fee > 0) {
+            line.classList.add('cart-shipping-alert');
+            line.innerHTML =
+                '<i class="material-icons cart-shipping-icon">local_shipping</i>' +
+                '<div class="cart-shipping-text">' +
+                    'Tu domicilio queda <strong>fuera de la periferia de Guadalajara</strong>, ' +
+                    'se agrega un cargo de envío de ' +
+                    `<span class="cart-shipping-amount">+$${fee.toFixed(2)}</span>` +
+                '</div>';
+            // Sacudida solo cuando el monto es nuevo o cambio (no en cada re-render).
+            if (lastShownShippingFee !== fee) {
+                replayAttentionAnimation(line);
+            }
+            lastShownShippingFee = fee;
+        } else {
+            lastShownShippingFee = null;
+            line.classList.add('cart-shipping-soft');
+            if (q.zona === 'foraneo') {
+                line.style.color = '#2e7d32';
+                line.innerHTML = `<i class="material-icons tiny" style="vertical-align:middle;">celebration</i> Envío foráneo <strong>GRATIS</strong> por llevar ${freeItems} o más productos`;
+            } else if (q.zona === 'local') {
+                line.style.color = '#2e7d32';
+                line.innerHTML = `<i class="material-icons tiny" style="vertical-align:middle;">check_circle</i> Envío a domicilio sin costo (dentro de la periferia)`;
+            } else {
+                line.style.color = '#9e9e9e';
+                line.innerHTML = `<i class="material-icons tiny" style="vertical-align:middle;">info</i> El costo de envío de tu zona se confirma al finalizar el pedido`;
+            }
+        }
+
+        // Solo desglosamos "Productos / Total" cuando hay un cargo real que explicar.
+        if (subLine && subDisplay) {
+            if (fee > 0) {
+                subDisplay.textContent = (Number(subtotalNum) || 0).toFixed(2);
+                subLine.style.display = 'block';
+            } else {
+                subLine.style.display = 'none';
+            }
+        }
+    }
+
+    function getCartItemsForQuote() {
+        return getCart()
+            .map((it) => ({
+                id_producto: parseInt(it.id_producto || it.id, 10) || 0,
+                quantity: Math.max(1, parseInt(it.quantity, 10) || 1)
+            }))
+            .filter((it) => it.id_producto > 0);
+    }
+
+    async function fetchDeliveryZoneQuote() {
+        const tipo = document.getElementById('tipo_entrega')?.value || '';
+        const direccion = (document.getElementById('direccion')?.value || '').trim();
+        const mapsLink = document.getElementById('maps_link')?.value || '';
+        const items = getCartItemsForQuote();
+
+        if (tipo !== 'Domicilio' || items.length === 0 || direccion === '') {
+            latestDeliveryZoneQuote = null;
+            renderCart();
+            return;
+        }
+
+        deliveryZoneQuoteInFlight++;
+        renderShippingLine(0, 0);
+        try {
+            const res = await fetch(DELIVERY_ZONE_QUOTE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tipo_entrega: tipo, direccion, maps_link: mapsLink, items }),
+                credentials: 'same-origin',
+                cache: 'no-store'
+            });
+            const data = await res.json();
+            latestDeliveryZoneQuote = (res.ok && data && data.success) ? data : null;
+        } catch (e) {
+            console.error('No se pudo cotizar el envío:', e);
+            latestDeliveryZoneQuote = null;
+        } finally {
+            deliveryZoneQuoteInFlight = Math.max(0, deliveryZoneQuoteInFlight - 1);
+            renderCart();
+        }
+    }
+
+    function scheduleDeliveryZoneQuote() {
+        if (deliveryZoneQuoteTimer) clearTimeout(deliveryZoneQuoteTimer);
+        deliveryZoneQuoteTimer = setTimeout(fetchDeliveryZoneQuote, 650);
+    }
+
     function formatPhoneMx(digits) {
         if (!digits) return '';
         if (digits.length <= 3) return `(${digits}`;
@@ -848,6 +1016,29 @@ include __DIR__ . '/includes/header.php';
                 confirmButtonColor: '#0d47a1'
             });
             return;
+        }
+
+        // Ultimo aviso explicito del cargo de envio foraneo antes de registrar el pedido.
+        if (tipoEntregaSeleccionada === 'Domicilio') {
+            await fetchDeliveryZoneQuote();
+            const q = latestDeliveryZoneQuote;
+            if (q && Number(q.costo_envio) > 0) {
+                const subtotalNum = getCart().reduce((s, it) => s + (parseFloat(it.precio) || 0) * (parseInt(it.quantity, 10) || 0), 0);
+                const fee = Math.max(0, Number(q.costo_envio) || 0);
+                const confirmacion = await Swal.fire({
+                    title: 'Tu domicilio está fuera de la periferia',
+                    html: `Se agrega un cargo de envío de <strong>$${fee.toFixed(2)}</strong>.<br><br>`
+                        + `Productos: $${subtotalNum.toFixed(2)}<br>`
+                        + `Envío: +$${fee.toFixed(2)}<br>`
+                        + `<strong>Total a pagar al recibir: $${(subtotalNum + fee).toFixed(2)}</strong>`,
+                    icon: 'info',
+                    showCancelButton: true,
+                    confirmButtonText: 'De acuerdo, confirmar',
+                    cancelButtonText: 'Volver',
+                    confirmButtonColor: '#0d47a1'
+                });
+                if (!confirmacion.isConfirmed) return;
+            }
         }
 
         const btn = this.querySelector('button');
@@ -1104,17 +1295,23 @@ include __DIR__ . '/includes/header.php';
         } catch (err) {
             // Ignorar bloqueo de storage.
         }
+        if (this.value !== 'Domicilio') {
+            latestDeliveryZoneQuote = null;
+        }
         aplicarModoEntrega(this.value);
         renderCart();
         schedulePickupStockCheck();
+        scheduleDeliveryZoneQuote();
     });
 
     document.getElementById('select_direccion')?.addEventListener('change', function() {
         if (this.value === '__other__') {
             if (mapsLinkInput) mapsLinkInput.value = '';
+            latestDeliveryZoneQuote = null;
             activarModoDireccionManual();
             M.textareaAutoResize(document.getElementById('direccion'));
             M.updateTextFields();
+            renderCart();
             return;
         }
 
@@ -1131,9 +1328,19 @@ include __DIR__ . '/includes/header.php';
             activarModoDireccionGuardada();
             M.textareaAutoResize(document.getElementById('direccion'));
             M.updateTextFields();
+            scheduleDeliveryZoneQuote();
         } else {
             activarModoDireccionManual();
         }
+    });
+
+    document.getElementById('direccion')?.addEventListener('input', function() {
+        // El texto escrito a mano invalida cualquier coordenada de una seleccion previa.
+        if (mapsLinkInput && document.activeElement === this) {
+            mapsLinkInput.value = '';
+        }
+        latestDeliveryZoneQuote = null;
+        scheduleDeliveryZoneQuote();
     });
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -1154,6 +1361,7 @@ include __DIR__ . '/includes/header.php';
         bindPhoneMaskValidationCart('telefono');
         if (typeof google !== 'undefined') initAutocompleteCart();
         schedulePickupStockCheck();
+        scheduleDeliveryZoneQuote();
 
         const initialMapsLink = mapsLinkInput?.value || '';
         if (initialMapsLink.includes('query=')) {
@@ -1164,6 +1372,7 @@ include __DIR__ . '/includes/header.php';
         window.addEventListener('storage', function(event) {
             if (event.key === 'cart') {
                 schedulePickupStockCheck();
+                scheduleDeliveryZoneQuote();
             }
         });
     });
@@ -1221,6 +1430,72 @@ include __DIR__ . '/includes/header.php';
     .cart-qty-input-warning {
         border-color: #c62828;
         background: #ffebee;
+    }
+
+    /* ----- Aviso de envio foraneo en el carrito ----- */
+    #cart-shipping-line { border-radius: 10px; transition: background-color .25s ease; }
+
+    #cart-shipping-line.cart-shipping-soft {
+        display: block;
+        font-size: 0.92rem;
+        margin: 2px 0;
+        text-align: right;
+    }
+
+    #cart-shipping-line.cart-shipping-alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        max-width: 340px;
+        margin: 10px 0 4px auto;
+        padding: 12px 14px;
+        text-align: left;
+        color: #7f1d1d;
+        background: #fff4f2;
+        border: 1px solid #ef9a9a;
+        border-left: 5px solid #c62828;
+        box-shadow: 0 0 0 0 rgba(198, 40, 40, 0);
+        animation: cartShippingGlow 2s ease-in-out infinite;
+    }
+    #cart-shipping-line.cart-shipping-alert.cart-shipping-attn {
+        animation: cartShippingShake .7s cubic-bezier(.36,.07,.19,.97) both,
+                   cartShippingGlow 2s ease-in-out .7s infinite;
+    }
+    #cart-shipping-line .cart-shipping-icon {
+        font-size: 22px;
+        line-height: 1.2;
+        color: #c62828;
+        flex-shrink: 0;
+    }
+    #cart-shipping-line .cart-shipping-text { line-height: 1.35; }
+    #cart-shipping-line .cart-shipping-amount {
+        display: inline-block;
+        margin-left: 2px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        background: #c62828;
+        color: #fff;
+        font-weight: 800;
+        font-size: 0.98rem;
+        white-space: nowrap;
+    }
+
+    @keyframes cartShippingShake {
+        10%, 90% { transform: translateX(-2px); }
+        20%, 80% { transform: translateX(4px); }
+        30%, 50%, 70% { transform: translateX(-8px); }
+        40%, 60% { transform: translateX(8px); }
+    }
+    @keyframes cartShippingGlow {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0); }
+        50%      { box-shadow: 0 0 16px 2px rgba(198, 40, 40, .45); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        #cart-shipping-line.cart-shipping-alert,
+        #cart-shipping-line.cart-shipping-alert.cart-shipping-attn {
+            animation: none;
+        }
     }
 </style>
 

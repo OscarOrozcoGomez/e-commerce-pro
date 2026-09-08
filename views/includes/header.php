@@ -369,6 +369,10 @@
                             <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
                         <?php endif; ?>
 
+                        <?php if (hasPermission('ver_conversaciones_whatsapp')): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
+                        <?php endif; ?>
+
                         <?php if (isAdmin()): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
                         <?php endif; ?>
@@ -443,6 +447,34 @@
                 </li>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes <span id="header-chat-badge-mobile" class="new badge <?php echo $hasSecurityAlert ? 'orange darken-3' : 'green'; ?>" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $unreadChat > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$unreadChat; ?></span></a></li>
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
+
+                <?php
+                // Administracion: mismos enlaces (y mismos permisos) que el menu de perfil
+                // de escritorio. Sin esto, en movil no habia forma de llegar a Usuarios /
+                // Roles y Permisos: el dropdown de escritorio esta oculto y este sidenav
+                // solo traia Dashboard/Pickup/Mensajes/Favoritos.
+                $mostrarBlogsMovil = hasPermission('gestionar_blogs');
+                $mostrarUsuariosMovil = hasPermission('gestionar_usuarios');
+                $mostrarConversacionesWaMovil = hasPermission('ver_conversaciones_whatsapp');
+                $mostrarSaludMovil = isAdmin();
+                ?>
+                <?php if ($mostrarBlogsMovil || $mostrarUsuariosMovil || $mostrarConversacionesWaMovil || $mostrarSaludMovil): ?>
+                    <li><div class="divider"></div></li>
+                    <li><a class="subheader">Administración</a></li>
+                <?php endif; ?>
+                <?php if ($mostrarBlogsMovil): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/manage_blogs.php"><i class="material-icons">book</i> Gestionar Blogs</a></li>
+                <?php endif; ?>
+                <?php if ($mostrarUsuariosMovil): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/users.php"><i class="material-icons">people</i> Usuarios</a></li>
+                    <li><a href="<?php echo BASE_URL; ?>views/roles_permisos.php"><i class="material-icons">security</i> Roles y Permisos</a></li>
+                <?php endif; ?>
+                <?php if ($mostrarConversacionesWaMovil): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
+                <?php endif; ?>
+                <?php if ($mostrarSaludMovil): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
+                <?php endif; ?>
             <?php endif; ?>
             <li><a href="<?php echo BASE_URL; ?>logout.php" class="red-text"><i class="material-icons red-text">exit_to_app</i> Salir</a></li>
         <?php else: ?>

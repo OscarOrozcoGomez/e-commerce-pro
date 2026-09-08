@@ -405,6 +405,19 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php if (hasPermission('transferir_stock') || isAdmin()): ?>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Transferir entre Almacenes</span>
+                        <p>Mover mercancía de una sucursal a otra: descuenta el origen y abastece el destino al instante</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/transfer_stock.php" class="btn waves-effect waves-light deep-purple darken-1">Transferir</a>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
 
         <!-- SECCIÓN 3: CONFIGURACIÓN Y PERSONAL -->
@@ -586,6 +599,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/ai_assistant_settings.php" class="btn waves-effect waves-light green darken-2">Configurar</a>
+                        <a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php" class="btn-flat waves-effect">Conversaciones</a>
                         <a href="<?php echo BASE_URL; ?>views/ai_diagnostics.php" class="btn-flat waves-effect">Diagnostico</a>
                     </div>
                 </div>
@@ -711,6 +725,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php if (hasPermission('ver_insights_ia')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -722,6 +737,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
 
         <div class="row dashboard-actions">
@@ -822,6 +838,19 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php if (hasPermission('transferir_stock') || isAdmin()): ?>
+            <div class="col s12 m6 l4">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Transferir entre Almacenes</span>
+                        <p>Mover mercancía de una sucursal a otra: descuenta el origen y abastece el destino al instante</p>
+                    </div>
+                    <div class="card-action">
+                        <a href="<?php echo BASE_URL; ?>views/transfer_stock.php" class="btn waves-effect waves-light deep-purple darken-1">Transferir</a>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">article</i> Contenido</h5></div></div>
@@ -1097,8 +1126,22 @@ include __DIR__ . '/includes/header.php';
         font-size: 0.9rem;
     }
 
+    .dashboard-actions {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
+        align-items: stretch;
+    }
+
     .dashboard-actions .col {
         display: flex;
+        float: none !important;
+        width: auto !important;
+        margin-left: 0 !important;
+        left: auto !important;
+        right: auto !important;
+        min-width: 0;
+        padding: 0;
     }
 
     .dashboard-actions .card {

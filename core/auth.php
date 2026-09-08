@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/pickup_offer_utils.php';
 require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/delivery_route_utils.php';
+require_once __DIR__ . '/delivery_zone_utils.php';
 require_once __DIR__ . '/order_cancel_utils.php';
 require_once __DIR__ . '/attribution.php';
 require_once __DIR__ . '/ventas_features.php';
@@ -44,6 +45,7 @@ const PERMISOS_EN_USO = [
     'gestionar_cancelaciones',
     'gestionar_asistente_ia',
     'ver_insights_ia',
+    'ver_conversaciones_whatsapp',
     'ver_notificaciones_pickup',
     // Control de caducidades por lote (views/caducidades.php + api/lotes_manager.php).
     'gestionar_caducidades',
@@ -1204,6 +1206,7 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
     $telefono = esc((string) ($order['telefono'] ?? ''));
     $direccion = esc((string) ($order['direccion'] ?? ''));
     $total = (float) ($order['total'] ?? 0.0);
+    $costoEnvioEmail = round((float) ($order['costo_envio'] ?? 0.0), 2);
 
     // Enlace para escribirle al cliente por WhatsApp desde el correo:
     //   - $waDigits: telefono en digitos con lada de pais (52 + 10 nacionales).
@@ -1322,6 +1325,9 @@ function buildNewOrderNotificationHtml(array $order, array $items): string
                 </table>
 
                 <div style="text-align:right;margin-top:16px;padding-top:12px;border-top:2px solid #1a237e;">
+                    ' . ($costoEnvioEmail > 0
+                        ? '<span style="font-size:13px;color:#78909c;">Envio a domicilio (fuera de periferia GDL): $' . number_format($costoEnvioEmail, 2) . '</span><br>'
+                        : '') . '
                     <span style="font-size:13px;color:#78909c;">Total del pedido</span><br>
                     <span style="font-size:22px;font-weight:800;color:#1a237e;">$' . number_format($total, 2) . '</span>
                 </div>
@@ -1667,7 +1673,30 @@ function dbCreatePublicOrder(array $data): array {
             }
         }
 
-        $totalPedido = round(max(0.0, $subtotal - $descuentoTotal), 2);
+        // Cargo de envio foraneo (fuera de la periferia de Guadalajara). Mismo criterio
+        // que el bot y el panel de vendedor -- ver core/delivery_zone_utils.php. Se decide
+        // por coordenadas si el pedido a domicilio las trae (el checkout web las resuelve
+        // via Google Maps) y si no, por el texto de la direccion. Pickup/Sucursal => $0.
+        $hasPedidosCostoEnvio = $columnExists($pdo, 'pedidos', 'costo_envio');
+        $productosDistintosEnvio = count(array_unique(array_filter(array_map(
+            static fn($i) => (int)($i['id_producto'] ?? 0),
+            is_array($data['items'] ?? null) ? $data['items'] : []
+        ), static fn($id) => $id > 0)));
+        $zonaEnvio = deliveryZoneResolveForOrder(
+            is_array($coordsEntrega) ? (float)$coordsEntrega['lat'] : null,
+            is_array($coordsEntrega) ? (float)$coordsEntrega['lng'] : null,
+            $direccionEntrega,
+            (string)$entrega,
+            $productosDistintosEnvio
+        );
+        $costoEnvio = round((float)$zonaEnvio['costo_envio'], 2);
+        $zonaEntregaCalculada = (string)$zonaEnvio['zona'];
+
+        $totalPedido = round(max(0.0, $subtotal - $descuentoTotal + $costoEnvio), 2);
+
+        if ($costoEnvio > 0) {
+            $infoCliente .= " | ENVIO_FORANEO (fuera de periferia GDL): +$" . number_format($costoEnvio, 2, '.', '');
+        }
 
         if ($aplicarIncentivoSucursal) {
             $infoCliente .= " | INCENTIVO_SUCURSAL: -$" . number_format($descuentoTotal, 2, '.', '');
@@ -1731,6 +1760,12 @@ function dbCreatePublicOrder(array $data): array {
             $pedidoColumns[] = 'tipo_entrega';
             $pedidoPlaceholders[] = ':tipo_entrega';
             $pedidoParams[':tipo_entrega'] = (string)$entrega;
+        }
+
+        if ($hasPedidosCostoEnvio) {
+            $pedidoColumns[] = 'costo_envio';
+            $pedidoPlaceholders[] = ':costo_envio';
+            $pedidoParams[':costo_envio'] = $costoEnvio;
         }
 
         if ($hasPedidosDireccionEntrega && $direccionEntrega !== '') {
@@ -1928,6 +1963,9 @@ function dbCreatePublicOrder(array $data): array {
             'tipo_entrega' => $entrega,
             'telefono' => $telefonoEntrega,
             'direccion' => $direccionEntrega,
+            'subtotal' => $subtotal,
+            'descuento_total' => $descuentoTotal,
+            'costo_envio' => $costoEnvio,
             'total' => $totalPedido,
             'items' => dbGetOrderItemsForEmail($pdo, (int)$id_pedido),
         ]);
@@ -1936,6 +1974,11 @@ function dbCreatePublicOrder(array $data): array {
             'success' => true,
             'pedido' => $numero_pedido,
             'id_pedido' => (int)$id_pedido,
+            'subtotal' => $subtotal,
+            'descuento_total' => $descuentoTotal,
+            'costo_envio' => $costoEnvio,
+            'zona_entrega' => $zonaEntregaCalculada,
+            'total' => $totalPedido,
         ];
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();

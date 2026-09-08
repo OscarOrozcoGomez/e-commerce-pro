@@ -6,11 +6,17 @@ require_once __DIR__ . '/../core/delivery_route_utils.php';
 require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
+require_once __DIR__ . '/../core/cliente_scope_utils.php';
 requireAuth();
 // Permiso 'gestionar_clientes' abre esta vista; el rol se mantiene como respaldo.
 if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
 
 $pdo = getPDO();
+
+// Alcance por sucursal: un encargado/vendedor solo ve y edita clientes de SU sucursal.
+// Un admin ve todos, incluidos los que no tienen sucursal (registros del sitio web).
+$scopeAlmacenId = getCurrentAlmacenId();
+$scopeIsAdmin = isAdmin();
 $error = '';
 $success = '';
 $sessionFlashKey = 'manage_customers_flash';
@@ -123,6 +129,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         $idCliente = (int)($_POST['id_cliente'] ?? 0);
 
         try {
+            // Un encargado no puede tocar (editar/eliminar/activar/direcciones) un
+            // cliente de otra sucursal aunque adivine su id_cliente.
+            if ($idCliente > 0) {
+                $stmtScopeChk = $pdo->prepare('SELECT id_almacen FROM clientes WHERE id_cliente = ? LIMIT 1');
+                $stmtScopeChk->execute([$idCliente]);
+                $scopeRow = $stmtScopeChk->fetch(PDO::FETCH_ASSOC);
+                if ($scopeRow !== false && !clienteScopeAllows(
+                    $scopeRow['id_almacen'] !== null ? (int)$scopeRow['id_almacen'] : null,
+                    $scopeAlmacenId,
+                    $scopeIsAdmin
+                )) {
+                    throw new Exception('Ese cliente pertenece a otra sucursal.');
+                }
+            }
+
             if ($accion === 'activar') {
                 if ($idUsuario > 0) {
                     $pdo->prepare("UPDATE usuarios SET estado = 'activo' WHERE id_usuario = ?")->execute([$idUsuario]);
@@ -191,11 +212,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $pdo->beginTransaction();
-                $stmtInsert = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, estado) VALUES (?, ?, ?, 'activo')");
+                $stmtInsert = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_almacen, estado) VALUES (?, ?, ?, ?, 'activo')");
                 $stmtInsert->execute([
                     $storeValue($nombre),
                     $storeValue($email !== '' ? $email : null),
                     $storeValue($telefonoNormalizado),
+                    clienteScopeAlmacenParaNuevo($scopeAlmacenId),
                 ]);
                 $nuevoClienteId = (int)$pdo->lastInsertId();
 
@@ -421,7 +443,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
 $clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
 
-$clientes = $pdo->query("SELECT c.*, u.id_usuario, u.estado AS estado_usuario, u.contrasena, COALESCE(u.estado, c.estado, 'activo') AS estado_visible, CASE WHEN u.id_usuario IS NULL THEN 'sucursal' ELSE 'sitio_web' END AS origen_registro, CASE WHEN u.id_usuario IS NOT NULL AND u.contrasena IS NOT NULL AND TRIM(u.contrasena) <> '' THEN 1 ELSE 0 END AS tiene_acceso_web, (SELECT a.nombre FROM pedidos p0 INNER JOIN almacenes a ON a.id_almacen = p0.id_almacen WHERE p0.id_cliente = c.id_cliente ORDER BY p0.id_pedido ASC LIMIT 1) AS sucursal_origen FROM clientes c LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario ORDER BY c.nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+$scopeFilter = clienteScopeSqlFilter($scopeAlmacenId, $scopeIsAdmin, 'c');
+$stmtClientes = $pdo->prepare("SELECT c.*, u.id_usuario, u.estado AS estado_usuario, u.contrasena, COALESCE(u.estado, c.estado, 'activo') AS estado_visible, CASE WHEN u.id_usuario IS NULL THEN 'sucursal' ELSE 'sitio_web' END AS origen_registro, CASE WHEN u.id_usuario IS NOT NULL AND u.contrasena IS NOT NULL AND TRIM(u.contrasena) <> '' THEN 1 ELSE 0 END AS tiene_acceso_web, a_asignada.nombre AS sucursal_asignada, (SELECT a.nombre FROM pedidos p0 INNER JOIN almacenes a ON a.id_almacen = p0.id_almacen WHERE p0.id_cliente = c.id_cliente ORDER BY p0.id_pedido ASC LIMIT 1) AS sucursal_origen FROM clientes c LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario LEFT JOIN almacenes a_asignada ON a_asignada.id_almacen = c.id_almacen WHERE {$scopeFilter['sql']} ORDER BY c.nombre ASC");
+$stmtClientes->execute($scopeFilter['params']);
+$clientes = $stmtClientes->fetchAll(PDO::FETCH_ASSOC);
 
 $horariosPorCliente = [];
 try {
