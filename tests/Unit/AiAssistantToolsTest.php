@@ -125,6 +125,148 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame(14, $porBeneficio[0]['id_producto']);
     }
 
+    public function testAiSearchInventoryOmitsFichaFieldsWhenNotCaptured(): void
+    {
+        // La gran mayoria del catalogo (97% en produccion) todavia no tiene ingredientes,
+        // modo de uso ni tabla nutrimental capturados -- no deben aparecer como cadenas
+        // vacias en la respuesta, para no inflarla con ruido.
+        $this->seedProducto(20, 'Zinc', 'ZNC20', null, 120.00);
+
+        $resultados = aiSearchInventory($this->pdo, 'Zinc');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('ingredientes', $resultados[0]);
+        $this->assertArrayNotHasKey('modo_uso', $resultados[0]);
+        $this->assertArrayNotHasKey('tabla_nutrimental', $resultados[0]);
+    }
+
+    public function testAiSearchInventoryIncludesIngredientesModoUsoYTablaNutrimentalCuandoExisten(): void
+    {
+        $this->seedProducto(
+            21,
+            'Ashwagandha',
+            'ASH21',
+            null,
+            349.00,
+            'activo',
+            null,
+            'Extracto de raiz de ashwagandha',
+            null,
+            'Tomar 1 capsula al dia con alimentos.',
+            '[{"label":"Contenido energetico","porcion":"10 kcal","total":"200 kcal"}]'
+        );
+
+        $resultados = aiSearchInventory($this->pdo, 'Ashwagandha');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Extracto de raiz de ashwagandha', $resultados[0]['ingredientes']);
+        $this->assertSame('Tomar 1 capsula al dia con alimentos.', $resultados[0]['modo_uso']);
+        $this->assertStringContainsString('Contenido energetico', $resultados[0]['tabla_nutrimental']);
+        $this->assertStringContainsString('10 kcal', $resultados[0]['tabla_nutrimental']);
+    }
+
+    public function testAiSearchInventoryIncludesRendimientoEstimadoCuandoAmbosDatosExisten(): void
+    {
+        // Ejemplo real que reporto el usuario: 240 capsulas por envase, dosis sugerida
+        // por la marca de 3 al dia -- debe alcanzar para 80 dias (240 / 3), no 90 (ese
+        // numero era de un producto distinto con otros valores).
+        $this->seedProducto(22, 'Citrato de Magnesio', 'MAG22', null, 399.00, 'activo', null, null, null, null, null, 240, 3);
+
+        $resultados = aiSearchInventory($this->pdo, 'Citrato de Magnesio');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame(
+            'Dosis sugerida por la marca: 3 capsulas al dia. Con 240 capsulas por envase, alcanza para aproximadamente 80 dias (~2.7 meses) a esa dosis.',
+            $resultados[0]['rendimiento_estimado']
+        );
+    }
+
+    public function testAiSearchInventoryOmitsRendimientoEstimadoWhenOnlyOneOfTheTwoFieldsIsSet(): void
+    {
+        // Nunca se debe asumir una dosis que el admin no capturo explicitamente -- a
+        // diferencia de loteDiasTratamiento() (que para Caducidades asume 1/dia), aqui se
+        // omite por completo si falta cualquiera de los dos datos.
+        $this->seedProducto(23, 'Solo capsulas por envase', 'CAP23', null, 199.00, 'activo', null, null, null, null, null, 240, null);
+        $this->seedProducto(24, 'Solo porcion capsulas', 'CAP24', null, 199.00, 'activo', null, null, null, null, null, null, 3);
+
+        $resultados = aiSearchInventory($this->pdo, 'capsulas');
+
+        foreach ($resultados as $producto) {
+            $this->assertArrayNotHasKey('rendimiento_estimado', $producto);
+        }
+    }
+
+    public function testAiBuildRendimientoEstimadoTextoUsesSingularForOneCapsulePerDay(): void
+    {
+        $this->assertSame(
+            'Dosis sugerida por la marca: 1 capsula al dia. Con 90 capsulas por envase, alcanza para aproximadamente 90 dias (~3 meses) a esa dosis.',
+            aiBuildRendimientoEstimadoTexto(90, 1)
+        );
+    }
+
+    public function testAiBuildRendimientoEstimadoTextoReturnsEmptyWithMissingOrInvalidData(): void
+    {
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(null, 3));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(240, null));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(0, 3));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(240, 0));
+        $this->assertSame('', aiBuildRendimientoEstimadoTexto(-10, 3));
+    }
+
+    public function testAiFormatTablaNutrimentalHandlesFlatRowsShape(): void
+    {
+        $json = '[{"label":"Contenido energetico","porcion":"0.058 kJ 0.014 kcal","total":"11.6 kJ 2.8 kcal"},{"label":"Proteinas","porcion":"0.0035 g","total":"0.7 g"}]';
+
+        $resultado = aiFormatTablaNutrimental($json);
+
+        $this->assertSame(
+            "- Contenido energetico: por porcion 0.058 kJ 0.014 kcal, total del envase 11.6 kJ 2.8 kcal\n"
+            . '- Proteinas: por porcion 0.0035 g, total del envase 0.7 g',
+            $resultado
+        );
+    }
+
+    public function testAiFormatTablaNutrimentalHandlesGridShapeWithColumnsAndRows(): void
+    {
+        // Forma real observada en el catalogo (B-Life): incluye ademas table_html (el mismo
+        // contenido pero como HTML con estilos inline) -- se ignora a proposito, columns/rows
+        // ya trae la misma informacion, estructurada y sin necesidad de raspar HTML.
+        $json = json_encode([
+            'table_html' => '<table><tr><th>Cantidades</th><th>Por porcion</th></tr></table>',
+            'columns' => [
+                ['indexColumn' => 0, 'value' => 'Cantidades'],
+                ['indexColumn' => 1, 'value' => "Por porcion\n(0.5 g)"],
+            ],
+            'rows' => [
+                [
+                    ['indexColumn' => 0, 'indexRow' => 0, 'value' => 'Grasas', 'bold' => false],
+                    ['indexColumn' => 1, 'indexRow' => 0, 'value' => '0 g', 'bold' => false],
+                ],
+            ],
+        ]);
+
+        $resultado = aiFormatTablaNutrimental($json);
+
+        $this->assertSame('- Grasas: Por porcion (0.5 g): 0 g', $resultado);
+    }
+
+    public function testAiFormatTablaNutrimentalSkipsRowsWithoutLabel(): void
+    {
+        $json = '[{"label":"","porcion":"1 g","total":"2 g"},{"label":"Sodio","porcion":"1 mg","total":"2 mg"}]';
+
+        $this->assertSame('- Sodio: por porcion 1 mg, total del envase 2 mg', aiFormatTablaNutrimental($json));
+    }
+
+    public function testAiFormatTablaNutrimentalReturnsEmptyStringForInvalidOrEmptyInput(): void
+    {
+        $this->assertSame('', aiFormatTablaNutrimental(null));
+        $this->assertSame('', aiFormatTablaNutrimental(''));
+        $this->assertSame('', aiFormatTablaNutrimental('   '));
+        $this->assertSame('', aiFormatTablaNutrimental('esto no es json'));
+        $this->assertSame('', aiFormatTablaNutrimental('{"algo":"irrelevante"}'));
+        $this->assertSame('', aiFormatTablaNutrimental('[]'));
+    }
+
     public function testAiSearchInventoryReturnsEachPresentationAsASeparateResult(): void
     {
         // Mismo producto base, 3 presentaciones/tamanos distintos -- cada una con su propio
@@ -369,6 +511,57 @@ final class AiAssistantToolsTest extends TestCase
 
         $this->assertStringNotContainsStringIgnoringCase('be life', $definicionesJson);
         $this->assertStringContainsString('Blife', $definicionesJson);
+    }
+
+    public function testAiGetToolDefinitionsNeverSuggestsTarjetaAsAValidPaymentMethod(): void
+    {
+        // La descripcion original decia "Efectivo, transferencia, tarjeta u otro metodo"
+        // como si "tarjeta" fuera un ejemplo valido -- solo aceptamos efectivo/transferencia.
+        // "tarjeta" SI puede aparecer, pero unicamente como ejemplo de lo que NUNCA se debe
+        // mandar (igual que "Be Life" aparece solo como ejemplo de typo a reconocer).
+        $definicionesJson = (string)json_encode(aiGetToolDefinitions());
+
+        $this->assertStringNotContainsStringIgnoringCase('tarjeta u otro metodo', $definicionesJson);
+        $this->assertStringContainsString('Nunca mandes \"tarjeta\"', $definicionesJson);
+    }
+
+    public function testAiBuildSystemPromptOnlyOffersMiercolesYSabadoForDeliveryAndEscalatesOtherDays(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('UNICAMENTE los miercoles y los sabados', $prompt);
+        $this->assertStringContainsString('el cliente se adapta a nuestro itinerario', $prompt);
+        $this->assertStringContainsString('llama a transferir_a_humano', $prompt);
+    }
+
+    public function testAiBuildSystemPromptOnlyAcceptsEfectivoOTransferenciaAsPaymentMethods(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('SOLO aceptamos efectivo o transferencia', $prompt);
+        $this->assertStringContainsString('nunca ofrezcas ni aceptes tarjeta', $prompt);
+    }
+
+    public function testAiLeyendaNoMedicamentoMatchesTheExactLegalTextShownInProductDetail(): void
+    {
+        $this->assertSame(
+            'Este producto no es un medicamento. El consumo de este producto es responsabilidad de quien lo recomienda y de quien lo usa.',
+            AI_LEYENDA_NO_MEDICAMENTO
+        );
+
+        // Guarda contra que ambas fuentes se desincronicen (product_detail.php es la
+        // leyenda "oficial" que ya ve el cliente en la pagina publica del producto).
+        $productDetailSource = (string) file_get_contents(__DIR__ . '/../../product_detail.php');
+        $this->assertStringContainsString(AI_LEYENDA_NO_MEDICAMENTO, $productDetailSource);
+    }
+
+    public function testAiBuildSystemPromptIncludesLegalDisclaimerAndForbidsMedicalRecommendationLanguage(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString(AI_LEYENDA_NO_MEDICAMENTO, $prompt);
+        $this->assertStringContainsString('Somos distribuidores, no profesionales de la salud', $prompt);
+        $this->assertStringContainsString('"te recomiendo"', $prompt);
     }
 
     public function testAiCountInventoryMatchesMatchesActualRowCountIgnoringLimit(): void
@@ -1287,7 +1480,11 @@ final class AiAssistantToolsTest extends TestCase
                 estado TEXT NOT NULL DEFAULT "activo",
                 descripcion TEXT NULL,
                 ingredientes TEXT NULL,
-                beneficios TEXT NULL
+                beneficios TEXT NULL,
+                modo_uso TEXT NULL,
+                tabla_nutrimental TEXT NULL,
+                capsulas_por_envase INTEGER NULL,
+                porcion_capsulas INTEGER NULL
             )'
         );
         $this->pdo->exec(
@@ -1427,12 +1624,16 @@ final class AiAssistantToolsTest extends TestCase
         string $estado = 'activo',
         ?string $descripcion = null,
         ?string $ingredientes = null,
-        ?string $beneficios = null
+        ?string $beneficios = null,
+        ?string $modoUso = null,
+        ?string $tablaNutrimental = null,
+        ?int $capsulasPorEnvase = null,
+        ?int $porcionCapsulas = null
     ): void {
         $this->pdo->prepare(
-            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios]);
+            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental, capsulas_por_envase, porcion_capsulas)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental, $capsulasPorEnvase, $porcionCapsulas]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void

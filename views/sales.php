@@ -387,8 +387,6 @@ include __DIR__ . '/includes/header.php';
                                     <option value="" selected>Se define al entregar</option>
                                     <option value="1">Efectivo</option>
                                     <option value="2">Transferencia Bancaria</option>
-                                    <option value="3">Tarjeta</option>
-                                    <option value="4">Cheque</option>
                                 </select>
                                 <label>Método de Pago Estimado (Opcional)</label>
                             </div>
