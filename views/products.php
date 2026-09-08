@@ -1450,15 +1450,22 @@ include __DIR__ . '/includes/header.php';
             </div>`;
         }
         html += '<table class="striped condensed"><thead><tr>' +
-            '<th>Lote</th><th>Caduca</th><th>Días</th><th>Restante</th><th>Severidad</th><th></th>' +
+            '<th>Lote</th><th>Caduca</th><th>Días p/ vender</th><th>Restante</th><th>Severidad</th><th></th>' +
             '</tr></thead><tbody>';
         lotes.forEach(l => {
             const sev = LOTE_SEV[l.severidad] || {t: l.severidad, c: 'grey'};
             const noVend = l.no_vendible ? ' <span class="new badge red darken-3 white-text" data-badge-caption="" title="Un envase comprado hoy no se alcanza a terminar antes de caducar">NO VENDIBLE</span>' : '';
+            // "Días para vender" = horizonte real: si el envase rinde N días, después de
+            // (caducidad − N) un cliente ya no lo termina a tiempo. Si no hay dato de
+            // cápsulas/porción, es igual a los días para caducar.
+            const ef = (l.dias_efectivos_venta != null) ? l.dias_efectivos_venta : l.dias_hasta_caducar;
+            const diasCell = (l.dias_tratamiento_envase != null && ef !== l.dias_hasta_caducar)
+                ? `<strong>${ef}</strong> <small class="grey-text" title="Caduca en ${l.dias_hasta_caducar} días. El envase rinde ${l.dias_tratamiento_envase} días de tratamiento, así que ${l.dias_hasta_caducar}−${l.dias_tratamiento_envase} es lo que queda para colocarlo.">(caduca en ${l.dias_hasta_caducar})</small>`
+                : `${l.dias_hasta_caducar}`;
             html += `<tr>
                 <td>${escLote(l.codigo_lote)}</td>
                 <td>${escLote(l.fecha_caducidad)}${l.caducidad_aproximada ? ' <small class="grey-text">(aprox)</small>' : ''}</td>
-                <td>${l.dias_hasta_caducar}</td>
+                <td>${diasCell}</td>
                 <td>${l.cantidad_restante}</td>
                 <td><span class="new badge ${sev.c}" data-badge-caption="">${sev.t}</span>${noVend}</td>
                 <td style="white-space:nowrap;">

@@ -284,6 +284,15 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
         $margenConsumo = $diasTratamiento !== null ? $diasHastaCaducar - $diasTratamiento : null;
         $noVendible = $margenConsumo !== null && $cantRestante > 0 && $diasHastaCaducar >= 0 && $margenConsumo < 0;
 
+        // Horizonte REAL para colocar cada unidad: si el envase rinde N dias, la
+        // ultima fecha en que un cliente puede comprarlo y terminarselo antes de que
+        // caduque es (caducidad - N). Vender despues de esa fecha = el cliente
+        // consume producto vencido. Por eso la proyeccion y la severidad se miden
+        // contra este horizonte, no contra la fecha de caducidad "cruda": asi la
+        // alerta salta con la anticipacion suficiente para ponerlo en oferta.
+        // Sin datos de capsulas/porcion, el horizonte es la propia fecha de caducidad.
+        $diasEfectivos = $margenConsumo !== null ? max(0, $margenConsumo) : $diasHastaCaducar;
+
         $excedente = null;
         $diasParaAgotar = null;
         $velObjetivo = null;
@@ -304,20 +313,24 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             $excedente = null; // no se puede proyectar
         } elseif ($sinRotacion || $velDiaria <= 0) {
             $excedente = $cantRestante;
-            $velObjetivo = $cantRestante / max(1, $diasHastaCaducar);
+            $velObjetivo = $cantRestante / max(1, $diasEfectivos);
         } else {
-            $demandaAntes = max(0.0, $velDiaria * $diasHastaCaducar);
+            $demandaAntes = max(0.0, $velDiaria * $diasEfectivos);
             $vendidasATiempo = max(0.0, min((float) $cantRestante, $demandaAntes - $posicion));
             $excedente = (int) ceil($cantRestante - $vendidasATiempo);
             $excedente = max(0, $excedente);
             $diasParaAgotar = ($posicion + $cantRestante) / $velDiaria;
-            $velObjetivo = ($posicion + $cantRestante) / max(1, $diasHastaCaducar);
+            $velObjetivo = ($posicion + $cantRestante) / max(1, $diasEfectivos);
             $consumidoPorEsteLote = $vendidasATiempo;
         }
 
-        $severidad = loteSeveridad($diasHastaCaducar, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
+        // La severidad se mide contra el horizonte efectivo (ver arriba), salvo
+        // 'caducado', que depende de la fecha real ya cumplida.
+        $severidad = $diasHastaCaducar < 0
+            ? 'caducado'
+            : loteSeveridad($diasEfectivos, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
         $descuento = ($excedente !== null && $excedente > 0)
-            ? loteDescuentoSugerido($excedente, $cantRestante, $diasHastaCaducar)
+            ? loteDescuentoSugerido($excedente, $cantRestante, $diasEfectivos)
             : 0;
 
         if ($noVendible) {
@@ -336,6 +349,7 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             'ritmo_ratio' => ($velObjetivo !== null && $velObjetivo > 0) ? round($velDiaria / $velObjetivo, 2) : null,
             'dias_tratamiento_envase' => $diasTratamiento,
             'margen_consumo_dias' => $margenConsumo,
+            'dias_efectivos_venta' => $diasHastaCaducar < 0 ? $diasHastaCaducar : $diasEfectivos,
             'no_vendible' => $noVendible,
             'severidad' => $severidad,
             'descuento_sugerido_pct' => $descuento,
@@ -444,10 +458,12 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
         $lotes = array_values(array_filter($lotes, static fn($l) => $l['severidad'] === $sev));
     }
 
+    // Orden de exhibicion: primero los que tienen menos margen REAL para venderse
+    // (horizonte efectivo), con la fecha de caducidad cruda como desempate.
     usort($lotes, static function (array $a, array $b): int {
-        $da = $a['dias_hasta_caducar'];
-        $db = $b['dias_hasta_caducar'];
-        return $da <=> $db;
+        $ea = $a['dias_efectivos_venta'] ?? $a['dias_hasta_caducar'];
+        $eb = $b['dias_efectivos_venta'] ?? $b['dias_hasta_caducar'];
+        return [$ea, $a['dias_hasta_caducar']] <=> [$eb, $b['dias_hasta_caducar']];
     });
 
     return ['lotes' => $lotes, 'ventana_dias' => LOTE_VENTANA_DIAS];
