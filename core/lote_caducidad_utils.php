@@ -380,8 +380,14 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
         $params[':categoria'] = trim((string) $filtros['categoria']);
     }
     if (isset($filtros['q']) && trim((string) $filtros['q']) !== '') {
-        $where[] = '(p.nombre LIKE :q OR l.codigo_lote LIKE :q OR ' . loteSkuExpr($pdo) . ' LIKE :q)';
-        $params[':q'] = '%' . trim((string) $filtros['q']) . '%';
+        // Tres placeholders distintos para el mismo valor a proposito: MySQL/PDO con
+        // ATTR_EMULATE_PREPARES=false no permite reusar un named param (:q, :q, :q) ->
+        // SQLSTATE[HY093] (mismo patron de bug que loteGuardar()).
+        $where[] = '(p.nombre LIKE :q1 OR l.codigo_lote LIKE :q2 OR ' . loteSkuExpr($pdo) . ' LIKE :q3)';
+        $qLike = '%' . trim((string) $filtros['q']) . '%';
+        $params[':q1'] = $qLike;
+        $params[':q2'] = $qLike;
+        $params[':q3'] = $qLike;
     }
 
     $sql = 'SELECT l.*, p.nombre AS producto_nombre, p.categoria AS producto_categoria,

@@ -16,7 +16,7 @@ final class PhoneDuplicateDetectionTest extends TestCase
         $this->pdo = new PDO('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        $this->pdo->exec('CREATE TABLE clientes (id_cliente INTEGER PRIMARY KEY AUTOINCREMENT, id_usuario INTEGER NULL, telefono TEXT NULL)');
+        $this->pdo->exec('CREATE TABLE clientes (id_cliente INTEGER PRIMARY KEY AUTOINCREMENT, id_usuario INTEGER NULL, telefono TEXT NULL, nombre TEXT NULL)');
     }
 
     protected function tearDown(): void

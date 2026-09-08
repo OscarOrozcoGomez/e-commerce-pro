@@ -258,7 +258,7 @@ $showPickupTracking = $isPickupOrder && $pickupBadge !== '';
                                 <?php endif; ?>
                                 
                                 <span class="title" style="font-weight: bold;"><?php echo esc($item['nombre'] . ($item['nombre_variante'] ? " - " . $item['nombre_variante'] : "")); ?></span>
-                                <p class="grey-text" style="font-size: 0.85rem;">SKU: <?php echo esc($item['sku']); ?></p>
+                                <p class="grey-text" style="font-size: 0.85rem;">SKU: <?php echo esc($item['sku'] ?? ''); ?></p>
                                 <?php if ($isReleased): ?>
                                     <p class="released-note"><i class="material-icons tiny">report_problem</i> Producto liberado por tiempo maximo de apartado.</p>
                                 <?php endif; ?>

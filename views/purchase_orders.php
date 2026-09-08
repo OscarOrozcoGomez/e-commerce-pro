@@ -717,6 +717,7 @@ include __DIR__ . '/includes/header.php';
                 if (row) row.remove();
                 poToast(res.message || 'Producto devuelto', 'green');
                 cargarPospuestos();
+                cargarListaCompra();
             })
             .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'));
         });
