@@ -26,6 +26,12 @@ if (!defined('LOTE_DIAS_URGENTE')) {
 if (!defined('LOTE_DIAS_PLANIFICAR')) {
     define('LOTE_DIAS_PLANIFICAR', 180);  // 90-180 -> planificar ; >=180 -> vigilar
 }
+if (!defined('LOTE_DIAS_MARGEN_CORTO')) {
+    // Aunque el modelo proyecte que el lote se vende a tiempo, si el margen REAL
+    // para colocarlo (horizonte efectivo) es menor a esto no se muestra "Ok"
+    // plano: se marca "vigilar" para que no pase desapercibido en la recta final.
+    define('LOTE_DIAS_MARGEN_CORTO', 60);
+}
 
 /**
  * Estados de lote que se consideran "vivos" en la vista de caducidades.
@@ -329,6 +335,18 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
         $severidad = $diasHastaCaducar < 0
             ? 'caducado'
             : loteSeveridad($diasEfectivos, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
+
+        // Piso de vigilancia: un lote que SI se proyecta vender pero al que le queda
+        // poco margen real para colocarse no debe verse verde plano ("todo tranquilo
+        // para siempre"). Solo eleva 'ok'; nunca degrada una severidad mas alta.
+        if ($severidad === 'ok'
+            && $cantRestante > 0
+            && $diasHastaCaducar >= 0
+            && $diasEfectivos < LOTE_DIAS_MARGEN_CORTO
+        ) {
+            $severidad = 'vigilar';
+        }
+
         $descuento = ($excedente !== null && $excedente > 0)
             ? loteDescuentoSugerido($excedente, $cantRestante, $diasEfectivos)
             : 0;
