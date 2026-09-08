@@ -625,7 +625,9 @@ final class SecurityAndEdgeCasesTest extends TestCase
                 estado TEXT NOT NULL DEFAULT "activo",
                 descripcion TEXT NULL,
                 ingredientes TEXT NULL,
-                beneficios TEXT NULL
+                beneficios TEXT NULL,
+                modo_uso TEXT NULL,
+                tabla_nutrimental TEXT NULL
             )'
         );
         $this->pdo->exec(

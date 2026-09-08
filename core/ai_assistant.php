@@ -178,10 +178,11 @@ function aiBuildSystemPrompt(
         $lines[] = 'Flujo de atencion:';
         $lines[] = '1. Saluda y da seguimiento a lo que el cliente ya pregunto antes en esta conversacion (tienes el historial completo).';
         $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. El catalogo tiene productos de varias categorias (vitaminas, minerales, suplementos, etc.) y muchos vienen en varias presentaciones/tamanos (por ejemplo 120, 240 o 500 capsulas) a precios distintos -- si consultar_inventario te regresa varias presentaciones del mismo producto, mencionalas todas para que el cliente elija la que le convenga, no asumas una sola. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
-        $lines[] = '3. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
-        $lines[] = '4. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
-        $lines[] = '5. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad) y metodo de pago preferido.';
-        $lines[] = '6. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
+        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla). Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
+        $lines[] = '4. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
+        $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
+        $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad) y metodo de pago preferido.';
+        $lines[] = '7. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
         $lines[] = '';
         $lines[] = 'Cierre de venta: eres habil y educado para conducir la conversacion hacia la compra, sin presionar ni sonar como script. Cada respuesta debe invitar al siguiente paso concreto (nunca dejes la conversacion en un punto muerto): si el cliente ya pregunto precio, ofrece apartarlo o pasar a los datos de envio; si duda entre opciones, ayudalo a decidir con una pregunta o recomendacion breve en vez de solo esperar; si menciona una necesidad (para dormir, energia, digestion, etc.), sugiere tu mismo el producto mas adecuado del inventario real en vez de esperar a que el cliente lo pida por nombre. Se calido y genuino, no insistas si el cliente ya dijo que no.';
         $lines[] = 'Si el cliente pide hablar con una persona, muestra molestia fuerte, o tiene una duda que no puedes resolver con tus funciones (quejas, reembolsos, temas administrativos), llama a transferir_a_humano con el motivo.';
@@ -294,7 +295,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_inventario',
-                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada.',
+                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso y/o tabla_nutrimental (solo si el dato existe para ese producto) -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene o su informacion nutrimental.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1224,6 +1225,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     $safeLimit = max(1, min(20, $limit));
 
     $sql = "SELECT p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
+                   p.ingredientes, p.modo_uso, p.tabla_nutrimental,
                    COALESCE(SUM(ia.cantidad_actual), 0) AS stock_total
             FROM productos p
             LEFT JOIN inventario_almacen ia ON ia.id_producto = p.id_producto
@@ -1243,7 +1245,8 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         $params[':term5'] = $term;
         $params[':term6'] = $term;
     }
-    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta
+    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
+                       p.ingredientes, p.modo_uso, p.tabla_nutrimental
               ORDER BY p.nombre ASC, p.nombre_variante ASC
               LIMIT ' . $safeLimit;
 
@@ -1253,13 +1256,138 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
 
     return array_map(static function (array $row): array {
         $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
-        return [
+        $producto = [
             'id_producto' => (int)$row['id_producto'],
             'nombre' => trim((string)$row['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
             'precio' => round((float)$row['precio_venta'], 2),
             'stock' => max(0, (int)$row['stock_total']),
         ];
+
+        // Solo unos cuantos productos tienen esta ficha capturada todavia (ver
+        // scripts/populate_product_benefits.php y la sincronizacion con B-Life) -- se omiten
+        // las llaves por completo cuando estan vacias en vez de mandar cadenas vacias, para
+        // no inflar la respuesta con ruido en el 97% de los productos que no la tienen.
+        $ingredientes = trim((string)($row['ingredientes'] ?? ''));
+        if ($ingredientes !== '') {
+            $producto['ingredientes'] = $ingredientes;
+        }
+        $modoUso = trim((string)($row['modo_uso'] ?? ''));
+        if ($modoUso !== '') {
+            $producto['modo_uso'] = $modoUso;
+        }
+        $tablaNutrimental = aiFormatTablaNutrimental($row['tabla_nutrimental'] ?? null);
+        if ($tablaNutrimental !== '') {
+            $producto['tabla_nutrimental'] = $tablaNutrimental;
+        }
+
+        return $producto;
     }, $rows);
+}
+
+/**
+ * Convierte el JSON crudo de productos.tabla_nutrimental (guardado por la sincronizacion con
+ * B-Life, pensado originalmente para renderizarse como tabla HTML en la pagina web) a texto
+ * plano legible para mandarlo directo en un mensaje de WhatsApp. Pura y testeable.
+ *
+ * Se han observado dos formas reales en el catalogo:
+ *   A) Lista plana de filas: [{"label":"...","porcion":"...","total":"..."}, ...]
+ *   B) Grilla ya estructurada: {"columns":[{"indexColumn":N,"value":"..."}, ...],
+ *      "rows":[[{"indexColumn":N,"indexRow":M,"value":"..."}, ...], ...]} -- tambien trae
+ *      "table_html" (el mismo contenido pero como HTML con estilos inline); se ignora
+ *      table_html a proposito porque columns/rows ya trae la misma informacion estructurada,
+ *      mucho mas simple y confiable de leer que raspar HTML con estilos inline.
+ */
+function aiFormatTablaNutrimental(?string $rawJson): string
+{
+    $rawJson = trim((string)$rawJson);
+    if ($rawJson === '') {
+        return '';
+    }
+
+    $decoded = json_decode($rawJson, true);
+    if (!is_array($decoded)) {
+        return '';
+    }
+
+    if (array_key_exists(0, $decoded) && is_array($decoded[0]) && isset($decoded[0]['label'])) {
+        return aiFormatTablaNutrimentalFilas($decoded);
+    }
+
+    if (isset($decoded['columns'], $decoded['rows']) && is_array($decoded['columns']) && is_array($decoded['rows'])) {
+        return aiFormatTablaNutrimentalGrilla($decoded['columns'], $decoded['rows']);
+    }
+
+    return '';
+}
+
+/** Forma A de aiFormatTablaNutrimental(): lista plana de filas {label, porcion, total}. */
+function aiFormatTablaNutrimentalFilas(array $filas): string
+{
+    $lineas = [];
+    foreach ($filas as $fila) {
+        if (!is_array($fila)) {
+            continue;
+        }
+        $label = trim((string)($fila['label'] ?? ''));
+        if ($label === '') {
+            continue;
+        }
+        $porcion = trim((string)($fila['porcion'] ?? ''));
+        $total = trim((string)($fila['total'] ?? ''));
+        $valores = array_values(array_filter([
+            $porcion !== '' ? "por porcion {$porcion}" : '',
+            $total !== '' ? "total del envase {$total}" : '',
+        ]));
+        $lineas[] = $valores !== [] ? "- {$label}: " . implode(', ', $valores) : "- {$label}";
+    }
+
+    return implode("\n", $lineas);
+}
+
+/** Forma B de aiFormatTablaNutrimental(): grilla {columns, rows} con celdas por indice. */
+function aiFormatTablaNutrimentalGrilla(array $columnas, array $filas): string
+{
+    $encabezados = [];
+    foreach ($columnas as $col) {
+        if (is_array($col) && isset($col['value'])) {
+            $encabezados[(int)($col['indexColumn'] ?? count($encabezados))] = trim(str_replace("\n", ' ', (string)$col['value']));
+        }
+    }
+    ksort($encabezados);
+    $etiquetasColumnas = array_values($encabezados);
+
+    $lineas = [];
+    foreach ($filas as $fila) {
+        if (!is_array($fila)) {
+            continue;
+        }
+        $celdas = [];
+        foreach ($fila as $celda) {
+            if (is_array($celda) && isset($celda['indexColumn'])) {
+                $celdas[(int)$celda['indexColumn']] = trim(str_replace("\n", ' ', (string)($celda['value'] ?? '')));
+            }
+        }
+        ksort($celdas);
+        $celdas = array_values($celdas);
+        if (empty($celdas) || $celdas[0] === '') {
+            continue;
+        }
+
+        $etiquetaFila = $celdas[0];
+        $resto = [];
+        for ($i = 1, $total = count($celdas); $i < $total; $i++) {
+            $valor = $celdas[$i];
+            if ($valor === '') {
+                continue;
+            }
+            $nombreCol = $etiquetasColumnas[$i] ?? '';
+            $resto[] = $nombreCol !== '' ? "{$nombreCol}: {$valor}" : $valor;
+        }
+
+        $lineas[] = $resto !== [] ? "- {$etiquetaFila}: " . implode(', ', $resto) : "- {$etiquetaFila}";
+    }
+
+    return implode("\n", $lineas);
 }
 
 /**
