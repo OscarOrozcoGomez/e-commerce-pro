@@ -679,12 +679,12 @@ function sendSecurityHeaders(): void
     // en entregas.php para planear rutas). Un allowlist vacio "()" bloquea incluso al propio
     // origen, por lo que el permiso del navegador/telefono nunca llegaba a evaluarse.
     header('Permissions-Policy: geolocation=(self), microphone=(), camera=()');
-    // cdn.tiny.cloud: views/manage_blogs.php carga el editor TinyMCE desde ahi. Sin este
-    // dominio en script-src/script-src-elem, el <script src="https://cdn.tiny.cloud/..."> se
-    // bloquea por CSP y el tinymce.init() que le sigue en la misma etiqueta <script> lanza
-    // "tinymce is not defined", lo que aborta el resto de ese bloque -- incluido el listener de
-    // autogeneracion de slug -- para todo admin/encargado real, no solo en pruebas.
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
+    // cdn.jsdelivr.net: views/manage_blogs.php carga el bundle self-hosted de TinyMCE desde ahi
+    // (skins/plugins/themes se resuelven relativos a esa URL). Sin ese dominio en
+    // script-src/script-src-elem/style-src, el <script src> se bloquea por CSP y el
+    // tinymce.init() que le sigue lanza "tinymce is not defined", abortando el resto de ese
+    // bloque -- incluido el listener de autogeneracion de slug -- para todo admin/encargado real.
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 
     // Evitar que páginas autenticadas queden en cache del navegador/proxies compartidos.
