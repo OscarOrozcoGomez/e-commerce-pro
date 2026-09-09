@@ -6,6 +6,7 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
 require_once __DIR__ . '/../core/sale_delivery_mode.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
+require_once __DIR__ . '/../core/oferta_pricing.php';
 
 header('Content-Type: application/json');
 
@@ -470,14 +471,22 @@ try {
         $auditNotes = [];
 
         foreach ($productos as $producto) {
-            $stmtProducto = $pdo->prepare('SELECT nombre, COALESCE(precio_venta, 0) AS precio_venta, COALESCE(precio_costo, 0) AS precio_costo FROM productos WHERE id_producto = ? LIMIT 1');
+            $stmtProducto = $pdo->prepare('SELECT nombre, COALESCE(precio_venta, 0) AS precio_venta, COALESCE(precio_costo, 0) AS precio_costo, precio_oferta FROM productos WHERE id_producto = ? LIMIT 1');
             $stmtProducto->execute([$producto['id_producto']]);
             $productoDb = $stmtProducto->fetch(PDO::FETCH_ASSOC) ?: null;
             if (!$productoDb) {
                 throw new Exception('Producto no encontrado para el pedido.');
             }
 
-            $precioCatalogo = round((float)($productoDb['precio_venta'] ?? 0), 2);
+            // Si el producto esta en la categoria "Ofertas", el precio de catalogo es el
+            // precio de oferta (override manual o costo+$50). Asi el registro de linea
+            // guarda el precio correcto y no salta la alerta de "precio catalogo != capturado".
+            $precioCatalogo = round(ofertaPrecioEfectivo(
+                (float) ($productoDb['precio_venta'] ?? 0),
+                (float) ($productoDb['precio_costo'] ?? 0),
+                $productoDb['precio_oferta'] ?? null,
+                ofertaProductoEnOferta($pdo, (int) $producto['id_producto'])
+            ), 2);
             $costoUnitario = round((float)($productoDb['precio_costo'] ?? 0), 2);
             $descuentoLinea = round((float)$producto['descuento_linea'], 2);
             $porcentajeDescuento = $producto['subtotal_base'] > 0

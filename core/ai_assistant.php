@@ -11,6 +11,7 @@ require_once __DIR__ . '/pii_crypto.php';
 require_once __DIR__ . '/whatsapp_helper.php';
 require_once __DIR__ . '/whatsapp_link_utils.php';
 require_once __DIR__ . '/lote_caducidad_utils.php'; // loteDiasTratamiento() -- ver aiBuildRendimientoEstimadoTexto()
+require_once __DIR__ . '/oferta_pricing.php';       // ofertaPrecioEfectivo() -- precios de productos en la categoria "Ofertas"
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -1309,6 +1310,48 @@ function aiEscapeLikeTerm(string $term): string
     );
 }
 
+/**
+ * Devuelve, para los ids que esten en la categoria "Ofertas", su precio de oferta
+ * efectivo (override manual o costo + $50). Mapa id_producto => precio; los ids fuera
+ * de oferta no aparecen (el llamador usa el precio_venta normal).
+ *
+ * Va en su propia consulta para no acoplar aiSearchInventory / aiResolveOrderItems a
+ * producto_categorias; si esas tablas/columnas no existen, regresa [] sin romper.
+ *
+ * @param array<int,int|string> $idsProducto
+ * @return array<int,float>
+ */
+function aiResolverPreciosOferta(PDO $pdo, array $idsProducto): array
+{
+    $enOferta = ofertaFiltrarEnOferta($pdo, $idsProducto);
+    if (empty($enOferta)) {
+        return [];
+    }
+
+    $ids = array_keys($enOferta);
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+
+    try {
+        $stmt = $pdo->prepare("SELECT id_producto, precio_venta, precio_costo, precio_oferta FROM productos WHERE id_producto IN ($ph)");
+        $stmt->execute($ids);
+        $filas = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (PDOException $e) {
+        return [];
+    }
+
+    $precios = [];
+    foreach ($filas as $f) {
+        $precios[(int) $f['id_producto']] = ofertaPrecioEfectivo(
+            (float) $f['precio_venta'],
+            (float) ($f['precio_costo'] ?? 0),
+            $f['precio_oferta'] ?? null,
+            true
+        );
+    }
+
+    return $precios;
+}
+
 function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): array
 {
     $busqueda = trim($busquedaTexto);
@@ -1346,12 +1389,17 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    return array_map(static function (array $row): array {
+    // Precio de oferta: los productos en la categoria "Ofertas" se cotizan al precio
+    // rebajado (override manual o costo+$50). Se resuelve en un paso aparte para no
+    // acoplar la consulta principal a producto_categorias. Ver core/oferta_pricing.php.
+    $preciosOferta = aiResolverPreciosOferta($pdo, array_column($rows, 'id_producto'));
+
+    return array_map(static function (array $row) use ($preciosOferta): array {
         $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
         $producto = [
             'id_producto' => (int)$row['id_producto'],
             'nombre' => trim((string)$row['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
-            'precio' => round((float)$row['precio_venta'], 2),
+            'precio' => $preciosOferta[(int)$row['id_producto']] ?? round((float)$row['precio_venta'], 2),
             'stock' => max(0, (int)$row['stock_total']),
         ];
 
@@ -1721,10 +1769,14 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
             continue;
         }
 
+        // El pedido de Alex re-resuelve el precio contra la BD (el LLM nunca lo decide);
+        // si el producto esta en la categoria "Ofertas" se cobra el precio de oferta.
+        $preciosOferta = aiResolverPreciosOferta($pdo, [$idProducto]);
+
         $items[] = [
             'id_producto' => (int)$producto['id_producto'],
             'quantity' => $cantidad,
-            'precio' => round((float)$producto['precio_venta'], 2),
+            'precio' => $preciosOferta[$idProducto] ?? round((float)$producto['precio_venta'], 2),
             'nombre' => (string)$producto['nombre'],
         ];
     }

@@ -218,6 +218,25 @@ include __DIR__ . '/includes/header.php';
                             <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
                         </div>
 
+                        <div class="input-field">
+                            <input type="number" id="precio_oferta" name="precio_oferta" step="0.01" placeholder="Vacío = automático (costo + $50)">
+                            <label for="precio_oferta" class="active">Precio de Oferta</label>
+                            <span class="helper-text">Solo se usa cuando el producto está en la categoría "Ofertas". Vacío = costo + $50 automático.</span>
+                            <button type="button" id="btn-sugerir-oferta" class="btn-small grey lighten-1 black-text" style="margin-top:6px;">Sugerir (costo + $50)</button>
+                        </div>
+                        <script>
+                        (function(){
+                          var btn = document.getElementById('btn-sugerir-oferta');
+                          if (!btn) return;
+                          btn.addEventListener('click', function(){
+                            var costo = parseFloat(document.getElementById('precio_costo').value || '0') || 0;
+                            var of = document.getElementById('precio_oferta');
+                            of.value = (Math.round((costo + 50) * 100) / 100).toFixed(2);
+                            if (window.M && M.updateTextFields) M.updateTextFields();
+                          });
+                        })();
+                        </script>
+
                         <div class="input-field" style="margin-top: 30px; margin-bottom: 30px;">
                             <div class="switch">
                                 <label>
@@ -1108,6 +1127,7 @@ include __DIR__ . '/includes/header.php';
                 <td>
                     $${parseFloat(p.precio_venta).toFixed(2)}
                     ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
+                    ${parseFloat(p.precio_oferta) > 0 ? `<br><small class="orange-text text-darken-3" title="Precio de oferta (si está en la categoría Ofertas)">oferta $${parseFloat(p.precio_oferta).toFixed(2)}</small>` : ''}
                 </td>
                 <td>
                     <span class="badge ${p.estado === 'activo' ? 'blue' : 'grey darken-1'} white-text" style="float: none; border-radius: 4px;">
@@ -1264,6 +1284,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
+        document.getElementById('precio_oferta').value = (prod.precio_oferta === null || prod.precio_oferta === undefined || prod.precio_oferta === '') ? '' : prod.precio_oferta;
 
         // Manejo del Autocomplete de Padre
         const idPadreHidden = document.getElementById('id_padre');
@@ -1364,6 +1385,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('search_padre').value = '';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
+        document.getElementById('precio_oferta').value = '';
         document.getElementById('capsulas_por_envase').value = '';
         document.getElementById('porcion_capsulas').value = '';
 

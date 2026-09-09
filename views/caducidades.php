@@ -229,6 +229,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td style="white-space:nowrap;">
+                                    <a class="btn-flat btn-small green-text text-darken-2" title="Poner en oferta (1 clic): agrega el producto a la categoría Ofertas y le fija precio costo + $50" onclick="ponerEnOferta(<?php echo (int) $l['id_lote']; ?>, <?php echo (int) $l['id_producto']; ?>, '<?php echo addslashes(esc((string) ($l['producto_nombre'] ?? ''))); ?>')"><i class="material-icons">sell</i></a>
                                     <a class="btn-flat btn-small" title="Marcar en oferta / atendida" onclick="marcarOferta(<?php echo (int) $l['id_lote']; ?>)"><i class="material-icons">local_offer</i></a>
                                     <a class="btn-flat btn-small" title="Ver producto" href="<?php echo BASE_URL; ?>views/products.php?id_producto=<?php echo (int) $l['id_producto']; ?>"><i class="material-icons">open_in_new</i></a>
                                     <a class="btn-flat btn-small red-text" title="Retirar lote" onclick="retirarLote(<?php echo (int) $l['id_lote']; ?>)"><i class="material-icons">block</i></a>
@@ -262,6 +263,14 @@ include __DIR__ . '/includes/header.php';
     window.marcarOferta = function (id) {
         const enOferta = confirm('¿Ya lo pusiste en oferta? Aceptar = sí · Cancelar = solo marcar como revisado.');
         postLote({ accion: 'marcar_atendida', id_lote: id, en_oferta: enOferta ? '1' : '' }).then(tras);
+    };
+
+    // Un clic: mete el producto a la categoría "Ofertas" y le fija el precio de
+    // oferta (costo + $50) si no tiene uno manual. Desde ahí el catálogo, la ficha,
+    // el POS y Alex lo venden a ese precio.
+    window.ponerEnOferta = function (idLote, idProducto, nombre) {
+        if (!confirm('¿Poner "' + nombre + '" en Ofertas?\n\nSe agrega a la categoría Ofertas y se le fija el precio de oferta (costo + $50) si aún no tiene uno capturado a mano.')) return;
+        postLote({ accion: 'poner_producto_en_oferta', id_lote: idLote, id_producto: idProducto }).then(tras);
     };
 
     window.retirarLote = function (id) {

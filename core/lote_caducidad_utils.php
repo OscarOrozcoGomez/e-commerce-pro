@@ -41,6 +41,8 @@ if (!defined('LOTE_RUNWAY_URGENTE'))    { define('LOTE_RUNWAY_URGENTE', 120); }
 if (!defined('LOTE_RUNWAY_PLANIFICAR')) { define('LOTE_RUNWAY_PLANIFICAR', 270); }
 if (!defined('LOTE_RUNWAY_VIGILAR'))    { define('LOTE_RUNWAY_VIGILAR', 450); }
 
+require_once __DIR__ . '/oferta_pricing.php';
+
 /**
  * Estados de lote que se consideran "vivos" en la vista de caducidades.
  */
@@ -920,6 +922,69 @@ function loteMarcarAtendida(PDO $pdo, int $idLote, bool $enOferta, ?string $nota
         ':uid' => $userId,
         ':id' => $idLote,
     ]);
+}
+
+/**
+ * Pone un producto "en oferta" desde el panel de Caducidades, de un clic:
+ *  - lo agrega a la categoria de ofertas (la crea como "Oferta" si no existe),
+ *  - le fija precio_oferta = costo + $50 si aun no tiene un override manual,
+ *  - marca el lote como atendido y en_oferta (cuando se pasa un id_lote > 0).
+ *
+ * El catalogo, la ficha, el POS y Alex ya leen ese precio efectivo, asi que con
+ * este unico paso el producto pasa a venderse al precio de oferta en todos lados.
+ *
+ * @return array{nombre:string, precio_costo:float, precio_oferta:float, precio_venta:float, ya_estaba:bool, precio_fijado:bool}
+ */
+function lotePonerProductoEnOferta(PDO $pdo, int $idProducto, int $idLote, int $userId): array
+{
+    if ($idProducto <= 0) {
+        throw new InvalidArgumentException('Producto invalido.');
+    }
+
+    $stmt = $pdo->prepare('SELECT nombre, precio_costo, precio_venta, precio_oferta FROM productos WHERE id_producto = :id');
+    $stmt->execute([':id' => $idProducto]);
+    $prod = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($prod)) {
+        throw new InvalidArgumentException('El producto ya no existe.');
+    }
+
+    $catId = ofertaResolverCategoriaId($pdo, true);
+    if ($catId === null) {
+        throw new RuntimeException('No se pudo resolver la categoria de ofertas.');
+    }
+
+    // Alta idempotente en producto_categorias (check-then-insert: portable MySQL/SQLite).
+    $chk = $pdo->prepare('SELECT 1 FROM producto_categorias WHERE id_producto = :p AND id_categoria = :c');
+    $chk->execute([':p' => $idProducto, ':c' => $catId]);
+    $yaEstaba = $chk->fetchColumn() !== false;
+    if (!$yaEstaba) {
+        $pdo->prepare('INSERT INTO producto_categorias (id_producto, id_categoria) VALUES (:p, :c)')
+            ->execute([':p' => $idProducto, ':c' => $catId]);
+    }
+
+    // El precio sugerido solo se escribe si no hay un override manual todavia
+    // (no pisar un precio que alguien ya bajo a mano desde la ficha del producto).
+    $tienePrecio = $prod['precio_oferta'] !== null && (float) $prod['precio_oferta'] > 0;
+    $precioOferta = $tienePrecio
+        ? round((float) $prod['precio_oferta'], 2)
+        : ofertaPrecioSugerido((float) $prod['precio_costo']);
+    if (!$tienePrecio) {
+        $pdo->prepare('UPDATE productos SET precio_oferta = :po WHERE id_producto = :id')
+            ->execute([':po' => $precioOferta, ':id' => $idProducto]);
+    }
+
+    if ($idLote > 0) {
+        loteMarcarAtendida($pdo, $idLote, true, 'Producto puesto en oferta desde Caducidades', $userId);
+    }
+
+    return [
+        'nombre'        => (string) $prod['nombre'],
+        'precio_costo'  => round((float) $prod['precio_costo'], 2),
+        'precio_oferta' => $precioOferta,
+        'precio_venta'  => round((float) $prod['precio_venta'], 2),
+        'ya_estaba'     => $yaEstaba,
+        'precio_fijado' => !$tienePrecio,
+    ];
 }
 
 /**
