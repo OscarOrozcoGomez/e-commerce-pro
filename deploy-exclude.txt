@@ -13,6 +13,10 @@ phpunit.xml
 composer.phar
 deploy-exclude.txt
 
+# --- Tooling de IA / grafo de conocimiento: solo en el repo, NUNCA en prod ---
+CLAUDE.md
+graphify-out/
+
 # --- Front / E2E (viven en la rama automation) ---
 node_modules/
 test-results/

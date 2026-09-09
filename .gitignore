@@ -94,3 +94,6 @@ scripts/dev_*.php
 
 # Catalogo local (solo uso interno, no subir al repo)
 /assets/Cat*logo Beneficios Digital Blife.pdf
+
+# Graphify: grafo de conocimiento local (regenerable, no versionar)
+/graphify-out/
