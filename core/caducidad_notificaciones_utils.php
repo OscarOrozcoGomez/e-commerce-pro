@@ -56,6 +56,21 @@ function loteMarcarSeveridadesNotificadas(PDO $pdo, array $cambios): void
 }
 
 /**
+ * Sella la severidad ACTUAL de todos los lotes visibles sin enviar nada. Se corre
+ * una sola vez al activar el feature (scripts/caducidades_notificacion_cron.php
+ * --sellar-inicial) para no recibir un correo con decenas de lotes de golpe en la
+ * primera corrida: a partir de ahí el cron solo avisa de los que CAMBIEN.
+ *
+ * @return int cuántos lotes se sellaron
+ */
+function loteSellarSeveridadesActuales(PDO $pdo): int
+{
+    $lotes = loteFetchProyecciones($pdo)['lotes'];
+    loteMarcarSeveridadesNotificadas($pdo, $lotes);
+    return count($lotes);
+}
+
+/**
  * Mapa de severidad a {label, color} para pintar el correo.
  *
  * @return array{label:string,color:string}
@@ -81,8 +96,11 @@ function loteSeveridadInfo(?string $severidad): array
  * cambio de severidad, con los datos necesarios para decidir si ponerlo en
  * oferta o retirarlo (producto, lote, caducidad, cantidad, excedente, %
  * descuento sugerido, y si ya no es vendible a tiempo).
+ *
+ * @param int $omitidos  lotes que cambiaron pero no caben en el correo (se lista
+ *   solo un tope; ver LOTE_NOTIF_MAX_TARJETAS). 0 = se listan todos.
  */
-function loteBuildNotificacionHtml(array $cambios): string
+function loteBuildNotificacionHtml(array $cambios, int $omitidos = 0): string
 {
     $filas = '';
     $n = 0;
@@ -129,8 +147,13 @@ function loteBuildNotificacionHtml(array $cambios): string
             </div>';
     }
 
-    $total = count($cambios);
+    $total = count($cambios) + max(0, $omitidos);
     $tituloResumen = $total === 1 ? '1 lote cambió de estado' : "{$total} lotes cambiaron de estado";
+
+    $masHtml = $omitidos > 0
+        ? '<p style="color:#90a4ae;font-size:12px;margin:4px 0 0;">… y ' . (int) $omitidos
+            . ' lote' . ($omitidos === 1 ? '' : 's') . ' más. Abre "Gestionar Productos" para ver la lista completa.</p>'
+        : '';
 
     return '
     <div style="background:#f4f6f7;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
@@ -142,6 +165,7 @@ function loteBuildNotificacionHtml(array $cambios): string
             <div style="padding:20px 24px;">
                 <p style="color:#546e7a;font-size:13px;margin:0 0 16px;">Revisa estos lotes y decide si conviene ponerlos en oferta, venderlos rápido o retirarlos.</p>
                 ' . $filas . '
+                ' . $masHtml . '
                 <div style="margin-top:20px;text-align:center;">
                     <a href="' . esc(appAbsoluteAssetUrl('views/products.php')) . '" style="display:inline-block;background:#ef6c00;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">Ir a Gestionar Productos</a>
                 </div>
@@ -150,12 +174,22 @@ function loteBuildNotificacionHtml(array $cambios): string
     </div>';
 }
 
+if (!defined('LOTE_NOTIF_MAX_TARJETAS')) {
+    // Tope de lotes detallados en un solo correo. Si cambian más a la vez (p.ej.
+    // una primera corrida sin sellar, o muchas caducidades juntas) el correo
+    // lista los N más urgentes y "… y X más" en vez de un muro de decenas.
+    define('LOTE_NOTIF_MAX_TARJETAS', 30);
+}
+
 /**
  * Orquesta todo: detecta cambios, arma y envia el correo a los destinatarios
  * activos, y (salvo dry-run) marca los lotes como notificados para no
  * repetir el aviso. Nunca lanza excepcion hacia afuera (igual que
  * sendNewOrderNotificationEmails()) para que un cron no truene por un fallo
  * de correo.
+ *
+ * dry-run: NO llama al mailer y NO marca nada; solo cuenta los cambios
+ * detectados (para revisar qué haría el cron sin efectos secundarios).
  *
  * @param callable|null $mailer  fn(string $correo, string $asunto, string $html): bool
  *   (inyectable para pruebas; por defecto appSendHtmlEmail())
@@ -172,11 +206,21 @@ function loteEnviarNotificacionesDeCambios(PDO $pdo, ?callable $mailer = null, b
         }
         $resultado['cambios'] = count($cambios);
 
+        if ($dryRun) {
+            // Sin efectos: ni mailer ni marcado. Solo el conteo de arriba.
+            return $resultado;
+        }
+
         $destinatarios = dbGetCaducidadNotificationEmails($pdo, true);
         if ($destinatarios !== []) {
             $total = count($cambios);
+            // Ya vienen ordenados por urgencia (loteFetchProyecciones); si son
+            // muchos, se detallan solo los primeros y el resto va como "… y X más".
+            $detallados = array_slice($cambios, 0, LOTE_NOTIF_MAX_TARJETAS);
+            $omitidos = max(0, $total - count($detallados));
+
             $asunto = $total === 1 ? '1 lote cambió de estado de caducidad' : "{$total} lotes cambiaron de estado de caducidad";
-            $html = loteBuildNotificacionHtml($cambios);
+            $html = loteBuildNotificacionHtml($detallados, $omitidos);
             $enviar = $mailer ?? 'appSendHtmlEmail';
 
             foreach ($destinatarios as $correo) {
@@ -189,9 +233,7 @@ function loteEnviarNotificacionesDeCambios(PDO $pdo, ?callable $mailer = null, b
             }
         }
 
-        if (!$dryRun) {
-            loteMarcarSeveridadesNotificadas($pdo, $cambios);
-        }
+        loteMarcarSeveridadesNotificadas($pdo, $cambios);
     } catch (Throwable $e) {
         error_log('WARNING: No fue posible enviar notificaciones de caducidad: ' . $e->getMessage());
     }

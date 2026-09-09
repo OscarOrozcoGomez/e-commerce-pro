@@ -352,4 +352,66 @@ final class CaducidadNotificacionesUtilsTest extends TestCase
 
         return (int) $this->pdo->lastInsertId();
     }
+
+    /* ---- dry-run sin efectos, sellado inicial y tope del correo -------- */
+
+    public function testDryRunNoLlamaAlMailerNiMarca(): void
+    {
+        $this->seedProducto(1, 'Dry sin efectos');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(10), 40);
+        $this->seedCorreo('a@correo.com', true);
+
+        $llamadas = 0;
+        $mailer = function () use (&$llamadas) { $llamadas++; return true; };
+
+        $res = loteEnviarNotificacionesDeCambios($this->pdo, $mailer, true);
+
+        $this->assertSame(1, $res['cambios']);
+        $this->assertSame(0, $res['correos_enviados']);
+        $this->assertSame(0, $llamadas, 'dry-run NO debe invocar al mailer (era un bug: mandaba correos reales)');
+        $this->assertCount(1, loteDetectarCambiosDeSeveridad($this->pdo), 'y NO marca: el cambio sigue pendiente');
+    }
+
+    public function testSellarSeveridadesActualesMarcaTodoSinEnviar(): void
+    {
+        $this->seedProducto(1, 'A');
+        $this->seedProducto(2, 'B');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(1, 'L1', $this->enDias(10), 40);
+        $this->seedLote(2, 'L2', $this->enDias(150), 3);
+
+        $this->assertCount(2, loteDetectarCambiosDeSeveridad($this->pdo), 'precondición: 2 cambios pendientes');
+
+        $sellados = loteSellarSeveridadesActuales($this->pdo);
+
+        $this->assertSame(2, $sellados);
+        $this->assertSame([], loteDetectarCambiosDeSeveridad($this->pdo), 'tras sellar, nada pendiente');
+    }
+
+    public function testCorreoTopaTarjetasYResumeElResto(): void
+    {
+        $n = LOTE_NOTIF_MAX_TARJETAS + 3; // 33
+        for ($i = 1; $i <= $n; $i++) {
+            $this->seedProducto($i, "Prod $i");
+            $this->seedLote($i, "L$i", $this->enDias(10 + $i), 5); // sin ventas -> 'sin_historico' (cambio vs NULL)
+        }
+        $this->seedCorreo('a@correo.com', true);
+
+        $htmlCapturado = '';
+        $mailer = function (string $correo, string $asunto, string $html) use (&$htmlCapturado) {
+            $htmlCapturado = $html;
+            return true;
+        };
+
+        $res = loteEnviarNotificacionesDeCambios($this->pdo, $mailer);
+
+        $this->assertSame($n, $res['cambios']);
+        $this->assertSame(1, $res['correos_enviados']);
+        $tarjetas = substr_count($htmlCapturado, 'border-radius:8px;margin-bottom:12px');
+        $this->assertSame(LOTE_NOTIF_MAX_TARJETAS, $tarjetas, 'solo se detallan las primeras N tarjetas');
+        $this->assertStringContainsString('y 3 lotes más', $htmlCapturado);
+        $this->assertStringContainsString('33 lotes cambiaron de estado', $htmlCapturado);
+    }
 }
