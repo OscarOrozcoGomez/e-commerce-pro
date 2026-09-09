@@ -26,6 +26,20 @@ if (!defined('LOTE_DIAS_URGENTE')) {
 if (!defined('LOTE_DIAS_PLANIFICAR')) {
     define('LOTE_DIAS_PLANIFICAR', 180);  // 90-180 -> planificar ; >=180 -> vigilar
 }
+/*
+ * Piso de severidad por RUNWAY real (dias_efectivos_venta = caducidad - dias de
+ * tratamiento que rinde el envase). Manda la cercania a quedarse sin margen para
+ * vender, aunque el modelo de velocidad diga que el lote se coloca a tiempo:
+ *   < 45      -> critico
+ *   45 - 119  -> urgente
+ *   120 - 269 -> planificar
+ *   270 - 449 -> vigilar
+ *   >= 450    -> ok
+ */
+if (!defined('LOTE_RUNWAY_CRITICO'))    { define('LOTE_RUNWAY_CRITICO', 45); }
+if (!defined('LOTE_RUNWAY_URGENTE'))    { define('LOTE_RUNWAY_URGENTE', 120); }
+if (!defined('LOTE_RUNWAY_PLANIFICAR')) { define('LOTE_RUNWAY_PLANIFICAR', 270); }
+if (!defined('LOTE_RUNWAY_VIGILAR'))    { define('LOTE_RUNWAY_VIGILAR', 450); }
 
 /**
  * Estados de lote que se consideran "vivos" en la vista de caducidades.
@@ -212,6 +226,44 @@ function loteSeveridad(int $diasHastaCaducar, ?int $excedente, int $cantidadRest
 }
 
 /**
+ * Severidad SOLO por el runway real (dias efectivos para colocar el lote), sin
+ * mirar velocidad ni excedente. Es el "piso": un lote con poco margen se marca
+ * fuerte aunque el modelo diga que se vende.
+ */
+function loteSeveridadPorRunway(int $diasEfectivos): string
+{
+    if ($diasEfectivos < LOTE_RUNWAY_CRITICO) {
+        return 'critico';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_URGENTE) {
+        return 'urgente';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_PLANIFICAR) {
+        return 'planificar';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_VIGILAR) {
+        return 'vigilar';
+    }
+
+    return 'ok';
+}
+
+/**
+ * Devuelve la peor de dos severidades segun este orden de gravedad:
+ * ok < vigilar < sin_historico < planificar < sin_rotacion < urgente < critico < caducado.
+ */
+function loteSeveridadPeor(string $a, string $b): string
+{
+    static $rank = [
+        'ok' => 0, 'vigilar' => 1, 'sin_historico' => 2, 'planificar' => 3,
+        'sin_rotacion' => 4, 'urgente' => 5, 'critico' => 6, 'caducado' => 7,
+    ];
+    $ra = $rank[$a] ?? 0;
+    $rb = $rank[$b] ?? 0;
+    return $ra >= $rb ? $a : $b;
+}
+
+/**
  * Dias de tratamiento que rinde un envase = capsulas por envase / capsulas por
  * porcion (toma). Ej: 90 capsulas / 1 por dia = 90 dias. null si falta el dato.
  */
@@ -284,6 +336,15 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
         $margenConsumo = $diasTratamiento !== null ? $diasHastaCaducar - $diasTratamiento : null;
         $noVendible = $margenConsumo !== null && $cantRestante > 0 && $diasHastaCaducar >= 0 && $margenConsumo < 0;
 
+        // Horizonte REAL para colocar cada unidad: si el envase rinde N dias, la
+        // ultima fecha en que un cliente puede comprarlo y terminarselo antes de que
+        // caduque es (caducidad - N). Vender despues de esa fecha = el cliente
+        // consume producto vencido. Por eso la proyeccion y la severidad se miden
+        // contra este horizonte, no contra la fecha de caducidad "cruda": asi la
+        // alerta salta con la anticipacion suficiente para ponerlo en oferta.
+        // Sin datos de capsulas/porcion, el horizonte es la propia fecha de caducidad.
+        $diasEfectivos = $margenConsumo !== null ? max(0, $margenConsumo) : $diasHastaCaducar;
+
         $excedente = null;
         $diasParaAgotar = null;
         $velObjetivo = null;
@@ -304,20 +365,32 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             $excedente = null; // no se puede proyectar
         } elseif ($sinRotacion || $velDiaria <= 0) {
             $excedente = $cantRestante;
-            $velObjetivo = $cantRestante / max(1, $diasHastaCaducar);
+            $velObjetivo = $cantRestante / max(1, $diasEfectivos);
         } else {
-            $demandaAntes = max(0.0, $velDiaria * $diasHastaCaducar);
+            $demandaAntes = max(0.0, $velDiaria * $diasEfectivos);
             $vendidasATiempo = max(0.0, min((float) $cantRestante, $demandaAntes - $posicion));
             $excedente = (int) ceil($cantRestante - $vendidasATiempo);
             $excedente = max(0, $excedente);
             $diasParaAgotar = ($posicion + $cantRestante) / $velDiaria;
-            $velObjetivo = ($posicion + $cantRestante) / max(1, $diasHastaCaducar);
+            $velObjetivo = ($posicion + $cantRestante) / max(1, $diasEfectivos);
             $consumidoPorEsteLote = $vendidasATiempo;
         }
 
-        $severidad = loteSeveridad($diasHastaCaducar, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
+        // La severidad se mide contra el horizonte efectivo (ver arriba), salvo
+        // 'caducado', que depende de la fecha real ya cumplida.
+        $severidad = $diasHastaCaducar < 0
+            ? 'caducado'
+            : loteSeveridad($diasEfectivos, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
+
+        // Piso por RUNWAY: la cercania a quedarse sin margen real para vender manda,
+        // aunque el modelo diga que el lote se coloca a tiempo. Se toma la PEOR entre
+        // lo que dio el modelo y lo que dicta el runway. Nunca baja una severidad.
+        if ($diasHastaCaducar >= 0 && $cantRestante > 0 && $severidad !== 'caducado') {
+            $severidad = loteSeveridadPeor($severidad, loteSeveridadPorRunway($diasEfectivos));
+        }
+
         $descuento = ($excedente !== null && $excedente > 0)
-            ? loteDescuentoSugerido($excedente, $cantRestante, $diasHastaCaducar)
+            ? loteDescuentoSugerido($excedente, $cantRestante, $diasEfectivos)
             : 0;
 
         if ($noVendible) {
@@ -336,6 +409,7 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             'ritmo_ratio' => ($velObjetivo !== null && $velObjetivo > 0) ? round($velDiaria / $velObjetivo, 2) : null,
             'dias_tratamiento_envase' => $diasTratamiento,
             'margen_consumo_dias' => $margenConsumo,
+            'dias_efectivos_venta' => $diasHastaCaducar < 0 ? $diasHastaCaducar : $diasEfectivos,
             'no_vendible' => $noVendible,
             'severidad' => $severidad,
             'descuento_sugerido_pct' => $descuento,
@@ -444,10 +518,12 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
         $lotes = array_values(array_filter($lotes, static fn($l) => $l['severidad'] === $sev));
     }
 
+    // Orden de exhibicion: primero los que tienen menos margen REAL para venderse
+    // (horizonte efectivo), con la fecha de caducidad cruda como desempate.
     usort($lotes, static function (array $a, array $b): int {
-        $da = $a['dias_hasta_caducar'];
-        $db = $b['dias_hasta_caducar'];
-        return $da <=> $db;
+        $ea = $a['dias_efectivos_venta'] ?? $a['dias_hasta_caducar'];
+        $eb = $b['dias_efectivos_venta'] ?? $b['dias_hasta_caducar'];
+        return [$ea, $a['dias_hasta_caducar']] <=> [$eb, $b['dias_hasta_caducar']];
     });
 
     return ['lotes' => $lotes, 'ventana_dias' => LOTE_VENTANA_DIAS];
@@ -485,9 +561,11 @@ function loteResumenSeveridad(PDO $pdo): array
             $conteo[$sev]++;
         }
         if (in_array($sev, $urgentes, true)) {
-            if ($masUrgente === null
-                || (int) $l['dias_hasta_caducar'] < (int) $masUrgente['dias_hasta_caducar']
-            ) {
+            $efActual = (int) ($l['dias_efectivos_venta'] ?? $l['dias_hasta_caducar']);
+            $efPrevio = $masUrgente === null
+                ? PHP_INT_MAX
+                : (int) ($masUrgente['dias_efectivos_venta'] ?? $masUrgente['dias_hasta_caducar']);
+            if ($efActual < $efPrevio) {
                 $masUrgente = $l;
             }
         }

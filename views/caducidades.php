@@ -172,7 +172,7 @@ include __DIR__ . '/includes/header.php';
                             <th>Producto</th>
                             <th>Lote</th>
                             <th>Caduca</th>
-                            <th class="right-align">Días</th>
+                            <th class="right-align" title="Días que quedan para colocar el lote: si el envase rinde N días de tratamiento, después de (caducidad − N) un cliente ya no lo termina a tiempo">Días p/ vender</th>
                             <th class="right-align">Restante</th>
                             <th class="right-align">Vel/día</th>
                             <th class="right-align">Excedente</th>
@@ -199,7 +199,17 @@ include __DIR__ . '/includes/header.php';
                                     <?php echo esc((string) ($l['fecha_caducidad'] ?? '')); ?>
                                     <?php if (!empty($l['caducidad_aproximada'])): ?><small class="grey-text">(aprox)</small><?php endif; ?>
                                 </td>
-                                <td class="right-align"><?php echo (int) $l['dias_hasta_caducar']; ?></td>
+                                <td class="right-align">
+                                    <?php
+                                    $ef = $l['dias_efectivos_venta'] ?? $l['dias_hasta_caducar'];
+                                    if (($l['dias_tratamiento_envase'] ?? null) !== null && (int) $ef !== (int) $l['dias_hasta_caducar']):
+                                    ?>
+                                        <strong><?php echo (int) $ef; ?></strong>
+                                        <br><small class="grey-text" title="El envase rinde <?php echo (int) $l['dias_tratamiento_envase']; ?> días de tratamiento">caduca en <?php echo (int) $l['dias_hasta_caducar']; ?></small>
+                                    <?php else: ?>
+                                        <?php echo (int) $l['dias_hasta_caducar']; ?>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="right-align"><?php echo (int) $l['cantidad_restante']; ?></td>
                                 <td class="right-align"><?php echo number_format((float) ($l['vel_diaria'] ?? 0), 2); ?></td>
                                 <td class="right-align">

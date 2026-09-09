@@ -131,6 +131,33 @@ final class CaducidadNotificacionesUtilsTest extends TestCase
         $this->assertStringContainsString('NO VENDIBLE A TIEMPO', $html);
     }
 
+    public function testBuildNotificacionHtmlExplicaElMargenRealCuandoHayDatosDeCapsulas(): void
+    {
+        // Envase rinde 90 dias, caduca en 200 -> quedan ~110 dias para colocarlo.
+        $this->seedProducto(1, 'Con capsulas', null, 90, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(200), 5);
+
+        $cambios = loteDetectarCambiosDeSeveridad($this->pdo);
+        $html = loteBuildNotificacionHtml($cambios);
+
+        $this->assertStringContainsString('quedan ~110 días para colocarlo', $html);
+        $this->assertStringContainsString('el envase rinde 90', $html);
+    }
+
+    public function testBuildNotificacionHtmlSinCapsulasUsaDiasRestantesNormales(): void
+    {
+        $this->seedProducto(1, 'Sin capsulas');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(75), 5);
+
+        $cambios = loteDetectarCambiosDeSeveridad($this->pdo);
+        $html = loteBuildNotificacionHtml($cambios);
+
+        $this->assertStringContainsString('75 días restantes', $html);
+        $this->assertStringNotContainsString('para colocarlo', $html);
+    }
+
     public function testEnviarNotificacionesSinCambiosNoLlamaAlMailer(): void
     {
         $this->seedProducto(1, 'Sin cambios');

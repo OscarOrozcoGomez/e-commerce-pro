@@ -109,7 +109,17 @@ function loteBuildNotificacionHtml(array $cambios, int $omitidos = 0): string
         $antes = loteSeveridadInfo($c['severidad_anterior'] ?? null);
         $ahora = loteSeveridadInfo($c['severidad'] ?? null);
         $dias = (int) ($c['dias_hasta_caducar'] ?? 0);
-        $diasTexto = $dias < 0 ? (abs($dias) . ' días de caducado') : ($dias . ' días restantes');
+        $diasEfectivos = isset($c['dias_efectivos_venta']) ? (int) $c['dias_efectivos_venta'] : $dias;
+        $trat = isset($c['dias_tratamiento_envase']) && $c['dias_tratamiento_envase'] !== null
+            ? (int) $c['dias_tratamiento_envase'] : null;
+        if ($dias < 0) {
+            $diasTexto = abs($dias) . ' días de caducado';
+        } elseif ($trat !== null && $diasEfectivos !== $dias) {
+            $diasTexto = 'quedan ~' . max(0, $diasEfectivos) . ' días para colocarlo (caduca en ' . $dias
+                . ', el envase rinde ' . $trat . ')';
+        } else {
+            $diasTexto = $dias . ' días restantes';
+        }
         $excedente = $c['excedente_proyectado'] ?? null;
         $descuento = (int) ($c['descuento_sugerido_pct'] ?? 0);
         $noVendible = !empty($c['no_vendible']);
