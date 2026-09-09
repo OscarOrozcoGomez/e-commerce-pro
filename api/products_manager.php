@@ -257,6 +257,11 @@ try {
             $porcionCapsulas = isset($data['porcion_capsulas']) && $data['porcion_capsulas'] !== ''
                 ? max(0, (int)$data['porcion_capsulas']) : null;
 
+            // Precio de oferta: override manual opcional. Vacio => NULL (el catalogo usa
+            // costo + $50 automatico cuando el producto esta en la categoria "Ofertas").
+            $precioOferta = isset($data['precio_oferta']) && trim((string)$data['precio_oferta']) !== ''
+                ? round(max(0.0, (float)$data['precio_oferta']), 2) : null;
+
             if ($id > 0) {
                 // EDITAR
                 $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras,
@@ -264,7 +269,8 @@ try {
                         `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad,
                         `capsulas_por_envase` = :capsulas_por_envase, `porcion_capsulas` = :porcion_capsulas,
                         `id_padre` = :id_padre, `precio_costo` = :precio_costo,
-                        `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion, `estado` = :estado
+                        `precio_venta` = :precio_venta, `precio_comparacion` = :precio_comparacion,
+                        `precio_oferta` = :precio_oferta, `estado` = :estado
                         WHERE id_producto = :id";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
@@ -278,12 +284,13 @@ try {
                     ':id_padre' => !empty($data['id_padre']) ? (int)$data['id_padre'] : null,
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0, ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
+                    ':precio_oferta' => $precioOferta,
                     ':estado' => $estado, ':id' => $id
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `capsulas_por_envase`, `porcion_capsulas`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `estado`)
-                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :capsulas_por_envase, :porcion_capsulas, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `capsulas_por_envase`, `porcion_capsulas`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `precio_oferta`, `estado`)
+                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :capsulas_por_envase, :porcion_capsulas, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :precio_oferta, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '',
@@ -302,6 +309,7 @@ try {
                     ':precio_costo' => $data['precio_costo'] ?? 0,
                     ':precio_venta' => $data['precio_venta'] ?? 0,
                     ':precio_comparacion' => $data['precio_comparacion'] ?? 0,
+                    ':precio_oferta' => $precioOferta,
                     ':estado' => $estado
                 ]);
                 $id = (int)$pdo->lastInsertId();

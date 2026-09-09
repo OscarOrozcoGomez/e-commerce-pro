@@ -104,6 +104,25 @@ try {
             echo json_encode(['success' => true, 'message' => 'Alerta marcada como atendida']);
             break;
 
+        case 'poner_producto_en_oferta':
+            $res = lotePonerProductoEnOferta(
+                $pdo,
+                (int) ($data['id_producto'] ?? 0),
+                (int) ($data['id_lote'] ?? 0),
+                $userId
+            );
+            logAudit(
+                'PRODUCTO_EN_OFERTA',
+                'productos',
+                (int) ($data['id_producto'] ?? 0),
+                'Precio de oferta $' . number_format($res['precio_oferta'], 2) . ' - ' . $res['nombre']
+            );
+            $msg = $res['ya_estaba']
+                ? 'Ya estaba en Ofertas. Precio de oferta: $' . number_format($res['precio_oferta'], 2)
+                : $res['nombre'] . ' en Ofertas a $' . number_format($res['precio_oferta'], 2);
+            echo json_encode(['success' => true, 'message' => $msg, 'data' => $res]);
+            break;
+
         case 'eliminar':
             loteEliminar($pdo, (int) ($data['id_lote'] ?? 0));
             logAudit('LOTE_ELIMINADO', 'lotes_inventario', (int) ($data['id_lote'] ?? 0), 'Lote eliminado');
