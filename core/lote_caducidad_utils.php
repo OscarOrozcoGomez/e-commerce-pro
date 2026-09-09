@@ -26,12 +26,20 @@ if (!defined('LOTE_DIAS_URGENTE')) {
 if (!defined('LOTE_DIAS_PLANIFICAR')) {
     define('LOTE_DIAS_PLANIFICAR', 180);  // 90-180 -> planificar ; >=180 -> vigilar
 }
-if (!defined('LOTE_DIAS_MARGEN_CORTO')) {
-    // Aunque el modelo proyecte que el lote se vende a tiempo, si el margen REAL
-    // para colocarlo (horizonte efectivo) es menor a esto no se muestra "Ok"
-    // plano: se marca "vigilar" para que no pase desapercibido en la recta final.
-    define('LOTE_DIAS_MARGEN_CORTO', 60);
-}
+/*
+ * Piso de severidad por RUNWAY real (dias_efectivos_venta = caducidad - dias de
+ * tratamiento que rinde el envase). Manda la cercania a quedarse sin margen para
+ * vender, aunque el modelo de velocidad diga que el lote se coloca a tiempo:
+ *   < 45      -> critico
+ *   45 - 119  -> urgente
+ *   120 - 269 -> planificar
+ *   270 - 449 -> vigilar
+ *   >= 450    -> ok
+ */
+if (!defined('LOTE_RUNWAY_CRITICO'))    { define('LOTE_RUNWAY_CRITICO', 45); }
+if (!defined('LOTE_RUNWAY_URGENTE'))    { define('LOTE_RUNWAY_URGENTE', 120); }
+if (!defined('LOTE_RUNWAY_PLANIFICAR')) { define('LOTE_RUNWAY_PLANIFICAR', 270); }
+if (!defined('LOTE_RUNWAY_VIGILAR'))    { define('LOTE_RUNWAY_VIGILAR', 450); }
 
 /**
  * Estados de lote que se consideran "vivos" en la vista de caducidades.
@@ -218,6 +226,44 @@ function loteSeveridad(int $diasHastaCaducar, ?int $excedente, int $cantidadRest
 }
 
 /**
+ * Severidad SOLO por el runway real (dias efectivos para colocar el lote), sin
+ * mirar velocidad ni excedente. Es el "piso": un lote con poco margen se marca
+ * fuerte aunque el modelo diga que se vende.
+ */
+function loteSeveridadPorRunway(int $diasEfectivos): string
+{
+    if ($diasEfectivos < LOTE_RUNWAY_CRITICO) {
+        return 'critico';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_URGENTE) {
+        return 'urgente';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_PLANIFICAR) {
+        return 'planificar';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_VIGILAR) {
+        return 'vigilar';
+    }
+
+    return 'ok';
+}
+
+/**
+ * Devuelve la peor de dos severidades segun este orden de gravedad:
+ * ok < vigilar < sin_historico < planificar < sin_rotacion < urgente < critico < caducado.
+ */
+function loteSeveridadPeor(string $a, string $b): string
+{
+    static $rank = [
+        'ok' => 0, 'vigilar' => 1, 'sin_historico' => 2, 'planificar' => 3,
+        'sin_rotacion' => 4, 'urgente' => 5, 'critico' => 6, 'caducado' => 7,
+    ];
+    $ra = $rank[$a] ?? 0;
+    $rb = $rank[$b] ?? 0;
+    return $ra >= $rb ? $a : $b;
+}
+
+/**
  * Dias de tratamiento que rinde un envase = capsulas por envase / capsulas por
  * porcion (toma). Ej: 90 capsulas / 1 por dia = 90 dias. null si falta el dato.
  */
@@ -336,15 +382,11 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             ? 'caducado'
             : loteSeveridad($diasEfectivos, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
 
-        // Piso de vigilancia: un lote que SI se proyecta vender pero al que le queda
-        // poco margen real para colocarse no debe verse verde plano ("todo tranquilo
-        // para siempre"). Solo eleva 'ok'; nunca degrada una severidad mas alta.
-        if ($severidad === 'ok'
-            && $cantRestante > 0
-            && $diasHastaCaducar >= 0
-            && $diasEfectivos < LOTE_DIAS_MARGEN_CORTO
-        ) {
-            $severidad = 'vigilar';
+        // Piso por RUNWAY: la cercania a quedarse sin margen real para vender manda,
+        // aunque el modelo diga que el lote se coloca a tiempo. Se toma la PEOR entre
+        // lo que dio el modelo y lo que dicta el runway. Nunca baja una severidad.
+        if ($diasHastaCaducar >= 0 && $cantRestante > 0 && $severidad !== 'caducado') {
+            $severidad = loteSeveridadPeor($severidad, loteSeveridadPorRunway($diasEfectivos));
         }
 
         $descuento = ($excedente !== null && $excedente > 0)
@@ -519,9 +561,11 @@ function loteResumenSeveridad(PDO $pdo): array
             $conteo[$sev]++;
         }
         if (in_array($sev, $urgentes, true)) {
-            if ($masUrgente === null
-                || (int) $l['dias_hasta_caducar'] < (int) $masUrgente['dias_hasta_caducar']
-            ) {
+            $efActual = (int) ($l['dias_efectivos_venta'] ?? $l['dias_hasta_caducar']);
+            $efPrevio = $masUrgente === null
+                ? PHP_INT_MAX
+                : (int) ($masUrgente['dias_efectivos_venta'] ?? $masUrgente['dias_hasta_caducar']);
+            if ($efActual < $efPrevio) {
                 $masUrgente = $l;
             }
         }
