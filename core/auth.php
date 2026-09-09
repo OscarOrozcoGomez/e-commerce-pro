@@ -1051,6 +1051,31 @@ function sendPasswordResetEmail(string $email, string $token, bool $bienvenida =
 }
 
 /**
+ * Dominio para el remitente (From / Return-Path) de los correos salientes.
+ *
+ * En contexto web sale de $_SERVER['HTTP_HOST']. En CLI/cron ese está VACÍO: sin
+ * fallback el envelope-from queda como "no-reply@" (sin dominio) y el relay lo
+ * rechaza con 501 -- por eso los correos disparados desde un cron nunca llegaban.
+ * El fallback lee una variable de entorno (APP_EMAIL_FROM_DOMAIN / APP_PRIMARY_DOMAIN
+ * / MAIL_DOMAIN); el propio cron también puede fijar $_SERVER['HTTP_HOST'] antes
+ * del require (opción --host=dominio).
+ */
+function appOutboundEmailDomain(): string
+{
+    $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host === '') {
+        foreach (['APP_EMAIL_FROM_DOMAIN', 'APP_PRIMARY_DOMAIN', 'MAIL_DOMAIN'] as $k) {
+            $v = $_SERVER[$k] ?? $_ENV[$k] ?? getenv($k);
+            if (is_string($v) && trim($v) !== '') {
+                $host = trim($v);
+                break;
+            }
+        }
+    }
+    return str_replace('www.', '', $host);
+}
+
+/**
  * Envía un correo de texto plano reutilizando la misma lógica para todo el sistema:
  * en localhost queda registrado en mail_log.txt (para pruebas en XAMPP) y en el
  * host real se envía con mail() usando un remitente del propio dominio.
@@ -1076,7 +1101,11 @@ function appSendPlainTextEmail(string $email, string $subject, string $message):
 
     // LÓGICA PARA EL HOST REAL
     // Es vital que el remitente (From) sea un correo de tu dominio para evitar el SPAM
-    $domain = str_replace('www.', '', $host);
+    $domain = appOutboundEmailDomain();
+    if ($domain === '') {
+        error_log('appSendPlainTextEmail: sin dominio para el remitente (HTTP_HOST vacío y APP_EMAIL_FROM_DOMAIN sin definir); no se envió a ' . $email);
+        return false;
+    }
     $fromEmail = "no-reply@" . $domain;
     $fromName = "Belleza y Bienestar";
 
@@ -1118,7 +1147,11 @@ function appSendHtmlEmail(string $email, string $subject, string $htmlBody): boo
         return true;
     }
 
-    $domain = str_replace('www.', '', $host);
+    $domain = appOutboundEmailDomain();
+    if ($domain === '') {
+        error_log('appSendHtmlEmail: sin dominio para el remitente (HTTP_HOST vacío y APP_EMAIL_FROM_DOMAIN sin definir); no se envió a ' . $email);
+        return false;
+    }
     $fromEmail = "no-reply@" . $domain;
     $fromName = "Belleza y Bienestar";
 

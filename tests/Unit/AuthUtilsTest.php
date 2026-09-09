@@ -51,6 +51,29 @@ final class AuthUtilsTest extends TestCase
         $this->assertSame('mi-producto-500mg', slugify('Mi producto 500mg'));
     }
 
+    public function testAppOutboundEmailDomainUsaHttpHostYQuitaWww(): void
+    {
+        $_SERVER['HTTP_HOST'] = 'www.bellezaybienestar.com.mx';
+        $this->assertSame('bellezaybienestar.com.mx', appOutboundEmailDomain());
+    }
+
+    public function testAppOutboundEmailDomainCaeAlEnvCuandoNoHayHttpHost(): void
+    {
+        unset($_SERVER['HTTP_HOST']); // contexto CLI/cron
+        $_SERVER['APP_EMAIL_FROM_DOMAIN'] = 'ejemplo.mx';
+        try {
+            $this->assertSame('ejemplo.mx', appOutboundEmailDomain());
+        } finally {
+            unset($_SERVER['APP_EMAIL_FROM_DOMAIN']);
+        }
+    }
+
+    public function testAppOutboundEmailDomainVacioSinHostNiEnv(): void
+    {
+        unset($_SERVER['HTTP_HOST'], $_SERVER['APP_EMAIL_FROM_DOMAIN'], $_SERVER['APP_PRIMARY_DOMAIN'], $_SERVER['MAIL_DOMAIN']);
+        $this->assertSame('', appOutboundEmailDomain());
+    }
+
     public function testSlugifyFallbacksToProductoWhenInputIsNotUsable(): void
     {
         $this->assertSame('producto', slugify('***'));
