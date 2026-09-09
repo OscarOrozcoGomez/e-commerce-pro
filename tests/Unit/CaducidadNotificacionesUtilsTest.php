@@ -274,6 +274,129 @@ final class CaducidadNotificacionesUtilsTest extends TestCase
         $this->assertSame([], loteDetectarCambiosDeSeveridad($this->pdo));
     }
 
+    /* ---- Sección "Para sacar cuanto antes" ----------------------------- */
+
+    public function testLotesParaSacarYaSoloDevuelveLosQueUrgen(): void
+    {
+        $this->seedProducto(1, 'A'); $this->seedProducto(2, 'B');
+        $this->seedProducto(3, 'C'); $this->seedProducto(4, 'D');
+        $this->seedVentaHistorica(1, 90); $this->seedVentaHistorica(2, 90);
+        $this->seedVentaHistorica(3, 90); $this->seedVentaHistorica(4, 90);
+        $this->seedLote(1, 'CRIT', $this->enDias(10), 40);   // critico
+        $this->seedLote(2, 'URG', $this->enDias(60), 40);    // urgente
+        $this->seedLote(3, 'CAD', $this->enDias(-2), 5);     // caducado
+        $this->seedLote(4, 'PLAN', $this->enDias(200), 5);   // planificar -> NO urge
+
+        $sacar = loteLotesParaSacarYa($this->pdo);
+        $codigos = array_column($sacar, 'codigo_lote');
+
+        $this->assertContains('CRIT', $codigos);
+        $this->assertContains('URG', $codigos);
+        $this->assertContains('CAD', $codigos);
+        $this->assertNotContains('PLAN', $codigos);
+        // orden por dias efectivos: el caducado (-2) primero, luego 10, luego 60.
+        $this->assertSame(['CAD', 'CRIT', 'URG'], $codigos);
+    }
+
+    public function testLotesParaSacarYaExcluyeLosIdsIndicados(): void
+    {
+        $this->seedProducto(1, 'A'); $this->seedProducto(2, 'B');
+        $this->seedVentaHistorica(1, 90); $this->seedVentaHistorica(2, 90);
+        $idA = $this->seedLoteId(1, 'A', $this->enDias(10), 40);
+        $this->seedLote(2, 'B', $this->enDias(12), 40);
+
+        $sacar = loteLotesParaSacarYa($this->pdo, [$idA]);
+
+        $this->assertSame(['B'], array_column($sacar, 'codigo_lote'));
+    }
+
+    public function testCorreoIncluyeLaSeccionSacarYaConLosLotesQueNoCambiaron(): void
+    {
+        // Lote viejo ya urgente y YA notificado (no cambia esta corrida).
+        $this->seedProducto(1, 'Viejo urgente');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'VIEJO', $this->enDias(15), 30);
+        loteMarcarSeveridadesNotificadas($this->pdo, loteDetectarCambiosDeSeveridad($this->pdo));
+
+        // Lote nuevo que SÍ cambia (de NULL -> planificar, no urge).
+        $this->seedProducto(2, 'Nuevo tranquilo');
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(2, 'NUEVO', $this->enDias(200), 5);
+
+        $this->seedCorreo('a@correo.com', true);
+
+        $html = '';
+        $asunto = '';
+        $res = loteEnviarNotificacionesDeCambios($this->pdo, function ($to, $s, $h) use (&$html, &$asunto) {
+            $asunto = $s; $html = $h; return true;
+        });
+
+        $this->assertSame(1, $res['cambios']);
+        $this->assertSame(1, $res['sacar_ya'], 'VIEJO va en la sección de liquidación aunque no cambió');
+        $this->assertStringContainsString('Para sacar cuanto antes (1)', $html);
+        $this->assertStringContainsString('VIEJO', $html);
+        $this->assertStringContainsString('NUEVO', $html);
+        $this->assertStringContainsString('1 para sacar ya', $asunto);
+    }
+
+    public function testCorreoNoRepiteLaTarjetaDeUnCambioQueTambienUrge(): void
+    {
+        // Lote que cambia Y urge (NULL -> critico).
+        $this->seedProducto(1, 'Cambia y urge');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'X', $this->enDias(10), 40);
+        // Otro que ya urgía y no cambia.
+        $this->seedProducto(2, 'Ya urgía');
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(2, 'Y', $this->enDias(20), 40);
+        loteMarcarSeveridadesNotificadas($this->pdo, [
+            ['id_lote' => $this->pdo->query("SELECT id_lote FROM lotes_inventario WHERE codigo_lote='Y'")->fetchColumn(), 'severidad' => 'critico'],
+        ]);
+
+        $this->seedCorreo('a@correo.com', true);
+        $html = '';
+        $res = loteEnviarNotificacionesDeCambios($this->pdo, function ($to, $s, $h) use (&$html) { $html = $h; return true; });
+
+        $this->assertSame(1, $res['cambios']);   // solo X cambió
+        $this->assertSame(1, $res['sacar_ya']);  // solo Y en la sección extra (X no se repite)
+        $this->assertSame(1, substr_count($html, '>X</strong>'), 'la tarjeta de X aparece una sola vez');
+        $this->assertStringContainsString('Para sacar cuanto antes (2)', $html);   // X (arriba) + Y
+        $this->assertStringContainsString('1 de los de arriba ya está en esta lista', $html);
+    }
+
+    public function testCorreoSinNadaUrgenteNoTraeSeccionSacarYa(): void
+    {
+        $this->seedProducto(1, 'Tranquilo');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(200), 5); // planificar
+
+        $this->seedCorreo('a@correo.com', true);
+        $html = '';
+        $asunto = '';
+        loteEnviarNotificacionesDeCambios($this->pdo, function ($to, $s, $h) use (&$html, &$asunto) {
+            $asunto = $s; $html = $h; return true;
+        });
+
+        $this->assertStringNotContainsString('Para sacar cuanto antes', $html);
+        $this->assertStringNotContainsString('para sacar ya', $asunto);
+    }
+
+    public function testDryRunReportaSacarYaSinEnviar(): void
+    {
+        $this->seedProducto(1, 'Nuevo critico');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(10), 40);
+        $this->seedCorreo('a@correo.com', true);
+
+        $llamadas = 0;
+        $res = loteEnviarNotificacionesDeCambios($this->pdo, function () use (&$llamadas) { $llamadas++; return true; }, true);
+
+        $this->assertSame(1, $res['cambios']);
+        $this->assertArrayHasKey('sacar_ya', $res);
+        $this->assertSame(0, $res['sacar_ya'], 'el único urgente ya está en cambios -> 0 extra');
+        $this->assertSame(0, $llamadas);
+    }
+
     /* --------------------------------------------------------------------- */
 
     private function enDias(int $dias): string

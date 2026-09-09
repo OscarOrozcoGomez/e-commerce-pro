@@ -74,10 +74,11 @@ if ($sellarInicial) {
 $resultado = loteEnviarNotificacionesDeCambios($pdo, null, $isDryRun);
 
 fwrite(STDOUT, sprintf(
-    'RUN %s | dry-run=%s | lotes con cambio de severidad: %d | correos enviados: %d%s',
+    'RUN %s | dry-run=%s | lotes con cambio de severidad: %d | para sacar ya (extra): %d | correos enviados: %d%s',
     date('Y-m-d H:i:s'),
     $isDryRun ? 'si' : 'no',
     $resultado['cambios'],
+    $resultado['sacar_ya'] ?? 0,
     $resultado['correos_enviados'],
     PHP_EOL
 ));
