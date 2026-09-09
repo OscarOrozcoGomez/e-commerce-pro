@@ -98,7 +98,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="input-field col s12" style="margin: 0 0 4px 0; position: relative;">
                                 <i class="material-icons prefix">search</i>
                                 <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150..." style="padding-right: 2.5rem;">
-                                <button type="button" id="blife_search_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:0; top:6px; background:none; border:none; cursor:pointer; padding:4px; color:#9e9e9e; line-height:1;">
+                                <button type="button" id="blife_search_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:2px; top:0; bottom:20px; width:2.5rem; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; padding:0; color:#9e9e9e; line-height:1;">
                                     <i class="material-icons">close</i>
                                 </button>
                                 <label for="blife_search" class="active">Buscar producto en B-Life</label>
@@ -301,7 +301,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="input-field col s12 m6" style="position: relative;">
                             <i class="material-icons prefix">search</i>
                             <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU..." style="padding-right: 2.5rem;">
-                            <button type="button" id="buscar_producto_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:0; top:6px; background:none; border:none; cursor:pointer; padding:4px; color:#9e9e9e; line-height:1;">
+                            <button type="button" id="buscar_producto_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:2px; top:0; bottom:20px; width:2.5rem; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; padding:0; color:#9e9e9e; line-height:1;">
                                 <i class="material-icons">close</i>
                             </button>
                         </div>
@@ -709,7 +709,7 @@ include __DIR__ . '/includes/header.php';
 
         // Botón para borrar todo el texto de búsqueda de un clic.
         const btnClear = document.getElementById('blife_search_clear');
-        const toggleClear = () => { if (btnClear) btnClear.style.display = input.value ? 'block' : 'none'; };
+        const toggleClear = () => { if (btnClear) btnClear.style.display = input.value ? 'flex' : 'none'; };
         if (btnClear) {
             btnClear.addEventListener('click', () => {
                 input.value = '';
@@ -1436,7 +1436,7 @@ include __DIR__ . '/includes/header.php';
         const input = document.getElementById('buscar_producto');
         const btn = document.getElementById('buscar_producto_clear');
         if (!input || !btn) return;
-        const toggle = () => { btn.style.display = input.value ? 'block' : 'none'; };
+        const toggle = () => { btn.style.display = input.value ? 'flex' : 'none'; };
         input.addEventListener('input', toggle);
         btn.addEventListener('click', () => {
             input.value = '';
