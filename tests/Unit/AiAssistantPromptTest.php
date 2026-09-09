@@ -111,7 +111,7 @@ final class AiAssistantPromptTest extends TestCase
         $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
 
         $this->assertStringContainsString('no son texto', $prompt);
-        $this->assertStringContainsString('Nunca ignores ese mensaje', $prompt);
+        $this->assertStringContainsString('nunca ignores ese mensaje', $prompt);
     }
 
     public function testSystemPromptIncludesContinuityRule(): void

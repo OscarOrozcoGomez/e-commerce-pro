@@ -576,6 +576,23 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('ajustar la cantidad a lo disponible', $prompt);
     }
 
+    public function testAiBuildSystemPromptTeachesAlexToUseRealTranscriptionsAndOcr(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('Nota de voz transcrita', $prompt);
+        $this->assertStringContainsString('Texto detectado en la imagen', $prompt);
+        $this->assertStringContainsString('SI puedes usar ese contenido como si el cliente lo hubiera escrito', $prompt);
+        $this->assertStringContainsString('confirmalo con el cliente en vez de asumirlo tal cual', $prompt);
+    }
+
+    public function testAiBuildSystemPromptStillWarnsAboutPlainMediaPlaceholdersWithoutTranscription(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('NO puedes ver ni escuchar el archivo real', $prompt);
+    }
+
     public function testAiGetToolDefinitionsNeverSuggestsTarjetaAsAValidPaymentMethod(): void
     {
         // La descripcion original decia "Efectivo, transferencia, tarjeta u otro metodo"
