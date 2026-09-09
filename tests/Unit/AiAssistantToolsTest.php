@@ -582,8 +582,16 @@ final class AiAssistantToolsTest extends TestCase
 
         $this->assertStringContainsString('Nota de voz transcrita', $prompt);
         $this->assertStringContainsString('Texto detectado en la imagen', $prompt);
-        $this->assertStringContainsString('SI puedes usar ese contenido como si el cliente lo hubiera escrito', $prompt);
-        $this->assertStringContainsString('confirmalo con el cliente en vez de asumirlo tal cual', $prompt);
+        $this->assertStringContainsString('SI puedes usar ese contenido como si el cliente te lo hubiera descrito', $prompt);
+        $this->assertStringContainsString('confirmalo con el cliente o llama a transferir_a_humano en vez de asumirlo tal cual', $prompt);
+    }
+
+    public function testAiBuildSystemPromptTeachesAlexToUseImageDescriptions(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('"Descripcion"', $prompt);
+        $this->assertStringContainsString('una botella de suplemento con la tapa rota', $prompt);
     }
 
     public function testAiBuildSystemPromptStillWarnsAboutPlainMediaPlaceholdersWithoutTranscription(): void
