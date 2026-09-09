@@ -60,8 +60,14 @@ $articulos = dbGetBlogs(false);
 include __DIR__ . '/includes/header.php';
 ?>
 
-<!-- Script de TinyMCE para edición HTML -->
-<script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+<!-- Script de TinyMCE para edicion HTML.
+     Se usa el bundle self-hosted (GPL) servido por jsDelivr en vez del endpoint
+     cdn.tiny.cloud/1/no-api-key/: ese ultimo dejo de funcionar sin API key y ahora
+     muestra el aviso "A valid API key is required to continue using TinyMCE".
+     El bundle self-hosted no pide API key ni muestra ese aviso; resuelve skins,
+     plugins y themes de forma relativa a esta URL. jsDelivr ya esta en el CSP
+     (script-src / script-src-elem / style-src) de core/config.php. -->
+<script src="https://cdn.jsdelivr.net/npm/tinymce@6.8.3/tinymce.min.js" referrerpolicy="origin"></script>
 
 <div class="container">
     <div class="row">
