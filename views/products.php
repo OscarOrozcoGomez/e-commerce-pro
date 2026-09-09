@@ -97,7 +97,10 @@ include __DIR__ . '/includes/header.php';
                         <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
                             <div class="input-field col s12" style="margin: 0 0 4px 0; position: relative;">
                                 <i class="material-icons prefix">search</i>
-                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150...">
+                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150..." style="padding-right: 2.5rem;">
+                                <button type="button" id="blife_search_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:0; top:6px; background:none; border:none; cursor:pointer; padding:4px; color:#9e9e9e; line-height:1;">
+                                    <i class="material-icons">close</i>
+                                </button>
                                 <label for="blife_search" class="active">Buscar producto en B-Life</label>
                                 <div id="blife-search-results" style="display:none; position:absolute; z-index:20; left:0; right:0; background:#fff; border:1px solid #bbb; border-radius:4px; max-height:280px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
                             </div>
@@ -295,9 +298,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                     <div class="row" style="margin-bottom: 0;">
-                        <div class="input-field col s12 m6">
+                        <div class="input-field col s12 m6" style="position: relative;">
                             <i class="material-icons prefix">search</i>
-                            <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
+                            <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU..." style="padding-right: 2.5rem;">
+                            <button type="button" id="buscar_producto_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:0; top:6px; background:none; border:none; cursor:pointer; padding:4px; color:#9e9e9e; line-height:1;">
+                                <i class="material-icons">close</i>
+                            </button>
                         </div>
                         <div class="input-field col s12 m3">
                             <select id="filtro_estado" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px; height: 3rem;">
@@ -701,11 +707,25 @@ include __DIR__ . '/includes/header.php';
                 .catch(() => cerrar());
         };
 
-        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); });
+        // Botón para borrar todo el texto de búsqueda de un clic.
+        const btnClear = document.getElementById('blife_search_clear');
+        const toggleClear = () => { if (btnClear) btnClear.style.display = input.value ? 'block' : 'none'; };
+        if (btnClear) {
+            btnClear.addEventListener('click', () => {
+                input.value = '';
+                lastQuery = '';
+                cerrar();
+                toggleClear();
+                input.focus();
+            });
+        }
+
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); toggleClear(); });
         input.addEventListener('focus', () => { if (input.value.trim().length >= 2) buscar(); });
         document.addEventListener('click', (ev) => {
             if (ev.target !== input && !box.contains(ev.target)) cerrar();
         });
+        toggleClear();
     })();
 
     window.renderNutritionalPreview = function() {
@@ -1410,6 +1430,22 @@ include __DIR__ . '/includes/header.php';
     document.getElementById('buscar_producto').addEventListener('keyup', aplicarFiltros);
     document.getElementById('filtro_estado').addEventListener('change', aplicarFiltros);
     document.getElementById('filtro_imagen').addEventListener('change', aplicarFiltros);
+
+    // Botón para borrar de un clic el texto del buscador del listado.
+    (function initBuscarProductoClear() {
+        const input = document.getElementById('buscar_producto');
+        const btn = document.getElementById('buscar_producto_clear');
+        if (!input || !btn) return;
+        const toggle = () => { btn.style.display = input.value ? 'block' : 'none'; };
+        input.addEventListener('input', toggle);
+        btn.addEventListener('click', () => {
+            input.value = '';
+            toggle();
+            aplicarFiltros();
+            input.focus();
+        });
+        toggle();
+    })();
 
     document.addEventListener('DOMContentLoaded', function() {
         aplicarFiltros(); // Aplicar filtro por defecto (Activos) al cargar
