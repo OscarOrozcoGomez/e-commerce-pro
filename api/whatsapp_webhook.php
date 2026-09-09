@@ -65,7 +65,7 @@ try {
     }
 
     $perfilNombre = ($inbound['profile_name'] ?? '') !== '' ? $inbound['profile_name'] : null;
-    $replyParts = aiRunAssistantTurn($inbound['wa_id'], $perfilNombre, $inbound['texto'], $inbound['wa_message_id']);
+    $replyParts = aiRunAssistantTurn($inbound['wa_id'], $perfilNombre, $inbound['texto'], $inbound['wa_message_id'], $inbound['message_kind'] ?? null);
     echo json_encode(['success' => true, 'reply' => $replyParts], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     // Nunca se exponen detalles internos en la respuesta; solo se registran en el log del servidor.

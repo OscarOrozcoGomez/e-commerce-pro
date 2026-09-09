@@ -586,6 +586,34 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('confirmalo con el cliente en vez de asumirlo tal cual', $prompt);
     }
 
+    public function testAiBuildSystemPromptMentionsPhotosAreAutoTransferredToHuman(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('ya se transfieren directo a un asesor humano por codigo', $prompt);
+    }
+
+    public function testAiEsFotoNoInterpretadaIsTrueForImageWithoutOcrText(): void
+    {
+        $this->assertTrue(aiEsFotoNoInterpretada('image', '[El cliente envio una foto]'));
+    }
+
+    public function testAiEsFotoNoInterpretadaIsFalseWhenOcrFoundText(): void
+    {
+        $this->assertFalse(aiEsFotoNoInterpretada(
+            'image',
+            '[El cliente envio una foto. Texto detectado en la imagen (puede tener errores de OCR): PAGO CONFIRMADO 349.00 MXN]'
+        ));
+    }
+
+    public function testAiEsFotoNoInterpretadaIsFalseForNonImageKinds(): void
+    {
+        $this->assertFalse(aiEsFotoNoInterpretada('audio', '[El cliente envio un audio]'));
+        $this->assertFalse(aiEsFotoNoInterpretada('video', '[El cliente envio un video]'));
+        $this->assertFalse(aiEsFotoNoInterpretada('text', 'hola'));
+        $this->assertFalse(aiEsFotoNoInterpretada(null, '[El cliente envio una foto]'));
+    }
+
     public function testAiBuildSystemPromptStillWarnsAboutPlainMediaPlaceholdersWithoutTranscription(): void
     {
         $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
