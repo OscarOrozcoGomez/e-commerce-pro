@@ -109,17 +109,15 @@ include __DIR__ . '/includes/header.php';
     <div class="row" style="margin-bottom:0;">
         <div class="col s12">
             <ul class="tabs">
-                <li class="tab col s6"><a href="#tab-caducidades" class="<?php echo $tab === 'cad' ? 'active' : ''; ?>">
-                    Caducidades (<?php echo (int) ($resumen['total'] ?? 0); ?>)
-                </a></li>
-                <li class="tab col s6"><a href="#tab-inconsistencias" class="<?php echo $tab === 'inc' ? 'active' : ''; ?>">
-                    Inconsistencias stock/lotes<?php if ($totalDescuadres > 0): ?> (<?php echo $totalDescuadres; ?>)<?php endif; ?>
-                </a></li>
+                <li class="tab col s6"><a href="#tab-caducidades" class="<?php echo $tab === 'cad' ? 'active' : ''; ?>">Caducidades (<?php echo (int) ($resumen['total'] ?? 0); ?>)</a></li>
+                <li class="tab col s6"><a href="#tab-inconsistencias" class="<?php echo $tab === 'inc' ? 'active' : ''; ?>">Inconsistencias stock/lotes<?php if ($totalDescuadres > 0): ?> (<?php echo $totalDescuadres; ?>)<?php endif; ?></a></li>
             </ul>
         </div>
+    </div>
 
-        <!-- ================= TAB 1: Caducidades ================= -->
-        <div id="tab-caducidades" class="col s12">
+    <!-- ================= TAB 1: Caducidades ================= -->
+    <div id="tab-caducidades">
+        <div class="row"><div class="col s12">
             <p class="grey-text" style="margin:14px 0 6px;">
                 Lotes ordenados por los días que faltan para caducar. El "excedente proyectado" son las unidades que —a la velocidad de venta de los últimos <?php echo (int) ($proy['ventana_dias'] ?? 90); ?> días— <strong>no</strong> se alcanzarían a vender antes de caducar. Ponlos en oferta a tiempo.
             </p>
@@ -266,10 +264,12 @@ include __DIR__ . '/includes/header.php';
                 </table>
                 </div>
             <?php endif; ?>
-        </div><!-- /#tab-caducidades -->
+        </div></div>
+    </div><!-- /#tab-caducidades -->
 
-        <!-- ================= TAB 2: Inconsistencias stock vs. lotes ================= -->
-        <div id="tab-inconsistencias" class="col s12">
+    <!-- ================= TAB 2: Inconsistencias stock vs. lotes ================= -->
+    <div id="tab-inconsistencias">
+        <div class="row"><div class="col s12">
             <p class="grey-text" style="margin:14px 0 10px;">
                 Productos donde el <strong>stock del sistema</strong> (inventario_almacen) no coincide con la <strong>suma de sus lotes</strong> vivos. Aquí es donde puede haber mercancía sin registrar en lotes, o lotes mal capturados.
                 <br><strong>Faltante</strong>: el sistema tiene más que los lotes → faltan lotes por registrar.
@@ -349,9 +349,9 @@ include __DIR__ . '/includes/header.php';
                 </table>
                 </div>
             <?php endif; ?>
-        </div><!-- /#tab-inconsistencias -->
-    </div><!-- /row con las tabs -->
-</div>
+        </div></div>
+    </div><!-- /#tab-inconsistencias -->
+</div><!-- /container -->
 
 <?php echo csrfInput(); ?>
 <script>
