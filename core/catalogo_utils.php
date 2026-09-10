@@ -443,7 +443,16 @@ function catalogRenderProductCard(array $p): string
                         <?php endif; ?>
                     </p>
                 </div>
-                <div class="card-action center-align" style="border-top: 1px solid #eee;">
+                <div class="card-action" style="border-top: 1px solid #eee; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <?php
+                    // Precio a mostrar/compartir: el mismo "Desde $X" ya con la rebaja de oferta.
+                    $precioCompartir = $precioActual > 0 ? $precioActual : (float) ($p['precio_venta'] ?? $p['precio_efectivo'] ?? 0);
+                    ?>
+                    <button type="button" class="btn green waves-effect waves-light"
+                            title="Compartir por WhatsApp"
+                            onclick="shareProductoWhatsApp(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo $precioCompartir; ?>)">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
                     <?php if ($agotado): ?>
                         <button class="btn grey lighten-1 disabled" disabled>
                             <i class="material-icons left" style="margin-right:4px;">block</i>Agotado
@@ -467,6 +476,74 @@ function catalogRenderProductCard(array $p): string
     <?php
 
     return (string) ob_get_clean();
+}
+
+/**
+ * Lista compacta de productos en oferta (categoria "oferta"/"ofertas") para armar
+ * un solo mensaje de WhatsApp con todas las ofertas. Solo productos raiz con
+ * existencia vendible; el precio ya trae la rebaja de oferta aplicada. Se colapsa
+ * por nombre (igual que el catalogo) para no repetir familias con variantes.
+ *
+ * @return array<int,array{id_producto:int, nombre:string, precio:float}>
+ */
+function catalogGetOfertasParaCompartir(PDO $pdo): array
+{
+    $enOferta = ofertaSqlEnOfertaExpr('p');
+    $precioEfectivo = ofertaSqlPrecioEfectivoExpr('p.precio_venta', 'p.precio_costo', 'p.precio_oferta', $enOferta);
+
+    $sellableIds = array_values(array_filter(array_map('intval', getPublicSellableWarehouseIds($pdo))));
+    $whInList = $sellableIds ? implode(',', $sellableIds) : '0';
+
+    $sql = "SELECT p.id_producto, p.nombre, {$precioEfectivo} AS precio
+            FROM productos p
+            LEFT JOIN (
+                SELECT COALESCE(NULLIF(pr.id_padre, 0), pr.id_producto) AS root_id,
+                       SUM(COALESCE(ia.cantidad_actual, 0)) AS stock_familia
+                FROM productos pr
+                LEFT JOIN inventario_almacen ia
+                       ON ia.id_producto = pr.id_producto AND ia.id_almacen IN ($whInList)
+                GROUP BY root_id
+            ) stk ON stk.root_id = p.id_producto
+            WHERE (p.id_padre IS NULL OR p.id_padre = 0)
+              AND (p.estado = 'activo' OR EXISTS (SELECT 1 FROM productos p_child WHERE p_child.id_padre = p.id_producto AND p_child.estado = 'activo'))
+              AND COALESCE(stk.stock_familia, 0) > 0
+              AND ({$enOferta})
+            ORDER BY p.nombre ASC";
+
+    try {
+        $rows = (array) $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log('catalogGetOfertasParaCompartir: ' . $e->getMessage());
+        return [];
+    }
+
+    $indexPorNombre = [];
+    $ofertas = [];
+    foreach ($rows as $row) {
+        $nombre = trim((string) ($row['nombre'] ?? ''));
+        if ($nombre === '') {
+            continue;
+        }
+        $key = catalogGroupKey($nombre);
+        $precio = (float) ($row['precio'] ?? 0);
+
+        if (isset($indexPorNombre[$key])) {
+            $pos = $indexPorNombre[$key];
+            if ($precio > 0 && ($ofertas[$pos]['precio'] <= 0 || $precio < $ofertas[$pos]['precio'])) {
+                $ofertas[$pos]['precio'] = $precio;
+            }
+            continue;
+        }
+
+        $indexPorNombre[$key] = count($ofertas);
+        $ofertas[] = [
+            'id_producto' => (int) ($row['id_producto'] ?? 0),
+            'nombre' => $nombre,
+            'precio' => $precio,
+        ];
+    }
+
+    return $ofertas;
 }
 
 /**
