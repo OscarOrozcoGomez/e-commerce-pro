@@ -68,6 +68,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
+                            <input type="text" id="nombre_corto" name="nombre_corto" placeholder="Ej: 3 Mag Blend, Clarity Platinum">
+                            <label for="nombre_corto" class="active">Nombre corto / etiqueta del pomo</label>
+                            <span class="helper-text">Como lo conoce el equipo. Sirve también para buscarlo en el listado. Lo autollena SINC de B-Life.</span>
+                        </div>
+
+                        <div class="input-field">
                             <input type="text" id="sku" name="sku">
                             <label for="sku">SKU (Código Interno)</label>
                             <span class="helper-text">Opcional</span>
@@ -516,6 +522,12 @@ include __DIR__ . '/includes/header.php';
                     // 3b. Descripción comercial (body_html de Shopify, convertido a texto plano)
                     if (fullData.producto.description)
                         document.getElementById('descripcion').value = fullData.producto.description;
+
+                    // 3c. Nombre corto / etiqueta del pomo ("3 Mag Blend B Life®." -> "3 Mag Blend").
+                    //     Lo calcula el backend del body_html; si no lo pudo sacar, se deja
+                    //     lo que ya haya para que lo captures a mano.
+                    if (fullData.producto.nombre_corto)
+                        document.getElementById('nombre_corto').value = fullData.producto.nombre_corto;
 
                     // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
                     if (fullData.producto.sku)
@@ -1121,9 +1133,9 @@ include __DIR__ . '/includes/header.php';
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
-            <tr data-codes="${(p.codigo_barras || '').toLowerCase()}" data-has-image="${hasImg}">
+            <tr data-codes="${((p.codigo_barras || '') + ' ' + (p.nombre_corto || '')).toLowerCase()}" data-has-image="${hasImg}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
-                <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}</td>
+                <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}${p.nombre_corto ? `<br><small class="grey-text">${p.nombre_corto}</small>` : ''}</td>
                 <td>
                     $${parseFloat(p.precio_venta).toFixed(2)}
                     ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
@@ -1191,14 +1203,15 @@ include __DIR__ . '/includes/header.php';
         });
         variantsHtml += '</div>';
 
-        // Juntar todos los códigos para que el buscador funcione
-        const allCodes = variants.map(v => v.codigo_barras).join(' ');
+        // Juntar todos los códigos + nombres cortos para que el buscador funcione
+        const allCodes = variants.map(v => `${v.codigo_barras || ''} ${v.nombre_corto || ''}`).join(' ');
+        const nombreCorto = variants.map(v => v.nombre_corto).filter(Boolean)[0] || '';
 
         return `
             <tr class="product-group-row" data-codes="${allCodes.toLowerCase()}" data-has-image="${hasImg}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
                 <td>
-                    <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong><br>
+                    <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong>${nombreCorto ? ` <small class="grey-text">· ${nombreCorto}</small>` : ''}<br>
                     <button type="button" class="btn-small blue darken-2 waves-effect waves-light" style="font-size:0.65rem; height:24px; line-height:24px; padding:0 8px; border-radius:4px; margin-top:4px;" onclick="toggleVariants('${groupId}')">
                         <i class="material-icons left" style="font-size:1rem; margin-right:4px;">unfold_more</i>
                         ${variants.length} PRESENTACIONES
@@ -1268,6 +1281,7 @@ include __DIR__ . '/includes/header.php';
         
         document.getElementById('nombre').value = prod.nombre;
         document.getElementById('nombre_variante').value = prod.nombre_variante || '';
+        document.getElementById('nombre_corto').value = prod.nombre_corto || '';
         document.getElementById('sku').value = prod.sku || '';
         document.getElementById('codigo_barras').value = prod.codigo_barras || '';
         document.getElementById('descripcion').value = prod.descripcion || '';
@@ -1381,6 +1395,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('accion').value = 'agregar';
         document.getElementById('sku').value = '';
         document.getElementById('nombre_variante').value = '';
+        document.getElementById('nombre_corto').value = '';
         document.getElementById('id_padre').value = '';
         document.getElementById('search_padre').value = '';
         document.getElementById('id_producto').value = '';

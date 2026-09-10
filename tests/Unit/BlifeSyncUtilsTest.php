@@ -293,6 +293,45 @@ final class BlifeSyncUtilsTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // blifeShortName — nombre corto / etiqueta del pomo
+    // ------------------------------------------------------------------
+
+    /**
+     * @dataProvider shortNameProvider
+     */
+    public function testShortNameExtractsCleanLabelOrNothing(string $bodyHtml, string $esperado): void
+    {
+        $this->assertSame($esperado, blifeShortName($bodyHtml));
+    }
+
+    public static function shortNameProvider(): array
+    {
+        return [
+            'arranque limpio'          => ['<p><strong>3 Mag Blend</strong> B Life®. Cada cápsula de 500 mg contiene...</p>', '3 Mag Blend'],
+            'dos palabras'             => ['<p>Clarity Platinum B Life®. Cada cápsula contiene 500 mg...</p>', 'Clarity Platinum'],
+            'tres palabras'            => ['Ashwagandha Root Powder B Life® en cápsulas contiene raíz de...', 'Ashwagandha Root Powder'],
+            'con número'              => ['Omega 3 Platinum B Life®. Cada cápsula de 1000 mg...', 'Omega 3 Platinum'],
+            'B Life sin ®'            => ['Snoring Nasal Strips B Life. Bandas nasales para dormir mejor.', 'Snoring Nasal Strips'],
+            'con signos'               => ['Electroblend + Creatina B Life®. Electrolitos con creatina...', 'Electroblend + Creatina'],
+            'entidad html'             => ['&iexcl;Pure Lysine B Life&reg;. Lisina pura de 1400 mg.', 'Pure Lysine'],
+            // Negativos: frase de marketing, arranque genérico, o cuelga de preposición
+            'marketing "Descubre"'     => ['¡Descubre el bienestar con Glycinate Mag B Life®!', ''],
+            'marketing "Conoce ... de"' => ['Conoce la formulación de Ferty Blend de B Life®...', ''],
+            'arranque "Cada"'          => ['Cada cápsula de este producto B Life® aporta magnesio.', ''],
+            'sin "B Life" pronto'      => ['Suplemento alimenticio a base de hierbas naturales seleccionadas.', ''],
+            'cuelga de preposición'    => ['Aceite de B Life® prensado en frío.', ''],
+            'vacío'                    => ['', ''],
+            'solo tags'                => ['<p></p><br>', ''],
+        ];
+    }
+
+    public function testShortNameCapsLengthAndWordCount(): void
+    {
+        // 5+ palabras antes de "B Life" -> no es un nombre de etiqueta.
+        $this->assertSame('', blifeShortName('Mezcla Herbal Con Neem Nogal Clavo B Life®. ...'));
+    }
+
+    // ------------------------------------------------------------------
     // blifeTabText
     // ------------------------------------------------------------------
 
