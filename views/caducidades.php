@@ -46,6 +46,20 @@ try {
 }
 $lotes = $proy['lotes'];
 
+// Descuadres de inventario: productos donde el stock del sistema no coincide con
+// la suma de sus lotes. Reusa los filtros de almacén/búsqueda de la página.
+$fTipoDescuadre = trim((string) ($_GET['d_tipo'] ?? ''));
+$descuadres = [];
+try {
+    $descuadres = loteFetchDescuadres($pdo, [
+        'id_almacen' => $fAlmacen,
+        'q' => $fQ,
+        'tipo' => $fTipoDescuadre,
+    ]);
+} catch (Throwable $e) {
+    error_log('caducidades.php (descuadres): ' . $e->getMessage());
+}
+
 $resumen = loteResumenSeveridad($pdo);
 
 // Catálogos para los filtros.
@@ -108,6 +122,84 @@ include __DIR__ . '/includes/header.php';
                 </a>
             <?php endforeach; ?>
             <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="chip">Ver todos: <strong><?php echo (int) ($resumen['total'] ?? 0); ?></strong></a>
+        </div>
+    </div>
+
+    <?php
+    // El total de descuadres SIN filtro (para el badge de la barra); la tabla de
+    // abajo sí respeta el filtro de almacén/búsqueda/tipo de la página.
+    $totalDescuadres = (int) ($resumen['descuadres'] ?? 0);
+    ?>
+    <div class="row">
+        <div class="col s12">
+            <div class="card-panel <?php echo $totalDescuadres > 0 ? 'red lighten-5' : 'grey lighten-4'; ?>" style="padding:0;">
+                <details <?php echo $totalDescuadres > 0 ? 'open' : ''; ?>>
+                    <summary style="cursor:pointer; padding:12px 16px; font-weight:600; list-style:none;">
+                        <i class="material-icons tiny" style="vertical-align:middle; color:<?php echo $totalDescuadres > 0 ? '#c62828' : '#9e9e9e'; ?>;">rule</i>
+                        Descuadres de inventario
+                        <span class="new badge <?php echo $totalDescuadres > 0 ? 'red' : 'grey'; ?>" data-badge-caption="" style="float:none; margin-left:6px;"><?php echo $totalDescuadres; ?></span>
+                        <span class="grey-text" style="font-weight:400; font-size:.85rem;">— productos donde el stock del sistema ≠ suma de sus lotes</span>
+                    </summary>
+                    <div style="padding:0 16px 16px;">
+                        <p class="grey-text" style="font-size:.82rem; margin:0 0 10px;">
+                            <strong>Faltante</strong>: el sistema tiene más de lo que suman los lotes → faltan lotes por registrar (¿tenemos algo más?).
+                            <strong>Sobrante</strong>: los lotes suman más que el sistema → lote de más o stock sin actualizar.
+                        </p>
+
+                        <form method="GET" style="margin-bottom:10px;">
+                            <?php if ($fAlmacen > 0): ?><input type="hidden" name="id_almacen" value="<?php echo (int) $fAlmacen; ?>"><?php endif; ?>
+                            <?php if ($fQ !== ''): ?><input type="hidden" name="q" value="<?php echo esc($fQ); ?>"><?php endif; ?>
+                            <?php foreach (['' => 'Todos', 'faltante' => 'Solo faltante', 'sobrante' => 'Solo sobrante'] as $k => $lbl): ?>
+                                <label style="margin-right:14px;">
+                                    <input name="d_tipo" type="radio" value="<?php echo $k; ?>" <?php echo $fTipoDescuadre === $k ? 'checked' : ''; ?> onchange="this.form.submit()" />
+                                    <span><?php echo $lbl; ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </form>
+
+                        <?php if (empty($descuadres)): ?>
+                            <p class="grey-text" style="margin:0;"><?php echo $totalDescuadres > 0 ? 'Ningún descuadre coincide con el filtro.' : 'Todo cuadra: cada producto con stock tiene sus lotes al día.'; ?></p>
+                        <?php else: ?>
+                            <div style="overflow-x:auto;">
+                            <table class="striped highlight" style="background:#fff;">
+                                <thead>
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th class="right-align">Stock sistema</th>
+                                        <th class="right-align">Suma lotes</th>
+                                        <th class="right-align">Diferencia</th>
+                                        <th class="right-align" title="Lotes vivos registrados para este producto">Lotes</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($descuadres as $d): $dif = (int) $d['diferencia']; ?>
+                                        <tr>
+                                            <td>
+                                                <strong><?php echo esc((string) $d['producto_nombre']); ?></strong>
+                                                <?php if (!empty($d['producto_sku'])): ?><br><small class="grey-text"><?php echo esc((string) $d['producto_sku']); ?></small><?php endif; ?>
+                                            </td>
+                                            <td class="right-align"><?php echo (int) $d['stock_sistema']; ?></td>
+                                            <td class="right-align"><?php echo (int) $d['stock_lotes']; ?></td>
+                                            <td class="right-align">
+                                                <span class="new badge <?php echo $dif > 0 ? 'blue darken-1' : 'deep-orange darken-1'; ?> white-text" data-badge-caption="" style="float:none;">
+                                                    <?php echo ($dif > 0 ? '+' : '') . $dif; ?> <?php echo $dif > 0 ? 'faltante' : 'sobrante'; ?>
+                                                </span>
+                                            </td>
+                                            <td class="right-align"><?php echo (int) $d['n_lotes']; ?></td>
+                                            <td style="white-space:nowrap;">
+                                                <a class="btn-flat btn-small" title="Ver / editar lotes del producto" href="<?php echo BASE_URL; ?>views/products.php?id_producto=<?php echo (int) $d['id_producto']; ?>"><i class="material-icons">inventory_2</i></a>
+                                                <a class="btn-flat btn-small" title="Entradas de inventario" href="<?php echo BASE_URL; ?>views/inventario_entradas.php"><i class="material-icons">add_business</i></a>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </details>
+            </div>
         </div>
     </div>
 

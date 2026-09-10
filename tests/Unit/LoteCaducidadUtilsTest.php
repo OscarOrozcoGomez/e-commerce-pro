@@ -1436,4 +1436,139 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->assertSame(2, $r['urgen']);
         $this->assertSame('CADUCA_LEJOS', $r['mas_urgente']['codigo_lote'], '50 dias efectivos < 80, aunque caduque mas tarde en el calendario');
     }
+
+    /* ---- loteFetchDescuadres: stock del sistema vs suma de lotes -------- */
+
+    private function porId(array $filas): array
+    {
+        $out = [];
+        foreach ($filas as $f) {
+            $out[(int) $f['id_producto']] = $f;
+        }
+        return $out;
+    }
+
+    public function testDescuadreProductoConStockPeroSinLotes(): void
+    {
+        $this->seedProducto(1, 'Stock sin lotes');
+        $this->seedInventario(1, 1, 10); // sistema 10, lotes 0
+
+        $d = loteFetchDescuadres($this->pdo);
+
+        $this->assertCount(1, $d);
+        $this->assertSame(1, $d[0]['id_producto']);
+        $this->assertSame(10, $d[0]['stock_sistema']);
+        $this->assertSame(0, $d[0]['stock_lotes']);
+        $this->assertSame(10, $d[0]['diferencia']);
+        $this->assertSame('faltante', $d[0]['tipo']);
+        $this->assertSame(0, $d[0]['n_lotes']);
+    }
+
+    public function testDescuadreLotesSinStockDeSistemaEsSobrante(): void
+    {
+        $this->seedProducto(1, 'Lotes sin inventario');
+        $this->seedLote(1, 'A', $this->enDias(120), 3);
+        $this->seedLote(1, 'B', $this->enDias(120), 2); // lotes 5, sistema 0
+
+        $d = loteFetchDescuadres($this->pdo);
+
+        $this->assertCount(1, $d);
+        $this->assertSame(0, $d[0]['stock_sistema']);
+        $this->assertSame(5, $d[0]['stock_lotes']);
+        $this->assertSame(-5, $d[0]['diferencia']);
+        $this->assertSame('sobrante', $d[0]['tipo']);
+        $this->assertSame(2, $d[0]['n_lotes']);
+    }
+
+    public function testDescuadreNoListaLosQueCuadran(): void
+    {
+        $this->seedProducto(1, 'Cuadra');
+        $this->seedInventario(1, 1, 6);
+        $this->seedLote(1, 'A', $this->enDias(120), 4);
+        $this->seedLote(1, 'B', $this->enDias(120), 2); // 6 == 6
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreLotesRetiradosOAgotadosNoCuentan(): void
+    {
+        $this->seedProducto(1, 'Con retirados');
+        $this->seedInventario(1, 1, 0);
+        $id = $this->seedLoteId(1, 'VIEJO', $this->enDias(120), 100);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'retirado' WHERE id_lote = $id");
+
+        // sistema 0, lotes vivos 0 -> cuadra.
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreProductoArchivadoSeExcluye(): void
+    {
+        $this->seedProducto(1, 'Archivado');
+        $this->seedInventario(1, 1, 9);
+        $this->pdo->exec("UPDATE productos SET estado = 'archivado' WHERE id_producto = 1");
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreOrdenadoPorMagnitud(): void
+    {
+        $this->seedProducto(1, 'Chico');  $this->seedInventario(1, 1, 2);   // dif +2
+        $this->seedProducto(2, 'Grande'); $this->seedInventario(2, 1, 40);  // dif +40
+        $this->seedProducto(3, 'Medio');  $this->seedInventario(3, 1, 0);
+        $this->seedLote(3, 'L', $this->enDias(120), 12);                    // dif -12
+
+        $codigos = array_column(loteFetchDescuadres($this->pdo), 'id_producto');
+        $this->assertSame([2, 3, 1], $codigos, 'mayor |diferencia| primero');
+    }
+
+    public function testDescuadreFiltroTipo(): void
+    {
+        $this->seedProducto(1, 'Faltante'); $this->seedInventario(1, 1, 5);
+        $this->seedProducto(2, 'Sobrante'); $this->seedInventario(2, 1, 0);
+        $this->seedLote(2, 'L', $this->enDias(120), 3);
+
+        $this->assertSame([1], array_column(loteFetchDescuadres($this->pdo, ['tipo' => 'faltante']), 'id_producto'));
+        $this->assertSame([2], array_column(loteFetchDescuadres($this->pdo, ['tipo' => 'sobrante']), 'id_producto'));
+    }
+
+    public function testDescuadreFiltroBusquedaPorNombreOSku(): void
+    {
+        $this->seedProducto(1, 'Omega tres'); $this->seedInventario(1, 1, 5);
+        $this->seedProducto(2, 'Colageno');   $this->seedInventario(2, 1, 7);
+
+        $this->assertSame([1], array_column(loteFetchDescuadres($this->pdo, ['q' => 'omega']), 'id_producto'));
+        $this->assertSame([2], array_column(loteFetchDescuadres($this->pdo, ['q' => 'SKU-2']), 'id_producto'));
+    }
+
+    public function testDescuadreFiltroPorAlmacenRestringeAmbosLados(): void
+    {
+        $this->seedAlmacen(2, 'Sucursal');
+        $this->seedProducto(1, 'Repartido');
+        $this->seedInventario(1, 1, 5);   // matriz: sistema 5
+        $this->seedInventario(1, 2, 5);   // sucursal: sistema 5  (total 10)
+        $this->seedLote(1, 'L1', $this->enDias(120), 5, 1); // lote en matriz
+        $this->seedLote(1, 'L2', $this->enDias(120), 5, 2); // lote en sucursal (total 10 -> cuadra global)
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo), 'global cuadra 10 = 10');
+
+        // En sucursal quitamos el lote -> descuadre solo ahí.
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'retirado' WHERE codigo_lote = 'L2'");
+        $soloSucursal = loteFetchDescuadres($this->pdo, ['id_almacen' => 2]);
+        $this->assertCount(1, $soloSucursal);
+        $this->assertSame(5, $soloSucursal[0]['stock_sistema']);
+        $this->assertSame(0, $soloSucursal[0]['stock_lotes']);
+
+        // Matriz sigue cuadrando.
+        $this->assertSame([], loteFetchDescuadres($this->pdo, ['id_almacen' => 1]));
+    }
+
+    public function testResumenSeveridadIncluyeConteoDeDescuadres(): void
+    {
+        $this->seedProducto(1, 'Descuadrado'); $this->seedInventario(1, 1, 3);
+        $this->seedProducto(2, 'Ok');          $this->seedInventario(2, 1, 4);
+        $this->seedLote(2, 'L', $this->enDias(120), 4);
+
+        $r = loteResumenSeveridad($this->pdo);
+        $this->assertSame(1, $r['descuadres']);
+    }
 }
