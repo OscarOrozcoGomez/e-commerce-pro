@@ -308,9 +308,31 @@ include __DIR__ . '/includes/header.php';
             </form>
 
             <?php if (empty($descuadres)): ?>
-                <div class="card-panel <?php echo $totalDescuadres > 0 ? '' : 'green lighten-5'; ?>">
-                    <?php echo $totalDescuadres > 0 ? 'Ningún descuadre coincide con el filtro.' : '✓ Todo cuadra: cada producto con stock tiene sus lotes al día.'; ?>
-                </div>
+                <?php
+                $hayFiltro = $fAlmacen > 0 || $fTipoDescuadre !== '' || $fQ !== '';
+                $nomAlmacen = '';
+                foreach ($almacenes as $a) {
+                    if ((int) $a['id_almacen'] === $fAlmacen) { $nomAlmacen = (string) $a['nombre']; }
+                }
+                ?>
+                <?php if ($totalDescuadres > 0 && $hayFiltro): ?>
+                    <div class="card-panel amber lighten-5">
+                        Hay <strong><?php echo $totalDescuadres; ?></strong> descuadre(s) en total, pero
+                        <strong>ninguno</strong> con el filtro actual
+                        (<?php
+                            $partes = [];
+                            if ($fAlmacen > 0) { $partes[] = 'almacén: ' . esc($nomAlmacen !== '' ? $nomAlmacen : (string) $fAlmacen); }
+                            if ($fTipoDescuadre !== '') { $partes[] = $fTipoDescuadre; }
+                            if ($fQ !== '') { $partes[] = 'búsqueda: “' . esc($fQ) . '”'; }
+                            echo implode(' · ', $partes);
+                        ?>).
+                        <a href="?tab=inc" class="btn-flat">Ver todos</a>
+                    </div>
+                <?php elseif ($totalDescuadres > 0): ?>
+                    <div class="card-panel">Ningún descuadre coincide con el filtro.</div>
+                <?php else: ?>
+                    <div class="card-panel green lighten-5">✓ Todo cuadra: cada producto con stock tiene sus lotes al día.</div>
+                <?php endif; ?>
             <?php else: ?>
                 <div style="overflow-x:auto;">
                 <table class="striped highlight">
