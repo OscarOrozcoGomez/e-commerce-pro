@@ -139,6 +139,7 @@ try {
             $blife_data = [
                 'producto' => [
                     'title'       => (string)($prod['title'] ?? ''),
+                    'nombre_corto' => blifeShortName((string)($prod['body_html'] ?? '')),
                     'description' => blifeHtmlToText((string)($prod['body_html'] ?? '')),
                     'ingredients' => $ingredientes,
                     'mode_use'    => $modoUso,
@@ -252,6 +253,9 @@ try {
             $codigoBarras = trim((string)($data['codigo_barras'] ?? ''));
             $codigoBarras = $codigoBarras === '' ? null : $codigoBarras;
 
+            $nombreCorto = trim((string)($data['nombre_corto'] ?? ''));
+            $nombreCorto = $nombreCorto === '' ? null : mb_substr($nombreCorto, 0, 120);
+
             $capsulasPorEnvase = isset($data['capsulas_por_envase']) && $data['capsulas_por_envase'] !== ''
                 ? max(0, (int)$data['capsulas_por_envase']) : null;
             $porcionCapsulas = isset($data['porcion_capsulas']) && $data['porcion_capsulas'] !== ''
@@ -264,7 +268,7 @@ try {
 
             if ($id > 0) {
                 // EDITAR
-                $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `sku` = :sku, `codigo_barras` = :codigo_barras,
+                $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `nombre_corto` = :nombre_corto, `sku` = :sku, `codigo_barras` = :codigo_barras,
                         `descripcion` = :descripcion, `ingredientes` = :ingredientes, `modo_uso` = :modo_uso,
                         `tabla_nutrimental` = :tabla, `mostrar_tabla` = :mostrar_tabla, `unidad` = :unidad,
                         `capsulas_por_envase` = :capsulas_por_envase, `porcion_capsulas` = :porcion_capsulas,
@@ -275,6 +279,7 @@ try {
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '', ':nombre_variante' => $data['nombre_variante'] ?? null,
+                    ':nombre_corto' => $nombreCorto,
                     ':sku' => $sku, ':codigo_barras' => $codigoBarras,
                     ':descripcion' => $data['descripcion'] ?? '', ':ingredientes' => $data['ingredientes'] ?? '',
                     ':modo_uso' => $data['modo_uso'] ?? '', ':tabla' => $data['tabla_nutrimental'] ?? '[]',
@@ -289,12 +294,13 @@ try {
                 ]);
             } else {
                 // AGREGAR
-                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `capsulas_por_envase`, `porcion_capsulas`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `precio_oferta`, `estado`)
-                        VALUES (:nombre, :nombre_variante, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :capsulas_por_envase, :porcion_capsulas, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :precio_oferta, :estado)";
+                $sql = "INSERT INTO productos (`nombre`, `nombre_variante`, `nombre_corto`, `sku`, `codigo_barras`, `descripcion`, `ingredientes`, `modo_uso`, `tabla_nutrimental`, `mostrar_tabla`, `unidad`, `capsulas_por_envase`, `porcion_capsulas`, `id_padre`, `precio_costo`, `precio_venta`, `precio_comparacion`, `precio_oferta`, `estado`)
+                        VALUES (:nombre, :nombre_variante, :nombre_corto, :sku, :codigo_barras, :descripcion, :ingredientes, :modo_uso, :tabla, :mostrar_tabla, :unidad, :capsulas_por_envase, :porcion_capsulas, :id_padre, :precio_costo, :precio_venta, :precio_comparacion, :precio_oferta, :estado)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     ':nombre' => $data['nombre'] ?? '',
                     ':nombre_variante' => $data['nombre_variante'] ?? null,
+                    ':nombre_corto' => $nombreCorto,
                     ':sku' => $sku,
                     ':codigo_barras' => $codigoBarras,
                     ':descripcion' => $data['descripcion'] ?? '',

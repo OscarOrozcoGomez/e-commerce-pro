@@ -717,7 +717,7 @@ include __DIR__ . '/includes/header.php';
             }
 
             const coincidencias = productosDisponibles.filter((p) => {
-                const texto = normalizeSearchTerm(`${p.nombre} ${p.nombre_variante || ''} ${p.codigo_barras || ''}`);
+                const texto = normalizeSearchTerm(`${p.nombre} ${p.nombre_variante || ''} ${p.nombre_corto || ''} ${p.codigo_barras || ''}`);
                 return texto.includes(normalizado);
             }).slice(0, 12);
 
@@ -741,6 +741,7 @@ include __DIR__ . '/includes/header.php';
                     <img class="thumb" src="${imgSrc}" alt="" loading="lazy">
                     <div class="info">
                         <div class="nombre">${escapeHtml(p.nombre)}</div>
+                        ${p.nombre_corto ? `<div class="sub" style="font-weight:600;">${escapeHtml(p.nombre_corto)}</div>` : ''}
                         ${p.nombre_variante ? `<div class="sub">${escapeHtml(p.nombre_variante)}</div>` : ''}
                     </div>
                 `;
