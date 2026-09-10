@@ -577,6 +577,7 @@ function loteResumenSeveridad(PDO $pdo): array
         'urgen' => $conteo['critico'] + $conteo['urgente'] + $conteo['caducado'],
         'total' => count($lotes),
         'mas_urgente' => $masUrgente,
+        'descuadres' => count(loteFetchDescuadres($pdo)),
     ];
 
     return $resumen;
@@ -629,6 +630,136 @@ function loteReconciliacionStock(PDO $pdo, array $idsProducto): array
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $out[(int) $row['id_producto']]['stock_lotes'] = (int) $row['total'];
     }
+
+    return $out;
+}
+
+/**
+ * Productos donde el stock del sistema (SUM inventario_almacen.cantidad_actual) NO
+ * coincide con la suma de sus lotes vivos (SUM lotes_inventario.cantidad_restante).
+ * Incluye productos con stock pero SIN un solo lote registrado -- ahi es donde
+ * "puede haber algo mas". Ordenado por tamano del descuadre (|diferencia| desc).
+ *
+ * diferencia = stock_sistema - stock_lotes
+ *   > 0  ('faltante'): el sistema tiene mas de lo que suman los lotes -> faltan
+ *                      lotes por registrar, o merma no descontada.
+ *   < 0  ('sobrante'): los lotes suman mas que el sistema -> lote de mas, o el
+ *                      stock del sistema quedo sin actualizar.
+ *
+ * @param array{id_almacen?:int, q?:string, tipo?:string} $filtros
+ *   id_almacen restringe AMBOS lados a ese almacen (los lotes con almacen NULL
+ *   quedan fuera en ese modo).
+ * @return array<int,array{
+ *   id_producto:int, producto_nombre:string, producto_sku:string,
+ *   producto_categoria:?string, stock_sistema:int, stock_lotes:int,
+ *   diferencia:int, tipo:string, n_lotes:int
+ * }>
+ */
+function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
+{
+    if (!loteTablaExiste($pdo, 'inventario_almacen') || !loteTablaExiste($pdo, 'lotes_inventario')) {
+        return [];
+    }
+
+    $idAlmacen = isset($filtros['id_almacen']) && (int) $filtros['id_almacen'] > 0
+        ? (int) $filtros['id_almacen'] : null;
+
+    // Stock del sistema por producto.
+    $sqlSis = 'SELECT id_producto, SUM(cantidad_actual) AS total FROM inventario_almacen';
+    $pSis = [];
+    if ($idAlmacen !== null) {
+        $sqlSis .= ' WHERE id_almacen = :a';
+        $pSis[':a'] = $idAlmacen;
+    }
+    $sqlSis .= ' GROUP BY id_producto';
+    $sistema = [];
+    $st = $pdo->prepare($sqlSis);
+    $st->execute($pSis);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $sistema[(int) $r['id_producto']] = (int) $r['total'];
+    }
+
+    // Stock de lotes vivos por producto.
+    $sqlLot = "SELECT id_producto, SUM(cantidad_restante) AS total, COUNT(*) AS n
+               FROM lotes_inventario WHERE estado IN ('activo','caducado')";
+    $pLot = [];
+    if ($idAlmacen !== null) {
+        $sqlLot .= ' AND id_almacen = :a';
+        $pLot[':a'] = $idAlmacen;
+    }
+    $sqlLot .= ' GROUP BY id_producto';
+    $lotes = [];
+    $st = $pdo->prepare($sqlLot);
+    $st->execute($pLot);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $lotes[(int) $r['id_producto']] = ['total' => (int) $r['total'], 'n' => (int) $r['n']];
+    }
+
+    $ids = array_values(array_unique(array_merge(array_keys($sistema), array_keys($lotes))));
+    if ($ids === []) {
+        return [];
+    }
+
+    $ph = [];
+    $pProd = [];
+    foreach ($ids as $i => $id) {
+        $ph[] = ":d{$i}";
+        $pProd[":d{$i}"] = $id;
+    }
+    $tieneEstado = loteColumnaExiste($pdo, 'productos', 'estado');
+    $tieneCategoria = loteColumnaExiste($pdo, 'productos', 'categoria');
+    $sqlProd = 'SELECT p.id_producto, p.nombre, ' . loteSkuExpr($pdo) . ' AS sku'
+        . ($tieneCategoria ? ', p.categoria' : ", '' AS categoria")
+        . ($tieneEstado ? ', p.estado' : ", 'activo' AS estado")
+        . ' FROM productos p WHERE p.id_producto IN (' . implode(',', $ph) . ')';
+    $st = $pdo->prepare($sqlProd);
+    $st->execute($pProd);
+    $prods = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $prods[(int) $r['id_producto']] = $r;
+    }
+
+    $q = isset($filtros['q']) ? mb_strtolower(trim((string) $filtros['q'])) : '';
+    $tipoFiltro = isset($filtros['tipo']) ? trim((string) $filtros['tipo']) : '';
+
+    $out = [];
+    foreach ($ids as $id) {
+        $prod = $prods[$id] ?? null;
+        if ($prod === null || (string) ($prod['estado'] ?? 'activo') === 'archivado') {
+            continue;
+        }
+        $s = $sistema[$id] ?? 0;
+        $l = $lotes[$id]['total'] ?? 0;
+        if ($s === $l) {
+            continue;
+        }
+        $dif = $s - $l;
+        $tipo = $dif > 0 ? 'faltante' : 'sobrante';
+        if ($tipoFiltro !== '' && $tipoFiltro !== $tipo) {
+            continue;
+        }
+        if ($q !== '') {
+            $hay = mb_strtolower((string) $prod['nombre'] . ' ' . (string) ($prod['sku'] ?? ''));
+            if (mb_strpos($hay, $q) === false) {
+                continue;
+            }
+        }
+        $out[] = [
+            'id_producto' => $id,
+            'producto_nombre' => (string) $prod['nombre'],
+            'producto_sku' => (string) ($prod['sku'] ?? ''),
+            'producto_categoria' => ($prod['categoria'] ?? '') !== '' ? (string) $prod['categoria'] : null,
+            'stock_sistema' => $s,
+            'stock_lotes' => $l,
+            'diferencia' => $dif,
+            'tipo' => $tipo,
+            'n_lotes' => $lotes[$id]['n'] ?? 0,
+        ];
+    }
+
+    usort($out, static function (array $a, array $b): int {
+        return [abs($b['diferencia']), $a['producto_nombre']] <=> [abs($a['diferencia']), $b['producto_nombre']];
+    });
 
     return $out;
 }

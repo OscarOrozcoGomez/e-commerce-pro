@@ -46,6 +46,10 @@ try {
 }
 $lotes = $proy['lotes'];
 
+// La pestaña "Inconsistencias" carga su tabla por AJAX (api/lotes_manager.php
+// ?modo=descuadres) y filtra en vivo; aquí solo pre-seleccionamos el filtro.
+$fTipoDescuadre = trim((string) ($_GET['d_tipo'] ?? ''));
+
 $resumen = loteResumenSeveridad($pdo);
 
 // Catálogos para los filtros.
@@ -75,6 +79,10 @@ $SEV = [
     'ok'            => ['t' => 'Ok',             'c' => 'green lighten-1 white-text'],
 ];
 
+// Pestaña activa (se preserva en los submits de los formularios de filtro).
+$tab = (($_GET['tab'] ?? '') === 'inc') ? 'inc' : 'cad';
+$totalDescuadres = (int) ($resumen['descuadres'] ?? 0);
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -85,35 +93,45 @@ include __DIR__ . '/includes/header.php';
                 <h4 style="margin:0;"><i class="material-icons left" style="color:#e65100;">event_busy</i> Control de Caducidades</h4>
                 <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Dashboard</a>
             </div>
-            <p class="grey-text" style="margin-top:4px;">
+        </div>
+    </div>
+
+    <div class="row" style="margin-bottom:0;">
+        <div class="col s12">
+            <ul class="tabs">
+                <li class="tab col s6"><a href="#tab-caducidades" class="<?php echo $tab === 'cad' ? 'active' : ''; ?>">Caducidades (<?php echo (int) ($resumen['total'] ?? 0); ?>)</a></li>
+                <li class="tab col s6"><a href="#tab-inconsistencias" class="<?php echo $tab === 'inc' ? 'active' : ''; ?>">Inconsistencias stock/lotes<?php if ($totalDescuadres > 0): ?> (<?php echo $totalDescuadres; ?>)<?php endif; ?></a></li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- ================= TAB 1: Caducidades ================= -->
+    <div id="tab-caducidades">
+        <div class="row"><div class="col s12">
+            <p class="grey-text" style="margin:14px 0 6px;">
                 Lotes ordenados por los días que faltan para caducar. El "excedente proyectado" son las unidades que —a la velocidad de venta de los últimos <?php echo (int) ($proy['ventana_dias'] ?? 90); ?> días— <strong>no</strong> se alcanzarían a vender antes de caducar. Ponlos en oferta a tiempo.
             </p>
-        </div>
-    </div>
 
-    <div class="row">
-        <div class="col s12">
-            <?php
-            $chips = [
-                'caducado'   => ['Caducados', 'black white-text'],
-                'critico'    => ['Críticos', 'red darken-1 white-text'],
-                'urgente'    => ['Urgentes', 'deep-orange darken-1 white-text'],
-                'planificar' => ['A planificar', 'amber darken-2 white-text'],
-                'vigilar'    => ['A vigilar', 'blue-grey lighten-1 white-text'],
-            ];
-            foreach ($chips as $k => [$label, $cls]):
-            ?>
-                <a href="?severidad=<?php echo $k; ?>" class="chip <?php echo $cls; ?>" style="text-decoration:none;">
-                    <?php echo esc($label); ?>: <strong><?php echo (int) ($resumen[$k] ?? 0); ?></strong>
-                </a>
-            <?php endforeach; ?>
-            <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="chip">Ver todos: <strong><?php echo (int) ($resumen['total'] ?? 0); ?></strong></a>
-        </div>
-    </div>
+            <div style="margin-bottom:10px;">
+                <?php
+                $chips = [
+                    'caducado'   => ['Caducados', 'black white-text'],
+                    'critico'    => ['Críticos', 'red darken-1 white-text'],
+                    'urgente'    => ['Urgentes', 'deep-orange darken-1 white-text'],
+                    'planificar' => ['A planificar', 'amber darken-2 white-text'],
+                    'vigilar'    => ['A vigilar', 'blue-grey lighten-1 white-text'],
+                ];
+                foreach ($chips as $k => [$label, $cls]):
+                ?>
+                    <a href="?severidad=<?php echo $k; ?>#tab-caducidades" class="chip <?php echo $cls; ?>" style="text-decoration:none;">
+                        <?php echo esc($label); ?>: <strong><?php echo (int) ($resumen[$k] ?? 0); ?></strong>
+                    </a>
+                <?php endforeach; ?>
+                <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="chip">Ver todos: <strong><?php echo (int) ($resumen['total'] ?? 0); ?></strong></a>
+            </div>
 
-    <div class="row">
-        <div class="col s12">
             <form method="GET" class="card-panel grey lighten-4" style="padding:12px;">
+                <input type="hidden" name="tab" value="cad">
                 <div class="row" style="margin-bottom:0;">
                     <div class="input-field col s12 m3">
                         <select name="severidad">
@@ -152,16 +170,12 @@ include __DIR__ . '/includes/header.php';
                         </label>
                     </div>
                     <div class="col s12 m6" style="text-align:right;">
-                        <a href="<?php echo BASE_URL; ?>views/caducidades.php" class="btn-flat">Limpiar</a>
+                        <a href="?tab=cad" class="btn-flat">Limpiar</a>
                         <button type="submit" class="btn orange darken-3 waves-effect waves-light"><i class="material-icons left">filter_list</i>Filtrar</button>
                     </div>
                 </div>
             </form>
-        </div>
-    </div>
 
-    <div class="row">
-        <div class="col s12">
             <?php if (empty($lotes)): ?>
                 <div class="card-panel">No hay lotes que coincidan con el filtro.</div>
             <?php else: ?>
@@ -240,9 +254,54 @@ include __DIR__ . '/includes/header.php';
                 </table>
                 </div>
             <?php endif; ?>
-        </div>
-    </div>
-</div>
+        </div></div>
+    </div><!-- /#tab-caducidades -->
+
+    <!-- ================= TAB 2: Inconsistencias stock vs. lotes ================= -->
+    <div id="tab-inconsistencias">
+        <div class="row"><div class="col s12">
+            <p class="grey-text" style="margin:14px 0 10px;">
+                Productos donde el <strong>stock del sistema</strong> (inventario_almacen) no coincide con la <strong>suma de sus lotes</strong> vivos. Aquí es donde puede haber mercancía sin registrar en lotes, o lotes mal capturados.
+                <br><strong>Faltante</strong>: el sistema tiene más que los lotes → faltan lotes por registrar.
+                <strong>Sobrante</strong>: los lotes suman más que el sistema → lote de más o stock sin actualizar.
+            </p>
+
+            <div class="card-panel grey lighten-4" style="padding:12px;">
+                <div class="row" style="margin-bottom:0;">
+                    <div class="input-field col s12 m4">
+                        <select id="inc-almacen" class="browser-default" style="border:1px solid #ccc; border-radius:4px;">
+                            <option value="0">Almacén (todos)</option>
+                            <?php foreach ($almacenes as $a): ?>
+                                <option value="<?php echo (int) $a['id_almacen']; ?>" <?php echo $fAlmacen === (int) $a['id_almacen'] ? 'selected' : ''; ?>><?php echo esc((string) $a['nombre']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="input-field col s12 m4">
+                        <select id="inc-tipo" class="browser-default" style="border:1px solid #ccc; border-radius:4px;">
+                            <?php foreach (['' => 'Descuadre: todos', 'faltante' => 'Solo faltante', 'sobrante' => 'Solo sobrante'] as $k => $lbl): ?>
+                                <option value="<?php echo $k; ?>" <?php echo $fTipoDescuadre === $k ? 'selected' : ''; ?>><?php echo $lbl; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="input-field col s12 m4">
+                        <input type="text" id="inc-q" value="<?php echo esc($fQ); ?>" placeholder="Producto o SKU">
+                        <label for="inc-q" class="active">Buscar</label>
+                    </div>
+                </div>
+                <div class="row" style="margin-bottom:0;">
+                    <div class="col s12" style="text-align:right;">
+                        <span id="inc-count" class="grey-text" style="margin-right:12px; font-size:.85rem;"></span>
+                        <a id="inc-limpiar" class="btn-flat" style="cursor:pointer;">Limpiar</a>
+                    </div>
+                </div>
+            </div>
+
+            <div id="inc-resultado">
+                <div class="card-panel grey-text center-align">Cargando…</div>
+            </div>
+        </div></div>
+    </div><!-- /#tab-inconsistencias -->
+</div><!-- /container -->
 
 <?php echo csrfInput(); ?>
 <script>
@@ -278,10 +337,88 @@ include __DIR__ . '/includes/header.php';
         postLote({ accion: 'cambiar_estado', id_lote: id, estado: 'retirado' }).then(tras);
     };
 
+    /* ---- Pestaña "Inconsistencias": filtra en vivo, sin botón ---- */
+    const BASE_URL_JS = '<?php echo BASE_URL; ?>';
+    const escH = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let incTimer = null;
+
+    function cargarInconsistencias() {
+        const alm = document.getElementById('inc-almacen');
+        const tipo = document.getElementById('inc-tipo');
+        const q = document.getElementById('inc-q');
+        const cont = document.getElementById('inc-resultado');
+        const cnt = document.getElementById('inc-count');
+        if (!cont) return;
+
+        const params = new URLSearchParams({ modo: 'descuadres' });
+        if (alm && alm.value && alm.value !== '0') params.set('id_almacen', alm.value);
+        if (tipo && tipo.value) params.set('tipo', tipo.value);
+        if (q && q.value.trim()) params.set('q', q.value.trim());
+
+        if (cnt) cnt.textContent = '…';
+        fetch(LOTES_API + '?' + params.toString())
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) { cont.innerHTML = '<div class="card-panel red lighten-5">No se pudo cargar.</div>'; return; }
+                const rows = res.data || [];
+                if (cnt) cnt.textContent = rows.length + (rows.length === 1 ? ' resultado' : ' resultados');
+                if (!rows.length) {
+                    cont.innerHTML = '<div class="card-panel">Ningún descuadre con este filtro.</div>';
+                    return;
+                }
+                let h = '<div style="overflow-x:auto;"><table class="striped highlight"><thead><tr>'
+                    + '<th>Producto</th><th class="right-align">Stock sistema</th><th class="right-align">Suma lotes</th>'
+                    + '<th class="right-align">Diferencia</th><th class="right-align">Lotes</th><th></th></tr></thead><tbody>';
+                rows.forEach(d => {
+                    const dif = parseInt(d.diferencia, 10) || 0;
+                    const cls = dif > 0 ? 'blue darken-1' : 'deep-orange darken-1';
+                    const pid = parseInt(d.id_producto, 10) || 0;
+                    h += '<tr><td><strong>' + escH(d.producto_nombre) + '</strong>'
+                        + (d.producto_sku ? '<br><small class="grey-text">' + escH(d.producto_sku) + '</small>' : '') + '</td>'
+                        + '<td class="right-align">' + (parseInt(d.stock_sistema, 10) || 0) + '</td>'
+                        + '<td class="right-align">' + (parseInt(d.stock_lotes, 10) || 0) + '</td>'
+                        + '<td class="right-align"><span class="new badge ' + cls + ' white-text" data-badge-caption="" style="float:none;">'
+                        + (dif > 0 ? '+' : '') + dif + ' ' + (dif > 0 ? 'faltante' : 'sobrante') + '</span></td>'
+                        + '<td class="right-align">' + (parseInt(d.n_lotes, 10) || 0) + '</td>'
+                        + '<td style="white-space:nowrap;">'
+                        + '<a class="btn-flat btn-small" title="Ver / editar lotes del producto" href="' + BASE_URL_JS + 'views/products.php?id_producto=' + pid + '"><i class="material-icons">inventory_2</i></a>'
+                        + '<a class="btn-flat btn-small" title="Entradas de inventario" href="' + BASE_URL_JS + 'views/inventario_entradas.php"><i class="material-icons">add_business</i></a>'
+                        + '</td></tr>';
+                });
+                cont.innerHTML = h + '</tbody></table></div>';
+            })
+            .catch(() => { cont.innerHTML = '<div class="card-panel red lighten-5">Error de conexión.</div>'; });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
-        if (window.M && M.FormSelect) {
-            M.FormSelect.init(document.querySelectorAll('select'));
+        if (window.M && M.Tabs) {
+            M.Tabs.init(document.querySelectorAll('.tabs'));
         }
+        if (window.M && M.FormSelect) {
+            M.FormSelect.init(document.querySelectorAll('select:not(.browser-default)'));
+        }
+
+        document.getElementById('inc-almacen')?.addEventListener('change', cargarInconsistencias);
+        document.getElementById('inc-tipo')?.addEventListener('change', cargarInconsistencias);
+        document.getElementById('inc-q')?.addEventListener('input', function () {
+            clearTimeout(incTimer);
+            incTimer = setTimeout(cargarInconsistencias, 300);
+        });
+        document.getElementById('inc-limpiar')?.addEventListener('click', function () {
+            const a = document.getElementById('inc-almacen'); if (a) a.value = '0';
+            const t = document.getElementById('inc-tipo'); if (t) t.value = '';
+            const q = document.getElementById('inc-q'); if (q) q.value = '';
+            cargarInconsistencias();
+        });
+        cargarInconsistencias();
+
+        <?php if ($tab === 'inc'): ?>
+        var tInc = document.querySelector('.tabs a[href="#tab-inconsistencias"]');
+        if (tInc && window.M && M.Tabs) {
+            var inst = M.Tabs.getInstance(tInc.closest('.tabs'));
+            if (inst) inst.select('tab-inconsistencias');
+        }
+        <?php endif; ?>
     });
 </script>
 

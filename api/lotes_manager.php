@@ -19,19 +19,37 @@ $pdo = getPDO();
 $userId = (int) ($_SESSION['usuario']['id_usuario'] ?? 0);
 
 // Lectura GET:
-//   ?id_producto=N       -> lotes de un producto (para la ficha en products.php)
-//   ?modo=lista [+filtros] -> TODOS los lotes con proyección (para views/caducidades.php):
-//                             severidad, id_almacen, categoria, q, solo_con_excedente
+//   ?id_producto=N          -> lotes de un producto (para la ficha en products.php)
+//   ?modo=lista [+filtros]   -> TODOS los lotes con proyección (para views/caducidades.php):
+//                              severidad, id_almacen, categoria, q, solo_con_excedente
+//   ?modo=descuadres [+filtros] -> productos con stock del sistema != suma de lotes:
+//                              id_almacen, q, tipo (faltante|sobrante)
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $idProducto = (int) ($_GET['id_producto'] ?? 0);
-    $modoLista = ($_GET['modo'] ?? '') === 'lista';
+    $modo = (string) ($_GET['modo'] ?? '');
+    $modoLista = $modo === 'lista';
+    $modoDescuadres = $modo === 'descuadres';
 
-    if ($idProducto <= 0 && !$modoLista) {
+    if ($idProducto <= 0 && !$modoLista && !$modoDescuadres) {
         echo json_encode(['success' => false, 'message' => 'Producto inválido']);
         exit;
     }
 
     try {
+        if ($modoDescuadres) {
+            $filtros = [];
+            foreach (['id_almacen', 'q', 'tipo'] as $k) {
+                if (isset($_GET[$k]) && trim((string) $_GET[$k]) !== '') {
+                    $filtros[$k] = $_GET[$k];
+                }
+            }
+            echo json_encode(
+                ['success' => true, 'data' => loteFetchDescuadres($pdo, $filtros)],
+                JSON_UNESCAPED_UNICODE
+            );
+            exit;
+        }
+
         if ($idProducto > 0) {
             $filtros = ['id_producto' => $idProducto];
         } else {
