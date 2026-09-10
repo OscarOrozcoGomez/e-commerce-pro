@@ -272,7 +272,7 @@ include __DIR__ . '/includes/header.php';
                             <label>Asignar Categorías</label>
                         </div>
 
-                        <?php if (isAdmin()): ?>
+                        <?php if (hasPermission('ajustar_inventario_producto')): ?>
                         <div class="row grey lighten-4" style="padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
                             <div class="col s12"><p style="margin:0 0 10px 0;"><strong>Control de Inventario</strong></p></div>
                             <!-- Solo se escribe inventario_almacen si el usuario tocó de verdad alguno de los

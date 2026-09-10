@@ -562,7 +562,7 @@ try {
             // que cambiar el nombre/foto/precio de un producto reescribía cantidad_actual,
             // stock_minimo y stock_maximo del almacén seleccionado (y con el selector de la
             // lista podía terminar escribiendo en el almacén equivocado).
-            if (isAdmin() && ($data['stock_touched'] ?? '0') === '1') {
+            if (hasPermission('ajustar_inventario_producto') && ($data['stock_touched'] ?? '0') === '1') {
                 $id_alm = (int)($data['id_almacen_stock'] ?? 0);
                 if ($id_alm > 0) {
                     $nuevaCantidad = max(0, (int)($data['cantidad_actual'] ?? 0));
