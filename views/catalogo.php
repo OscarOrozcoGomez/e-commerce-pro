@@ -173,6 +173,10 @@ try {
 $productos = catalogCollapseProducts($productos);
 $productos = catalogAttachStockAvailability($pdo, $productos);
 
+// El icono de compartir por WhatsApp (por producto y el de "todas las ofertas")
+// solo se muestra a sesiones iniciadas: cualquier usuario del sistema o cliente.
+$puedeCompartir = isAuthenticated();
+
 if ($isAjaxLoadMore) {
     header('Content-Type: text/html; charset=UTF-8');
     if (empty($productos)) {
@@ -182,7 +186,7 @@ if ($isAjaxLoadMore) {
             . '</div>';
     } else {
         foreach ($productos as $p) {
-            echo catalogRenderProductCard($p);
+            echo catalogRenderProductCard($p, $puedeCompartir);
         }
     }
     exit;
@@ -201,7 +205,9 @@ foreach ($categorias as $catOferta) {
 }
 $viendoCategoriaOfertas = $categoriaSeleccionada !== ''
     && in_array(mb_strtolower($categoriaSeleccionada, 'UTF-8'), OFERTA_CATEGORIA_NOMBRES, true);
-$ofertasParaCompartir = $viendoCategoriaOfertas ? catalogGetOfertasParaCompartir($pdo) : [];
+$ofertasParaCompartir = ($puedeCompartir && $viendoCategoriaOfertas)
+    ? catalogGetOfertasParaCompartir($pdo)
+    : [];
 
 $pageTitle = 'Catálogo de Productos';
 include __DIR__ . '/includes/header.php';
@@ -325,7 +331,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 <?php else: ?>
                     <?php foreach ($productos as $p): ?>
-                        <?php echo catalogRenderProductCard($p); ?>
+                        <?php echo catalogRenderProductCard($p, $puedeCompartir); ?>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>

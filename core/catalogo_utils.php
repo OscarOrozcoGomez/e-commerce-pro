@@ -400,7 +400,7 @@ function catalogResolveCardImageSrc(string $rawImagen, int $productId): string
     return $imgSrc;
 }
 
-function catalogRenderProductCard(array $p): string
+function catalogRenderProductCard(array $p, bool $mostrarBotonCompartir = false): string
 {
     $groupKey = catalogGroupKey((string) ($p['nombre'] ?? ''));
     $precioActual = (float) ($p['precio_desde'] ?? 0);
@@ -444,15 +444,17 @@ function catalogRenderProductCard(array $p): string
                     </p>
                 </div>
                 <div class="card-action" style="border-top: 1px solid #eee; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <?php
-                    // Precio a mostrar/compartir: el mismo "Desde $X" ya con la rebaja de oferta.
-                    $precioCompartir = $precioActual > 0 ? $precioActual : (float) ($p['precio_venta'] ?? $p['precio_efectivo'] ?? 0);
-                    ?>
-                    <button type="button" class="btn green waves-effect waves-light"
-                            title="Compartir por WhatsApp"
-                            onclick="shareProductoWhatsApp(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo $precioCompartir; ?>)">
-                        <i class="fa-brands fa-whatsapp"></i>
-                    </button>
+                    <?php if ($mostrarBotonCompartir): ?>
+                        <?php
+                        // Precio a mostrar/compartir: el mismo "Desde $X" ya con la rebaja de oferta.
+                        $precioCompartir = $precioActual > 0 ? $precioActual : (float) ($p['precio_venta'] ?? $p['precio_efectivo'] ?? 0);
+                        ?>
+                        <button type="button" class="btn green waves-effect waves-light"
+                                title="Compartir por WhatsApp"
+                                onclick="shareProductoWhatsApp(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo $precioCompartir; ?>)">
+                            <i class="fa-brands fa-whatsapp"></i>
+                        </button>
+                    <?php endif; ?>
                     <?php if ($agotado): ?>
                         <button class="btn grey lighten-1 disabled" disabled>
                             <i class="material-icons left" style="margin-right:4px;">block</i>Agotado
