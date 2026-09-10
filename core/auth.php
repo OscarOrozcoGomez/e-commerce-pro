@@ -49,6 +49,9 @@ const PERMISOS_EN_USO = [
     'ver_notificaciones_pickup',
     // Control de caducidades por lote (views/caducidades.php + api/lotes_manager.php).
     'gestionar_caducidades',
+    // Ajuste manual de stock en la ficha de producto (views/products.php +
+    // api/products_manager.php); antes era isAdmin() por codigo.
+    'ajustar_inventario_producto',
 ];
 
 /**

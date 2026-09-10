@@ -95,9 +95,25 @@ sendSecurityHeaders();
 
 // Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
 if (!defined('BASE_URL')) {
-    // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+    // Detección automática: en red local (localhost, 127.0.0.1, IP privada de LAN
+    // para probar desde el teléfono, o hostname .local/.lan) usa la subcarpeta bajo
+    // htdocs; en remoto (dominio público) usa la raíz.
     $host = $_SERVER['HTTP_HOST'] ?? '';
-    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+    $hostSinPuerto = (string) preg_replace('/:\d+$/', '', $host);
+    // Túneles de desarrollo (Cloudflare quick tunnel, ngrok, localtunnel, etc.) que
+    // exponen el XAMPP local hacia afuera: ningún sitio de producción se sirve desde
+    // estos dominios, así que se tratan como red local para conservar la subcarpeta.
+    $esTunelDev = preg_match(
+        '/(\.trycloudflare\.com|\.ngrok\.io|\.ngrok-free\.app|\.ngrok\.app|\.loca\.lt|\.lhr\.life|\.serveo\.net)$/',
+        $hostSinPuerto
+    ) === 1;
+    $esRedLocal = strpos($host, 'localhost') !== false
+        || strpos($host, '127.0.0.1') !== false
+        || substr($hostSinPuerto, -6) === '.local'
+        || substr($hostSinPuerto, -4) === '.lan'
+        || $esTunelDev
+        || preg_match('/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/', $hostSinPuerto) === 1;
+    if ($esRedLocal) {
         // Deriva la subcarpeta del propio script para que un git worktree servido en
         // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
         // local; cae a /e-commerce-pro/ si no se puede determinar.

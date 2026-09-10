@@ -450,6 +450,7 @@ INSERT INTO `permisos` (`clave`,`nombre`,`descripcion`) VALUES
   ('configurar_usuarios','Configurar usuarios','Puede crear y editar usuarios y roles'),
   ('ver_reportes','Ver reportes','Puede ver reportes y dashboards'),
   ('transferir_stock','Transferir stock','Puede mover inventario entre almacenes'),
+  ('ajustar_inventario_producto','Ajustar inventario desde la ficha de producto','Puede ver y editar stock actual, minimo y maximo por almacen en la ficha de producto'),
   ('gestionar_clientes','Gestionar clientes','Puede crear y editar clientes'),
   ('gestionar_blogs','Gestionar Blogs','Puede crear y editar artículos del blog');
 

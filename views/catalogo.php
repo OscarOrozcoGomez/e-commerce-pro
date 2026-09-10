@@ -173,6 +173,10 @@ try {
 $productos = catalogCollapseProducts($productos);
 $productos = catalogAttachStockAvailability($pdo, $productos);
 
+// El icono de compartir por WhatsApp (por producto y el de "todas las ofertas")
+// solo se muestra a sesiones iniciadas: cualquier usuario del sistema o cliente.
+$puedeCompartir = isAuthenticated();
+
 if ($isAjaxLoadMore) {
     header('Content-Type: text/html; charset=UTF-8');
     if (empty($productos)) {
@@ -182,11 +186,28 @@ if ($isAjaxLoadMore) {
             . '</div>';
     } else {
         foreach ($productos as $p) {
-            echo catalogRenderProductCard($p);
+            echo catalogRenderProductCard($p, $puedeCompartir);
         }
     }
     exit;
 }
+
+// Ofertas para el botón "enviar todas las ofertas en un solo link de WhatsApp".
+// Solo en carga normal (el bloque AJAX de arriba ya hizo exit) y SOLO cuando el
+// usuario está viendo la categoría de ofertas: fuera de ahí el botón no aplica.
+$ofertasCategoriaNombre = '';
+foreach ($categorias as $catOferta) {
+    $nombreCat = (string) ($catOferta['nombre'] ?? '');
+    if (in_array(mb_strtolower($nombreCat, 'UTF-8'), OFERTA_CATEGORIA_NOMBRES, true)) {
+        $ofertasCategoriaNombre = $nombreCat;
+        break;
+    }
+}
+$viendoCategoriaOfertas = $categoriaSeleccionada !== ''
+    && in_array(mb_strtolower($categoriaSeleccionada, 'UTF-8'), OFERTA_CATEGORIA_NOMBRES, true);
+$ofertasParaCompartir = ($puedeCompartir && $viendoCategoriaOfertas)
+    ? catalogGetOfertasParaCompartir($pdo)
+    : [];
 
 $pageTitle = 'Catálogo de Productos';
 include __DIR__ . '/includes/header.php';
@@ -279,6 +300,14 @@ include __DIR__ . '/includes/header.php';
                 <h4 class="grey-text text-darken-3" style="font-weight: 300; margin: 0;">
                     <?php echo empty($categoriaSeleccionada) ? 'Explorar Catálogo' : 'Categoría: ' . esc($categoriaSeleccionada); ?>
                 </h4>
+                <?php if (!empty($ofertasParaCompartir)): ?>
+                    <button type="button" id="share-ofertas-btn" data-no-track="1"
+                            class="btn green waves-effect waves-light"
+                            style="text-transform: none;">
+                        <i class="fa-brands fa-whatsapp left"></i>
+                        Enviar <?php echo count($ofertasParaCompartir); ?> ofertas por WhatsApp
+                    </button>
+                <?php endif; ?>
                 <label class="grey-text text-darken-2" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
                     <input type="checkbox" id="toggle-agotados" class="filled-in" <?php echo $incluirAgotados ? 'checked' : ''; ?>>
                     <span style="padding-left: 26px;">Ver agotados</span>
@@ -302,7 +331,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 <?php else: ?>
                     <?php foreach ($productos as $p): ?>
-                        <?php echo catalogRenderProductCard($p); ?>
+                        <?php echo catalogRenderProductCard($p, $puedeCompartir); ?>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
@@ -647,6 +676,68 @@ function handleAddToCart(event, id, nombre, precio) {
         updateCartBadge();
     }
 }
+
+// --- Compartir por WhatsApp -------------------------------------------------
+// En móvil se usa el selector nativo de Android/iOS (navigator.share): ahí el
+// usuario elige la app destino, incluyendo WhatsApp y WhatsApp Business como
+// opciones separadas. Un link wa.me directo NO deja elegir en Android (abre la
+// que esté como predeterminada). En escritorio, sin navigator.share, se cae al
+// link wa.me de siempre (abre el selector de chats de WhatsApp Web).
+const catalogBaseUrlAbs = window.location.origin + '<?php echo BASE_URL; ?>';
+const ofertasParaCompartir = <?php echo json_encode(array_map(
+    static fn(array $o): array => ['id' => $o['id_producto'], 'n' => $o['nombre'], 'p' => $o['precio']],
+    $ofertasParaCompartir
+), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+const ofertasCategoriaNombre = <?php echo json_encode($ofertasCategoriaNombre, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+
+function buildProductUrlAbs(id) {
+    return catalogBaseUrlAbs + 'product_detail.php?id=' + encodeURIComponent(id);
+}
+
+function formatPrecioCompartir(precio) {
+    const n = Number(precio);
+    if (!(n > 0)) {
+        return '';
+    }
+    return ' - $' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function compartirTexto(texto) {
+    if (navigator.share) {
+        try {
+            await navigator.share({ text: texto });
+            return;
+        } catch (err) {
+            // El usuario cerró el selector a propósito: no abrimos nada más.
+            if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
+                return;
+            }
+            // Cualquier otro error (navegador sin soporte real, etc.): fallback.
+        }
+    }
+    window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+}
+
+function shareProductoWhatsApp(event, id, nombre, precio) {
+    event.preventDefault();
+    event.stopPropagation();
+    const texto = '*' + nombre + '*' + formatPrecioCompartir(precio) + '\n' + buildProductUrlAbs(id);
+    compartirTexto(texto);
+}
+
+document.getElementById('share-ofertas-btn')?.addEventListener('click', function () {
+    if (!Array.isArray(ofertasParaCompartir) || ofertasParaCompartir.length === 0) {
+        return;
+    }
+    const lineas = ofertasParaCompartir.map(function (o) {
+        return '• *' + o.n + '*' + formatPrecioCompartir(o.p) + '\n' + buildProductUrlAbs(o.id);
+    });
+    let texto = '🔥 *Ofertas disponibles* 🔥\n\n' + lineas.join('\n\n');
+    if (ofertasCategoriaNombre) {
+        texto += '\n\nVer todas: ' + catalogBaseUrlAbs + 'views/catalogo.php?categoria=' + encodeURIComponent(ofertasCategoriaNombre);
+    }
+    compartirTexto(texto);
+});
 </script>
 
 <style>
