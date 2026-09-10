@@ -46,19 +46,9 @@ try {
 }
 $lotes = $proy['lotes'];
 
-// Descuadres de inventario: productos donde el stock del sistema no coincide con
-// la suma de sus lotes. Reusa los filtros de almacén/búsqueda de la página.
+// La pestaña "Inconsistencias" carga su tabla por AJAX (api/lotes_manager.php
+// ?modo=descuadres) y filtra en vivo; aquí solo pre-seleccionamos el filtro.
 $fTipoDescuadre = trim((string) ($_GET['d_tipo'] ?? ''));
-$descuadres = [];
-try {
-    $descuadres = loteFetchDescuadres($pdo, [
-        'id_almacen' => $fAlmacen,
-        'q' => $fQ,
-        'tipo' => $fTipoDescuadre,
-    ]);
-} catch (Throwable $e) {
-    error_log('caducidades.php (descuadres): ' . $e->getMessage());
-}
 
 $resumen = loteResumenSeveridad($pdo);
 
@@ -276,11 +266,10 @@ include __DIR__ . '/includes/header.php';
                 <strong>Sobrante</strong>: los lotes suman más que el sistema → lote de más o stock sin actualizar.
             </p>
 
-            <form method="GET" class="card-panel grey lighten-4" style="padding:12px;">
-                <input type="hidden" name="tab" value="inc">
+            <div class="card-panel grey lighten-4" style="padding:12px;">
                 <div class="row" style="margin-bottom:0;">
                     <div class="input-field col s12 m4">
-                        <select name="id_almacen" class="browser-default" style="border:1px solid #ccc; border-radius:4px;">
+                        <select id="inc-almacen" class="browser-default" style="border:1px solid #ccc; border-radius:4px;">
                             <option value="0">Almacén (todos)</option>
                             <?php foreach ($almacenes as $a): ?>
                                 <option value="<?php echo (int) $a['id_almacen']; ?>" <?php echo $fAlmacen === (int) $a['id_almacen'] ? 'selected' : ''; ?>><?php echo esc((string) $a['nombre']); ?></option>
@@ -288,89 +277,28 @@ include __DIR__ . '/includes/header.php';
                         </select>
                     </div>
                     <div class="input-field col s12 m4">
-                        <select name="d_tipo" class="browser-default" style="border:1px solid #ccc; border-radius:4px;">
+                        <select id="inc-tipo" class="browser-default" style="border:1px solid #ccc; border-radius:4px;">
                             <?php foreach (['' => 'Descuadre: todos', 'faltante' => 'Solo faltante', 'sobrante' => 'Solo sobrante'] as $k => $lbl): ?>
                                 <option value="<?php echo $k; ?>" <?php echo $fTipoDescuadre === $k ? 'selected' : ''; ?>><?php echo $lbl; ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="input-field col s12 m4">
-                        <input type="text" name="q" id="q_inc" value="<?php echo esc($fQ); ?>" placeholder="Producto o SKU">
-                        <label for="q_inc" class="active">Buscar</label>
+                        <input type="text" id="inc-q" value="<?php echo esc($fQ); ?>" placeholder="Producto o SKU">
+                        <label for="inc-q" class="active">Buscar</label>
                     </div>
                 </div>
                 <div class="row" style="margin-bottom:0;">
                     <div class="col s12" style="text-align:right;">
-                        <a href="?tab=inc" class="btn-flat">Limpiar</a>
-                        <button type="submit" class="btn orange darken-3 waves-effect waves-light"><i class="material-icons left">filter_list</i>Filtrar</button>
+                        <span id="inc-count" class="grey-text" style="margin-right:12px; font-size:.85rem;"></span>
+                        <a id="inc-limpiar" class="btn-flat" style="cursor:pointer;">Limpiar</a>
                     </div>
                 </div>
-            </form>
+            </div>
 
-            <?php if (empty($descuadres)): ?>
-                <?php
-                $hayFiltro = $fAlmacen > 0 || $fTipoDescuadre !== '' || $fQ !== '';
-                $nomAlmacen = '';
-                foreach ($almacenes as $a) {
-                    if ((int) $a['id_almacen'] === $fAlmacen) { $nomAlmacen = (string) $a['nombre']; }
-                }
-                ?>
-                <?php if ($totalDescuadres > 0 && $hayFiltro): ?>
-                    <div class="card-panel amber lighten-5">
-                        Hay <strong><?php echo $totalDescuadres; ?></strong> descuadre(s) en total, pero
-                        <strong>ninguno</strong> con el filtro actual
-                        (<?php
-                            $partes = [];
-                            if ($fAlmacen > 0) { $partes[] = 'almacén: ' . esc($nomAlmacen !== '' ? $nomAlmacen : (string) $fAlmacen); }
-                            if ($fTipoDescuadre !== '') { $partes[] = $fTipoDescuadre; }
-                            if ($fQ !== '') { $partes[] = 'búsqueda: “' . esc($fQ) . '”'; }
-                            echo implode(' · ', $partes);
-                        ?>).
-                        <a href="?tab=inc" class="btn-flat">Ver todos</a>
-                    </div>
-                <?php elseif ($totalDescuadres > 0): ?>
-                    <div class="card-panel">Ningún descuadre coincide con el filtro.</div>
-                <?php else: ?>
-                    <div class="card-panel green lighten-5">✓ Todo cuadra: cada producto con stock tiene sus lotes al día.</div>
-                <?php endif; ?>
-            <?php else: ?>
-                <div style="overflow-x:auto;">
-                <table class="striped highlight">
-                    <thead>
-                        <tr>
-                            <th>Producto</th>
-                            <th class="right-align">Stock sistema</th>
-                            <th class="right-align">Suma lotes</th>
-                            <th class="right-align">Diferencia</th>
-                            <th class="right-align" title="Lotes vivos registrados para este producto">Lotes</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($descuadres as $d): $dif = (int) $d['diferencia']; ?>
-                            <tr>
-                                <td>
-                                    <strong><?php echo esc((string) $d['producto_nombre']); ?></strong>
-                                    <?php if (!empty($d['producto_sku'])): ?><br><small class="grey-text"><?php echo esc((string) $d['producto_sku']); ?></small><?php endif; ?>
-                                </td>
-                                <td class="right-align"><?php echo (int) $d['stock_sistema']; ?></td>
-                                <td class="right-align"><?php echo (int) $d['stock_lotes']; ?></td>
-                                <td class="right-align">
-                                    <span class="new badge <?php echo $dif > 0 ? 'blue darken-1' : 'deep-orange darken-1'; ?> white-text" data-badge-caption="" style="float:none;">
-                                        <?php echo ($dif > 0 ? '+' : '') . $dif; ?> <?php echo $dif > 0 ? 'faltante' : 'sobrante'; ?>
-                                    </span>
-                                </td>
-                                <td class="right-align"><?php echo (int) $d['n_lotes']; ?></td>
-                                <td style="white-space:nowrap;">
-                                    <a class="btn-flat btn-small" title="Ver / editar lotes del producto" href="<?php echo BASE_URL; ?>views/products.php?id_producto=<?php echo (int) $d['id_producto']; ?>"><i class="material-icons">inventory_2</i></a>
-                                    <a class="btn-flat btn-small" title="Entradas de inventario" href="<?php echo BASE_URL; ?>views/inventario_entradas.php"><i class="material-icons">add_business</i></a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-                </div>
-            <?php endif; ?>
+            <div id="inc-resultado">
+                <div class="card-panel grey-text center-align">Cargando…</div>
+            </div>
         </div></div>
     </div><!-- /#tab-inconsistencias -->
 </div><!-- /container -->
@@ -409,14 +337,81 @@ include __DIR__ . '/includes/header.php';
         postLote({ accion: 'cambiar_estado', id_lote: id, estado: 'retirado' }).then(tras);
     };
 
+    /* ---- Pestaña "Inconsistencias": filtra en vivo, sin botón ---- */
+    const BASE_URL_JS = '<?php echo BASE_URL; ?>';
+    const escH = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let incTimer = null;
+
+    function cargarInconsistencias() {
+        const alm = document.getElementById('inc-almacen');
+        const tipo = document.getElementById('inc-tipo');
+        const q = document.getElementById('inc-q');
+        const cont = document.getElementById('inc-resultado');
+        const cnt = document.getElementById('inc-count');
+        if (!cont) return;
+
+        const params = new URLSearchParams({ modo: 'descuadres' });
+        if (alm && alm.value && alm.value !== '0') params.set('id_almacen', alm.value);
+        if (tipo && tipo.value) params.set('tipo', tipo.value);
+        if (q && q.value.trim()) params.set('q', q.value.trim());
+
+        if (cnt) cnt.textContent = '…';
+        fetch(LOTES_API + '?' + params.toString())
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) { cont.innerHTML = '<div class="card-panel red lighten-5">No se pudo cargar.</div>'; return; }
+                const rows = res.data || [];
+                if (cnt) cnt.textContent = rows.length + (rows.length === 1 ? ' resultado' : ' resultados');
+                if (!rows.length) {
+                    cont.innerHTML = '<div class="card-panel">Ningún descuadre con este filtro.</div>';
+                    return;
+                }
+                let h = '<div style="overflow-x:auto;"><table class="striped highlight"><thead><tr>'
+                    + '<th>Producto</th><th class="right-align">Stock sistema</th><th class="right-align">Suma lotes</th>'
+                    + '<th class="right-align">Diferencia</th><th class="right-align">Lotes</th><th></th></tr></thead><tbody>';
+                rows.forEach(d => {
+                    const dif = parseInt(d.diferencia, 10) || 0;
+                    const cls = dif > 0 ? 'blue darken-1' : 'deep-orange darken-1';
+                    const pid = parseInt(d.id_producto, 10) || 0;
+                    h += '<tr><td><strong>' + escH(d.producto_nombre) + '</strong>'
+                        + (d.producto_sku ? '<br><small class="grey-text">' + escH(d.producto_sku) + '</small>' : '') + '</td>'
+                        + '<td class="right-align">' + (parseInt(d.stock_sistema, 10) || 0) + '</td>'
+                        + '<td class="right-align">' + (parseInt(d.stock_lotes, 10) || 0) + '</td>'
+                        + '<td class="right-align"><span class="new badge ' + cls + ' white-text" data-badge-caption="" style="float:none;">'
+                        + (dif > 0 ? '+' : '') + dif + ' ' + (dif > 0 ? 'faltante' : 'sobrante') + '</span></td>'
+                        + '<td class="right-align">' + (parseInt(d.n_lotes, 10) || 0) + '</td>'
+                        + '<td style="white-space:nowrap;">'
+                        + '<a class="btn-flat btn-small" title="Ver / editar lotes del producto" href="' + BASE_URL_JS + 'views/products.php?id_producto=' + pid + '"><i class="material-icons">inventory_2</i></a>'
+                        + '<a class="btn-flat btn-small" title="Entradas de inventario" href="' + BASE_URL_JS + 'views/inventario_entradas.php"><i class="material-icons">add_business</i></a>'
+                        + '</td></tr>';
+                });
+                cont.innerHTML = h + '</tbody></table></div>';
+            })
+            .catch(() => { cont.innerHTML = '<div class="card-panel red lighten-5">Error de conexión.</div>'; });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         if (window.M && M.Tabs) {
             M.Tabs.init(document.querySelectorAll('.tabs'));
         }
         if (window.M && M.FormSelect) {
-            M.FormSelect.init(document.querySelectorAll('select'));
+            M.FormSelect.init(document.querySelectorAll('select:not(.browser-default)'));
         }
-        // Si venimos de un submit de filtro de "Inconsistencias", abre esa pestaña.
+
+        document.getElementById('inc-almacen')?.addEventListener('change', cargarInconsistencias);
+        document.getElementById('inc-tipo')?.addEventListener('change', cargarInconsistencias);
+        document.getElementById('inc-q')?.addEventListener('input', function () {
+            clearTimeout(incTimer);
+            incTimer = setTimeout(cargarInconsistencias, 300);
+        });
+        document.getElementById('inc-limpiar')?.addEventListener('click', function () {
+            const a = document.getElementById('inc-almacen'); if (a) a.value = '0';
+            const t = document.getElementById('inc-tipo'); if (t) t.value = '';
+            const q = document.getElementById('inc-q'); if (q) q.value = '';
+            cargarInconsistencias();
+        });
+        cargarInconsistencias();
+
         <?php if ($tab === 'inc'): ?>
         var tInc = document.querySelector('.tabs a[href="#tab-inconsistencias"]');
         if (tInc && window.M && M.Tabs) {
