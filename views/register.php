@@ -50,6 +50,19 @@ function isLikelyDeliverableEmail(string $email): bool
         return true;
     }
 
+    // En local/QA/CI (mismo criterio que ya usa views/includes/header.php para desactivar
+    // tracking) se salta la resolucion DNS real: es una llamada de red de verdad, sin cache ni
+    // timeout configurable, hecha en cada registro -- bajo la carga concurrente de la suite E2E
+    // (docenas de tests llamando registerAndLogin() en paralelo) esto degrada severamente el
+    // throughput del runner de CI, que ya de por si corre con solo 2 nucleos compartidos.
+    $hostForDns = $_SERVER['HTTP_HOST'] ?? '';
+    $isLocalDnsContext = strpos($hostForDns, 'localhost') !== false
+        || strpos($hostForDns, '127.0.0.1') !== false
+        || (defined('APP_ENV') && in_array(strtolower((string)APP_ENV), ['qa', 'local', 'dev', 'development', 'test'], true));
+    if ($isLocalDnsContext) {
+        return true;
+    }
+
     return checkdnsrr($domain, 'MX') || checkdnsrr($domain, 'A') || checkdnsrr($domain, 'AAAA');
 }
 

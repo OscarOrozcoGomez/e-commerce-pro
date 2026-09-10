@@ -23,6 +23,11 @@ test-results/
 playwright-report/
 tests/
 test_payloads/
+package.json
+package-lock.json
+playwright.config.ts
+tsconfig.json
+.mcp.json
 
 # --- Scripts locales / de un solo uso / diagnostico ---
 scripts/dev_*.php
