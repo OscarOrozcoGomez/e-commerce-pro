@@ -23,7 +23,7 @@ final class LoteCaducidadUtilsTest extends TestCase
     public function testProductoSinVentasEsSinHistorico(): void
     {
         $this->seedProducto(1, 'Sin ventas');
-        $this->seedLote(1, 'L1', $this->enDias(120), 100);
+        $this->seedLote(1, 'L1', $this->enDias(600), 100); // runway holgado -> no lo escala el piso
 
         $lotes = loteFetchProyecciones($this->pdo)['lotes'];
         $this->assertCount(1, $lotes);
@@ -35,7 +35,7 @@ final class LoteCaducidadUtilsTest extends TestCase
     {
         $this->seedProducto(1, 'Rotacion alta');
         $this->seedVentaHistorica(1, 90);          // ~1 pieza/dia
-        $this->seedLote(1, 'L1', $this->enDias(60), 5);
+        $this->seedLote(1, 'L1', $this->enDias(500), 5); // runway holgado
 
         $lotes = loteFetchProyecciones($this->pdo)['lotes'];
         $this->assertSame('ok', $lotes[0]['severidad']);
@@ -54,10 +54,11 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->assertGreaterThan(300, $lote['excedente_proyectado']);
         $this->assertGreaterThan(0, $lote['descuento_sugerido_pct']);
 
-        // Mas de 180 dias de anticipacion -> vigilar
+        // A 220 dias: el modelo (excedente + fecha lejana) daria 'vigilar', pero el
+        // piso por runway (120-269) lo mantiene en 'planificar'.
         $this->pdo->exec("UPDATE lotes_inventario SET fecha_caducidad = '" . $this->enDias(220) . "'");
         $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
-        $this->assertSame('vigilar', $lote['severidad']);
+        $this->assertSame('planificar', $lote['severidad']);
     }
 
     public function testLoteCriticoPorCaducidadCercana(): void
@@ -220,8 +221,11 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->assertGreaterThanOrEqual(30, $lote['descuento_sugerido_pct']);
     }
 
-    public function testMargenDeConsumoPositivoNoEscalaSeveridad(): void
+    public function testMargenDeConsumoCortoEscalaLaSeveridadAunqueSeProyecteVender(): void
     {
+        // Omega 90 caps/1 dia (rinde 90), caduca en 200 -> horizonte efectivo 110.
+        // El modelo proyecta que las 5 piezas se venden (excedente 0), pero 110 dias
+        // de margen real caen en la banda 'urgente' del piso por runway (45-119).
         $this->seedProducto(1, 'Omega 3', 90, 1);
         $this->seedVentaHistorica(1, 90);
         $this->seedLote(1, 'L1', $this->enDias(200), 5);
@@ -229,7 +233,8 @@ final class LoteCaducidadUtilsTest extends TestCase
         $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
         $this->assertFalse($lote['no_vendible']);
         $this->assertSame(110, $lote['margen_consumo_dias']);
-        $this->assertSame('ok', $lote['severidad']);
+        $this->assertSame(0, $lote['excedente_proyectado']);
+        $this->assertSame('urgente', $lote['severidad']);
     }
 
     public function testRegistrarEntradaSumaAlLoteExistente(): void
@@ -290,7 +295,8 @@ final class LoteCaducidadUtilsTest extends TestCase
 
         $this->assertSame(95, $porCodigo['A']['excedente_proyectado']);
         $this->assertSame(0, $porCodigo['B']['excedente_proyectado'], 'B deberia venderse completo una vez que A ya no compite por la demanda');
-        $this->assertSame('ok', $porCodigo['B']['severidad']);
+        // Excedente 0, pero B caduca en 100 dias -> el piso por runway lo pone en 'urgente'.
+        $this->assertSame('urgente', $porCodigo['B']['severidad']);
     }
 
     /**
@@ -358,7 +364,7 @@ final class LoteCaducidadUtilsTest extends TestCase
     {
         $this->seedProducto(1, 'Marcado a mano');
         $this->seedVentaHistorica(1, 90);
-        $this->seedLote(1, 'L1', $this->enDias(150), 5); // vende a tiempo -> 'ok' por fecha
+        $this->seedLote(1, 'L1', $this->enDias(600), 5); // runway holgado -> 'ok' por fecha
 
         $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
         $this->pdo->exec("UPDATE lotes_inventario SET estado = 'caducado' WHERE id_lote = {$lote['id_lote']}");
@@ -511,15 +517,14 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->seedProducto(1, 'No vendible en cadena', 90, 1);
         $this->seedVentaHistorica(1, 90); // ~1 pieza/dia
 
-        // Lote A: caduca en 40 dias -> "no_vendible" (rinde 90 > 40 dias de vida),
-        // pero de cualquier forma solo se alcanzan a vender ~40 de sus piezas antes
-        // de esa fecha.
+        // Lote A: caduca en 40 dias -> "no_vendible" (rinde 90 > 40 dias de vida).
+        // Su horizonte efectivo es 0, asi que NO consume demanda real para la fila FEFO.
         $this->seedLote(1, 'A', $this->enDias(40), 60);
-        // Lote B: caduca en 95 dias (>= los 90 que rinde el envase, o sea B NO es
-        // no_vendible por si mismo). Si A "contaminara" la posicion con las 60
-        // piezas completas (por el flag no_vendible de A), B se veria con excedente
-        // inflado. Debe seguir usando lo realmente consumido por A (~40) para la posicion.
-        $this->seedLote(1, 'B', $this->enDias(95), 20);
+        // Lote B: caduca en 100 dias -> horizonte efectivo = 100 - 90 = 10 dias.
+        // A NO debe "contaminar" la posicion con sus 60 piezas completas por su flag
+        // no_vendible: si lo hiciera, B veria demanda negativa y excedente = 20.
+        // Como A aporta 0, B alcanza a vender ~10 de sus 20 -> excedente = 10.
+        $this->seedLote(1, 'B', $this->enDias(100), 20);
 
         $lotes = loteFetchProyecciones($this->pdo)['lotes'];
         $porCodigo = [];
@@ -529,9 +534,7 @@ final class LoteCaducidadUtilsTest extends TestCase
 
         $this->assertTrue($porCodigo['A']['no_vendible']);
         $this->assertFalse($porCodigo['B']['no_vendible']);
-        // B: demanda disponible = 95 dias; posicion real consumida por A = min(60, 40) = 40;
-        // quedan 55 dias de demanda para B, mas que suficiente para sus 20 piezas.
-        $this->assertSame(0, $porCodigo['B']['excedente_proyectado']);
+        $this->assertSame(10, $porCodigo['B']['excedente_proyectado'], 'A no contamina la posicion con sus 60 piezas (seria excedente 20)');
     }
 
     public function testVelocidadIncluyeVentaExactamenteEnElBordeDeLaVentana(): void
@@ -1049,5 +1052,523 @@ final class LoteCaducidadUtilsTest extends TestCase
 
         $this->assertSame(0, $r['total']);
         $this->assertArrayHasKey('critico', $r);
+    }
+
+    /* ---- Horizonte efectivo de venta (caducidad - duracion del tratamiento) --- */
+
+    public function testAlertaSaltaConAntelacionPorLaDuracionDelTratamiento(): void
+    {
+        // Caso real: envase de 200 capsulas, 1/dia -> rinde 200 dias. Caduca en 234.
+        // La ultima fecha en que alguien puede comprarlo y terminarselo es dentro de
+        // 34 dias. Con rotacion baja NO se vende en ese margen -> debe alertar YA,
+        // no mostrarse "Ok" solo porque a la fecha de caducidad aun le faltan 234 dias.
+        $this->seedProducto(1, 'Magnesio 200', 200, 1);
+        $this->seedVenta(1, 1, 45); // una sola venta en la ventana -> rotacion baja
+        $this->seedLote(1, 'MAG', $this->enDias(234), 2);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(34, $lote['dias_efectivos_venta']);
+        $this->assertFalse($lote['no_vendible'], 'todavia hay margen (34 dias), no es "imposible"');
+        $this->assertSame('critico', $lote['severidad'], '34 dias efectivos cae en la banda critica del runway (< 45)');
+        $this->assertSame(2, $lote['excedente_proyectado']);
+    }
+
+    public function testHorizonteEfectivoEscalaSeveridadAntesDeQueSeaImposibleVender(): void
+    {
+        // trat = 90, caduca en 100 -> margen 10: NO es no_vendible, pero el horizonte
+        // real para colocar cada unidad es de solo 10 dias.
+        $this->seedProducto(1, 'Omega', 90, 1);
+        $this->seedVentaHistorica(1, 90); // ~1 pieza/dia
+        $this->seedLote(1, 'L1', $this->enDias(100), 20);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertFalse($lote['no_vendible']);
+        $this->assertSame(10, $lote['dias_efectivos_venta']);
+        $this->assertSame('critico', $lote['severidad']);
+        $this->assertSame(10, $lote['excedente_proyectado']);
+    }
+
+    public function testSinDatosDeCapsulasElHorizonteEsLaFechaDeCaducidad(): void
+    {
+        // Producto sin capsulas_por_envase/porcion -> el horizonte efectivo ES la
+        // fecha de caducidad cruda (no se resta nada).
+        $this->seedProducto(1, 'Sin caps');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(600), 5); // runway holgado
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertNull($lote['dias_tratamiento_envase']);
+        $this->assertSame(600, $lote['dias_efectivos_venta']);
+        $this->assertSame('ok', $lote['severidad']);
+    }
+
+    public function testHorizonteEfectivoCeroCuandoElEnvaseRindeExactamenteLoQueFalta(): void
+    {
+        // margen == 0 no es no_vendible (necesita < 0), pero el horizonte efectivo es 0.
+        $this->seedProducto(1, 'Justo', 90, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(90), 10);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertFalse($lote['no_vendible']);
+        $this->assertSame(0, $lote['dias_efectivos_venta']);
+        $this->assertSame('critico', $lote['severidad']);
+    }
+
+    public function testHorizonteEfectivoNoAfectaLoteDeRotacionRapida(): void
+    {
+        $this->seedProducto(1, 'Rapido', 30, 1);      // rinde 30 dias
+        $this->seedVentaHistorica(1, 90);              // ~1 pieza/dia
+        $this->seedLote(1, 'L1', $this->enDias(500), 5); // horizonte efectivo 470 -> holgado
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(470, $lote['dias_efectivos_venta']);
+        $this->assertSame('ok', $lote['severidad']);
+        $this->assertSame(0, $lote['excedente_proyectado']);
+    }
+
+    public function testCaducadoIgnoraElHorizonteEfectivo(): void
+    {
+        $this->seedProducto(1, 'Vencido', 90, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(-5), 10);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame('caducado', $lote['severidad']);
+        $this->assertSame(-5, $lote['dias_efectivos_venta']);
+    }
+
+    public function testOrdenDeExhibicionPorHorizonteEfectivoNoPorFechaCruda(): void
+    {
+        // Producto 1: rinde 180 dias, caduca en 220 -> horizonte efectivo 40.
+        $this->seedProducto(1, 'Trat largo', 180, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'LARGO_TRAT', $this->enDias(220), 5);
+
+        // Producto 2: rinde 10 dias, caduca en 120 (mas cerca) -> horizonte efectivo 110.
+        $this->seedProducto(2, 'Trat corto', 10, 1);
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(2, 'CORTO_TRAT', $this->enDias(120), 5);
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+
+        // LARGO_TRAT va primero pese a caducar mas tarde: su margen real es menor.
+        $this->assertSame('LARGO_TRAT', $lotes[0]['codigo_lote']);
+        $this->assertSame('CORTO_TRAT', $lotes[1]['codigo_lote']);
+    }
+
+    public function testDiasEfectivosVentaExpuestoEnCadaFila(): void
+    {
+        $this->seedProducto(1, 'Expone', 60, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(100), 5);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertArrayHasKey('dias_efectivos_venta', $lote);
+        $this->assertSame(40, $lote['dias_efectivos_venta']);
+        $this->assertSame(40, $lote['margen_consumo_dias']);
+    }
+
+    /* ---- Piso por RUNWAY: la escala la manda "dias efectivos p/ vender" ---- */
+
+    public function testRunwayCortoMarcaCriticoAunqueElModeloProyecteVender(): void
+    {
+        // Caso del usuario: 200 caps / 1 dia, caduca en 234 -> horizonte efectivo 34.
+        // El producto rota bien (~1/dia): el modelo proyecta que la unica pieza se
+        // vende (excedente 0). Pero 34 dias de margen real cae en la banda critica
+        // del piso por runway (< 45): se marca 'critico', no 'ok' ni 'vigilar'.
+        $this->seedProducto(1, 'Magnesio', 200, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'MAG', $this->enDias(234), 1);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(0, $lote['excedente_proyectado'], 'el modelo sigue proyectando que se vende');
+        $this->assertSame(34, $lote['dias_efectivos_venta']);
+        $this->assertSame('critico', $lote['severidad']);
+    }
+
+    public function testRunwayLargoNoEscalaLaSeveridad(): void
+    {
+        $this->seedProducto(1, 'Rinde poco, caduca lejos', 30, 1); // efectivo 500-30 = 470
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(500), 5);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(470, $lote['dias_efectivos_venta']);
+        $this->assertSame('ok', $lote['severidad']);
+    }
+
+    public function testRunwayNoDegradaUnaSeveridadMasAlta(): void
+    {
+        // Margen corto (10) Y con excedente -> 'critico'; el merge toma la PEOR.
+        $this->seedProducto(1, 'Corto y con excedente', 90, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(100), 20);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(10, $lote['dias_efectivos_venta']);
+        $this->assertGreaterThan(0, $lote['excedente_proyectado']);
+        $this->assertSame('critico', $lote['severidad']);
+    }
+
+    public function testRunwaySinDatosDeCapsulasUsaLaFechaCruda(): void
+    {
+        // Sin capsulas/porcion el horizonte es la fecha cruda. Un lote a 40 dias de
+        // caducar, con stock, aunque rote bien -> 'critico' (< 45).
+        $this->seedProducto(1, 'Sin caps cerca de caducar');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(40), 1);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertNull($lote['dias_tratamiento_envase']);
+        $this->assertSame(40, $lote['dias_efectivos_venta']);
+        $this->assertSame('critico', $lote['severidad']);
+    }
+
+    public function testRunwayNoTocaLoteConCantidadCero(): void
+    {
+        $this->seedProducto(1, 'Vacio', 90, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(30), 0);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(0, $lote['cantidad_restante']);
+        $this->assertSame('ok', $lote['severidad']);
+    }
+
+    /**
+     * Bandas del piso por runway (sin datos de capsulas -> horizonte = fecha cruda):
+     * <45 critico | 45-119 urgente | 120-269 planificar | 270-449 vigilar | >=450 ok
+     *
+     * @dataProvider datosBandasRunway
+     */
+    public function testRunwayBandasPorDiasEfectivos(int $dias, string $esperada): void
+    {
+        $this->seedProducto(1, "Banda $dias");
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias($dias), 3);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame($dias, $lote['dias_efectivos_venta']);
+        $this->assertSame($esperada, $lote['severidad']);
+    }
+
+    public static function datosBandasRunway(): array
+    {
+        return [
+            '44 -> critico'     => [44, 'critico'],
+            '45 -> urgente'     => [45, 'urgente'],
+            '119 -> urgente'    => [119, 'urgente'],
+            '120 -> planificar' => [120, 'planificar'],
+            '269 -> planificar' => [269, 'planificar'],
+            '270 -> vigilar'    => [270, 'vigilar'],
+            '449 -> vigilar'    => [449, 'vigilar'],
+            '450 -> ok'         => [450, 'ok'],
+        ];
+    }
+
+    /* ---- loteSeveridadPorRunway / loteSeveridadPeor: funciones puras ---- */
+
+    /**
+     * @dataProvider datosBandasRunway
+     */
+    public function testLoteSeveridadPorRunwayClasificaCadaBanda(int $dias, string $esperada): void
+    {
+        $this->assertSame($esperada, loteSeveridadPorRunway($dias));
+    }
+
+    public function testLoteSeveridadPorRunwayConDiasNegativosEsCritico(): void
+    {
+        // El caller ya trata 'caducado' aparte; aun asi la función no debe romperse.
+        $this->assertSame('critico', loteSeveridadPorRunway(-10));
+        $this->assertSame('critico', loteSeveridadPorRunway(0));
+    }
+
+    /**
+     * @dataProvider datosSeveridadPeor
+     */
+    public function testLoteSeveridadPeorTomaLaMasGrave(string $a, string $b, string $esperada): void
+    {
+        $this->assertSame($esperada, loteSeveridadPeor($a, $b));
+        $this->assertSame($esperada, loteSeveridadPeor($b, $a), 'debe ser conmutativa');
+    }
+
+    public static function datosSeveridadPeor(): array
+    {
+        return [
+            'ok vs critico'                 => ['ok', 'critico', 'critico'],
+            'vigilar vs planificar'         => ['vigilar', 'planificar', 'planificar'],
+            'planificar vs urgente'         => ['planificar', 'urgente', 'urgente'],
+            'sin_rotacion gana a vigilar'   => ['sin_rotacion', 'vigilar', 'sin_rotacion'],
+            'sin_rotacion gana a planificar'=> ['sin_rotacion', 'planificar', 'sin_rotacion'],
+            'critico gana a sin_rotacion'   => ['critico', 'sin_rotacion', 'critico'],
+            'planificar gana a sin_historico'=> ['planificar', 'sin_historico', 'planificar'],
+            'sin_historico gana a vigilar'  => ['sin_historico', 'vigilar', 'sin_historico'],
+            'caducado gana a todo'          => ['caducado', 'critico', 'caducado'],
+            'iguales'                       => ['urgente', 'urgente', 'urgente'],
+            'desconocida se trata como ok'  => ['xyz', 'planificar', 'planificar'],
+        ];
+    }
+
+    /* ---- Merge modelo x runway: casos donde divergen ------------------- */
+
+    public function testRunwayEscalaUnPlanificarDelModeloAUrgente(): void
+    {
+        // Sin caps -> efectivo = 100. Con excedente el modelo da 'planificar'
+        // (banda 90-180), pero el runway a 100 dias es 'urgente' (45-119).
+        $this->seedProducto(1, 'Diverge', null);
+        $this->seedVentaHistorica(1, 90);          // ~1 pieza/dia
+        $this->seedLote(1, 'L1', $this->enDias(100), 150); // 150 no se venden en 100 dias
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertSame(100, $lote['dias_efectivos_venta']);
+        $this->assertGreaterThan(0, $lote['excedente_proyectado']);
+        $this->assertSame('urgente', $lote['severidad']);
+    }
+
+    public function testSinRotacionSeMantieneConRunwayHolgadoPeroEscalaConRunwayCorto(): void
+    {
+        $this->seedProducto(1, 'Frenado');
+        $this->seedVenta(1, 10, 200); // hubo ventas, pero nada en la ventana de 90 -> sin_rotacion
+
+        $idLejano = $this->seedLoteId(1, 'LEJANO', $this->enDias(600), 20);
+        $this->assertSame('sin_rotacion', loteFetchProyecciones($this->pdo, ['id_producto' => 1])['lotes'][0]['severidad']);
+
+        // El mismo producto, un lote con runway corto -> el piso lo lleva a 'critico'.
+        $this->pdo->exec("UPDATE lotes_inventario SET fecha_caducidad = '" . $this->enDias(20) . "' WHERE id_lote = $idLejano");
+        $lote = loteFetchProyecciones($this->pdo, ['id_producto' => 1])['lotes'][0];
+        $this->assertSame('critico', $lote['severidad'], 'sin_rotacion + 20 dias de runway = critico');
+    }
+
+    public function testSinHistoricoEscalaConRunwayCortoPeroElExcedenteSigueNulo(): void
+    {
+        $this->seedProducto(1, 'Nuevo y urgente'); // sin ventas -> sin_historico
+        $this->seedLote(1, 'L1', $this->enDias(60), 100);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertNull($lote['excedente_proyectado'], 'sin histórico: no se puede proyectar');
+        $this->assertSame(60, $lote['dias_efectivos_venta']);
+        $this->assertSame('urgente', $lote['severidad'], 'runway a 60 dias -> urgente, aunque no haya proyección');
+    }
+
+    public function testRunwayConDatosDeCapsulasCaeEnLaBandaPorLaResta(): void
+    {
+        // caduca en 135, envase rinde 90 -> efectivo 45 -> justo 'urgente' (no critico).
+        $this->seedProducto(1, 'Resta al filo', 90, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(135), 3);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->assertSame(45, $lote['dias_efectivos_venta']);
+        $this->assertSame('urgente', $lote['severidad']);
+
+        // Un dia menos de caducidad -> efectivo 44 -> 'critico'.
+        $this->pdo->exec("UPDATE lotes_inventario SET fecha_caducidad = '" . $this->enDias(134) . "'");
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+        $this->assertSame(44, $lote['dias_efectivos_venta']);
+        $this->assertSame('critico', $lote['severidad']);
+    }
+
+    public function testNoVendibleYRunwayCoincidenEnCritico(): void
+    {
+        // Envase rinde 100, caduca en 30 -> margen -70 -> no_vendible; efectivo 0.
+        $this->seedProducto(1, 'Imposible', 100, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(30), 12);
+
+        $lote = loteFetchProyecciones($this->pdo)['lotes'][0];
+
+        $this->assertTrue($lote['no_vendible']);
+        $this->assertSame(0, $lote['dias_efectivos_venta']);
+        $this->assertSame('critico', $lote['severidad']);
+        $this->assertSame(12, $lote['excedente_proyectado'], 'no_vendible fuerza excedente = todo el lote');
+        $this->assertGreaterThanOrEqual(30, $lote['descuento_sugerido_pct']);
+    }
+
+    /* ---- Orden y resumen usan el horizonte efectivo ------------------- */
+
+    public function testOrdenConMismoHorizonteEfectivoDesempataPorFechaCruda(): void
+    {
+        // A: rinde 100, caduca en 200 -> efectivo 100.  B: sin caps, caduca en 100 -> efectivo 100.
+        $this->seedProducto(1, 'Con caps', 100, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'A', $this->enDias(200), 5);
+
+        $this->seedProducto(2, 'Sin caps');
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(2, 'B', $this->enDias(100), 5);
+
+        $lotes = loteFetchProyecciones($this->pdo)['lotes'];
+        $this->assertSame(100, $lotes[0]['dias_efectivos_venta']);
+        $this->assertSame(100, $lotes[1]['dias_efectivos_venta']);
+        $this->assertSame('B', $lotes[0]['codigo_lote'], 'mismo horizonte -> primero el que caduca antes en fecha real');
+    }
+
+    public function testResumenMasUrgenteSeEligePorHorizonteEfectivoNoPorFechaCruda(): void
+    {
+        // CADUCA_LEJOS: rinde 200, caduca en 250 -> efectivo 50 (urgente).
+        $this->seedProducto(1, 'Trat largo', 200, 1);
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'CADUCA_LEJOS', $this->enDias(250), 3);
+
+        // CADUCA_PRONTO: sin caps, caduca en 80 -> efectivo 80 (urgente).
+        $this->seedProducto(2, 'Sin caps');
+        $this->seedVentaHistorica(2, 90);
+        $this->seedLote(2, 'CADUCA_PRONTO', $this->enDias(80), 3);
+
+        $r = loteResumenSeveridad($this->pdo);
+
+        $this->assertSame(2, $r['urgen']);
+        $this->assertSame('CADUCA_LEJOS', $r['mas_urgente']['codigo_lote'], '50 dias efectivos < 80, aunque caduque mas tarde en el calendario');
+    }
+
+    /* ---- loteFetchDescuadres: stock del sistema vs suma de lotes -------- */
+
+    private function porId(array $filas): array
+    {
+        $out = [];
+        foreach ($filas as $f) {
+            $out[(int) $f['id_producto']] = $f;
+        }
+        return $out;
+    }
+
+    public function testDescuadreProductoConStockPeroSinLotes(): void
+    {
+        $this->seedProducto(1, 'Stock sin lotes');
+        $this->seedInventario(1, 1, 10); // sistema 10, lotes 0
+
+        $d = loteFetchDescuadres($this->pdo);
+
+        $this->assertCount(1, $d);
+        $this->assertSame(1, $d[0]['id_producto']);
+        $this->assertSame(10, $d[0]['stock_sistema']);
+        $this->assertSame(0, $d[0]['stock_lotes']);
+        $this->assertSame(10, $d[0]['diferencia']);
+        $this->assertSame('faltante', $d[0]['tipo']);
+        $this->assertSame(0, $d[0]['n_lotes']);
+    }
+
+    public function testDescuadreLotesSinStockDeSistemaEsSobrante(): void
+    {
+        $this->seedProducto(1, 'Lotes sin inventario');
+        $this->seedLote(1, 'A', $this->enDias(120), 3);
+        $this->seedLote(1, 'B', $this->enDias(120), 2); // lotes 5, sistema 0
+
+        $d = loteFetchDescuadres($this->pdo);
+
+        $this->assertCount(1, $d);
+        $this->assertSame(0, $d[0]['stock_sistema']);
+        $this->assertSame(5, $d[0]['stock_lotes']);
+        $this->assertSame(-5, $d[0]['diferencia']);
+        $this->assertSame('sobrante', $d[0]['tipo']);
+        $this->assertSame(2, $d[0]['n_lotes']);
+    }
+
+    public function testDescuadreNoListaLosQueCuadran(): void
+    {
+        $this->seedProducto(1, 'Cuadra');
+        $this->seedInventario(1, 1, 6);
+        $this->seedLote(1, 'A', $this->enDias(120), 4);
+        $this->seedLote(1, 'B', $this->enDias(120), 2); // 6 == 6
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreLotesRetiradosOAgotadosNoCuentan(): void
+    {
+        $this->seedProducto(1, 'Con retirados');
+        $this->seedInventario(1, 1, 0);
+        $id = $this->seedLoteId(1, 'VIEJO', $this->enDias(120), 100);
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'retirado' WHERE id_lote = $id");
+
+        // sistema 0, lotes vivos 0 -> cuadra.
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreProductoArchivadoSeExcluye(): void
+    {
+        $this->seedProducto(1, 'Archivado');
+        $this->seedInventario(1, 1, 9);
+        $this->pdo->exec("UPDATE productos SET estado = 'archivado' WHERE id_producto = 1");
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreOrdenadoPorMagnitud(): void
+    {
+        $this->seedProducto(1, 'Chico');  $this->seedInventario(1, 1, 2);   // dif +2
+        $this->seedProducto(2, 'Grande'); $this->seedInventario(2, 1, 40);  // dif +40
+        $this->seedProducto(3, 'Medio');  $this->seedInventario(3, 1, 0);
+        $this->seedLote(3, 'L', $this->enDias(120), 12);                    // dif -12
+
+        $codigos = array_column(loteFetchDescuadres($this->pdo), 'id_producto');
+        $this->assertSame([2, 3, 1], $codigos, 'mayor |diferencia| primero');
+    }
+
+    public function testDescuadreFiltroTipo(): void
+    {
+        $this->seedProducto(1, 'Faltante'); $this->seedInventario(1, 1, 5);
+        $this->seedProducto(2, 'Sobrante'); $this->seedInventario(2, 1, 0);
+        $this->seedLote(2, 'L', $this->enDias(120), 3);
+
+        $this->assertSame([1], array_column(loteFetchDescuadres($this->pdo, ['tipo' => 'faltante']), 'id_producto'));
+        $this->assertSame([2], array_column(loteFetchDescuadres($this->pdo, ['tipo' => 'sobrante']), 'id_producto'));
+    }
+
+    public function testDescuadreFiltroBusquedaPorNombreOSku(): void
+    {
+        $this->seedProducto(1, 'Omega tres'); $this->seedInventario(1, 1, 5);
+        $this->seedProducto(2, 'Colageno');   $this->seedInventario(2, 1, 7);
+
+        $this->assertSame([1], array_column(loteFetchDescuadres($this->pdo, ['q' => 'omega']), 'id_producto'));
+        $this->assertSame([2], array_column(loteFetchDescuadres($this->pdo, ['q' => 'SKU-2']), 'id_producto'));
+    }
+
+    public function testDescuadreFiltroPorAlmacenRestringeAmbosLados(): void
+    {
+        $this->seedAlmacen(2, 'Sucursal');
+        $this->seedProducto(1, 'Repartido');
+        $this->seedInventario(1, 1, 5);   // matriz: sistema 5
+        $this->seedInventario(1, 2, 5);   // sucursal: sistema 5  (total 10)
+        $this->seedLote(1, 'L1', $this->enDias(120), 5, 1); // lote en matriz
+        $this->seedLote(1, 'L2', $this->enDias(120), 5, 2); // lote en sucursal (total 10 -> cuadra global)
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo), 'global cuadra 10 = 10');
+
+        // En sucursal quitamos el lote -> descuadre solo ahí.
+        $this->pdo->exec("UPDATE lotes_inventario SET estado = 'retirado' WHERE codigo_lote = 'L2'");
+        $soloSucursal = loteFetchDescuadres($this->pdo, ['id_almacen' => 2]);
+        $this->assertCount(1, $soloSucursal);
+        $this->assertSame(5, $soloSucursal[0]['stock_sistema']);
+        $this->assertSame(0, $soloSucursal[0]['stock_lotes']);
+
+        // Matriz sigue cuadrando.
+        $this->assertSame([], loteFetchDescuadres($this->pdo, ['id_almacen' => 1]));
+    }
+
+    public function testResumenSeveridadIncluyeConteoDeDescuadres(): void
+    {
+        $this->seedProducto(1, 'Descuadrado'); $this->seedInventario(1, 1, 3);
+        $this->seedProducto(2, 'Ok');          $this->seedInventario(2, 1, 4);
+        $this->seedLote(2, 'L', $this->enDias(120), 4);
+
+        $r = loteResumenSeveridad($this->pdo);
+        $this->assertSame(1, $r['descuadres']);
     }
 }

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/oferta_pricing.php';
+
 function catalogPerfNowMs(): float
 {
     return hrtime(true) / 1000000;
@@ -229,8 +231,10 @@ function catalogCollapseProducts(array $products): array
         }
 
         $id = (int) ($p['id_producto'] ?? 0);
-        $precioDesde = (float) ($p['precio_desde'] ?? $p['precio_venta'] ?? 0);
-        $precioVenta = (float) ($p['precio_venta'] ?? $precioDesde);
+        $precioDesde = (float) ($p['precio_desde'] ?? $p['precio_efectivo'] ?? $p['precio_venta'] ?? 0);
+        // precio_efectivo ya trae la rebaja de oferta (costo+50 o el override manual);
+        // es el precio que la card manda al carrito, asi que gana sobre precio_venta.
+        $precioVenta = (float) ($p['precio_efectivo'] ?? $p['precio_venta'] ?? $precioDesde);
         $precioComparacionDesde = (float) ($p['precio_comparacion_desde'] ?? $p['precio_comparacion'] ?? 0);
 
         if (!isset($grouped[$key])) {
@@ -445,8 +449,14 @@ function catalogRenderProductCard(array $p): string
                             <i class="material-icons left" style="margin-right:4px;">block</i>Agotado
                         </button>
                     <?php else: ?>
+                        <?php
+                        // Tras catalogCollapseProducts(), precio_venta ya es el precio
+                        // efectivo minimo de la familia (con la rebaja de oferta aplicada);
+                        // es el mismo numero que se muestra como "Desde $X".
+                        $precioCarrito = (float) ($p['precio_venta'] ?? $p['precio_efectivo'] ?? $p['precio_desde'] ?? 0);
+                        ?>
                         <button class="btn blue darken-4 waves-effect waves-light"
-                                onclick="handleAddToCart(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo (float) ($p['precio_venta'] ?? 0); ?>)">
+                                onclick="handleAddToCart(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo $precioCarrito; ?>)">
                             <i class="material-icons">add_shopping_cart</i>
                         </button>
                     <?php endif; ?>
@@ -486,6 +496,17 @@ function catalogBuildQueries(PDO $pdo, string $categoriaSeleccionada, string $bu
     // pi.id_imagen (PK auto_increment = orden de carga real) se agrega como desempate
     // final porque hay datos existentes con "orden" repetido/0 en varias filas -- sin
     // este desempate, MySQL puede devolver cualquiera de las filas empatadas.
+    // Precio efectivo: si el producto esta en la categoria de ofertas, se rebaja a
+    // precio_oferta (o costo+50 si no hay override manual). Se calcula por fila --
+    // en el SELECT externo (para la card y el precio que va al carrito) y dentro de
+    // la tabla derivada "fam" (para el "Desde $X" de una familia con variantes).
+    // Ver core/oferta_pricing.php. Las expresiones no usan placeholders, asi que no
+    // agregan parametros a la consulta.
+    $enOfertaMain = ofertaSqlEnOfertaExpr('p');
+    $precioEfectivoMain = ofertaSqlPrecioEfectivoExpr('p.precio_venta', 'p.precio_costo', 'p.precio_oferta', $enOfertaMain);
+    $enOfertaFam = ofertaSqlEnOfertaExpr('pf');
+    $precioEfectivoFam = ofertaSqlPrecioEfectivoExpr('pf.precio_venta', 'pf.precio_costo', 'pf.precio_oferta', $enOfertaFam);
+
     $sqlMain = "SELECT p.*, COALESCE(
             NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi WHERE pi.id_producto = p.id_producto ORDER BY pi.orden ASC, pi.id_imagen ASC LIMIT 1), ''),
             NULLIF((SELECT pi.ruta_archivo FROM producto_imagenes pi INNER JOIN productos p_img ON pi.id_producto = p_img.id_producto WHERE p_img.id_padre = p.id_producto ORDER BY pi.orden ASC, pi.id_imagen ASC LIMIT 1), ''),
@@ -495,16 +516,22 @@ function catalogBuildQueries(PDO $pdo, string $categoriaSeleccionada, string $bu
         ) AS imagen,
         fam.precio_desde,
         fam.precio_comparacion_desde,
-        fam.total_variantes
+        fam.total_variantes,
+        ({$enOfertaMain}) AS en_oferta,
+        {$precioEfectivoMain} AS precio_efectivo
         FROM productos p
         LEFT JOIN (
             SELECT
-                COALESCE(NULLIF(id_padre, 0), id_producto) AS root_id,
-                MIN(precio_venta) AS precio_desde,
-                MIN(CASE WHEN precio_comparacion > 0 THEN precio_comparacion END) AS precio_comparacion_desde,
+                COALESCE(NULLIF(pf.id_padre, 0), pf.id_producto) AS root_id,
+                MIN({$precioEfectivoFam}) AS precio_desde,
+                MIN(CASE
+                        WHEN {$enOfertaFam} THEN GREATEST(pf.precio_venta, COALESCE(NULLIF(pf.precio_comparacion, 0), 0))
+                        WHEN pf.precio_comparacion > 0 THEN pf.precio_comparacion
+                        ELSE NULL
+                    END) AS precio_comparacion_desde,
                 COUNT(*) AS total_variantes
-            FROM productos
-            WHERE estado = 'activo'
+            FROM productos pf
+            WHERE pf.estado = 'activo'
             GROUP BY root_id
         ) fam ON fam.root_id = p.id_producto";
 

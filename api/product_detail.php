@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/product_display_utils.php';
+require_once __DIR__ . '/../core/oferta_pricing.php';
 
 header('Content-Type: application/json');
 
@@ -316,9 +317,9 @@ try {
 
     // Buscamos todos los productos que tengan exactamente el mismo nombre base.
     // Esto garantiza que 90, 180 y 360 caps estén juntos si comparten el nombre.
-    $sqlVar = "SELECT id_producto, id_padre, sku, nombre, nombre_variante, unidad, precio_venta, precio_comparacion, imagen 
-               FROM productos 
-               WHERE estado = 'activo' 
+    $sqlVar = "SELECT id_producto, id_padre, sku, nombre, nombre_variante, unidad, precio_venta, precio_comparacion, precio_costo, precio_oferta, imagen
+               FROM productos
+               WHERE estado = 'activo'
                AND TRIM(nombre) = ?
                ORDER BY precio_venta ASC";
 
@@ -350,6 +351,33 @@ try {
     }
 
     $product['variantes'] = $variantes_unicas;
+
+    // Precio de oferta: si el producto (o alguna de sus variantes) esta en la categoria
+    // de ofertas, se muestra el precio rebajado (precio_oferta manual o costo+50) y el
+    // precio normal pasa a "precio de lista" tachado. Misma regla que el catalogo, ver
+    // core/oferta_pricing.php. El checkout web confia en el precio que manda el carrito,
+    // asi que al ajustarlo aqui el pedido tambien se cobra con el descuento.
+    $idsParaOferta = [(int) ($product['id_producto'] ?? 0)];
+    foreach ($variantes_unicas as $v) {
+        $idsParaOferta[] = (int) ($v['id_producto'] ?? 0);
+    }
+    $enOfertaMap = ofertaFiltrarEnOferta($pdo, $idsParaOferta);
+
+    $aplicarOferta = static function (array $row) use ($enOfertaMap): array {
+        if (empty($enOfertaMap[(int) ($row['id_producto'] ?? 0)])) {
+            $row['en_oferta'] = false;
+            return $row;
+        }
+        $venta = (float) ($row['precio_venta'] ?? 0);
+        $costo = (float) ($row['precio_costo'] ?? 0);
+        $row['precio_comparacion'] = max((float) ($row['precio_comparacion'] ?? 0), $venta);
+        $row['precio_venta'] = ofertaPrecioEfectivo($venta, $costo, $row['precio_oferta'] ?? null, true);
+        $row['en_oferta'] = true;
+        return $row;
+    };
+
+    $product = $aplicarOferta($product);
+    $product['variantes'] = array_map($aplicarOferta, $product['variantes']);
 
     // Enviamos la respuesta limpia al frontend
     echo json_encode($product);

@@ -95,29 +95,20 @@ sendSecurityHeaders();
 
 // Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
 if (!defined('BASE_URL')) {
-    // APP_BASE_URL: override explicito para entornos donde ni "localhost" ni "127.0.0.1"
-    // implican una subcarpeta -- p.ej. CI, donde `php -S 127.0.0.1:8000 -t .` sirve el
-    // repo directo en la raiz, asi que la deteccion automatica de abajo pondria un
-    // BASE_URL equivocado y cada link/redirect de la app 404earia.
-    $envBaseUrl = getenv('APP_BASE_URL');
-    if ($envBaseUrl !== false && trim($envBaseUrl) !== '') {
-        define('BASE_URL', $envBaseUrl);
-    } else {
-        // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
-        $host = $_SERVER['HTTP_HOST'] ?? '';
-        if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
-            // Deriva la subcarpeta del propio script para que un git worktree servido en
-            // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
-            // local; cae a /e-commerce-pro/ si no se puede determinar.
-            $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
-            if (preg_match('#^/([^/]+)#', $scriptDir, $m) && $m[1] !== 'views' && $m[1] !== 'api') {
-                define('BASE_URL', '/' . $m[1] . '/');
-            } else {
-                define('BASE_URL', '/e-commerce-pro/');
-            }
+    // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+        // Deriva la subcarpeta del propio script para que un git worktree servido en
+        // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
+        // local; cae a /e-commerce-pro/ si no se puede determinar.
+        $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
+        if (preg_match('#^/([^/]+)#', $scriptDir, $m) && $m[1] !== 'views' && $m[1] !== 'api') {
+            define('BASE_URL', '/' . $m[1] . '/');
         } else {
-            define('BASE_URL', '/');
+            define('BASE_URL', '/e-commerce-pro/');
         }
+    } else {
+        define('BASE_URL', '/');
     }
 }
 
@@ -688,13 +679,12 @@ function sendSecurityHeaders(): void
     // en entregas.php para planear rutas). Un allowlist vacio "()" bloquea incluso al propio
     // origen, por lo que el permiso del navegador/telefono nunca llegaba a evaluarse.
     header('Permissions-Policy: geolocation=(self), microphone=(), camera=()');
-    // cdn.tiny.cloud: views/manage_blogs.php carga el editor TinyMCE desde ahi. Sin este
-    // dominio en script-src/script-src-elem, el <script src="https://cdn.tiny.cloud/..."> se
-    // bloquea por CSP y el tinymce.init() que le sigue en la misma etiqueta <script> lanza
-    // "tinymce is not defined", lo que aborta el resto de ese bloque -- incluido el listener de
-    // autogeneracion de slug -- para todo admin/encargado real, no solo en pruebas.
-    // googleads.g.doubleclick.net / googleadservices.com: tag de Google Ads (ver PR #74).
-    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.tiny.cloud https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
+    // cdn.jsdelivr.net: views/manage_blogs.php carga el bundle self-hosted de TinyMCE desde ahi
+    // (skins/plugins/themes se resuelven relativos a esa URL). Sin ese dominio en
+    // script-src/script-src-elem/style-src, el <script src> se bloquea por CSP y el
+    // tinymce.init() que le sigue lanza "tinymce is not defined", abortando el resto de ese
+    // bloque -- incluido el listener de autogeneracion de slug -- para todo admin/encargado real.
+    header("Content-Security-Policy: default-src 'self' https:; script-src 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; script-src-elem 'self' https://static.cloudflareinsights.com https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com https://www.googletagmanager.com https://www.google-analytics.com https://region1.google-analytics.com https://googleads.g.doubleclick.net https://www.googleadservices.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com https://cdn.jsdelivr.net https://maps.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';");
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 
     // Evitar que páginas autenticadas queden en cache del navegador/proxies compartidos.

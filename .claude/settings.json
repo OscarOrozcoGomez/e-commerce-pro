@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "b=\"$HOME/.local/bin/graphify.exe\"; [ -x \"$b\" ] || exit 0; d=\"${CLAUDE_PROJECT_DIR:-.}\"; \"$b\" update \"$d\" >/dev/null 2>&1 || \"$b\" extract \"$d\" --code-only >/dev/null 2>&1; exit 0",
+            "async": true,
+            "timeout": 300,
+            "statusMessage": "Refrescando grafo de graphify"
+          }
+        ]
+      }
+    ]
+  }
+}

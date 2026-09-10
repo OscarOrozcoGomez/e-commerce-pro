@@ -18,7 +18,7 @@ $pageTitle = 'Dashboard - Sistema POS';
 // Resumen de lotes por severidad de caducidad para la tarjeta "Control de Caducidades".
 $resumenCaducidades = [
     'critico' => 0, 'urgente' => 0, 'planificar' => 0, 'caducado' => 0,
-    'urgen' => 0, 'total' => 0, 'mas_urgente' => null,
+    'urgen' => 0, 'total' => 0, 'mas_urgente' => null, 'descuadres' => 0,
 ];
 try {
     require_once __DIR__ . '/../core/lote_caducidad_utils.php';
@@ -542,6 +542,12 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                         <?php else: ?>
                             <p>Registra lotes al editar un producto. Aquí verás cuáles no alcanzan a venderse antes de caducar.</p>
+                        <?php endif; ?>
+                        <?php if (($resumenCaducidades['descuadres'] ?? 0) > 0): ?>
+                            <p style="font-size: .82rem; margin: 6px 0 0;">
+                                <span class="new badge red white-text" data-badge-caption="" style="float:none; margin-left:0;"><?php echo (int) $resumenCaducidades['descuadres']; ?></span>
+                                <span class="grey-text">producto(s) con descuadre inventario vs. lotes — revisar en "Ver lotes"</span>
+                            </p>
                         <?php endif; ?>
                     </div>
                     <div class="card-action">

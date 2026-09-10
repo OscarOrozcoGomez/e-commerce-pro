@@ -68,6 +68,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
+                            <input type="text" id="nombre_corto" name="nombre_corto" placeholder="Ej: 3 Mag Blend, Clarity Platinum">
+                            <label for="nombre_corto" class="active">Nombre corto / etiqueta del pomo</label>
+                            <span class="helper-text">Como lo conoce el equipo. Sirve también para buscarlo en el listado. Lo autollena SINC de B-Life.</span>
+                        </div>
+
+                        <div class="input-field">
                             <input type="text" id="sku" name="sku">
                             <label for="sku">SKU (Código Interno)</label>
                             <span class="helper-text">Opcional</span>
@@ -97,7 +103,10 @@ include __DIR__ . '/includes/header.php';
                         <div class="row grey lighten-4" style="margin: 10px 0; padding: 10px; border-radius: 4px; border: 1px dashed #999;">
                             <div class="input-field col s12" style="margin: 0 0 4px 0; position: relative;">
                                 <i class="material-icons prefix">search</i>
-                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150...">
+                                <input type="text" id="blife_search" autocomplete="off" placeholder="Ej: omega 3, ashwagandha, BLIFEASHWAGA150..." style="padding-right: 2.5rem;">
+                                <button type="button" id="blife_search_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:2px; top:0; bottom:20px; width:2.5rem; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; padding:0; color:#9e9e9e; line-height:1;">
+                                    <i class="material-icons">close</i>
+                                </button>
                                 <label for="blife_search" class="active">Buscar producto en B-Life</label>
                                 <div id="blife-search-results" style="display:none; position:absolute; z-index:20; left:0; right:0; background:#fff; border:1px solid #bbb; border-radius:4px; max-height:280px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
                             </div>
@@ -215,6 +224,25 @@ include __DIR__ . '/includes/header.php';
                             <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
                         </div>
 
+                        <div class="input-field">
+                            <input type="number" id="precio_oferta" name="precio_oferta" step="0.01" placeholder="Vacío = automático (costo + $50)">
+                            <label for="precio_oferta" class="active">Precio de Oferta</label>
+                            <span class="helper-text">Solo se usa cuando el producto está en la categoría "Ofertas". Vacío = costo + $50 automático.</span>
+                            <button type="button" id="btn-sugerir-oferta" class="btn-small grey lighten-1 black-text" style="margin-top:6px;">Sugerir (costo + $50)</button>
+                        </div>
+                        <script>
+                        (function(){
+                          var btn = document.getElementById('btn-sugerir-oferta');
+                          if (!btn) return;
+                          btn.addEventListener('click', function(){
+                            var costo = parseFloat(document.getElementById('precio_costo').value || '0') || 0;
+                            var of = document.getElementById('precio_oferta');
+                            of.value = (Math.round((costo + 50) * 100) / 100).toFixed(2);
+                            if (window.M && M.updateTextFields) M.updateTextFields();
+                          });
+                        })();
+                        </script>
+
                         <div class="input-field" style="margin-top: 30px; margin-bottom: 30px;">
                             <div class="switch">
                                 <label>
@@ -295,9 +323,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                     <div class="row" style="margin-bottom: 0;">
-                        <div class="input-field col s12 m6">
+                        <div class="input-field col s12 m6" style="position: relative;">
                             <i class="material-icons prefix">search</i>
-                            <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU...">
+                            <input type="text" id="buscar_producto" placeholder="Buscar por nombre o SKU..." style="padding-right: 2.5rem;">
+                            <button type="button" id="buscar_producto_clear" title="Borrar búsqueda" style="display:none; position:absolute; right:2px; top:0; bottom:20px; width:2.5rem; align-items:center; justify-content:center; background:none; border:none; cursor:pointer; padding:0; color:#9e9e9e; line-height:1;">
+                                <i class="material-icons">close</i>
+                            </button>
                         </div>
                         <div class="input-field col s12 m3">
                             <select id="filtro_estado" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px; height: 3rem;">
@@ -491,6 +522,12 @@ include __DIR__ . '/includes/header.php';
                     // 3b. Descripción comercial (body_html de Shopify, convertido a texto plano)
                     if (fullData.producto.description)
                         document.getElementById('descripcion').value = fullData.producto.description;
+
+                    // 3c. Nombre corto / etiqueta del pomo ("3 Mag Blend B Life®." -> "3 Mag Blend").
+                    //     Lo calcula el backend del body_html; si no lo pudo sacar, se deja
+                    //     lo que ya haya para que lo captures a mano.
+                    if (fullData.producto.nombre_corto)
+                        document.getElementById('nombre_corto').value = fullData.producto.nombre_corto;
 
                     // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
                     if (fullData.producto.sku)
@@ -701,11 +738,25 @@ include __DIR__ . '/includes/header.php';
                 .catch(() => cerrar());
         };
 
-        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); });
+        // Botón para borrar todo el texto de búsqueda de un clic.
+        const btnClear = document.getElementById('blife_search_clear');
+        const toggleClear = () => { if (btnClear) btnClear.style.display = input.value ? 'flex' : 'none'; };
+        if (btnClear) {
+            btnClear.addEventListener('click', () => {
+                input.value = '';
+                lastQuery = '';
+                cerrar();
+                toggleClear();
+                input.focus();
+            });
+        }
+
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(buscar, 300); toggleClear(); });
         input.addEventListener('focus', () => { if (input.value.trim().length >= 2) buscar(); });
         document.addEventListener('click', (ev) => {
             if (ev.target !== input && !box.contains(ev.target)) cerrar();
         });
+        toggleClear();
     })();
 
     window.renderNutritionalPreview = function() {
@@ -1082,12 +1133,13 @@ include __DIR__ . '/includes/header.php';
         const jsonP = JSON.stringify(p).replace(/'/g, "&apos;");
 
         return `
-            <tr data-codes="${(p.codigo_barras || '').toLowerCase()}" data-has-image="${hasImg}">
+            <tr data-codes="${((p.codigo_barras || '') + ' ' + (p.nombre_corto || '')).toLowerCase()}" data-has-image="${hasImg}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
-                <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}</td>
+                <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}${p.nombre_corto ? `<br><small class="grey-text">${p.nombre_corto}</small>` : ''}</td>
                 <td>
                     $${parseFloat(p.precio_venta).toFixed(2)}
                     ${parseFloat(p.precio_comparacion) > 0 ? `<br><small class="grey-text" style="text-decoration: line-through;">$${parseFloat(p.precio_comparacion).toFixed(2)}</small>` : ''}
+                    ${parseFloat(p.precio_oferta) > 0 ? `<br><small class="orange-text text-darken-3" title="Precio de oferta (si está en la categoría Ofertas)">oferta $${parseFloat(p.precio_oferta).toFixed(2)}</small>` : ''}
                 </td>
                 <td>
                     <span class="badge ${p.estado === 'activo' ? 'blue' : 'grey darken-1'} white-text" style="float: none; border-radius: 4px;">
@@ -1151,14 +1203,15 @@ include __DIR__ . '/includes/header.php';
         });
         variantsHtml += '</div>';
 
-        // Juntar todos los códigos para que el buscador funcione
-        const allCodes = variants.map(v => v.codigo_barras).join(' ');
+        // Juntar todos los códigos + nombres cortos para que el buscador funcione
+        const allCodes = variants.map(v => `${v.codigo_barras || ''} ${v.nombre_corto || ''}`).join(' ');
+        const nombreCorto = variants.map(v => v.nombre_corto).filter(Boolean)[0] || '';
 
         return `
             <tr class="product-group-row" data-codes="${allCodes.toLowerCase()}" data-has-image="${hasImg}">
                 <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
                 <td>
-                    <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong><br>
+                    <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong>${nombreCorto ? ` <small class="grey-text">· ${nombreCorto}</small>` : ''}<br>
                     <button type="button" class="btn-small blue darken-2 waves-effect waves-light" style="font-size:0.65rem; height:24px; line-height:24px; padding:0 8px; border-radius:4px; margin-top:4px;" onclick="toggleVariants('${groupId}')">
                         <i class="material-icons left" style="font-size:1rem; margin-right:4px;">unfold_more</i>
                         ${variants.length} PRESENTACIONES
@@ -1228,6 +1281,7 @@ include __DIR__ . '/includes/header.php';
         
         document.getElementById('nombre').value = prod.nombre;
         document.getElementById('nombre_variante').value = prod.nombre_variante || '';
+        document.getElementById('nombre_corto').value = prod.nombre_corto || '';
         document.getElementById('sku').value = prod.sku || '';
         document.getElementById('codigo_barras').value = prod.codigo_barras || '';
         document.getElementById('descripcion').value = prod.descripcion || '';
@@ -1244,6 +1298,7 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
+        document.getElementById('precio_oferta').value = (prod.precio_oferta === null || prod.precio_oferta === undefined || prod.precio_oferta === '') ? '' : prod.precio_oferta;
 
         // Manejo del Autocomplete de Padre
         const idPadreHidden = document.getElementById('id_padre');
@@ -1340,10 +1395,12 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('accion').value = 'agregar';
         document.getElementById('sku').value = '';
         document.getElementById('nombre_variante').value = '';
+        document.getElementById('nombre_corto').value = '';
         document.getElementById('id_padre').value = '';
         document.getElementById('search_padre').value = '';
         document.getElementById('id_producto').value = '';
         document.getElementById('precio_comparacion').value = 0;
+        document.getElementById('precio_oferta').value = '';
         document.getElementById('capsulas_por_envase').value = '';
         document.getElementById('porcion_capsulas').value = '';
 
@@ -1411,6 +1468,22 @@ include __DIR__ . '/includes/header.php';
     document.getElementById('filtro_estado').addEventListener('change', aplicarFiltros);
     document.getElementById('filtro_imagen').addEventListener('change', aplicarFiltros);
 
+    // Botón para borrar de un clic el texto del buscador del listado.
+    (function initBuscarProductoClear() {
+        const input = document.getElementById('buscar_producto');
+        const btn = document.getElementById('buscar_producto_clear');
+        if (!input || !btn) return;
+        const toggle = () => { btn.style.display = input.value ? 'flex' : 'none'; };
+        input.addEventListener('input', toggle);
+        btn.addEventListener('click', () => {
+            input.value = '';
+            toggle();
+            aplicarFiltros();
+            input.focus();
+        });
+        toggle();
+    })();
+
     document.addEventListener('DOMContentLoaded', function() {
         aplicarFiltros(); // Aplicar filtro por defecto (Activos) al cargar
         <?php if (isset($success) && $success): ?>
@@ -1450,15 +1523,22 @@ include __DIR__ . '/includes/header.php';
             </div>`;
         }
         html += '<table class="striped condensed"><thead><tr>' +
-            '<th>Lote</th><th>Caduca</th><th>Días</th><th>Restante</th><th>Severidad</th><th></th>' +
+            '<th>Lote</th><th>Caduca</th><th>Días p/ vender</th><th>Restante</th><th>Severidad</th><th></th>' +
             '</tr></thead><tbody>';
         lotes.forEach(l => {
             const sev = LOTE_SEV[l.severidad] || {t: l.severidad, c: 'grey'};
             const noVend = l.no_vendible ? ' <span class="new badge red darken-3 white-text" data-badge-caption="" title="Un envase comprado hoy no se alcanza a terminar antes de caducar">NO VENDIBLE</span>' : '';
+            // "Días para vender" = horizonte real: si el envase rinde N días, después de
+            // (caducidad − N) un cliente ya no lo termina a tiempo. Si no hay dato de
+            // cápsulas/porción, es igual a los días para caducar.
+            const ef = (l.dias_efectivos_venta != null) ? l.dias_efectivos_venta : l.dias_hasta_caducar;
+            const diasCell = (l.dias_tratamiento_envase != null && ef !== l.dias_hasta_caducar)
+                ? `<strong>${ef}</strong> <small class="grey-text" title="Caduca en ${l.dias_hasta_caducar} días. El envase rinde ${l.dias_tratamiento_envase} días de tratamiento, así que ${l.dias_hasta_caducar}−${l.dias_tratamiento_envase} es lo que queda para colocarlo.">(caduca en ${l.dias_hasta_caducar})</small>`
+                : `${l.dias_hasta_caducar}`;
             html += `<tr>
                 <td>${escLote(l.codigo_lote)}</td>
                 <td>${escLote(l.fecha_caducidad)}${l.caducidad_aproximada ? ' <small class="grey-text">(aprox)</small>' : ''}</td>
-                <td>${l.dias_hasta_caducar}</td>
+                <td>${diasCell}</td>
                 <td>${l.cantidad_restante}</td>
                 <td><span class="new badge ${sev.c}" data-badge-caption="">${sev.t}</span>${noVend}</td>
                 <td style="white-space:nowrap;">

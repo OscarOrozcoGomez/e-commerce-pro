@@ -1800,7 +1800,7 @@ function routeBuildWaMessage(stop) {
     const productos = Array.isArray(stop.productos) ? stop.productos : [];
     const totalTexto = routeFormatMoney(stop.total);
 
-    let msg = 'Hola! Tu pedido es el siguiente:';
+    let msg = 'Hola! Tu pedido es el siguiente';
     if (productos.length > 0) {
         const lista = productos
             .map((p) => `• ${routeSafeText(p.cantidad) || '1'}x ${routeSafeText(p.nombre) || 'Producto'}`)
@@ -1809,7 +1809,7 @@ function routeBuildWaMessage(stop) {
     } else {
         // Respaldo si el pedido no trae detalle de productos por alguna razon.
         const numero = routeSafeText(stop.numero_pedido) || String(stop.id_pedido || '');
-        msg += ` ${numero}.`;
+        msg += `: ${numero}.`;
     }
 
     if (totalTexto !== null) {

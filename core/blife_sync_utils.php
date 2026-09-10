@@ -208,6 +208,39 @@ if (!function_exists('blifeHtmlToText')) {
     }
 }
 
+if (!function_exists('blifeShortName')) {
+    /**
+     * Deriva el "nombre corto" / nombre de la etiqueta del pomo ("3 Mag Blend",
+     * "Clarity Platinum") del body_html de Shopify, que casi siempre empieza con
+     * "<Nombre> B Life(R). ...". A veces va tras una frase-gancho ("¡Descubre el
+     * bienestar con Glycinate Mag B Life®!"). Si no se puede aislar con confianza
+     * devuelve '' (se captura a mano en la ficha).
+     */
+    function blifeShortName(string $bodyHtml): string
+    {
+        $t = trim((string) preg_replace('~\s+~u', ' ', strip_tags(html_entity_decode($bodyHtml, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
+        $t = ltrim($t, "¡¿ \t\"'");
+
+        // Caso LIMPIO: el body arranca directo con "<Nombre> B Life(R). ...".
+        // <Nombre> = 1-5 tokens; el 1º empieza con mayúscula o dígito.
+        if (!preg_match('~^([\p{Lu}0-9][\p{L}\p{N}&.\+\-]*(?:\s+[\p{L}\p{N}&.\+\-]{1,20}){0,4})\s+B\s*Life\b~u', $t, $m)) {
+            return '';
+        }
+        $cand = trim($m[1], " .·-–—|\"'");
+
+        // Descarta si es en realidad una frase de marketing o queda colgando de una preposición.
+        if (preg_match('~^(?:descubre|conoce|explora|disfruta|prueba|impulsa|eleva|experimenta|renueva|dale|potencia|mejora|transforma|incorpora|aprovecha|a[ñn]ade|suma|integra|cada|nuestr[ao]s?|este|esta|el|la|los|las|un|una|con|de)\b~ui', $cand)) {
+            return '';
+        }
+        if (preg_match('~\b(?:de|con|y|para|del|sin)$~ui', $cand)) {
+            return '';
+        }
+
+        $palabras = count(array_filter(preg_split('~\s+~u', $cand) ?: []));
+        return ($palabras >= 1 && $palabras <= 4 && mb_strlen($cand) <= 40) ? $cand : '';
+    }
+}
+
 if (!function_exists('blifeTabText')) {
     /** Saca el texto de una pestaña del tema (metafield renderizado) del HTML del producto. */
     function blifeTabText(string $html, string $tabPrefix, int $productId): string

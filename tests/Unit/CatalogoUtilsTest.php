@@ -119,6 +119,21 @@ final class CatalogoUtilsTest extends TestCase
         $this->assertSame([], $parts['params']);
     }
 
+    public function testCatalogBuildQueriesAplicaPrecioDeOfertaSinAgregarParametros(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '');
+
+        // El precio efectivo (rebaja de oferta: precio_oferta o costo+50) se expone como
+        // columna y alimenta el "Desde $X" de la familia.
+        $this->assertStringContainsString('AS precio_efectivo', $parts['sql_main']);
+        $this->assertStringContainsString("LOWER(c_of.nombre) IN ('oferta', 'ofertas')", $parts['sql_main']);
+        $this->assertStringContainsString('GREATEST(p.precio_costo, 0) + 50', $parts['sql_main']);
+
+        // Sigue sin parametros ligados y la logica no toca la consulta de conteo.
+        $this->assertSame([], $parts['params']);
+        $this->assertStringNotContainsString('precio_efectivo', $parts['sql_count']);
+    }
+
     public function testCatalogBuildQueriesBindsCategoryAndSearchParams(): void
     {
         $parts = catalogBuildQueries($this->pdoStub(), 'Suplementos', 'omega', false);

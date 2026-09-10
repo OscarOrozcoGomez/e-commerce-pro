@@ -15,6 +15,7 @@ require_once __DIR__ . '/../core/migrations.php';
 require_once __DIR__ . '/../core/chat_utils.php';
 require_once __DIR__ . '/../core/product_display_utils.php';
 require_once __DIR__ . '/../core/catalogo_utils.php';
+require_once __DIR__ . '/../core/oferta_pricing.php';
 require_once __DIR__ . '/../core/blife_sync_utils.php';
 require_once __DIR__ . '/../core/finance_utils.php';
 require_once __DIR__ . '/../core/pickup_offer_utils.php';

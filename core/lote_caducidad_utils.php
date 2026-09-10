@@ -26,6 +26,22 @@ if (!defined('LOTE_DIAS_URGENTE')) {
 if (!defined('LOTE_DIAS_PLANIFICAR')) {
     define('LOTE_DIAS_PLANIFICAR', 180);  // 90-180 -> planificar ; >=180 -> vigilar
 }
+/*
+ * Piso de severidad por RUNWAY real (dias_efectivos_venta = caducidad - dias de
+ * tratamiento que rinde el envase). Manda la cercania a quedarse sin margen para
+ * vender, aunque el modelo de velocidad diga que el lote se coloca a tiempo:
+ *   < 45      -> critico
+ *   45 - 119  -> urgente
+ *   120 - 269 -> planificar
+ *   270 - 449 -> vigilar
+ *   >= 450    -> ok
+ */
+if (!defined('LOTE_RUNWAY_CRITICO'))    { define('LOTE_RUNWAY_CRITICO', 45); }
+if (!defined('LOTE_RUNWAY_URGENTE'))    { define('LOTE_RUNWAY_URGENTE', 120); }
+if (!defined('LOTE_RUNWAY_PLANIFICAR')) { define('LOTE_RUNWAY_PLANIFICAR', 270); }
+if (!defined('LOTE_RUNWAY_VIGILAR'))    { define('LOTE_RUNWAY_VIGILAR', 450); }
+
+require_once __DIR__ . '/oferta_pricing.php';
 
 /**
  * Estados de lote que se consideran "vivos" en la vista de caducidades.
@@ -212,6 +228,44 @@ function loteSeveridad(int $diasHastaCaducar, ?int $excedente, int $cantidadRest
 }
 
 /**
+ * Severidad SOLO por el runway real (dias efectivos para colocar el lote), sin
+ * mirar velocidad ni excedente. Es el "piso": un lote con poco margen se marca
+ * fuerte aunque el modelo diga que se vende.
+ */
+function loteSeveridadPorRunway(int $diasEfectivos): string
+{
+    if ($diasEfectivos < LOTE_RUNWAY_CRITICO) {
+        return 'critico';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_URGENTE) {
+        return 'urgente';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_PLANIFICAR) {
+        return 'planificar';
+    }
+    if ($diasEfectivos < LOTE_RUNWAY_VIGILAR) {
+        return 'vigilar';
+    }
+
+    return 'ok';
+}
+
+/**
+ * Devuelve la peor de dos severidades segun este orden de gravedad:
+ * ok < vigilar < sin_historico < planificar < sin_rotacion < urgente < critico < caducado.
+ */
+function loteSeveridadPeor(string $a, string $b): string
+{
+    static $rank = [
+        'ok' => 0, 'vigilar' => 1, 'sin_historico' => 2, 'planificar' => 3,
+        'sin_rotacion' => 4, 'urgente' => 5, 'critico' => 6, 'caducado' => 7,
+    ];
+    $ra = $rank[$a] ?? 0;
+    $rb = $rank[$b] ?? 0;
+    return $ra >= $rb ? $a : $b;
+}
+
+/**
  * Dias de tratamiento que rinde un envase = capsulas por envase / capsulas por
  * porcion (toma). Ej: 90 capsulas / 1 por dia = 90 dias. null si falta el dato.
  */
@@ -284,6 +338,15 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
         $margenConsumo = $diasTratamiento !== null ? $diasHastaCaducar - $diasTratamiento : null;
         $noVendible = $margenConsumo !== null && $cantRestante > 0 && $diasHastaCaducar >= 0 && $margenConsumo < 0;
 
+        // Horizonte REAL para colocar cada unidad: si el envase rinde N dias, la
+        // ultima fecha en que un cliente puede comprarlo y terminarselo antes de que
+        // caduque es (caducidad - N). Vender despues de esa fecha = el cliente
+        // consume producto vencido. Por eso la proyeccion y la severidad se miden
+        // contra este horizonte, no contra la fecha de caducidad "cruda": asi la
+        // alerta salta con la anticipacion suficiente para ponerlo en oferta.
+        // Sin datos de capsulas/porcion, el horizonte es la propia fecha de caducidad.
+        $diasEfectivos = $margenConsumo !== null ? max(0, $margenConsumo) : $diasHastaCaducar;
+
         $excedente = null;
         $diasParaAgotar = null;
         $velObjetivo = null;
@@ -304,20 +367,32 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             $excedente = null; // no se puede proyectar
         } elseif ($sinRotacion || $velDiaria <= 0) {
             $excedente = $cantRestante;
-            $velObjetivo = $cantRestante / max(1, $diasHastaCaducar);
+            $velObjetivo = $cantRestante / max(1, $diasEfectivos);
         } else {
-            $demandaAntes = max(0.0, $velDiaria * $diasHastaCaducar);
+            $demandaAntes = max(0.0, $velDiaria * $diasEfectivos);
             $vendidasATiempo = max(0.0, min((float) $cantRestante, $demandaAntes - $posicion));
             $excedente = (int) ceil($cantRestante - $vendidasATiempo);
             $excedente = max(0, $excedente);
             $diasParaAgotar = ($posicion + $cantRestante) / $velDiaria;
-            $velObjetivo = ($posicion + $cantRestante) / max(1, $diasHastaCaducar);
+            $velObjetivo = ($posicion + $cantRestante) / max(1, $diasEfectivos);
             $consumidoPorEsteLote = $vendidasATiempo;
         }
 
-        $severidad = loteSeveridad($diasHastaCaducar, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
+        // La severidad se mide contra el horizonte efectivo (ver arriba), salvo
+        // 'caducado', que depende de la fecha real ya cumplida.
+        $severidad = $diasHastaCaducar < 0
+            ? 'caducado'
+            : loteSeveridad($diasEfectivos, $excedente, $cantRestante, $sinRotacion, $sinHistorico);
+
+        // Piso por RUNWAY: la cercania a quedarse sin margen real para vender manda,
+        // aunque el modelo diga que el lote se coloca a tiempo. Se toma la PEOR entre
+        // lo que dio el modelo y lo que dicta el runway. Nunca baja una severidad.
+        if ($diasHastaCaducar >= 0 && $cantRestante > 0 && $severidad !== 'caducado') {
+            $severidad = loteSeveridadPeor($severidad, loteSeveridadPorRunway($diasEfectivos));
+        }
+
         $descuento = ($excedente !== null && $excedente > 0)
-            ? loteDescuentoSugerido($excedente, $cantRestante, $diasHastaCaducar)
+            ? loteDescuentoSugerido($excedente, $cantRestante, $diasEfectivos)
             : 0;
 
         if ($noVendible) {
@@ -336,6 +411,7 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
             'ritmo_ratio' => ($velObjetivo !== null && $velObjetivo > 0) ? round($velDiaria / $velObjetivo, 2) : null,
             'dias_tratamiento_envase' => $diasTratamiento,
             'margen_consumo_dias' => $margenConsumo,
+            'dias_efectivos_venta' => $diasHastaCaducar < 0 ? $diasHastaCaducar : $diasEfectivos,
             'no_vendible' => $noVendible,
             'severidad' => $severidad,
             'descuento_sugerido_pct' => $descuento,
@@ -444,10 +520,12 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
         $lotes = array_values(array_filter($lotes, static fn($l) => $l['severidad'] === $sev));
     }
 
+    // Orden de exhibicion: primero los que tienen menos margen REAL para venderse
+    // (horizonte efectivo), con la fecha de caducidad cruda como desempate.
     usort($lotes, static function (array $a, array $b): int {
-        $da = $a['dias_hasta_caducar'];
-        $db = $b['dias_hasta_caducar'];
-        return $da <=> $db;
+        $ea = $a['dias_efectivos_venta'] ?? $a['dias_hasta_caducar'];
+        $eb = $b['dias_efectivos_venta'] ?? $b['dias_hasta_caducar'];
+        return [$ea, $a['dias_hasta_caducar']] <=> [$eb, $b['dias_hasta_caducar']];
     });
 
     return ['lotes' => $lotes, 'ventana_dias' => LOTE_VENTANA_DIAS];
@@ -485,9 +563,11 @@ function loteResumenSeveridad(PDO $pdo): array
             $conteo[$sev]++;
         }
         if (in_array($sev, $urgentes, true)) {
-            if ($masUrgente === null
-                || (int) $l['dias_hasta_caducar'] < (int) $masUrgente['dias_hasta_caducar']
-            ) {
+            $efActual = (int) ($l['dias_efectivos_venta'] ?? $l['dias_hasta_caducar']);
+            $efPrevio = $masUrgente === null
+                ? PHP_INT_MAX
+                : (int) ($masUrgente['dias_efectivos_venta'] ?? $masUrgente['dias_hasta_caducar']);
+            if ($efActual < $efPrevio) {
                 $masUrgente = $l;
             }
         }
@@ -497,6 +577,7 @@ function loteResumenSeveridad(PDO $pdo): array
         'urgen' => $conteo['critico'] + $conteo['urgente'] + $conteo['caducado'],
         'total' => count($lotes),
         'mas_urgente' => $masUrgente,
+        'descuadres' => count(loteFetchDescuadres($pdo)),
     ];
 
     return $resumen;
@@ -549,6 +630,136 @@ function loteReconciliacionStock(PDO $pdo, array $idsProducto): array
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $out[(int) $row['id_producto']]['stock_lotes'] = (int) $row['total'];
     }
+
+    return $out;
+}
+
+/**
+ * Productos donde el stock del sistema (SUM inventario_almacen.cantidad_actual) NO
+ * coincide con la suma de sus lotes vivos (SUM lotes_inventario.cantidad_restante).
+ * Incluye productos con stock pero SIN un solo lote registrado -- ahi es donde
+ * "puede haber algo mas". Ordenado por tamano del descuadre (|diferencia| desc).
+ *
+ * diferencia = stock_sistema - stock_lotes
+ *   > 0  ('faltante'): el sistema tiene mas de lo que suman los lotes -> faltan
+ *                      lotes por registrar, o merma no descontada.
+ *   < 0  ('sobrante'): los lotes suman mas que el sistema -> lote de mas, o el
+ *                      stock del sistema quedo sin actualizar.
+ *
+ * @param array{id_almacen?:int, q?:string, tipo?:string} $filtros
+ *   id_almacen restringe AMBOS lados a ese almacen (los lotes con almacen NULL
+ *   quedan fuera en ese modo).
+ * @return array<int,array{
+ *   id_producto:int, producto_nombre:string, producto_sku:string,
+ *   producto_categoria:?string, stock_sistema:int, stock_lotes:int,
+ *   diferencia:int, tipo:string, n_lotes:int
+ * }>
+ */
+function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
+{
+    if (!loteTablaExiste($pdo, 'inventario_almacen') || !loteTablaExiste($pdo, 'lotes_inventario')) {
+        return [];
+    }
+
+    $idAlmacen = isset($filtros['id_almacen']) && (int) $filtros['id_almacen'] > 0
+        ? (int) $filtros['id_almacen'] : null;
+
+    // Stock del sistema por producto.
+    $sqlSis = 'SELECT id_producto, SUM(cantidad_actual) AS total FROM inventario_almacen';
+    $pSis = [];
+    if ($idAlmacen !== null) {
+        $sqlSis .= ' WHERE id_almacen = :a';
+        $pSis[':a'] = $idAlmacen;
+    }
+    $sqlSis .= ' GROUP BY id_producto';
+    $sistema = [];
+    $st = $pdo->prepare($sqlSis);
+    $st->execute($pSis);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $sistema[(int) $r['id_producto']] = (int) $r['total'];
+    }
+
+    // Stock de lotes vivos por producto.
+    $sqlLot = "SELECT id_producto, SUM(cantidad_restante) AS total, COUNT(*) AS n
+               FROM lotes_inventario WHERE estado IN ('activo','caducado')";
+    $pLot = [];
+    if ($idAlmacen !== null) {
+        $sqlLot .= ' AND id_almacen = :a';
+        $pLot[':a'] = $idAlmacen;
+    }
+    $sqlLot .= ' GROUP BY id_producto';
+    $lotes = [];
+    $st = $pdo->prepare($sqlLot);
+    $st->execute($pLot);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $lotes[(int) $r['id_producto']] = ['total' => (int) $r['total'], 'n' => (int) $r['n']];
+    }
+
+    $ids = array_values(array_unique(array_merge(array_keys($sistema), array_keys($lotes))));
+    if ($ids === []) {
+        return [];
+    }
+
+    $ph = [];
+    $pProd = [];
+    foreach ($ids as $i => $id) {
+        $ph[] = ":d{$i}";
+        $pProd[":d{$i}"] = $id;
+    }
+    $tieneEstado = loteColumnaExiste($pdo, 'productos', 'estado');
+    $tieneCategoria = loteColumnaExiste($pdo, 'productos', 'categoria');
+    $sqlProd = 'SELECT p.id_producto, p.nombre, ' . loteSkuExpr($pdo) . ' AS sku'
+        . ($tieneCategoria ? ', p.categoria' : ", '' AS categoria")
+        . ($tieneEstado ? ', p.estado' : ", 'activo' AS estado")
+        . ' FROM productos p WHERE p.id_producto IN (' . implode(',', $ph) . ')';
+    $st = $pdo->prepare($sqlProd);
+    $st->execute($pProd);
+    $prods = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $prods[(int) $r['id_producto']] = $r;
+    }
+
+    $q = isset($filtros['q']) ? mb_strtolower(trim((string) $filtros['q'])) : '';
+    $tipoFiltro = isset($filtros['tipo']) ? trim((string) $filtros['tipo']) : '';
+
+    $out = [];
+    foreach ($ids as $id) {
+        $prod = $prods[$id] ?? null;
+        if ($prod === null || (string) ($prod['estado'] ?? 'activo') === 'archivado') {
+            continue;
+        }
+        $s = $sistema[$id] ?? 0;
+        $l = $lotes[$id]['total'] ?? 0;
+        if ($s === $l) {
+            continue;
+        }
+        $dif = $s - $l;
+        $tipo = $dif > 0 ? 'faltante' : 'sobrante';
+        if ($tipoFiltro !== '' && $tipoFiltro !== $tipo) {
+            continue;
+        }
+        if ($q !== '') {
+            $hay = mb_strtolower((string) $prod['nombre'] . ' ' . (string) ($prod['sku'] ?? ''));
+            if (mb_strpos($hay, $q) === false) {
+                continue;
+            }
+        }
+        $out[] = [
+            'id_producto' => $id,
+            'producto_nombre' => (string) $prod['nombre'],
+            'producto_sku' => (string) ($prod['sku'] ?? ''),
+            'producto_categoria' => ($prod['categoria'] ?? '') !== '' ? (string) $prod['categoria'] : null,
+            'stock_sistema' => $s,
+            'stock_lotes' => $l,
+            'diferencia' => $dif,
+            'tipo' => $tipo,
+            'n_lotes' => $lotes[$id]['n'] ?? 0,
+        ];
+    }
+
+    usort($out, static function (array $a, array $b): int {
+        return [abs($b['diferencia']), $a['producto_nombre']] <=> [abs($a['diferencia']), $b['producto_nombre']];
+    });
 
     return $out;
 }
@@ -842,6 +1053,69 @@ function loteMarcarAtendida(PDO $pdo, int $idLote, bool $enOferta, ?string $nota
         ':uid' => $userId,
         ':id' => $idLote,
     ]);
+}
+
+/**
+ * Pone un producto "en oferta" desde el panel de Caducidades, de un clic:
+ *  - lo agrega a la categoria de ofertas (la crea como "Oferta" si no existe),
+ *  - le fija precio_oferta = costo + $50 si aun no tiene un override manual,
+ *  - marca el lote como atendido y en_oferta (cuando se pasa un id_lote > 0).
+ *
+ * El catalogo, la ficha, el POS y Alex ya leen ese precio efectivo, asi que con
+ * este unico paso el producto pasa a venderse al precio de oferta en todos lados.
+ *
+ * @return array{nombre:string, precio_costo:float, precio_oferta:float, precio_venta:float, ya_estaba:bool, precio_fijado:bool}
+ */
+function lotePonerProductoEnOferta(PDO $pdo, int $idProducto, int $idLote, int $userId): array
+{
+    if ($idProducto <= 0) {
+        throw new InvalidArgumentException('Producto invalido.');
+    }
+
+    $stmt = $pdo->prepare('SELECT nombre, precio_costo, precio_venta, precio_oferta FROM productos WHERE id_producto = :id');
+    $stmt->execute([':id' => $idProducto]);
+    $prod = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($prod)) {
+        throw new InvalidArgumentException('El producto ya no existe.');
+    }
+
+    $catId = ofertaResolverCategoriaId($pdo, true);
+    if ($catId === null) {
+        throw new RuntimeException('No se pudo resolver la categoria de ofertas.');
+    }
+
+    // Alta idempotente en producto_categorias (check-then-insert: portable MySQL/SQLite).
+    $chk = $pdo->prepare('SELECT 1 FROM producto_categorias WHERE id_producto = :p AND id_categoria = :c');
+    $chk->execute([':p' => $idProducto, ':c' => $catId]);
+    $yaEstaba = $chk->fetchColumn() !== false;
+    if (!$yaEstaba) {
+        $pdo->prepare('INSERT INTO producto_categorias (id_producto, id_categoria) VALUES (:p, :c)')
+            ->execute([':p' => $idProducto, ':c' => $catId]);
+    }
+
+    // El precio sugerido solo se escribe si no hay un override manual todavia
+    // (no pisar un precio que alguien ya bajo a mano desde la ficha del producto).
+    $tienePrecio = $prod['precio_oferta'] !== null && (float) $prod['precio_oferta'] > 0;
+    $precioOferta = $tienePrecio
+        ? round((float) $prod['precio_oferta'], 2)
+        : ofertaPrecioSugerido((float) $prod['precio_costo']);
+    if (!$tienePrecio) {
+        $pdo->prepare('UPDATE productos SET precio_oferta = :po WHERE id_producto = :id')
+            ->execute([':po' => $precioOferta, ':id' => $idProducto]);
+    }
+
+    if ($idLote > 0) {
+        loteMarcarAtendida($pdo, $idLote, true, 'Producto puesto en oferta desde Caducidades', $userId);
+    }
+
+    return [
+        'nombre'        => (string) $prod['nombre'],
+        'precio_costo'  => round((float) $prod['precio_costo'], 2),
+        'precio_oferta' => $precioOferta,
+        'precio_venta'  => round((float) $prod['precio_venta'], 2),
+        'ya_estaba'     => $yaEstaba,
+        'precio_fijado' => !$tienePrecio,
+    ];
 }
 
 /**
