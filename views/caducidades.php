@@ -245,7 +245,7 @@ include __DIR__ . '/includes/header.php';
                                 <td style="white-space:nowrap;">
                                     <a class="btn-flat btn-small green-text text-darken-2" title="Poner en oferta (1 clic): agrega el producto a la categoría Ofertas y le fija precio costo + $50" onclick="ponerEnOferta(<?php echo (int) $l['id_lote']; ?>, <?php echo (int) $l['id_producto']; ?>, '<?php echo addslashes(esc((string) ($l['producto_nombre'] ?? ''))); ?>')"><i class="material-icons">sell</i></a>
                                     <a class="btn-flat btn-small" title="Marcar en oferta / atendida" onclick="marcarOferta(<?php echo (int) $l['id_lote']; ?>)"><i class="material-icons">local_offer</i></a>
-                                    <a class="btn-flat btn-small" title="Ver producto" href="<?php echo BASE_URL; ?>views/products.php?id_producto=<?php echo (int) $l['id_producto']; ?>"><i class="material-icons">open_in_new</i></a>
+                                    <a class="btn-flat btn-small" title="Ver producto" href="<?php echo BASE_URL; ?>views/products.php?id_producto=<?php echo (int) $l['id_producto']; ?>&from=caducidades"><i class="material-icons">open_in_new</i></a>
                                     <a class="btn-flat btn-small red-text" title="Retirar lote" onclick="retirarLote(<?php echo (int) $l['id_lote']; ?>)"><i class="material-icons">block</i></a>
                                 </td>
                             </tr>
@@ -381,7 +381,7 @@ include __DIR__ . '/includes/header.php';
                         + (dif > 0 ? '+' : '') + dif + ' ' + (dif > 0 ? 'faltante' : 'sobrante') + '</span></td>'
                         + '<td class="right-align">' + (parseInt(d.n_lotes, 10) || 0) + '</td>'
                         + '<td style="white-space:nowrap;">'
-                        + '<a class="btn-flat btn-small" title="Ver / editar lotes del producto" href="' + BASE_URL_JS + 'views/products.php?id_producto=' + pid + '"><i class="material-icons">inventory_2</i></a>'
+                        + '<a class="btn-flat btn-small" title="Ver producto (editar ficha, lotes y stock)" href="' + BASE_URL_JS + 'views/products.php?id_producto=' + pid + '&from=caducidades&back_tab=inc"><i class="material-icons">open_in_new</i></a>'
                         + '<a class="btn-flat btn-small" title="Entradas de inventario" href="' + BASE_URL_JS + 'views/inventario_entradas.php"><i class="material-icons">add_business</i></a>'
                         + '</td></tr>';
                 });
