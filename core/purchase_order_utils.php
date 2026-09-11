@@ -1022,6 +1022,224 @@ function purchaseOrderBuildImportPreview(PDO $pdo, string $texto, int $idAlmacen
     return ['rows' => $rows, 'warnings' => $warnings];
 }
 
+// ===========================================================================
+// Import desde mayoreo.blife.mx (scripts/mayoreo_pedidos.mjs deja un JSON con los
+// renglones ya estructurados: nombre, presentacion, cantidad, precio_unitario).
+// A diferencia del correo pegado, aqui SI viene la presentacion y el precio, asi
+// que el match puede desempatar por el numero de la presentacion (60 / 120 / 200)
+// y las lineas "100% OFF" a $0 se marcan como regalo.
+// ===========================================================================
+
+/**
+ * Numeros "de tamaño" que aparecen en una presentacion o nombre: "120 porciones"
+ * -> [120]; "300 Caps | 125 µg" -> [300, 125]; "200 Caps | 500 g" -> [200, 500].
+ * Se ignoran numeros pegados a "mg"/"g"/"ml" SOLO si hay otro numero antes (el
+ * primero suele ser el conteo de piezas, que es lo que distingue presentaciones).
+ *
+ * @return array<int,int>
+ */
+function purchaseOrderPresentacionNumeros(string $texto): array
+{
+    if (!preg_match_all('/\d{1,4}/', $texto, $m)) {
+        return [];
+    }
+    $nums = array_values(array_unique(array_map('intval', $m[0])));
+    // Descarta ruidos tipico (0, años).
+    return array_values(array_filter($nums, static fn(int $n): bool => $n > 0 && $n < 2000));
+}
+
+/**
+ * Detecta si un renglon es un regalo / promocion sin costo ("100% OFF", precio 0).
+ */
+function purchaseOrderEsRegalo(string $nombre, float $precioUnitario): bool
+{
+    if ($precioUnitario > 0.0) {
+        return false;
+    }
+    return true; // precio 0 = regalo/cortesia; el "100% OFF" del nombre es solo indicio extra
+}
+
+/**
+ * Como purchaseOrderMatchProduct pero usando la presentacion para desempatar entre
+ * variantes con nombre casi igual (Creatina 60 vs 120 tomas). Sube el candidato
+ * cuyo nombre / sku / nombre_variante contiene el numero de la presentacion, y
+ * baja el que trae un numero de tamaño distinto.
+ *
+ * @param array<int, array{id_producto:int|string, nombre:string, sku?:string|null, nombre_variante?:string|null}> $catalogo
+ * @return array<int, array{id_producto:int, nombre:string, sku:string, score:float}>
+ */
+function purchaseOrderMatchProductPresentacion(array $catalogo, string $nombre, string $presentacion, int $topN = 5): array
+{
+    $base = purchaseOrderMatchProduct($catalogo, $nombre, max($topN, 8));
+    if ($base === []) {
+        return [];
+    }
+
+    $numsQuery = purchaseOrderPresentacionNumeros($presentacion . ' ' . $nombre);
+    if ($numsQuery === []) {
+        return array_slice($base, 0, max(1, $topN));
+    }
+
+    // Index del catalogo por id para leer nombre_variante.
+    $porId = [];
+    foreach ($catalogo as $p) {
+        $porId[(int) ($p['id_producto'] ?? 0)] = $p;
+    }
+
+    foreach ($base as &$cand) {
+        $p = $porId[(int) $cand['id_producto']] ?? [];
+        $textoCand = (string) ($cand['nombre'] ?? '') . ' '
+            . (string) ($cand['sku'] ?? '') . ' '
+            . (string) ($p['nombre_variante'] ?? '');
+        $numsCand = purchaseOrderPresentacionNumeros($textoCand);
+
+        if ($numsCand === []) {
+            continue;
+        }
+        if (array_intersect($numsQuery, $numsCand) !== []) {
+            $cand['score'] = min(100.0, (float) $cand['score'] + 15.0);
+        } elseif (array_intersect([$numsQuery[0]], $numsCand) === [] && in_array($numsQuery[0], $numsCand, true) === false) {
+            // El candidato trae un tamaño distinto al primero de la consulta -> penaliza.
+            $cand['score'] = max(0.0, (float) $cand['score'] - 12.0);
+        }
+    }
+    unset($cand);
+
+    usort($base, static function (array $a, array $b): int {
+        return ($b['score'] <=> $a['score']) ?: ($a['id_producto'] <=> $b['id_producto']);
+    });
+
+    return array_slice($base, 0, max(1, $topN));
+}
+
+/**
+ * Normaliza el JSON que deja scripts/mayoreo_pedidos.mjs a una estructura estable.
+ *
+ * @param array<string,mixed> $pedido
+ * @return array{numero:string, fecha:string, total_txt:string, items:array<int,array{
+ *   nombre:string, presentacion:string, cantidad:int, precio_unitario:float, es_regalo:bool}>}
+ */
+function purchaseOrderNormalizeMayoreoPedido(array $pedido): array
+{
+    $numero = trim((string) ($pedido['numero'] ?? ''));
+    $items = [];
+    foreach ((array) ($pedido['items'] ?? []) as $raw) {
+        if (!is_array($raw)) {
+            continue;
+        }
+        $nombre = trim((string) ($raw['nombre'] ?? ''));
+        if ($nombre === '') {
+            continue;
+        }
+        $cantidad = (int) ($raw['cantidad'] ?? 0);
+        $precio = (float) ($raw['precio_unitario'] ?? $raw['precio'] ?? 0);
+        if ($cantidad <= 0) {
+            continue;
+        }
+        $items[] = [
+            'nombre' => $nombre,
+            'presentacion' => trim((string) ($raw['presentacion'] ?? '')),
+            'cantidad' => min($cantidad, PURCHASE_ORDER_IMPORT_MAX_QTY),
+            'precio_unitario' => max(0.0, $precio),
+            'es_regalo' => purchaseOrderEsRegalo($nombre, max(0.0, $precio)),
+        ];
+    }
+
+    return [
+        'numero' => $numero,
+        'fecha' => trim((string) ($pedido['fecha_compra'] ?? $pedido['fecha'] ?? '')),
+        'total_txt' => trim((string) ($pedido['total_pedido_txt'] ?? $pedido['total_lista_txt'] ?? '')),
+        'items' => $items,
+    ];
+}
+
+/**
+ * Arma la vista previa de un import de mayoreo: mapea cada renglon a un producto
+ * del catalogo (con la presentacion como desempate), marca los que no tienen match
+ * y los regalos, y adjunta la OC abierta si la hubiera.
+ *
+ * @param array<string,mixed> $pedido  JSON crudo de scripts/mayoreo_pedidos.mjs
+ * @return array{numero:string, id_almacen:int, rows:array<int,array<string,mixed>>, warnings:array<int,array{tipo:string,texto:string}>}
+ */
+function purchaseOrderBuildMayoreoPreview(PDO $pdo, array $pedido, int $idAlmacen): array
+{
+    $norm = purchaseOrderNormalizeMayoreoPedido($pedido);
+
+    $catalogo = $pdo->query(
+        "SELECT id_producto, nombre, sku, nombre_variante, precio_costo
+         FROM productos WHERE estado <> 'archivado' ORDER BY id_producto"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $costoPorId = [];
+    foreach ($catalogo as $p) {
+        $costoPorId[(int) $p['id_producto']] = (float) ($p['precio_costo'] ?? 0);
+    }
+
+    $ocPorProducto = [];
+    if ($idAlmacen > 0) {
+        $stmt = $pdo->prepare(
+            "SELECT doc.id_detalle, doc.id_producto, doc.id_orden_compra, oc.referencia
+             FROM detalle_orden_compra doc
+             JOIN ordenes_compra oc ON oc.id_orden_compra = doc.id_orden_compra
+             WHERE oc.estado IN ('borrador','enviada','parcial') AND oc.id_almacen = ?
+             ORDER BY doc.id_orden_compra, doc.id_detalle"
+        );
+        $stmt->execute([$idAlmacen]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $linea) {
+            $pid = (int) $linea['id_producto'];
+            if (!isset($ocPorProducto[$pid])) {
+                $ocPorProducto[$pid] = $linea;
+            }
+        }
+    }
+
+    $rows = [];
+    $warnings = [];
+    foreach ($norm['items'] as $item) {
+        $candidatos = purchaseOrderMatchProductPresentacion($catalogo, $item['nombre'], $item['presentacion'], 5);
+        $mejor = $candidatos[0] ?? null;
+        $sugerido = ($mejor !== null && $mejor['score'] >= PURCHASE_ORDER_IMPORT_MATCH_THRESHOLD)
+            ? (int) $mejor['id_producto']
+            : 0;
+
+        $row = [
+            'raw' => $item['nombre'],
+            'presentacion' => $item['presentacion'],
+            'cantidad' => $item['cantidad'],
+            'precio_unitario' => $item['precio_unitario'],
+            'es_regalo' => $item['es_regalo'],
+            'candidatos' => $candidatos,
+            'sugerido_id_producto' => $sugerido,
+            'score' => $mejor['score'] ?? 0.0,
+            'costo_catalogo' => $sugerido > 0 ? ($costoPorId[$sugerido] ?? 0.0) : 0.0,
+            'id_detalle' => null,
+            'id_orden_compra' => null,
+            'referencia' => null,
+        ];
+
+        if ($sugerido > 0 && isset($ocPorProducto[$sugerido])) {
+            $oc = $ocPorProducto[$sugerido];
+            $row['id_detalle'] = (int) $oc['id_detalle'];
+            $row['id_orden_compra'] = (int) $oc['id_orden_compra'];
+            $row['referencia'] = (string) $oc['referencia'];
+        }
+
+        if ($sugerido === 0 && !$item['es_regalo']) {
+            $warnings[] = ['tipo' => 'sin_match', 'texto' => $item['nombre'] . ($item['presentacion'] !== '' ? ' — ' . $item['presentacion'] : '')];
+        }
+
+        $rows[] = $row;
+    }
+
+    return [
+        'numero' => $norm['numero'],
+        'fecha' => $norm['fecha'],
+        'total_txt' => $norm['total_txt'],
+        'id_almacen' => $idAlmacen,
+        'rows' => $rows,
+        'warnings' => $warnings,
+    ];
+}
+
 /**
  * Aplica un import revisado por el usuario: entradas directas a inventario para
  * los productos sueltos y recepción (cerrando la orden) para los que caen en una

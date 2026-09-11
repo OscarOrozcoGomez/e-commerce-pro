@@ -84,17 +84,32 @@ include __DIR__ . '/includes/header.php';
                             <form id="form-entrada-masiva">
                                 <?php echo csrfInput(); ?>
 
-                                <div style="display: flex; justify-content: flex-end; gap: 10px; margin: 10px 0 4px;">
-                                    <button type="button" class="btn-flat btn-small" onclick="togglePoGroups(true)"><i class="material-icons left">unfold_more</i>Expandir todo</button>
-                                    <button type="button" class="btn-flat btn-small" onclick="togglePoGroups(false)"><i class="material-icons left">unfold_less</i>Colapsar todo</button>
+                                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 10px 0 4px; flex-wrap: wrap;">
+                                    <div>
+                                        <button type="button" class="btn-flat btn-small" onclick="toggleTodosCheck(true)"><i class="material-icons left">check_box</i>Seleccionar todos</button>
+                                        <button type="button" class="btn-flat btn-small" onclick="toggleTodosCheck(false)"><i class="material-icons left">check_box_outline_blank</i>Quitar selección</button>
+                                    </div>
+                                    <div>
+                                        <button type="button" class="btn-flat btn-small" onclick="togglePoGroups(true)"><i class="material-icons left">unfold_more</i>Expandir todo</button>
+                                        <button type="button" class="btn-flat btn-small" onclick="togglePoGroups(false)"><i class="material-icons left">unfold_less</i>Colapsar todo</button>
+                                    </div>
                                 </div>
+                                <p class="grey-text" style="font-size: 12.5px; margin: 0 0 8px;">
+                                    Marca solo los productos que quieres <strong>pedir ahora</strong>; los demás se quedan en la lista.
+                                    Puedes generar la orden con una selección parcial, o posponer varios de un jalón.
+                                </p>
 
                                 <!-- Una sección colapsable por sucursal, generada en renderTable() -->
                                 <div id="po-groups"></div>
 
                                 <div class="row" style="margin-top: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; flex-wrap: wrap;">
                                     <div class="grey-text text-darken-2">
-                                        <h5 style="margin: 0;">Total Inversión: <strong>$<span id="total-inversion-val">0.00</span></strong></h5>
+                                        <h5 style="margin: 0;">Total Inversión (seleccionados): <strong>$<span id="total-inversion-val">0.00</span></strong></h5>
+                                    </div>
+                                    <div>
+                                        <button type="button" onclick="posponerSeleccionados()" class="btn-large red lighten-1 waves-effect waves-light">
+                                            <i class="material-icons left">schedule</i> POSPONER SELECCIONADOS
+                                        </button>
                                     </div>
                                     <div>
                                         <button type="button" onclick="guardarReglasMasivas()" class="btn-large blue darken-2 waves-effect waves-light">
@@ -103,7 +118,7 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                     <div>
                                         <button type="button" onclick="generarOrdenCompra()" class="btn-large green darken-2 waves-effect waves-light">
-                                            <i class="material-icons left">assignment</i> GENERAR ORDEN DE COMPRA
+                                            <i class="material-icons left">assignment</i> GENERAR ORDEN DE COMPRA (SELECCIONADOS)
                                         </button>
                                     </div>
                                 </div>
@@ -232,6 +247,40 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+
+            <div class="col s12">
+                <div class="card">
+                    <div class="card-content">
+                        <span class="card-title">Importar pedido de mayoreo (B Life)</span>
+                        <p class="grey-text">
+                            Corre <code>node scripts/mayoreo_pedidos.mjs</code>, haz login una vez, y pega aquí
+                            el contenido del archivo <code>scripts/.mayoreo/pedido-BLM….json</code>. Se mapea a
+                            tu catálogo (la presentación desempata 60 vs 120 tomas), las líneas "100% OFF" a $0
+                            se marcan como regalo, y se registra como <strong>Orden de Compra "por llegar"</strong>:
+                            no toca inventario hasta que la surtas desde "Órdenes Abiertas".
+                        </p>
+
+                        <textarea id="may-json" class="browser-default"
+                            placeholder="Pega aquí el contenido de scripts/.mayoreo/pedido-BLM015728.json"
+                            style="width:100%; min-height:140px; padding:10px; font-family:monospace; font-size:12px;"></textarea>
+
+                        <div style="margin-top: 10px;">
+                            <button type="button" class="btn blue darken-2 waves-effect waves-light" onclick="analizarMayoreo(this)">
+                                <i class="material-icons left">search</i> Analizar pedido de mayoreo
+                            </button>
+                            <span id="may-meta" class="grey-text" style="margin-left:12px;"></span>
+                        </div>
+
+                        <div id="may-review" style="margin-top: 18px;"></div>
+
+                        <div id="may-commit-wrapper" style="display:none; margin-top: 16px; text-align:right;">
+                            <button type="button" class="btn-large green darken-2 waves-effect waves-light" onclick="registrarOrdenPorLlegar()">
+                                <i class="material-icons left">assignment</i> Registrar orden (por llegar)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -336,6 +385,12 @@ include __DIR__ . '/includes/header.php';
 
         return `
             <tr id="po-row-${index}" class="po-item-row">
+                <td class="center-align" style="width: 40px;">
+                    <label style="display:block; text-align:center;">
+                        <input type="checkbox" class="filled-in po-check" checked onchange="recalculateTotalInversion()">
+                        <span></span>
+                    </label>
+                </td>
                 <td><strong>${escHtml(item.nombre)}</strong><br><small class="grey-text">SKU: ${escHtml(item.sku)}</small></td>
                 <td>$${(parseFloat(item.precio_venta) || 0).toFixed(2)}</td>
                 <td class="red-text center-align"><strong>${stockActual}</strong></td>
@@ -374,6 +429,7 @@ include __DIR__ . '/includes/header.php';
         const thead = `
             <thead>
                 <tr>
+                    <th class="center-align" style="width: 40px;"></th>
                     <th>Producto</th>
                     <th>P. Venta</th>
                     <th class="center-align">Stock Actual</th>
@@ -390,6 +446,10 @@ include __DIR__ . '/includes/header.php';
             html += `
                 <li class="po-group active" data-sucursal="${escHtml(sucursal)}">
                     <div class="collapsible-header">
+                        <label class="po-group-selectall" onclick="event.stopPropagation();" style="margin:0 4px 0 0;">
+                            <input type="checkbox" class="filled-in po-group-check" checked onclick="event.stopPropagation();" onchange="toggleGrupoCheck(this)">
+                            <span></span>
+                        </label>
                         <i class="material-icons">store</i>
                         <span class="po-group-name">${escHtml(sucursal)}</span>
                         <span class="new badge grey lighten-1 po-group-count" data-badge-caption="">${filas.length}</span>
@@ -433,6 +493,24 @@ include __DIR__ . '/includes/header.php';
         });
     }
 
+    // ¿Este renglón está marcado para pedirse? (checkbox de su fila)
+    function filaSeleccionada(row) {
+        return row.querySelector('.po-check')?.checked !== false;
+    }
+
+    window.toggleTodosCheck = function (marcar) {
+        document.querySelectorAll('#po-groups .po-check').forEach((cb) => { cb.checked = marcar; });
+        document.querySelectorAll('#po-groups .po-group-check').forEach((cb) => { cb.checked = marcar; });
+        recalculateTotalInversion();
+    };
+
+    window.toggleGrupoCheck = function (grupoCheckbox) {
+        const li = grupoCheckbox.closest('.po-group');
+        if (!li) return;
+        li.querySelectorAll('.po-check').forEach((cb) => { cb.checked = grupoCheckbox.checked; });
+        recalculateTotalInversion();
+    };
+
     function recalculateTotalInversion() {
         let total = 0;
 
@@ -449,14 +527,15 @@ include __DIR__ . '/includes/header.php';
                 subtotalCell.textContent = '$' + subtotal.toFixed(2);
             }
 
-            total += subtotal;
+            if (filaSeleccionada(row)) total += subtotal;
         });
 
-        // Subtotal y conteo por sucursal en la cabecera de cada colapsable.
+        // Subtotal (solo seleccionados) y conteo por sucursal en cada colapsable.
         document.querySelectorAll('#po-groups .po-group').forEach((li) => {
             let sub = 0;
             const filas = li.querySelectorAll('.po-item-row');
             filas.forEach((row) => {
+                if (!filaSeleccionada(row)) return;
                 const qty = Math.max(0, parseInt(row.querySelector('input[name$="[cantidad]"]')?.value || '0', 10));
                 const unitCost = parseFloat(row.querySelector('input[name$="[precio_costo]"]')?.value || '0');
                 sub += qty * unitCost;
@@ -465,12 +544,19 @@ include __DIR__ . '/includes/header.php';
             if (subEl) subEl.textContent = '$' + sub.toFixed(2);
             const countEl = li.querySelector('.po-group-count');
             if (countEl) countEl.textContent = String(filas.length);
+            // El checkbox del grupo refleja si TODOS sus renglones estan marcados.
+            const grupoCb = li.querySelector('.po-group-check');
+            if (grupoCb) grupoCb.checked = filas.length > 0 && Array.from(filas).every(filaSeleccionada);
         });
 
         document.getElementById('total-inversion-val').textContent = total.toFixed(2);
     }
 
-    function collectListaItems() {
+    /**
+     * @param {boolean} soloSeleccionados si es true, descarta los renglones cuyo
+     *   checkbox de fila esta desmarcado.
+     */
+    function collectListaItems(soloSeleccionados) {
         const form = document.getElementById('form-entrada-masiva');
         const formData = new FormData(form);
         const itemsMap = {};
@@ -485,14 +571,20 @@ include __DIR__ . '/includes/header.php';
                 }
             }
         }
-        return Object.values(itemsMap);
+        return Object.entries(itemsMap)
+            .filter(([index]) => {
+                if (!soloSeleccionados) return true;
+                const row = document.getElementById('po-row-' + index);
+                return row ? filaSeleccionada(row) : true;
+            })
+            .map(([, item]) => item);
     }
 
     function generarOrdenCompra() {
-        const items = collectListaItems().filter(i => parseInt(i.cantidad, 10) > 0);
+        const items = collectListaItems(true).filter(i => parseInt(i.cantidad, 10) > 0);
 
         if (items.length === 0) {
-            poToast('No hay cantidades para ordenar', 'orange');
+            poToast('No hay productos seleccionados con cantidad para ordenar', 'orange');
             return;
         }
 
@@ -578,6 +670,73 @@ include __DIR__ . '/includes/header.php';
             .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'));
         });
     }
+
+    /** Posponer de un jalón todos los renglones cuyo checkbox de fila esta marcado. */
+    window.posponerSeleccionados = function () {
+        const filas = [];
+        document.querySelectorAll('#po-groups .po-item-row').forEach((row) => {
+            if (!filaSeleccionada(row)) return;
+            const idProducto = parseInt(row.querySelector('input[name$="[id_producto]"]')?.value || '0', 10);
+            const idAlmacen = parseInt(row.querySelector('input[name$="[id_almacen]"]')?.value || '0', 10);
+            if (idProducto > 0 && idAlmacen > 0) filas.push({ row, idProducto, idAlmacen });
+        });
+
+        if (filas.length === 0) {
+            poToast('Selecciona al menos un producto', 'orange');
+            return;
+        }
+
+        Swal.fire({
+            title: `¿Posponer ${filas.length} producto(s)?`,
+            text: 'Se quitan de esta lista y quedan en la pestaña de Pospuestos hasta que los devuelvas.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#1565c0',
+            confirmButtonText: 'Sí, posponer'
+        }).then((result) => {
+            if (!result.isConfirmed) return;
+
+            fetch(PO_BASE + 'api/postpone_purchase_items.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    csrf_token: getCsrf(),
+                    items: filas.map((f) => ({ id_producto: f.idProducto, id_almacen: f.idAlmacen }))
+                })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) {
+                    poToast('Error: ' + res.message, 'red');
+                    return;
+                }
+
+                filas.forEach((f) => {
+                    const grupo = f.row.closest('.po-group');
+                    f.row.remove();
+                    if (grupo && grupo.querySelectorAll('.po-item-row').length === 0) {
+                        grupo.remove();
+                    }
+                });
+                recalculateTotalInversion();
+
+                if (document.querySelectorAll('#po-groups .po-item-row').length === 0) {
+                    document.getElementById('po-form-wrapper').style.display = 'none';
+                    document.getElementById('po-list-container').style.display = 'block';
+                    document.getElementById('po-list-container').innerHTML = `
+                        <div class="center-align" style="padding: 40px;">
+                            <i class="material-icons large blue-text">schedule</i>
+                            <h5>No hay productos activos en esta ronda</h5>
+                            <p>Todos los productos fueron pospuestos o ya están cubiertos.</p>
+                        </div>`;
+                }
+
+                poToast(res.message || `${filas.length} producto(s) pospuesto(s)`, 'blue');
+                cargarPospuestos();
+            })
+            .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'));
+        });
+    };
 
     function renderChart(data) {
         const ctx = document.getElementById('chartFaltantes').getContext('2d');
@@ -1094,6 +1253,151 @@ include __DIR__ . '/includes/header.php';
                 importRows = [];
                 cargarOrdenes();
                 cargarListaCompra();
+            })
+            .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'));
+        });
+    }
+
+    // ============================================================
+    // TAB 4 (parte 2): IMPORTAR PEDIDO DE MAYOREO (JSON del script)
+    // ============================================================
+    let mayRows = [];
+
+    function mayAlmacenId() {
+        const el = document.getElementById('import-almacen');
+        return el ? (parseInt(el.value, 10) || 0) : 0;
+    }
+    function money(n) { return '$' + (parseFloat(n) || 0).toFixed(2); }
+
+    function analizarMayoreo(btn) {
+        const texto = (document.getElementById('may-json').value || '').trim();
+        if (!texto) { poToast('Pega el JSON del pedido de mayoreo', 'orange'); return; }
+        if (btn) btn.disabled = true;
+        document.getElementById('may-review').innerHTML = '';
+        document.getElementById('may-commit-wrapper').style.display = 'none';
+
+        fetch(PO_BASE + 'api/purchase_order_mayoreo_preview.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csrf_token: getCsrf(), texto, id_almacen: mayAlmacenId() })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (!res.success) { poToast('Error: ' + res.message, 'red'); return; }
+            renderMayoreoReview(res);
+        })
+        .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'))
+        .finally(() => { if (btn) btn.disabled = false; });
+    }
+
+    function renderMayoreoReview(res) {
+        mayRows = res.rows || [];
+        const meta = document.getElementById('may-meta');
+        if (meta) {
+            meta.textContent = [res.numero ? 'Pedido ' + res.numero : '', res.fecha || '', res.total_txt || '']
+                .filter(Boolean).join('  ·  ');
+        }
+
+        const cont = document.getElementById('may-review');
+        const wrap = document.getElementById('may-commit-wrapper');
+        if (!mayRows.length) {
+            cont.innerHTML = '<div class="card-panel amber lighten-4">El JSON no trae renglones.</div>';
+            wrap.style.display = 'none';
+            return;
+        }
+
+        const filas = mayRows.map((row, i) => {
+            const opts = (row.candidatos || []).map(c => {
+                const extra = [c.sku].filter(Boolean).join(' ');
+                return `<option value="${c.id_producto}"${c.id_producto === row.sugerido_id_producto ? ' selected' : ''}>`
+                    + `${escHtml(c.nombre)}${extra ? ' — ' + escHtml(extra) : ''} (${Math.round(c.score)}%)</option>`;
+            }).join('');
+
+            let estado = '';
+            if (row.es_regalo) estado = ' <span class="new badge grey" data-badge-caption="">regalo $0</span>';
+            else if (!row.sugerido_id_producto) estado = ' <span class="new badge red white-text" data-badge-caption="">sin producto — créalo</span>';
+            else if (row.id_detalle) estado = ` <span class="new badge green" data-badge-caption="">OC ${escHtml(row.referencia || '')}</span>`;
+
+            const incluir = (!row.es_regalo && row.sugerido_id_producto) ? 'checked' : '';
+
+            return `
+                <tr data-i="${i}">
+                    <td><input type="checkbox" class="filled-in may-incluir" id="may-inc-${i}" ${incluir}><label for="may-inc-${i}"></label></td>
+                    <td>${escHtml(row.raw)}${row.presentacion ? '<br><small class="grey-text">' + escHtml(row.presentacion) + '</small>' : ''}</td>
+                    <td>
+                        <select class="browser-default may-prod" style="min-width:240px;">
+                            <option value="0">— ignorar —</option>
+                            ${opts}
+                        </select>${estado}
+                    </td>
+                    <td style="width:90px;"><input type="number" min="0" value="${parseInt(row.cantidad, 10) || 0}" class="browser-default may-qty" style="width:100%;text-align:center;"></td>
+                    <td class="right-align">${money(row.precio_unitario)}</td>
+                    <td class="right-align grey-text">${money(row.costo_catalogo)}</td>
+                </tr>`;
+        }).join('');
+
+        let warnHtml = '';
+        if ((res.warnings || []).length) {
+            warnHtml = '<div class="card-panel amber lighten-4"><strong>Sin coincidencia en el catálogo:</strong>'
+                + '<ul class="browser-default" style="margin:6px 0 0 18px;">'
+                + res.warnings.map(w => '<li>' + escHtml(w.texto) + '</li>').join('')
+                + '</ul><span class="grey-text" style="font-size:12px;">Créalos en Productos y vuelve a analizar, o déjalos fuera.</span></div>';
+        }
+
+        cont.innerHTML = warnHtml + `
+            <div style="overflow-x:auto;">
+                <table class="striped highlight" style="min-width:720px;">
+                    <thead><tr>
+                        <th>Pedir</th><th>Detectado</th><th>Producto del catálogo</th>
+                        <th class="center-align">Cant.</th><th class="right-align">P. unit. (mayoreo)</th><th class="right-align">Costo catálogo</th>
+                    </tr></thead>
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>`;
+        wrap.style.display = 'block';
+    }
+
+    function collectMayoreoItems() {
+        const out = [];
+        document.querySelectorAll('#may-review tbody tr').forEach(tr => {
+            const inc = tr.querySelector('.may-incluir');
+            if (!inc || !inc.checked) return;
+            const pid = parseInt(tr.querySelector('.may-prod').value, 10) || 0;
+            const qty = Math.max(0, parseInt(tr.querySelector('.may-qty').value || '0', 10));
+            if (pid <= 0 || qty <= 0) return;
+            // precio_costo 0: se pidio "solo mostrar" el precio de mayoreo, no tocar costos.
+            out.push({ id_producto: pid, cantidad: qty, id_almacen: mayAlmacenId(), precio_costo: 0 });
+        });
+        return out;
+    }
+
+    function registrarOrdenPorLlegar() {
+        const items = collectMayoreoItems();
+        if (!items.length) { poToast('Marca al menos un renglón con producto y cantidad', 'orange'); return; }
+
+        Swal.fire({
+            title: '¿Registrar orden "por llegar"?',
+            html: `Se crea una Orden de Compra con <strong>${items.length}</strong> producto(s), en estado abierto. `
+                + 'No toca el inventario: cuando llegue la mercancía la surtes desde "Órdenes Abiertas".',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#2e7d32',
+            confirmButtonText: 'Sí, registrar'
+        }).then((r) => {
+            if (!r.isConfirmed) return;
+            fetch(PO_BASE + 'api/purchase_order_create.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ csrf_token: getCsrf(), items })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (!res.success) { poToast('Error: ' + res.message, 'red'); return; }
+                poToast(res.message || 'Orden registrada', 'green');
+                document.getElementById('may-json').value = '';
+                document.getElementById('may-review').innerHTML = '';
+                document.getElementById('may-commit-wrapper').style.display = 'none';
+                setTimeout(() => location.reload(), 1200);
             })
             .catch(() => poToast('Error de conexión. Inténtalo de nuevo.', 'red'));
         });
