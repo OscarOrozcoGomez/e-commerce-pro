@@ -6,6 +6,7 @@ require_once __DIR__ . '/phone_utils.php';
 require_once __DIR__ . '/delivery_route_utils.php';
 require_once __DIR__ . '/delivery_zone_utils.php';
 require_once __DIR__ . '/order_cancel_utils.php';
+require_once __DIR__ . '/lote_caducidad_utils.php';
 require_once __DIR__ . '/attribution.php';
 require_once __DIR__ . '/ventas_features.php';
 require_once __DIR__ . '/referrals.php';
@@ -1986,8 +1987,12 @@ function dbCreatePublicOrder(array $data): array {
             $netUnitPrice = $cantidad > 0 ? round($lineNet / $cantidad, 2) : $precio;
 
             $stmtDetalle->execute([$id_pedido, $idProducto, $cantidad, $precio, $netUnitPrice, $costoUnitario, $lineDiscount, $lineNet]);
+            $idDetalle = (int) $pdo->lastInsertId();
             foreach ($consumos as $consumo) {
                 $stmtStock->execute([(int)$consumo['cantidad'], $idProducto, (int)$consumo['id_almacen']]);
+                // Descuenta lotes en FEFO por cada almacen del reparto (best-effort, nunca
+                // bloquea el pedido: ver loteDescontarVentaFEFO).
+                loteDescontarVentaFEFO($pdo, $idProducto, (int) $consumo['id_almacen'], (int) $consumo['cantidad'], $idDetalle);
             }
         }
 

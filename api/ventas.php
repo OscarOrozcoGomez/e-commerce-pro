@@ -7,6 +7,7 @@ require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
 require_once __DIR__ . '/../core/sale_delivery_mode.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
 require_once __DIR__ . '/../core/oferta_pricing.php';
+require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 
 header('Content-Type: application/json');
 
@@ -89,6 +90,24 @@ try {
 
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         throw new Exception('Token CSRF inválido o expirado.');
+    }
+
+    // Vista previa de lotes (FEFO) para el carrito ANTES de cobrar: el POS la usa para
+    // mostrarle al cajero de que lote fisico debe surtir cada producto y pedirle que lo
+    // verifique antes de completar la venta. Rama aparte porque no aplica ninguna de las
+    // validaciones de domicilio/cliente de abajo -- es de solo lectura, nunca escribe.
+    if (($_POST['modo'] ?? '') === 'plan_lotes') {
+        $itemsRaw = json_decode((string) ($_POST['items'] ?? '[]'), true);
+        $items = is_array($itemsRaw) ? $itemsRaw : [];
+        $idAlmacenPreview = intval($_POST['id_almacen'] ?? 0);
+        if ($idAlmacenPreview <= 0) {
+            $idAlmacenPreview = $almacenVentaId;
+        }
+        echo json_encode([
+            'success' => true,
+            'data' => loteFetchPlanVentaFEFO($pdo, $items, $idAlmacenPreview > 0 ? $idAlmacenPreview : null),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 
     $idMetodoPago = intval($_POST['id_metodo_pago'] ?? 0);
@@ -526,6 +545,7 @@ try {
                 ':monto_descuento' => $descuentoLinea,
                 ':subtotal' => $producto['subtotal'],
             ]);
+            $idDetalle = (int) $pdo->lastInsertId();
 
             if (!$ventaSinInventario) {
                 $stmtStock = $pdo->prepare(
@@ -540,6 +560,10 @@ try {
                 if ($stmtStock->rowCount() === 0) {
                     throw new Exception('Stock insuficiente para el producto ID: ' . $producto['id_producto']);
                 }
+
+                // Descuenta lotes en FEFO (best-effort, nunca bloquea la venta: ver
+                // loteDescontarVentaFEFO). El stock del sistema ya se autorizo arriba.
+                loteDescontarVentaFEFO($pdo, (int) $producto['id_producto'], $almacenVentaId, (int) $producto['cantidad'], $idDetalle);
 
                 $stmtMov = $pdo->prepare(
                     "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_origen, cantidad, id_usuario, observacion) VALUES (:producto, 'salida', :almacen, :cantidad, :usuario, :observacion)"

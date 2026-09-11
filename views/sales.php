@@ -259,6 +259,18 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<div id="modal-verificar-lotes" class="modal" style="max-width: 640px;">
+    <div class="modal-content">
+        <h5 style="margin-top: 0;"><i class="material-icons left">fact_check</i>Verifica el lote antes de cobrar</h5>
+        <p class="grey-text text-darken-1" style="margin-top:-8px;">Estos productos tienen lote registrado. Confirma que separaste/entregaste cada uno del lote indicado antes de continuar.</p>
+        <div id="verificar-lotes-lista"></div>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect waves-grey btn-flat" id="btn-cancelar-verificar-lotes">Cancelar</a>
+        <a href="#!" id="btn-confirmar-lotes" class="waves-effect waves-light btn green darken-2 disabled">Confirmo, cobrar</a>
+    </div>
+</div>
+
 <template id="venta-template">
     <div id="venta-{{id}}" class="row animated fadeIn venta-context" style="margin-top: 20px;">
         <div class="col s12 m8">
@@ -606,6 +618,7 @@ include __DIR__ . '/includes/header.php';
 <script>
     const productosDisponibles = <?php echo json_encode($productos, JSON_UNESCAPED_UNICODE); ?>;
     const clientesActivos = <?php echo json_encode($clientesActivos, JSON_UNESCAPED_UNICODE); ?>;
+    const ID_ALMACEN_VENTA = <?php echo (int) $id_almacen_actual; ?>;
     const SALES_TABS_STORAGE_KEY = 'sales_tabs_draft_v4';
     let tabCount = 0;
     let productoIndex = 0;
@@ -623,6 +636,7 @@ include __DIR__ . '/includes/header.php';
     let salesDraftSaveTimer = null;
     let isRestoringDrafts = false;
     let pendingCloseVentaId = null;
+    let pendingLotesConfirmCallback = null;
     let googlePlacesReadySales = false;
     let pendingNewClienteContext = null;
     let pendingPhoneContext = null;
@@ -1588,6 +1602,20 @@ include __DIR__ . '/includes/header.php';
             getModalInstance('modal-agregar-telefono')?.close();
         });
 
+        const verificarLotesModalNode = document.getElementById('modal-verificar-lotes');
+        if (verificarLotesModalNode) M.Modal.init(verificarLotesModalNode, { dismissible: false });
+        document.getElementById('btn-cancelar-verificar-lotes')?.addEventListener('click', () => {
+            pendingLotesConfirmCallback = null;
+        });
+        document.getElementById('btn-confirmar-lotes')?.addEventListener('click', () => {
+            const btn = document.getElementById('btn-confirmar-lotes');
+            if (btn.classList.contains('disabled') || !pendingLotesConfirmCallback) return;
+            const callback = pendingLotesConfirmCallback;
+            pendingLotesConfirmCallback = null;
+            getModalInstance('modal-verificar-lotes')?.close();
+            callback();
+        });
+
         window.addEventListener('beforeunload', prevenirCierre);
         const ventaContainers = document.getElementById('ventas-containers');
         ventaContainers.addEventListener('input', scheduleSalesDraftSave);
@@ -2124,6 +2152,43 @@ include __DIR__ . '/includes/header.php';
         const labelBoton = esSucursal
             ? 'Registrar Venta <i class="material-icons right">point_of_sale</i>'
             : 'Agendar Pedido <i class="material-icons right">local_shipping</i>';
+
+        const productosCarrito = Array.from(context.querySelectorAll('.producto-item')).map((item) => ({
+            id_producto: parseInt(item.dataset.id || '0', 10) || 0,
+            cantidad: parseInt(item.querySelector('.cantidad')?.value || '0', 10) || 0,
+        })).filter((p) => p.id_producto > 0 && p.cantidad > 0);
+
+        const csrfToken = form.querySelector('[name="csrf_token"]')?.value || '';
+        const enviar = () => enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton);
+
+        // Antes de cobrar: consulta que lote(s) le tocaria a cada producto (FEFO) y, si
+        // hay algo que verificar, se lo pide al cajero antes de continuar. Si la consulta
+        // falla no se bloquea la venta -- solo no se muestra el aviso (ver mas abajo).
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams({
+                modo: 'plan_lotes',
+                csrf_token: csrfToken,
+                id_almacen: String(ID_ALMACEN_VENTA || 0),
+                items: JSON.stringify(productosCarrito),
+            }),
+        })
+            .then((response) => response.json())
+            .then((planData) => {
+                const plan = (planData && planData.success && Array.isArray(planData.data)) ? planData.data : [];
+                if (plan.length === 0) {
+                    enviar();
+                    return;
+                }
+                mostrarModalVerificarLotes(plan, enviar);
+            })
+            .catch((error) => {
+                console.error('No se pudo obtener el plan de lotes para verificar:', error);
+                enviar();
+            });
+    }
+
+    function enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton) {
         submitButton.disabled = true;
         submitButton.innerHTML = 'Procesando...';
 
@@ -2131,7 +2196,7 @@ include __DIR__ . '/includes/header.php';
             .then((response) => response.json())
             .then((data) => {
                 if (data.success) {
-                    M.toast({ html: data.message || (esSucursal ? 'Venta registrada con éxito' : 'Pedido agendado con éxito'), classes: 'green darken-2' });
+                    M.toast({ html: data.message || 'Venta registrada con éxito', classes: 'green darken-2' });
                     document.getElementById(`tab-li-${tabId}`).remove();
                     context.remove();
                     saveSalesDraftNow();
@@ -2147,6 +2212,48 @@ include __DIR__ . '/includes/header.php';
                 submitButton.disabled = false;
                 submitButton.innerHTML = labelBoton;
             });
+    }
+
+    /**
+     * Modal previo al cobro: por cada producto con lote(s) activos, muestra de cual
+     * codigo/fecha debe salir (segun FEFO) y exige un checkbox por producto antes de
+     * habilitar "Confirmo, cobrar". onConfirmado se llama solo si TODAS quedan marcadas.
+     */
+    function mostrarModalVerificarLotes(plan, onConfirmado) {
+        const lista = document.getElementById('verificar-lotes-lista');
+        if (!lista) { onConfirmado(); return; }
+
+        lista.innerHTML = plan.map((p, idx) => {
+            const filas = (p.asignaciones || []).map((a) =>
+                `<li>${a.cantidad} pza(s) del lote <strong>${escapeHtml(a.codigo_lote || '(sin código)')}</strong> — caduca ${escapeHtml(a.fecha_caducidad || '?')}</li>`
+            ).join('');
+            const avisoSobrante = (p.sobrante || 0) > 0
+                ? `<p class="orange-text text-darken-3" style="margin:4px 0; font-size:0.9rem;"><i class="material-icons tiny" style="vertical-align:middle;">warning</i> ${p.sobrante} pza(s) sin lote con existencia suficiente registrado.</p>`
+                : '';
+            return `
+                <div class="row" style="border-bottom:1px solid #eee; padding:8px 0; margin:0 0 4px;">
+                    <div class="col s12">
+                        <p style="margin:0 0 4px;"><strong>${escapeHtml(p.producto_nombre)}</strong> — ${p.cantidad_pedida} pza(s) vendida(s)</p>
+                        <ul style="margin:0 0 6px 20px; padding:0;">${filas}</ul>
+                        ${avisoSobrante}
+                        <label>
+                            <input type="checkbox" class="verificar-lote-check" data-idx="${idx}" />
+                            <span>Verifiqué / separé este producto del lote indicado</span>
+                        </label>
+                    </div>
+                </div>`;
+        }).join('');
+
+        const btnConfirmar = document.getElementById('btn-confirmar-lotes');
+        const checks = () => Array.from(lista.querySelectorAll('.verificar-lote-check'));
+        const actualizarBoton = () => {
+            btnConfirmar.classList.toggle('disabled', !checks().every((c) => c.checked));
+        };
+        checks().forEach((c) => c.addEventListener('change', actualizarBoton));
+        actualizarBoton();
+
+        pendingLotesConfirmCallback = onConfirmado;
+        getModalInstance('modal-verificar-lotes')?.open();
     }
 </script>
 

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
 require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
+require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
@@ -90,14 +91,21 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
         $id_pedido = intval($_POST['id_pedido']);
         if ($_POST['accion'] === 'en_camino') {
             try {
+                $planLotesSalida = loteFetchPlanPedido($pdo, $id_pedido);
+                if (!empty($planLotesSalida) && ($_POST['confirmar_lotes'] ?? '') !== '1') {
+                    throw new RuntimeException('Debes confirmar que revisaste los lotes asignados antes de salir a entregar.');
+                }
                 $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'en_reparto' WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                 if ($stmt->rowCount() > 0) {
                     logAudit('PEDIDO_EN_CAMINO', 'pedidos', $id_pedido, 'Pedido marcado en camino por repartidor');
+                    if (!empty($planLotesSalida)) {
+                        logAudit('PEDIDO_LOTES_VERIFICADOS', 'pedidos', $id_pedido, 'Repartidor verifico los lotes asignados antes de salir a entregar');
+                    }
                     $success = 'Pedido marcado como en camino.';
                 }
-            } catch (PDOException $e) {
-                $error = 'Error al actualizar el pedido.';
+            } catch (Throwable $e) {
+                $error = $e instanceof RuntimeException ? $e->getMessage() : 'Error al actualizar el pedido.';
             }
         }
 
@@ -461,6 +469,7 @@ try {
     }
 
     $detallesPorPedido = [];
+    $planesLotesPorPedido = [];
     if (!empty($entregas)) {
         $idsPedidos = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $entregas)));
         $placeholders = implode(',', array_fill(0, count($idsPedidos), '?'));
@@ -478,11 +487,18 @@ try {
             }
             $detallesPorPedido[$pedidoId][] = $detalle;
         }
+        foreach ($idsPedidos as $idPedido) {
+            $planesLotes = loteFetchPlanPedido($pdo, $idPedido);
+            if (!empty($planesLotes)) {
+                $planesLotesPorPedido[$idPedido] = $planesLotes;
+            }
+        }
     }
 } catch (PDOException $e) {
     $error = 'Error al obtener entregas: ' . $e->getMessage();
     $entregas = [];
     $detallesPorPedido = [];
+    $planesLotesPorPedido = [];
 }
 
 include __DIR__ . '/includes/header.php';
@@ -855,6 +871,7 @@ include __DIR__ . '/includes/header.php';
                                 <ul style="margin: 0; padding-left: 0; list-style: none;">
                                     <?php
                                         $itemsPedidoTarjeta = $detallesPorPedido[(int)$ent['id_pedido']] ?? [];
+                                        $planLotesTarjeta = $planesLotesPorPedido[(int)$ent['id_pedido']] ?? [];
                                         $entregadosRestantesTarjeta = count(array_filter($itemsPedidoTarjeta, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
                                     ?>
                                     <?php foreach ($itemsPedidoTarjeta as $indexItemTarjeta => $d): ?>
@@ -986,6 +1003,28 @@ include __DIR__ . '/includes/header.php';
                                         <?php echo csrfInput(); ?>
                                         <input type="hidden" name="id_pedido" value="<?php echo $ent['id_pedido']; ?>">
                                         <input type="hidden" name="accion" value="en_camino">
+                                        <?php if (!empty($planLotesTarjeta)): ?>
+                                            <div class="card-panel amber lighten-5" style="margin:0 0 10px; padding:10px; border:1px solid #ffcc80;">
+                                                <p class="brown-text text-darken-3" style="font-size:0.82rem; margin:0 0 6px;">
+                                                    <i class="material-icons tiny" style="vertical-align:middle;">fact_check</i>
+                                                    <strong>Verifica los lotes antes de salir</strong>
+                                                </p>
+                                                <?php foreach ($planLotesTarjeta as $planLote): ?>
+                                                    <div style="font-size:0.8rem; margin-top:5px;">
+                                                        <strong><?php echo esc((string)$planLote['producto_nombre']); ?></strong>
+                                                        <ul style="margin:2px 0 0 18px; padding:0;">
+                                                            <?php foreach ($planLote['asignaciones'] as $asignacionLote): ?>
+                                                                <li><?php echo (int)$asignacionLote['cantidad']; ?> pza(s), lote <strong><?php echo esc((string)$asignacionLote['codigo_lote']); ?></strong>, caduca <?php echo esc((string)$asignacionLote['fecha_caducidad']); ?></li>
+                                                            <?php endforeach; ?>
+                                                        </ul>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                                <label style="display:block; margin-top:9px;">
+                                                    <input type="checkbox" name="confirmar_lotes" value="1" required>
+                                                    <span>Confirmo que revise y separe estos lotes.</span>
+                                                </label>
+                                            </div>
+                                        <?php endif; ?>
                                         <?php if (($ent['estado'] ?? '') === 'pendiente_pago'): ?>
                                             <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
                                                 <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
