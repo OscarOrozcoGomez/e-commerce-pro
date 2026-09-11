@@ -122,6 +122,27 @@ function deliveryValidateSinEvidencia(array $post): array
 }
 
 /**
+ * Valida la confirmacion del repartidor antes de sacar un pedido con lotes asignados.
+ * Un pedido sin trazabilidad de lotes no requiere checkbox: puede continuar sin bloquear
+ * pedidos historicos o ventas hechas antes de activar el registro detalle_pedido_lotes.
+ *
+ * @param array<int,mixed> $planLotes Resultado de loteFetchPlanPedido().
+ * @param array<string,mixed> $post Normalmente $_POST.
+ * @return array{valid:bool,error:string}
+ */
+function deliveryValidateLotesAntesSalida(array $planLotes, array $post): array
+{
+    if ($planLotes === []) {
+        return ['valid' => true, 'error' => ''];
+    }
+    if ((string)($post['confirmar_lotes'] ?? '') !== '1') {
+        return ['valid' => false, 'error' => 'Debes confirmar que revisaste los lotes asignados antes de salir a entregar.'];
+    }
+
+    return ['valid' => true, 'error' => ''];
+}
+
+/**
  * Token que se busca en pedidos.observaciones para saber que el repartidor dio por
  * terminada una entrega ya cobrada SIN publicarla en redes (entregas viejas, sin foto, etc).
  * Mientras este marcador este presente, la tarjeta ya no reaparece en la lista del repartidor.

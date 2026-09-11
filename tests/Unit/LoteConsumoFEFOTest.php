@@ -236,6 +236,75 @@ final class LoteConsumoFEFOTest extends TestCase
         $this->assertSame(10, (int)$this->loteRow($idLote)['cantidad_restante']);
     }
 
+    /** @dataProvider invalidPedidoIdsProvider */
+    public function testFetchPlanPedidoRechazaIdsInvalidosSinConsultarDatos(int $idPedido): void
+    {
+        $this->assertSame([], loteFetchPlanPedido($this->pdo, $idPedido));
+    }
+
+    public static function invalidPedidoIdsProvider(): array
+    {
+        return [
+            'cero' => [0],
+            'negativo' => [-1],
+        ];
+    }
+
+    public function testFetchPlanPedidoDevuelveVacioSiElPedidoNoExiste(): void
+    {
+        $this->seedLote(1, 'NO-DEBE-APARECER', $this->enDias(90), 10);
+
+        $this->assertSame([], loteFetchPlanPedido($this->pdo, 999999));
+    }
+
+    public function testFetchPlanPedidoIgnoraAsignacionesCeroONegativas(): void
+    {
+        $idLote = $this->seedLoteId(1, 'VALIDO', $this->enDias(90), 10);
+        $this->pdo->prepare('INSERT INTO detalle_pedidos (id_detalle, id_pedido, id_producto, cantidad) VALUES (101, 501, 1, 3)')
+            ->execute();
+        $stmt = $this->pdo->prepare('INSERT INTO detalle_pedido_lotes (id_detalle, id_lote, cantidad, costo_unitario) VALUES (101, ?, ?, NULL)');
+        $stmt->execute([$idLote, 0]);
+        $stmt->execute([$idLote, -2]);
+
+        $this->assertSame([], loteFetchPlanPedido($this->pdo, 501));
+    }
+
+    public function testFetchPlanPedidoNoMuestraRegistrosHuerfanos(): void
+    {
+        $this->pdo->prepare('INSERT INTO detalle_pedido_lotes (id_detalle, id_lote, cantidad, costo_unitario) VALUES (404, 404, 2, NULL)')
+            ->execute();
+
+        $this->assertSame([], loteFetchPlanPedido($this->pdo, 502));
+    }
+
+    public function testFetchPlanPedidoAgrupaVariosDetallesYNoConsumeInventario(): void
+    {
+        $idLoteA = $this->seedLoteId(1, 'LOTE-A', $this->enDias(30), 8);
+        $idLoteB = $this->seedLoteId(1, 'LOTE-B', $this->enDias(60), 9);
+        $this->pdo->prepare('INSERT INTO productos (id_producto, nombre) VALUES (2, ?)')->execute(['Vitamina C']);
+        $this->pdo->exec('INSERT INTO detalle_pedidos (id_detalle, id_pedido, id_producto, cantidad) VALUES (102, 503, 1, 2), (103, 503, 2, 4)');
+        $this->pdo->prepare('INSERT INTO detalle_pedido_lotes (id_detalle, id_lote, cantidad, costo_unitario) VALUES (?, ?, ?, NULL)')->execute([102, $idLoteA, 2]);
+        $this->pdo->prepare('INSERT INTO detalle_pedido_lotes (id_detalle, id_lote, cantidad, costo_unitario) VALUES (?, ?, ?, NULL)')->execute([103, $idLoteB, 4]);
+
+        $plan = loteFetchPlanPedido($this->pdo, 503);
+
+        $this->assertCount(2, $plan);
+        $this->assertSame(102, $plan[0]['id_detalle']);
+        $this->assertSame('LOTE-A', $plan[0]['asignaciones'][0]['codigo_lote']);
+        $this->assertSame(103, $plan[1]['id_detalle']);
+        $this->assertSame('LOTE-B', $plan[1]['asignaciones'][0]['codigo_lote']);
+        $this->assertSame(8, (int)$this->loteRow($idLoteA)['cantidad_restante']);
+        $this->assertSame(9, (int)$this->loteRow($idLoteB)['cantidad_restante']);
+    }
+
+    public function testFetchPlanPedidoDevuelveVacioSiFaltanTablasDeTrazabilidad(): void
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+        $this->assertSame([], loteFetchPlanPedido($pdo, 500));
+    }
+
     /* --------------------------- loteRegresarDetalleALotes -------------------------- */
 
     public function testRegresarDetalleReactivaUnLoteQueQuedoAgotado(): void

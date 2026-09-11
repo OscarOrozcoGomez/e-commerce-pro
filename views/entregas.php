@@ -92,8 +92,9 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
         if ($_POST['accion'] === 'en_camino') {
             try {
                 $planLotesSalida = loteFetchPlanPedido($pdo, $id_pedido);
-                if (!empty($planLotesSalida) && ($_POST['confirmar_lotes'] ?? '') !== '1') {
-                    throw new RuntimeException('Debes confirmar que revisaste los lotes asignados antes de salir a entregar.');
+                $validacionLotesSalida = deliveryValidateLotesAntesSalida($planLotesSalida, $_POST);
+                if (!$validacionLotesSalida['valid']) {
+                    throw new RuntimeException($validacionLotesSalida['error']);
                 }
                 $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'en_reparto' WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado')");
                 $stmt->execute([$id_pedido, $usuario['id_usuario']]);
