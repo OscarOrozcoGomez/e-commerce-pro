@@ -97,3 +97,6 @@ scripts/dev_*.php
 
 # Graphify: grafo de conocimiento local (regenerable, no versionar)
 /graphify-out/
+
+# Playwright: sesion + capturas de mayoreo.blife.mx (contiene token de sesion, no versionar)
+/scripts/.mayoreo/

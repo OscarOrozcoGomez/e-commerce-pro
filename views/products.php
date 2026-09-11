@@ -8,6 +8,19 @@ require_once __DIR__ . '/../core/auth.php';
 requireAuth();
 requirePermission('gestionar_productos', BASE_URL . 'views/dashboard.php');
 $pageTitle = 'Gestionar Productos';
+
+// Botón de regreso contextual. Algunas vistas enlazan aquí para "ver / editar" un
+// producto (hoy: Control de Caducidades, pestañas Caducidades e Inconsistencias).
+// Sin esto, products.php solo ofrece "Volver al Dashboard" y el usuario pierde el
+// hilo de dónde venía. Se activa solo si el enlace trae ?from=...
+$volverUrl = '';
+$volverLabel = '';
+if ((string) ($_GET['from'] ?? '') === 'caducidades') {
+    $backTab = ($_GET['back_tab'] ?? '') === 'inc' ? '?tab=inc' : '';
+    $volverUrl = BASE_URL . 'views/caducidades.php' . $backTab;
+    $volverLabel = 'Volver a Caducidades';
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 <!-- Librería para Arrastrar y Soltar -->
@@ -20,6 +33,9 @@ include __DIR__ . '/includes/header.php';
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0;">Gestionar Productos</h4>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <?php if ($volverUrl !== ''): ?>
+                        <a href="<?php echo esc($volverUrl); ?>" class="btn orange darken-3 waves-effect waves-light"><i class="material-icons left">arrow_back</i> <?php echo esc($volverLabel); ?></a>
+                    <?php endif; ?>
                     <?php if (canBulkAssignCategories()): ?>
                         <a href="bulk_assign_category.php" class="btn purple darken-1 waves-effect waves-light"><i class="material-icons left">label</i> Asignar Categoría a Varios</a>
                     <?php endif; ?>

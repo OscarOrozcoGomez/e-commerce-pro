@@ -24,6 +24,15 @@ playwright-report/
 tests/
 test_payloads/
 
+# --- Automatizacion de mayoreo.blife.mx: requiere Chrome/Playwright + login manual
+#     (codigo de un solo uso), solo tiene sentido corriendo en una PC local con
+#     navegador. En el VPS no hay Chrome ni sesion humana que atienda el login. ---
+scripts/mayoreo_pedidos.mjs
+scripts/mayoreo_recon.mjs
+scripts/mayoreo_carrito_desde_lista.php
+scripts/mayoreo_llenar_carrito.mjs
+scripts/mayoreo_guardar_urls.php
+
 # --- Scripts locales / de un solo uso / diagnostico ---
 scripts/dev_*.php
 scripts/_img_*.php
