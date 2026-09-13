@@ -276,6 +276,11 @@ function preloadSecretSources(): void
             'PII_ENCRYPTION_KEY' => ['PII_ENCRYPTION_KEY', 'CUSTOMER_PII_KEY'],
             'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
             'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
+            // Google Cloud Vision para leer lote/caducidad desde la foto de la etiqueta
+            // (views/products.php). Puede ser la misma llave que MAPS_KEY si en la consola de
+            // GCP se habilita la API "Cloud Vision" sobre ese mismo proyecto/llave.
+            'VISION_KEY' => ['VISION_KEY', 'Vision_KEY', 'GOOGLE_VISION_API_KEY'],
+            'GOOGLE_VISION_API_KEY' => ['GOOGLE_VISION_API_KEY', 'VISION_KEY', 'Vision_KEY'],
             'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
             'TELEGRAM_CHAT_ID' => ['TELEGRAM_CHAT_ID'],
             'TELEGRAM_NOTIFICATIONS_ENABLED' => ['TELEGRAM_NOTIFICATIONS_ENABLED'],
@@ -497,6 +502,32 @@ function getMapsApiKey(bool $required = false): string
     return '';
 }
 
+function getVisionApiKey(bool $required = false): string
+{
+    $visionKey = getEnvVar('VISION_KEY');
+    if ($visionKey !== null) {
+        return $visionKey;
+    }
+
+    // Compatibilidad con nombres legacy o con diferente capitalización.
+    $visionKeyLegacyCase = getEnvVar('Vision_KEY');
+    if ($visionKeyLegacyCase !== null) {
+        return $visionKeyLegacyCase;
+    }
+
+    $legacyKey = getEnvVar('GOOGLE_VISION_API_KEY');
+    if ($legacyKey !== null) {
+        return $legacyKey;
+    }
+
+    if ($required) {
+        error_log('ERROR: Falta secreto requerido de Google Vision: VISION_KEY, Vision_KEY o GOOGLE_VISION_API_KEY.');
+        throw new RuntimeException('Falta secreto requerido de Google Vision: VISION_KEY, Vision_KEY o GOOGLE_VISION_API_KEY.');
+    }
+
+    return '';
+}
+
 // Modo de ejecución: QA por defecto en localhost/CLI, producción fuera de ahí.
 $hostForEnv = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = strpos($hostForEnv, 'localhost') !== false || strpos($hostForEnv, '127.0.0.1') !== false;
@@ -515,6 +546,12 @@ define('DB_CHARSET', getEnvVar('DB_CHARSET', 'utf8mb4'));
 if (!defined('GOOGLE_MAPS_API_KEY')) {
     // No bloquear toda la app si falta la llave; solo afectará vistas que usan Maps.
     define('GOOGLE_MAPS_API_KEY', getMapsApiKey(false));
+}
+
+// Llave de API para Google Cloud Vision (lectura de lote/caducidad desde foto de etiqueta).
+if (!defined('GOOGLE_VISION_API_KEY')) {
+    // No bloquear toda la app si falta la llave; solo afectará el botón "Escanear etiqueta".
+    define('GOOGLE_VISION_API_KEY', getVisionApiKey(false));
 }
 
 // Palabra clave que, si aparece en las notas de un pedido capturado por un admin/encargado,
