@@ -266,6 +266,37 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->assertSame(1, (int) $lotes[0]['id_producto']);
     }
 
+    public function testFetchProyeccionesFiltraPorListaDeIdsProducto(): void
+    {
+        $this->seedProducto(1, 'Omega 3');
+        $this->seedProducto(2, 'Magnesio');
+        $this->seedProducto(3, 'Zinc');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedVentaHistorica(2, 90);
+        $this->seedVentaHistorica(3, 90);
+        $this->seedLote(1, 'L1', $this->enDias(60), 5);
+        $this->seedLote(2, 'L2', $this->enDias(60), 5);
+        $this->seedLote(3, 'L3', $this->enDias(60), 5);
+
+        $lotes = loteFetchProyecciones($this->pdo, ['ids_producto' => [1, 3]])['lotes'];
+
+        $this->assertCount(2, $lotes);
+        $ids = array_map(static fn(array $l) => (int) $l['id_producto'], $lotes);
+        sort($ids);
+        $this->assertSame([1, 3], $ids);
+    }
+
+    public function testFetchProyeccionesConListaDeIdsProductoVaciaNoRegresaNada(): void
+    {
+        $this->seedProducto(1, 'Omega 3');
+        $this->seedVentaHistorica(1, 90);
+        $this->seedLote(1, 'L1', $this->enDias(60), 5);
+
+        $lotes = loteFetchProyecciones($this->pdo, ['ids_producto' => []])['lotes'];
+
+        $this->assertSame([], $lotes);
+    }
+
     /* ------------------- Pruebas adversariales / edge cases ------------------- */
 
     /**

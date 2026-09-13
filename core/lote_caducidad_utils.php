@@ -437,7 +437,7 @@ function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): a
  * Carga lotes visibles con su proyeccion de caducidad.
  *
  * @param array{
- *   severidad?:string, id_almacen?:int, id_producto?:int, categoria?:string,
+ *   severidad?:string, id_almacen?:int, id_producto?:int, ids_producto?:int[], categoria?:string,
  *   q?:string, solo_con_excedente?:bool
  * } $filtros
  * @return array{lotes: array<int,array<string,mixed>>, ventana_dias:int}
@@ -456,6 +456,23 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
     if (!empty($filtros['id_producto'])) {
         $where[] = 'l.id_producto = :id_producto';
         $params[':id_producto'] = (int) $filtros['id_producto'];
+    }
+    // Variante en lista para consultar varios productos candidatos de una sola pasada
+    // (ver aiListarOfertasVigentes() en ai_assistant.php). Si la lista viene vacia se
+    // corta aqui mismo: "quiero estos ids y no son ninguno" es "no hay resultado", no
+    // "ignora este filtro".
+    if (isset($filtros['ids_producto']) && is_array($filtros['ids_producto'])) {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $filtros['ids_producto']), static fn(int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return ['lotes' => [], 'ventana_dias' => LOTE_VENTANA_DIAS];
+        }
+        $ph = [];
+        foreach ($ids as $i => $id) {
+            $key = ":ip{$i}";
+            $ph[] = $key;
+            $params[$key] = $id;
+        }
+        $where[] = 'l.id_producto IN (' . implode(',', $ph) . ')';
     }
     if (!empty($filtros['id_almacen'])) {
         $where[] = 'l.id_almacen = :id_almacen';
