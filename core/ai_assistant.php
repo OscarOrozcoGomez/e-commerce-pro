@@ -64,6 +64,12 @@ const AI_LEYENDA_NO_MEDICAMENTO = 'Este producto no es un medicamento. El consum
 // mucha variedad" cuando en realidad se truncaron los resultados.
 const AI_INVENTORY_SEARCH_LIMIT = 12;
 
+// Tope de resultados que consultar_ofertas le manda al LLM. La categoria de Ofertas la
+// cura el equipo a mano (ver lotePonerProductoEnOferta() en lote_caducidad_utils.php), asi
+// que en la practica es una lista corta -- no necesita el mismo margen que el inventario
+// completo.
+const AI_OFERTAS_SEARCH_LIMIT = 12;
+
 // Municipios de la Zona Metropolitana de Guadalajara donde la entrega personal es
 // gratuita (politica_envio_texto). Sin acentos y en minusculas -- aiClasificarZonaEntrega()
 // normaliza la direccion del cliente antes de comparar contra esta lista.
@@ -194,6 +200,7 @@ function aiBuildSystemPrompt(
         $lines[] = '3c. Cuando platiques de ingredientes, beneficios, para que sirve o modo de uso de un producto (no en cada mensaje, solo cuando el tema salga), incluye de forma natural esta leyenda LEGAL tal cual, sin cambiarle ni una palabra: "' . AI_LEYENDA_NO_MEDICAMENTO . '"';
         $lines[] = '4. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
         $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
+        $lines[] = '5b. Ofertas vigentes: llama a consultar_ofertas para saber que productos tienen descuento real ahorita -- ya viene filtrado para excluir cualquier producto cuyo stock restante este caducado o no alcance a consumirse a tiempo, asi que todo lo que te regrese esa funcion es seguro de ofrecer tal cual (precio de oferta, precio normal y ahorro). Sugierelas de forma proactiva cuando encajen con naturalidad (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones. Nunca digas que algo esta en oferta ni inventes un descuento sin haber llamado antes a esta funcion.';
         $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad), dia de entrega y metodo de pago preferido.';
         $lines[] = '6b. Dias de entrega: hacemos entregas UNICAMENTE los miercoles y los sabados -- el cliente se adapta a nuestro itinerario (asi ahorramos combustible al repartir varios pedidos juntos), no al reves. Nunca preguntes "que dia te gustaria" de forma abierta -- ofrece tu mismo estas dos opciones de forma proactiva, por ejemplo: "Hacemos entregas los miercoles y los sabados, ¿cual se le acomoda mejor?". Si el cliente insiste en otro dia, no se lo niegues ni le prometas nada tu mismo -- respondele con calidez que lo vas a checar con el equipo y llama a transferir_a_humano.';
         $lines[] = '6c. Metodo de pago: SOLO aceptamos efectivo o transferencia, contra entrega -- nunca ofrezcas ni aceptes tarjeta ni ningun otro metodo. Si el cliente pregunta por pagar con tarjeta o algo distinto, explicale con naturalidad que por ahora solo manejamos efectivo o transferencia contra entrega.';
@@ -405,6 +412,23 @@ function aiGetToolDefinitions(): array
                 'parameters' => [
                     'type' => 'object',
                     'properties' => new stdClass(),
+                    'required' => [],
+                ],
+            ],
+        ],
+        [
+            'type' => 'function',
+            'function' => [
+                'name' => 'consultar_ofertas',
+                'description' => 'Devuelve los productos que HOY estan en la categoria de Ofertas, con existencia real y que el sistema ya confirmo que se pueden vender a tiempo -- nunca incluye un producto cuyo unico stock restante ya caduco o cuyo envase no alcanza a consumirse antes de caducar, aunque siga capturado en la categoria de Ofertas. Cada resultado trae precio de oferta, precio normal y el ahorro. Usala de forma proactiva cuando encaje con naturalidad en la conversacion (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'busqueda_texto' => [
+                            'type' => 'string',
+                            'description' => 'Opcional: texto para acotar a un producto o palabra clave especifica. Deja vacio (o no lo mandes) para ver todas las ofertas vigentes.',
+                        ],
+                    ],
                     'required' => [],
                 ],
             ],
@@ -1388,6 +1412,77 @@ function aiResolverPreciosOferta(PDO $pdo, array $idsProducto): array
     return $precios;
 }
 
+/**
+ * True si un lote (fila de loteFetchProyecciones()) todavia se puede vender a tiempo:
+ * ni ya caduco ni "no_vendible" (el envase no alcanza a consumirse antes de caducar,
+ * aunque la fecha todavia no llegue). Predicado compartido por aiStockVendible(),
+ * aiStockVendiblePorLotesBatch() y aiListarOfertasVigentes() para que las tres apliquen
+ * exactamente el mismo criterio de "esto si se puede ofrecer/vender".
+ */
+function aiLoteEsVendible(array $lote): bool
+{
+    return ($lote['severidad'] ?? null) !== 'caducado' && empty($lote['no_vendible']);
+}
+
+/**
+ * Version en lote de aiStockVendible(): evalua varios productos con una sola consulta
+ * de proyeccion de lotes (ver loteFetchProyecciones() con el filtro ids_producto) en vez
+ * de una consulta por producto. Solo trae entrada para productos que SI tienen lotes
+ * registrados -- la ausencia de un id en el mapa resultado significa "sin control de
+ * caducidad por lote para el, no hay nada que acotar", igual semantica que
+ * aiStockVendible().
+ *
+ * @param int[] $idsProducto
+ * @return array<int,int> id_producto => unidades realmente vendibles (suma de lotes ni
+ *   caducados ni no_vendible; puede ser 0 si todos sus lotes ya no se pueden vender)
+ */
+function aiStockVendiblePorLotesBatch(PDO $pdo, array $idsProducto): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $idsProducto), static fn(int $id): bool => $id > 0)));
+    if ($ids === []) {
+        return [];
+    }
+
+    $proyeccion = loteFetchProyecciones($pdo, ['ids_producto' => $ids]);
+
+    $vendible = [];
+    foreach ($proyeccion['lotes'] as $lote) {
+        $idProducto = (int)$lote['id_producto'];
+        if (!array_key_exists($idProducto, $vendible)) {
+            $vendible[$idProducto] = 0;
+        }
+        if (aiLoteEsVendible($lote)) {
+            $vendible[$idProducto] += max(0, (int)$lote['cantidad_restante']);
+        }
+    }
+
+    return $vendible;
+}
+
+/**
+ * Cuanto de $idProducto es realmente seguro ofrecer o vender ahora mismo: el stock del
+ * sistema (inventario_almacen) acotado por lo que el control de caducidades por lote
+ * confirma que se puede vender a tiempo. Es la fuente unica de verdad para "cuanto hay
+ * disponible" que comparten consultar_inventario, agendar_venta y consultar_ofertas --
+ * antes de esto, solo consultar_ofertas aplicaba este filtro, asi que un cliente podia
+ * pedir por nombre (consultar_inventario -> agendar_venta) un producto en oferta cuyo
+ * unico stock restante ya estaba caducado o era no_vendible y la venta se registraba
+ * igual, contando solo el numero crudo de inventario_almacen.
+ */
+function aiStockVendible(PDO $pdo, int $idProducto, int $stockSistema): int
+{
+    if ($idProducto <= 0 || $stockSistema <= 0) {
+        return max(0, $stockSistema);
+    }
+
+    $mapa = aiStockVendiblePorLotesBatch($pdo, [$idProducto]);
+    if (!array_key_exists($idProducto, $mapa)) {
+        return $stockSistema; // sin lotes registrados: no hay riesgo de caducidad que evaluar
+    }
+
+    return min($stockSistema, $mapa[$idProducto]);
+}
+
 function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): array
 {
     $busqueda = trim($busquedaTexto);
@@ -1430,13 +1525,24 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     // acoplar la consulta principal a producto_categorias. Ver core/oferta_pricing.php.
     $preciosOferta = aiResolverPreciosOferta($pdo, array_column($rows, 'id_producto'));
 
-    return array_map(static function (array $row) use ($preciosOferta): array {
+    // El stock que se le muestra a Alex nunca cuenta unidades atrapadas en un lote ya
+    // caducado o no_vendible, aunque inventario_almacen todavia no se haya reconciliado
+    // (descuadre real observado en produccion) -- misma regla que consultar_ofertas.
+    $stockVendible = aiStockVendiblePorLotesBatch($pdo, array_column($rows, 'id_producto'));
+
+    return array_map(static function (array $row) use ($preciosOferta, $stockVendible): array {
         $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
+        $idProducto = (int)$row['id_producto'];
+        $stock = max(0, (int)$row['stock_total']);
+        if (array_key_exists($idProducto, $stockVendible)) {
+            $stock = min($stock, $stockVendible[$idProducto]);
+        }
+
         $producto = [
-            'id_producto' => (int)$row['id_producto'],
+            'id_producto' => $idProducto,
             'nombre' => trim((string)$row['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
-            'precio' => $preciosOferta[(int)$row['id_producto']] ?? round((float)$row['precio_venta'], 2),
-            'stock' => max(0, (int)$row['stock_total']),
+            'precio' => $preciosOferta[$idProducto] ?? round((float)$row['precio_venta'], 2),
+            'stock' => $stock,
         ];
 
         // Solo unos cuantos productos tienen esta ficha capturada todavia (ver
@@ -1634,6 +1740,116 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
 }
 
 /**
+ * Productos que HOY estan en la categoria de Ofertas (ver core/oferta_pricing.php), con
+ * existencia real y que el control de caducidades por lote (core/lote_caducidad_utils.php)
+ * confirma que se pueden vender a tiempo. Nunca regresa un producto cuyo unico stock
+ * restante ya caduco o cuyo envase no alcanza a consumirse antes de caducar ("no_vendible"),
+ * aunque el producto siga capturado en la categoria de Ofertas -- esa categoria la cura el
+ * equipo a mano y puede tardar en limpiarse.
+ *
+ * Un producto sin lotes registrados (sin control de caducidad por lote para el) se incluye
+ * tal cual con su stock de inventario_almacen: el sistema no tiene forma de detectar un
+ * riesgo de caducidad ahi, asi que no hay nada que filtrar.
+ *
+ * Regresa TODA la lista vigente (sin recortar) -- el tope de resultados que se le manda
+ * al LLM es responsabilidad de aiToolConsultarOfertas(), igual que aiCountInventoryMatches()
+ * separa "cuantos hay" de "cuantos se muestran" para consultar_inventario.
+ */
+function aiListarOfertasVigentes(PDO $pdo, string $busqueda = ''): array
+{
+    $busqueda = trim($busqueda);
+
+    $sql = "SELECT p.id_producto, p.nombre, p.nombre_variante, p.precio_venta, p.precio_costo, p.precio_oferta,
+                   COALESCE(SUM(ia.cantidad_actual), 0) AS stock_total
+            FROM productos p
+            LEFT JOIN inventario_almacen ia ON ia.id_producto = p.id_producto
+            WHERE p.estado = 'activo' AND " . ofertaSqlEnOfertaExpr('p');
+    $params = [];
+    if ($busqueda !== '') {
+        $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.nombre_variante LIKE :term2 ESCAPE '!')";
+        $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
+        $params[':term1'] = $term;
+        $params[':term2'] = $term;
+    }
+    // La categoria de Ofertas la cura el equipo a mano (lista corta en la practica) -- este
+    // tope es solo una salvaguarda contra un descuido (ej. toda una coleccion metida ahi por
+    // error), no el limite de negocio real que si aplica aiToolConsultarOfertas().
+    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta, p.precio_costo, p.precio_oferta
+              HAVING stock_total > 0
+              ORDER BY p.nombre ASC, p.nombre_variante ASC
+              LIMIT 200';
+
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (PDOException $e) {
+        // Sin las tablas de categorias (esquemas a medio migrar) no hay forma de saber que
+        // esta en oferta -- mismo fallback seguro que ofertaProductoEnOferta().
+        return [];
+    }
+    if ($rows === []) {
+        return [];
+    }
+
+    $stockVendiblePorProducto = aiStockVendiblePorLotesBatch($pdo, array_column($rows, 'id_producto'));
+
+    $ofertas = [];
+    foreach ($rows as $row) {
+        $idProducto = (int)$row['id_producto'];
+        $stock = max(0, (int)$row['stock_total']);
+
+        if (array_key_exists($idProducto, $stockVendiblePorProducto)) {
+            $stock = min($stock, $stockVendiblePorProducto[$idProducto]);
+            if ($stock <= 0) {
+                continue; // todo lo que queda ya caduco o no alcanza a consumirse a tiempo
+            }
+        }
+
+        $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
+        $precioNormal = round((float)$row['precio_venta'], 2);
+        $precioOferta = ofertaPrecioEfectivo($precioNormal, (float)($row['precio_costo'] ?? 0), $row['precio_oferta'] ?? null, true);
+
+        $ofertas[] = [
+            'id_producto' => $idProducto,
+            'nombre' => trim((string)$row['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
+            'precio_oferta' => $precioOferta,
+            'precio_normal' => $precioNormal,
+            'ahorro' => round(max(0.0, $precioNormal - $precioOferta), 2),
+            'stock' => $stock,
+        ];
+    }
+
+    return $ofertas;
+}
+
+function aiToolConsultarOfertas(PDO $pdo, array $args): array
+{
+    $busqueda = trim((string)($args['busqueda_texto'] ?? ''));
+    $ofertas = aiListarOfertasVigentes($pdo, $busqueda);
+    $total = count($ofertas);
+
+    if ($total === 0) {
+        return [
+            'ok' => true,
+            'ofertas' => [],
+            'message' => $busqueda !== ''
+                ? 'No hay ninguna oferta vigente que coincida con esa busqueda ahorita.'
+                : 'No hay ninguna oferta vigente ahorita.',
+        ];
+    }
+
+    $mostradas = array_slice($ofertas, 0, AI_OFERTAS_SEARCH_LIMIT);
+    $result = ['ok' => true, 'ofertas' => $mostradas, 'total_encontradas' => $total];
+
+    if ($total > count($mostradas)) {
+        $result['message'] = "Hay {$total} ofertas vigentes en total; aqui se muestran las primeras " . count($mostradas) . ". No las listes todas de golpe: destaca 2-3 y pregunta algo puntual para acotar si el cliente quiere ver mas.";
+    }
+
+    return $result;
+}
+
+/**
  * Busca, dentro de $candidatos, la palabra mas parecida a $termino -- respaldo 100% en
  * codigo (sin gastar tokens de DeepSeek) para cuando un cliente escribe un producto o
  * marca con errores de dedo/fonetica (ej. "ashuangs" por "ashwagandha") y la busqueda
@@ -1800,8 +2016,14 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
             continue;
         }
 
-        if ((int)$producto['stock_total'] < $cantidad) {
-            $errores[] = "No hay suficiente existencia de \"{$producto['nombre']}\" (disponible: {$producto['stock_total']}).";
+        // No basta con el stock crudo de inventario_almacen: si el producto tiene lotes
+        // registrados, solo cuenta lo que el control de caducidades confirma que se puede
+        // vender a tiempo (ver aiStockVendible()) -- evita agendar una venta de un producto
+        // cuyo unico stock restante ya caduco o es no_vendible, aunque el cliente lo haya
+        // pedido por su cuenta sin pasar por consultar_ofertas.
+        $stockVendible = aiStockVendible($pdo, $idProducto, (int)$producto['stock_total']);
+        if ($stockVendible < $cantidad) {
+            $errores[] = "No hay suficiente existencia de \"{$producto['nombre']}\" (disponible: {$stockVendible}).";
             continue;
         }
 
@@ -2305,6 +2527,8 @@ function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): arr
             return aiToolEnviarPlantilla($pdo, $args);
         case 'enviar_catalogo':
             return aiToolEnviarCatalogo($pdo);
+        case 'consultar_ofertas':
+            return aiToolConsultarOfertas($pdo, $args);
         case 'etiquetar_cliente':
             return aiToolEtiquetarCliente($pdo, $args, $context);
         case 'quitar_etiqueta_cliente':
