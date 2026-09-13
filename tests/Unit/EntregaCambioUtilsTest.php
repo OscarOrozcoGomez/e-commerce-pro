@@ -129,6 +129,42 @@ final class EntregaCambioUtilsTest extends TestCase
         }
     }
 
+    public function testLotesAntesSalidaAllowsPedidoSinTrazabilidad(): void
+    {
+        $res = deliveryValidateLotesAntesSalida([], []);
+
+        $this->assertTrue($res['valid']);
+        $this->assertSame('', $res['error']);
+    }
+
+    /** @dataProvider invalidLoteConfirmationProvider */
+    public function testLotesAntesSalidaRejectsConfirmationMissingOrFalse(mixed $value): void
+    {
+        $res = deliveryValidateLotesAntesSalida([['id_detalle' => 10]], ['confirmar_lotes' => $value]);
+
+        $this->assertFalse($res['valid']);
+        $this->assertStringContainsString('revisaste los lotes', $res['error']);
+    }
+
+    public static function invalidLoteConfirmationProvider(): array
+    {
+        return [
+            'ausente' => [null],
+            'cero' => ['0'],
+            'texto' => ['si'],
+            'entero distinto' => [2],
+            'vacio' => [''],
+        ];
+    }
+
+    public function testLotesAntesSalidaAcceptsOnlyConfirmationExacta(): void
+    {
+        $res = deliveryValidateLotesAntesSalida([['id_detalle' => 10]], ['confirmar_lotes' => '1']);
+
+        $this->assertTrue($res['valid']);
+        $this->assertSame('', $res['error']);
+    }
+
     // ---- publicacion omitida ------------------------------------------------------
 
     public function testBuildPublicacionOmitidaMarkerContainsTokenNameAndDate(): void

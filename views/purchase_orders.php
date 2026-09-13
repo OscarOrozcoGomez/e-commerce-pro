@@ -1365,8 +1365,21 @@ include __DIR__ . '/includes/header.php';
             const pid = parseInt(tr.querySelector('.may-prod').value, 10) || 0;
             const qty = Math.max(0, parseInt(tr.querySelector('.may-qty').value || '0', 10));
             if (pid <= 0 || qty <= 0) return;
-            // precio_costo 0: se pidio "solo mostrar" el precio de mayoreo, no tocar costos.
-            out.push({ id_producto: pid, cantidad: qty, id_almacen: mayAlmacenId(), precio_costo: 0 });
+
+            const row = mayRows[parseInt(tr.dataset.i, 10)] || {};
+            // Costo real del producto SELECCIONADO (puede no ser el sugerido, si el
+            // usuario reasigno el renglon a otro candidato de la lista).
+            const candidato = (row.candidatos || []).find(c => c.id_producto === pid);
+            const precioCosto = candidato ? (Number(candidato.costo_catalogo) || 0) : 0;
+
+            const item = { id_producto: pid, cantidad: qty, id_almacen: mayAlmacenId(), precio_costo: precioCosto };
+            // Si el producto seleccionado sigue siendo el que la vista previa emparejo
+            // con una OC abierta, se manda su id_detalle para que el backend sume la
+            // cantidad ahi en vez de crear una orden de compra duplicada.
+            if (row.id_detalle && row.sugerido_id_producto === pid) {
+                item.id_detalle = row.id_detalle;
+            }
+            out.push(item);
         });
         return out;
     }

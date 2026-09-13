@@ -308,7 +308,7 @@ function purchaseOrderProcessInboundTx(PDO $pdo, array $items, int $userId): int
  * Normaliza items para generar una orden de compra. A diferencia de
  * purchaseOrderNormalizeInboundItems() conserva el precio de costo por unidad.
  *
- * @return array<int, array{id_producto:int, id_almacen:int, cantidad:int, precio_costo:float}>
+ * @return array<int, array{id_producto:int, id_almacen:int, cantidad:int, precio_costo:float, id_detalle:?int}>
  */
 function purchaseOrderNormalizeOrderItems(array $items): array
 {
@@ -323,6 +323,7 @@ function purchaseOrderNormalizeOrderItems(array $items): array
         $idAlmacen = (int) ($item['id_almacen'] ?? 0);
         $cantidad = (int) ($item['cantidad'] ?? 0);
         $precioCosto = (float) ($item['precio_costo'] ?? 0);
+        $idDetalle = (int) ($item['id_detalle'] ?? 0);
 
         if ($idProducto <= 0 || $idAlmacen <= 0 || $cantidad <= 0) {
             continue;
@@ -337,6 +338,10 @@ function purchaseOrderNormalizeOrderItems(array $items): array
             'id_almacen' => $idAlmacen,
             'cantidad' => $cantidad,
             'precio_costo' => $precioCosto,
+            // Presente solo cuando el caller (p.ej. la vista previa de mayoreo) ya
+            // identifico una linea de una OC abierta para el mismo producto/sucursal;
+            // ver purchaseOrderMergeItemsEnOrdenesAbiertasTx().
+            'id_detalle' => $idDetalle > 0 ? $idDetalle : null,
         ];
     }
 
@@ -344,9 +349,80 @@ function purchaseOrderNormalizeOrderItems(array $items): array
 }
 
 /**
+ * Suma cantidad (y fija costo si no tenia) a lineas de detalle_orden_compra ya
+ * existentes, para los items que traen un id_detalle valido -- evita crear una OC
+ * duplicada para un producto que ya viene en camino en otra orden abierta de la
+ * misma sucursal. Revalida cada id_detalle contra la BD (no confia en lo que trajo
+ * el cliente): si la OC ya no esta abierta, o el producto/sucursal no coincide
+ * (la vista previa pudo quedar desactualizada, o el usuario reasigno el renglon a
+ * otro producto), el item se regresa en 'no_aplicadas' para procesarse como orden
+ * nueva en su lugar. Debe correr dentro de la transaccion abierta por el caller.
+ *
+ * @param array<int,array{id_producto:int,id_almacen:int,cantidad:int,precio_costo:float,id_detalle:?int}> $items
+ * @return array{lineas:int, no_aplicadas: array<int,array<string,mixed>>}
+ */
+function purchaseOrderMergeItemsEnOrdenesAbiertasTx(PDO $pdo, array $items): array
+{
+    $idsDetalle = array_values(array_unique(array_map(static fn(array $it): int => (int) $it['id_detalle'], $items)));
+    $ph = implode(',', array_fill(0, count($idsDetalle), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT doc.id_detalle, doc.id_orden_compra, doc.id_producto, oc.id_almacen, oc.estado
+         FROM detalle_orden_compra doc
+         JOIN ordenes_compra oc ON oc.id_orden_compra = doc.id_orden_compra
+         WHERE doc.id_detalle IN ($ph)"
+    );
+    $stmt->execute($idsDetalle);
+    $mapa = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $d) {
+        $mapa[(int) $d['id_detalle']] = $d;
+    }
+
+    $updLinea = $pdo->prepare(
+        'UPDATE detalle_orden_compra
+         SET cantidad_solicitada = cantidad_solicitada + :c,
+             costo_unitario = CASE WHEN costo_unitario IS NULL OR costo_unitario <= 0 THEN :costo ELSE costo_unitario END
+         WHERE id_detalle = :id'
+    );
+
+    $lineas = 0;
+    $noAplicadas = [];
+    $ordenesTocadas = [];
+
+    foreach ($items as $item) {
+        $idDetalle = (int) $item['id_detalle'];
+        $d = $mapa[$idDetalle] ?? null;
+        $ordenAbierta = $d !== null && in_array($d['estado'], ['borrador', 'enviada', 'parcial'], true);
+        $coincide = $d !== null
+            && (int) $d['id_almacen'] === $item['id_almacen']
+            && (int) $d['id_producto'] === $item['id_producto'];
+
+        if (!$ordenAbierta || !$coincide) {
+            unset($item['id_detalle']);
+            $noAplicadas[] = $item;
+            continue;
+        }
+
+        $updLinea->execute([':c' => $item['cantidad'], ':costo' => $item['precio_costo'], ':id' => $idDetalle]);
+        $ordenesTocadas[(int) $d['id_orden_compra']] = true;
+        $lineas++;
+    }
+
+    foreach (array_keys($ordenesTocadas) as $idOrden) {
+        $sumStmt = $pdo->prepare('SELECT COALESCE(SUM(cantidad_solicitada * costo_unitario), 0) FROM detalle_orden_compra WHERE id_orden_compra = ?');
+        $sumStmt->execute([$idOrden]);
+        $total = (float) $sumStmt->fetchColumn();
+        $pdo->prepare('UPDATE ordenes_compra SET total_estimado = ? WHERE id_orden_compra = ?')->execute([$total, $idOrden]);
+    }
+
+    return ['lineas' => $lineas, 'no_aplicadas' => $noAplicadas];
+}
+
+/**
  * Crea una o varias órdenes de compra (una por sucursal) a partir de la lista
  * ajustada. Deja las líneas con cantidad_recibida = 0; el inventario NO se toca
- * hasta que se surte la orden.
+ * hasta que se surte la orden. Los items que traen un id_detalle valido (ver
+ * purchaseOrderMergeItemsEnOrdenesAbiertasTx) se suman a una OC abierta existente
+ * en vez de crear una nueva.
  *
  * @return array{ordenes: array<int,int>, lineas: int}
  */
@@ -357,47 +433,66 @@ function purchaseOrderCreateFromItems(PDO $pdo, array $items, int $userId): arra
         return ['ordenes' => [], 'lineas' => 0];
     }
 
-    $porAlmacen = [];
+    $paraMerge = [];
+    $paraCrear = [];
     foreach ($normalized as $item) {
-        $porAlmacen[$item['id_almacen']][] = $item;
+        if ($item['id_detalle'] !== null) {
+            $paraMerge[] = $item;
+        } else {
+            $paraCrear[] = $item;
+        }
     }
 
     $pdo->beginTransaction();
 
     try {
-        $stmtOrden = $pdo->prepare("INSERT INTO ordenes_compra (id_usuario, id_almacen, referencia, estado, total_estimado)
-            VALUES (:id_usuario, :id_almacen, :referencia, 'enviada', :total)");
-        $stmtLinea = $pdo->prepare("INSERT INTO detalle_orden_compra (id_orden_compra, id_producto, cantidad_solicitada, cantidad_recibida, costo_unitario)
-            VALUES (:id_orden, :id_producto, :cantidad, 0, :costo)");
-
         $ordenIds = [];
         $totalLineas = 0;
-        $marca = date('Ymd-His');
 
-        foreach ($porAlmacen as $idAlmacen => $lineas) {
-            $total = 0.0;
-            foreach ($lineas as $linea) {
-                $total += $linea['cantidad'] * $linea['precio_costo'];
+        if ($paraMerge !== []) {
+            $mergeados = purchaseOrderMergeItemsEnOrdenesAbiertasTx($pdo, $paraMerge);
+            $totalLineas += $mergeados['lineas'];
+            $paraCrear = array_merge($paraCrear, $mergeados['no_aplicadas']);
+        }
+
+        if ($paraCrear !== []) {
+            $porAlmacen = [];
+            foreach ($paraCrear as $item) {
+                $porAlmacen[$item['id_almacen']][] = $item;
             }
 
-            $referencia = 'OC-' . $marca . '-' . (int) $idAlmacen;
-            $stmtOrden->execute([
-                ':id_usuario' => $userId,
-                ':id_almacen' => (int) $idAlmacen,
-                ':referencia' => $referencia,
-                ':total' => $total,
-            ]);
-            $idOrden = (int) $pdo->lastInsertId();
-            $ordenIds[] = $idOrden;
+            $stmtOrden = $pdo->prepare("INSERT INTO ordenes_compra (id_usuario, id_almacen, referencia, estado, total_estimado)
+                VALUES (:id_usuario, :id_almacen, :referencia, 'enviada', :total)");
+            $stmtLinea = $pdo->prepare("INSERT INTO detalle_orden_compra (id_orden_compra, id_producto, cantidad_solicitada, cantidad_recibida, costo_unitario)
+                VALUES (:id_orden, :id_producto, :cantidad, 0, :costo)");
 
-            foreach ($lineas as $linea) {
-                $stmtLinea->execute([
-                    ':id_orden' => $idOrden,
-                    ':id_producto' => $linea['id_producto'],
-                    ':cantidad' => $linea['cantidad'],
-                    ':costo' => $linea['precio_costo'],
+            $marca = date('Ymd-His');
+
+            foreach ($porAlmacen as $idAlmacen => $lineas) {
+                $total = 0.0;
+                foreach ($lineas as $linea) {
+                    $total += $linea['cantidad'] * $linea['precio_costo'];
+                }
+
+                $referencia = 'OC-' . $marca . '-' . (int) $idAlmacen;
+                $stmtOrden->execute([
+                    ':id_usuario' => $userId,
+                    ':id_almacen' => (int) $idAlmacen,
+                    ':referencia' => $referencia,
+                    ':total' => $total,
                 ]);
-                $totalLineas++;
+                $idOrden = (int) $pdo->lastInsertId();
+                $ordenIds[] = $idOrden;
+
+                foreach ($lineas as $linea) {
+                    $stmtLinea->execute([
+                        ':id_orden' => $idOrden,
+                        ':id_producto' => $linea['id_producto'],
+                        ':cantidad' => $linea['cantidad'],
+                        ':costo' => $linea['precio_costo'],
+                    ]);
+                    $totalLineas++;
+                }
             }
         }
 
@@ -1196,6 +1291,13 @@ function purchaseOrderBuildMayoreoPreview(PDO $pdo, array $pedido, int $idAlmace
     $warnings = [];
     foreach ($norm['items'] as $item) {
         $candidatos = purchaseOrderMatchProductPresentacion($catalogo, $item['nombre'], $item['presentacion'], 5);
+        // Costo de catalogo por candidato (no solo el sugerido): si el usuario reasigna
+        // el renglon a otro candidato de la lista, el front necesita saber su costo real
+        // para no mandar precio_costo=0 al crear la orden.
+        foreach ($candidatos as &$cand) {
+            $cand['costo_catalogo'] = $costoPorId[(int) $cand['id_producto']] ?? 0.0;
+        }
+        unset($cand);
         $mejor = $candidatos[0] ?? null;
         $sugerido = ($mejor !== null && $mejor['score'] >= PURCHASE_ORDER_IMPORT_MATCH_THRESHOLD)
             ? (int) $mejor['id_producto']

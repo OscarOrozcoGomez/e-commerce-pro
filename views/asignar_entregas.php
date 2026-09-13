@@ -349,7 +349,15 @@ try {
     // Pestaña "Asignadas": todo pedido a domicilio que ya tiene repartidor, en cualquier
     // estado (incluye entregados y cancelados), para que admin/encargado vean el estado
     // real y puedan seguir editando productos aunque ya se haya entregado.
-    $sqlAsignados = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono, r.nombre AS repartidor_nombre
+    // Quien asigno: la fila mas reciente de logs_auditoria para 'PEDIDO_ASIGNADO' de este
+    // pedido -- si se reasigno varias veces, la ultima es la que corresponde al
+    // repartidor actual. Subconsulta correlacionada, aceptable para el tamano de esta
+    // lista (pedidos ya asignados, no el historico completo).
+    $sqlAsignados = "SELECT p.*, c.nombre as cliente, {$direccionExpr}, c.telefono, r.nombre AS repartidor_nombre,
+            (SELECT u2.nombre FROM logs_auditoria la
+                JOIN usuarios u2 ON u2.id_usuario = la.id_usuario
+                WHERE la.accion = 'PEDIDO_ASIGNADO' AND la.tabla_afectada = 'pedidos' AND la.id_registro = p.id_pedido
+                ORDER BY la.fecha DESC LIMIT 1) AS asignado_por_nombre
             FROM pedidos p
             LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
             LEFT JOIN usuarios r ON p.id_repartidor = r.id_usuario
@@ -589,6 +597,12 @@ include __DIR__ . '/includes/header.php';
                                                 <i class="material-icons tiny">person_pin</i>
                                                 <span class="grey-text text-darken-1">Repartidor: <?php echo esc((string)($pa['repartidor_nombre'] ?? 'N/A')); ?></span>
                                             </div>
+                                            <?php if (!empty($pa['asignado_por_nombre'])): ?>
+                                            <div class="assign-delivery-row">
+                                                <i class="material-icons tiny">assignment_ind</i>
+                                                <span class="grey-text" style="font-size:0.82rem;">Asignó: <?php echo esc((string)$pa['asignado_por_nombre']); ?></span>
+                                            </div>
+                                            <?php endif; ?>
                                             <div class="assign-delivery-total">$<?php echo number_format((float)$pa['total'], 2); ?></div>
 
                                             <div class="assign-products-list">
