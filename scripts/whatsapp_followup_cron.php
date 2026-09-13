@@ -26,6 +26,17 @@ $resueltas = 0;
 $cerradasPorInactividad = 0;
 $seguimientosEnviados = 0;
 $seguimientosFallidos = 0;
+$reactivadasPorInactividad = 0;
+
+// 0) Conversaciones pausadas por intervencion humana (o transferir_a_humano) donde nadie
+//    -- ni cliente ni asesor -- volvio a escribir en 24h: Alex retoma solo para no dejar
+//    al cliente sin atencion de forma indefinida si el asesor se olvido de reactivarla.
+foreach (aiFindConversationsToAutoReactivate($pdo) as $conversacion) {
+    if (!$isDryRun) {
+        aiAutoReactivateConversation($pdo, (int) $conversacion['id_conversacion']);
+    }
+    $reactivadasPorInactividad++;
+}
 
 // 1) Conversaciones que ya tienen un seguimiento enviado: si el cliente contesto, se
 //    limpia la marca (vuelve al flujo normal); si no y ya pasaron 48h desde el primer
@@ -68,9 +79,10 @@ foreach (aiFindConversationsNeedingFollowup($pdo) as $conversacion) {
 fwrite(
     STDOUT,
     sprintf(
-        "RUN %s | dry-run=%s | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d%s",
+        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d%s",
         date('Y-m-d H:i:s'),
         $isDryRun ? 'yes' : 'no',
+        $reactivadasPorInactividad,
         $seguimientosEnviados,
         $seguimientosFallidos,
         $resueltas,
