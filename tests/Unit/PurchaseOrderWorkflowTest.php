@@ -51,6 +51,60 @@ final class PurchaseOrderWorkflowTest extends TestCase
         $this->assertSame(3, (int) $lineas[0]['cantidad_solicitada']);
     }
 
+    /**
+     * Un item que trae id_detalle de una linea que ya esta en una OC abierta (p.ej. lo
+     * que detecta purchaseOrderBuildMayoreoPreview cuando el producto ya viene en camino)
+     * debe SUMAR cantidad ahi en vez de crear una orden de compra duplicada.
+     */
+    public function testCreateFromItemsMergesIntoExistingOpenOrderLineInsteadOfDuplicating(): void
+    {
+        $this->seedWarehouse(1, 'Matriz');
+        $this->seedProduct(10, 'Producto A');
+
+        $this->pdo->exec("INSERT INTO ordenes_compra (id_orden_compra, id_usuario, id_almacen, referencia, estado, total_estimado) VALUES (1, 7, 1, 'OC-EXISTENTE', 'enviada', 30.0)");
+        $this->pdo->exec("INSERT INTO detalle_orden_compra (id_detalle, id_orden_compra, id_producto, cantidad_solicitada, cantidad_recibida, costo_unitario) VALUES (55, 1, 10, 3, 0, 10.0)");
+
+        $result = purchaseOrderCreateFromItems($this->pdo, [
+            ['id_producto' => 10, 'id_almacen' => 1, 'cantidad' => 5, 'precio_costo' => 10.0, 'id_detalle' => 55],
+        ], 7);
+
+        $this->assertSame([], $result['ordenes'], 'no debe crear ninguna OC nueva, todo se fusiono');
+        $this->assertSame(1, $result['lineas']);
+
+        $linea = $this->pdo->query('SELECT cantidad_solicitada FROM detalle_orden_compra WHERE id_detalle = 55')->fetch();
+        $this->assertSame(8, (int) $linea['cantidad_solicitada'], '3 originales + 5 nuevas');
+
+        $orden = $this->pdo->query('SELECT total_estimado FROM ordenes_compra WHERE id_orden_compra = 1')->fetch();
+        $this->assertSame(80.0, (float) $orden['total_estimado'], '8 * 10.0, recalculado desde las lineas');
+
+        $totalOrdenes = (int) $this->pdo->query('SELECT COUNT(*) FROM ordenes_compra')->fetchColumn();
+        $this->assertSame(1, $totalOrdenes, 'sigue habiendo una sola OC, no se duplico');
+    }
+
+    /**
+     * Si el id_detalle que trae el item ya no corresponde a una OC abierta (se cerro
+     * entre que se mostro la vista previa y se confirmo) o no coincide en producto/
+     * almacen, no se arriesga la mezcla: se procesa como una orden nueva.
+     */
+    public function testCreateFromItemsFallsBackToNewOrderWhenDetalleNoLongerApplies(): void
+    {
+        $this->seedWarehouse(1, 'Matriz');
+        $this->seedProduct(10, 'Producto A');
+
+        $this->pdo->exec("INSERT INTO ordenes_compra (id_orden_compra, id_usuario, id_almacen, referencia, estado, total_estimado) VALUES (1, 7, 1, 'OC-CERRADA', 'cerrada', 30.0)");
+        $this->pdo->exec("INSERT INTO detalle_orden_compra (id_detalle, id_orden_compra, id_producto, cantidad_solicitada, cantidad_recibida, costo_unitario) VALUES (55, 1, 10, 3, 3, 10.0)");
+
+        $result = purchaseOrderCreateFromItems($this->pdo, [
+            ['id_producto' => 10, 'id_almacen' => 1, 'cantidad' => 5, 'precio_costo' => 12.0, 'id_detalle' => 55],
+        ], 7);
+
+        $this->assertCount(1, $result['ordenes'], 'la OC referenciada ya estaba cerrada: crea una nueva en su lugar');
+        $this->assertSame(1, $result['lineas']);
+
+        $lineaOriginal = $this->pdo->query('SELECT cantidad_solicitada FROM detalle_orden_compra WHERE id_detalle = 55')->fetch();
+        $this->assertSame(3, (int) $lineaOriginal['cantidad_solicitada'], 'la linea de la OC cerrada no se toca');
+    }
+
     public function testProductOnOpenOrderIsHiddenFromSuggestions(): void
     {
         $this->seedWarehouse(1, 'Matriz');

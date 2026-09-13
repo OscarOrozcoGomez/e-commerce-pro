@@ -636,7 +636,9 @@ include __DIR__ . '/includes/header.php';
     let salesDraftSaveTimer = null;
     let isRestoringDrafts = false;
     let pendingCloseVentaId = null;
-    let pendingLotesConfirmCallback = null;
+    let modalLotesQueue = [];
+    let modalLotesBusy = false;
+    let resolverModalLotesActual = null;
     let googlePlacesReadySales = false;
     let pendingNewClienteContext = null;
     let pendingPhoneContext = null;
@@ -1604,16 +1606,19 @@ include __DIR__ . '/includes/header.php';
 
         const verificarLotesModalNode = document.getElementById('modal-verificar-lotes');
         if (verificarLotesModalNode) M.Modal.init(verificarLotesModalNode, { dismissible: false });
+        // Hay una sola instancia del modal compartida entre todas las pestanas de venta
+        // (SALES_TABS_STORAGE_KEY permite varias abiertas a la vez); resolverModalLotesActual
+        // siempre apunta a la confirmacion pendiente que esta VISIBLE ahora mismo.
+        // mostrarModalVerificarLotes() encola las demas en vez de pisar esta, para que
+        // confirmar/cancelar nunca dispare la venta de otra pestana por error.
         document.getElementById('btn-cancelar-verificar-lotes')?.addEventListener('click', () => {
-            pendingLotesConfirmCallback = null;
+            resolverModalLotesActual?.(false);
         });
         document.getElementById('btn-confirmar-lotes')?.addEventListener('click', () => {
             const btn = document.getElementById('btn-confirmar-lotes');
-            if (btn.classList.contains('disabled') || !pendingLotesConfirmCallback) return;
-            const callback = pendingLotesConfirmCallback;
-            pendingLotesConfirmCallback = null;
+            if (btn.classList.contains('disabled') || !resolverModalLotesActual) return;
             getModalInstance('modal-verificar-lotes')?.close();
-            callback();
+            resolverModalLotesActual(true);
         });
 
         window.addEventListener('beforeunload', prevenirCierre);
@@ -2159,11 +2164,13 @@ include __DIR__ . '/includes/header.php';
         })).filter((p) => p.id_producto > 0 && p.cantidad > 0);
 
         const csrfToken = form.querySelector('[name="csrf_token"]')?.value || '';
-        const enviar = () => enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton);
+        const enviar = (confirmoLotes) => enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton, confirmoLotes);
 
         // Antes de cobrar: consulta que lote(s) le tocaria a cada producto (FEFO) y, si
         // hay algo que verificar, se lo pide al cajero antes de continuar. Si la consulta
-        // falla no se bloquea la venta -- solo no se muestra el aviso (ver mas abajo).
+        // falla no se bloquea la venta -- solo no se muestra el aviso (el servidor vuelve a
+        // calcular lo mismo al cobrar y, si hay algo que verificar, rechaza la venta sin
+        // confirmar_lotes=1 -- ver api/ventas.php).
         fetch(form.action, {
             method: 'POST',
             body: new URLSearchParams({
@@ -2177,22 +2184,27 @@ include __DIR__ . '/includes/header.php';
             .then((planData) => {
                 const plan = (planData && planData.success && Array.isArray(planData.data)) ? planData.data : [];
                 if (plan.length === 0) {
-                    enviar();
+                    enviar(false);
                     return;
                 }
-                mostrarModalVerificarLotes(plan, enviar);
+                mostrarModalVerificarLotes(plan).then((confirmado) => {
+                    if (confirmado) enviar(true);
+                });
             })
             .catch((error) => {
                 console.error('No se pudo obtener el plan de lotes para verificar:', error);
-                enviar();
+                enviar(false);
             });
     }
 
-    function enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton) {
+    function enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton, confirmoLotes) {
         submitButton.disabled = true;
         submitButton.innerHTML = 'Procesando...';
 
-        fetch(form.action, { method: 'POST', body: new FormData(form) })
+        const formData = new FormData(form);
+        if (confirmoLotes) formData.set('confirmar_lotes', '1');
+
+        fetch(form.action, { method: 'POST', body: formData })
             .then((response) => response.json())
             .then((data) => {
                 if (data.success) {
@@ -2217,11 +2229,32 @@ include __DIR__ . '/includes/header.php';
     /**
      * Modal previo al cobro: por cada producto con lote(s) activos, muestra de cual
      * codigo/fecha debe salir (segun FEFO) y exige un checkbox por producto antes de
-     * habilitar "Confirmo, cobrar". onConfirmado se llama solo si TODAS quedan marcadas.
+     * habilitar "Confirmo, cobrar". Devuelve una Promise<boolean> (true si confirmo,
+     * false si cancelo). Hay una sola instancia de este modal compartida entre todas
+     * las pestanas de venta abiertas, asi que las llamadas se encolan (modalLotesQueue)
+     * en vez de pisar una confirmacion ya visible -- sin esto, confirmar el modal de
+     * una pestana podia terminar cobrando la venta de otra.
      */
-    function mostrarModalVerificarLotes(plan, onConfirmado) {
+    function mostrarModalVerificarLotes(plan) {
+        return new Promise((resolve) => {
+            modalLotesQueue.push({ plan, resolve });
+            procesarSiguienteModalLotes();
+        });
+    }
+
+    function procesarSiguienteModalLotes() {
+        if (modalLotesBusy || modalLotesQueue.length === 0) return;
+        const { plan, resolve } = modalLotesQueue.shift();
+        modalLotesBusy = true;
+        resolverModalLotesActual = (confirmado) => {
+            resolverModalLotesActual = null;
+            modalLotesBusy = false;
+            resolve(confirmado);
+            procesarSiguienteModalLotes();
+        };
+
         const lista = document.getElementById('verificar-lotes-lista');
-        if (!lista) { onConfirmado(); return; }
+        if (!lista) { resolverModalLotesActual(true); return; }
 
         lista.innerHTML = plan.map((p, idx) => {
             const filas = (p.asignaciones || []).map((a) =>
@@ -2252,7 +2285,6 @@ include __DIR__ . '/includes/header.php';
         checks().forEach((c) => c.addEventListener('change', actualizarBoton));
         actualizarBoton();
 
-        pendingLotesConfirmCallback = onConfirmado;
         getModalInstance('modal-verificar-lotes')?.open();
     }
 </script>

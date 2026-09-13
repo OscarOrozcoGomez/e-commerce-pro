@@ -388,6 +388,35 @@ final class LoteConsumoFEFOTest extends TestCase
         $this->assertSame('activo', $this->loteRow($id)['estado'], 'dry-run no debe escribir nada');
     }
 
+    /**
+     * detalle_pedido_lotes.id_lote tiene ON DELETE CASCADE hacia lotes_inventario: si la
+     * purga borrara un lote con historial de venta, se llevaria entre patas el rastro de
+     * que lote surtio esa venta (el COGS real) -- justo lo que la tabla existe para
+     * conservar. Un lote agotado hace 120 dias PERO con filas en detalle_pedido_lotes
+     * nunca debe purgarse, aunque cumpla el corte de retencion.
+     */
+    public function testMantenimientoNuncaPurgaUnLoteConHistorialDeVentaAunqueCumplaElCorte(): void
+    {
+        $idConHistorial = $this->seedLoteId(1, 'VENDIDO-VIEJO', $this->enDias(90), 0);
+        $this->marcarEstadoYFecha($idConHistorial, 'agotado', $this->hace(120));
+        $this->pdo->prepare('INSERT INTO detalle_pedido_lotes (id_detalle, id_lote, cantidad, costo_unitario) VALUES (900, ?, 5, 10.0)')
+            ->execute([$idConHistorial]);
+
+        $idSinHistorial = $this->seedLoteId(1, 'SIN-VENTA-VIEJO', $this->enDias(90), 0);
+        $this->marcarEstadoYFecha($idSinHistorial, 'agotado', $this->hace(120));
+
+        $resultadoDryRun = loteMantenimientoAutomatico($this->pdo, 90, true);
+        $this->assertSame(1, $resultadoDryRun['purgados'], 'el dry-run tampoco debe contar el que tiene historial');
+
+        $resultado = loteMantenimientoAutomatico($this->pdo, 90);
+
+        $this->assertSame(1, $resultado['purgados']);
+        $this->assertNotNull($this->loteRowOrNull($idConHistorial), 'nunca se purga un lote con ventas registradas en detalle_pedido_lotes');
+        $this->assertNull($this->loteRowOrNull($idSinHistorial), 'sin historial de venta si se purga normalmente');
+        $filaHistorial = $this->pdo->query('SELECT COUNT(*) FROM detalle_pedido_lotes WHERE id_detalle = 900')->fetchColumn();
+        $this->assertSame(1, (int) $filaHistorial, 'el registro de trazabilidad sigue intacto');
+    }
+
     /* -------------------------------------------------------------------------- */
 
     private function enDias(int $dias): string

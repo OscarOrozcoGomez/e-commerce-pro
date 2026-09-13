@@ -112,6 +112,24 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
 
         if ($_POST['accion'] === 'entregar') {
             try {
+                // El UPDATE de abajo acepta el pedido directo desde 'pendiente_pago'/'pagado'
+                // (no exige pasar antes por 'en_camino'). El formulario normal de "entregar" NO
+                // manda 'confirmar_lotes' (ese checkbox solo vive en el boton "SALIR A ENTREGAR"
+                // y ya quedo validado ahi), asi que solo se re-exige aqui si el pedido se va a
+                // saltar 'en_camino' por completo -- p.ej. alguien manda el POST directo sin
+                // pasar por la UI, mismo motivo que el comentario de evidencia unas lineas abajo.
+                $stmtEstadoActual = $pdo->prepare('SELECT estado FROM pedidos WHERE id_pedido = ? AND id_repartidor = ?');
+                $stmtEstadoActual->execute([$id_pedido, $usuario['id_usuario']]);
+                $estadoActualEntrega = (string) $stmtEstadoActual->fetchColumn();
+
+                if ($estadoActualEntrega !== 'en_reparto') {
+                    $planLotesEntrega = loteFetchPlanPedido($pdo, $id_pedido);
+                    $validacionLotesEntrega = deliveryValidateLotesAntesSalida($planLotesEntrega, $_POST);
+                    if (!$validacionLotesEntrega['valid']) {
+                        throw new RuntimeException($validacionLotesEntrega['error']);
+                    }
+                }
+
                 // Flujo nuevo: la foto de evidencia se sube ANTES de cobrar (mientras el pedido
                 // sigue en_reparto, ver boton "SUBIR EVIDENCIA" en la tarjeta). Esta comprobacion
                 // es la misma regla que ya oculta el boton "ENTREGADO Y COBRADO" en la interfaz,
@@ -158,8 +176,8 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                         }
                     }
                 }
-            } catch (PDOException $e) {
-                $error = 'Error al actualizar el pedido.';
+            } catch (Throwable $e) {
+                $error = $e instanceof RuntimeException ? $e->getMessage() : 'Error al actualizar el pedido.';
             }
         }
 
@@ -488,12 +506,9 @@ try {
             }
             $detallesPorPedido[$pedidoId][] = $detalle;
         }
-        foreach ($idsPedidos as $idPedido) {
-            $planesLotes = loteFetchPlanPedido($pdo, $idPedido);
-            if (!empty($planesLotes)) {
-                $planesLotesPorPedido[$idPedido] = $planesLotes;
-            }
-        }
+        // Una sola consulta con IN(...) para todos los pedidos listados, en vez de una
+        // por tarjeta (mismo patron que $detallesPorPedido arriba).
+        $planesLotesPorPedido = loteFetchPlanesPorPedidos($pdo, $idsPedidos);
     }
 } catch (PDOException $e) {
     $error = 'Error al obtener entregas: ' . $e->getMessage();

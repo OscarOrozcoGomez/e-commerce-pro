@@ -297,6 +297,26 @@ function loteDescuentoSugerido(int $excedente, int $cantidadRestante, int $diasH
 }
 
 /**
+ * Criterio de desempate FEFO (fecha_caducidad, fecha_ingreso, id_lote), como
+ * comparador de PHP para usort(). Es la MISMA regla que loteClausulaFEFO() aplica
+ * como ORDER BY en SQL para la venta real -- si cambias el orden aqui, cambialo
+ * tambien alla (y viceversa), o el dashboard de proyeccion dejara de coincidir con
+ * el lote que realmente se descuenta al vender.
+ */
+function loteCompararOrdenFEFO(array $a, array $b): int
+{
+    $cmp = strcmp((string) $a['fecha_caducidad'], (string) $b['fecha_caducidad']);
+    if ($cmp !== 0) {
+        return $cmp;
+    }
+    $cmp = strcmp((string) ($a['fecha_ingreso'] ?? ''), (string) ($b['fecha_ingreso'] ?? ''));
+    if ($cmp !== 0) {
+        return $cmp;
+    }
+    return (int) ($a['id_lote'] ?? 0) <=> (int) ($b['id_lote'] ?? 0);
+}
+
+/**
  * Proyeccion FEFO para los lotes de UN producto. Funcion pura (sin DB).
  *
  * @param array<int, array<string,mixed>> $lotes  filas de lotes_inventario del mismo producto
@@ -305,17 +325,7 @@ function loteDescuentoSugerido(int $excedente, int $cantidadRestante, int $diasH
  */
 function loteComputeProyeccionProducto(array $lotes, array $vel, string $hoy): array
 {
-    usort($lotes, static function (array $a, array $b): int {
-        $cmp = strcmp((string) $a['fecha_caducidad'], (string) $b['fecha_caducidad']);
-        if ($cmp !== 0) {
-            return $cmp;
-        }
-        $cmp = strcmp((string) ($a['fecha_ingreso'] ?? ''), (string) ($b['fecha_ingreso'] ?? ''));
-        if ($cmp !== 0) {
-            return $cmp;
-        }
-        return (int) ($a['id_lote'] ?? 0) <=> (int) ($b['id_lote'] ?? 0);
-    });
+    usort($lotes, 'loteCompararOrdenFEFO');
 
     $velDiaria = (float) ($vel['vel_diaria'] ?? 0.0);
     $sinHistorico = (bool) ($vel['sin_historico'] ?? false);
@@ -1189,6 +1199,10 @@ function loteConsumirFEFO(array $lotesDisponibles, int $cantidadPedida): array
  * que ve el cajero antes de cobrar) -- para que un ajuste al criterio de eleccion
  * no se desincronice entre lo que se muestra y lo que realmente se descuenta.
  *
+ * El desempate (fecha_caducidad, fecha_ingreso, id_lote) replica en SQL el mismo
+ * criterio que loteCompararOrdenFEFO() aplica en PHP para el dashboard de
+ * proyeccion -- si cambias uno, cambia el otro.
+ *
  * @return array{where:string, params:array<string,mixed>, orden:string}
  */
 function loteClausulaFEFO(int $idProducto, ?int $idAlmacen): array
@@ -1328,21 +1342,45 @@ function loteFetchPlanVentaFEFO(PDO $pdo, array $items, ?int $idAlmacen): array
         $nombres[(int) $row['id_producto']] = (string) $row['nombre'];
     }
 
+    // Una sola consulta con IN(...) para TODOS los productos del carrito, en vez de una
+    // por producto -- esto se llama en cada "Cobrar" (ver modo=plan_lotes en
+    // api/ventas.php) y un carrito de 15 productos no debe pagar 15 round-trips solo
+    // para armar el aviso. Replica a mano el WHERE/ORDER de loteClausulaFEFO() (misma
+    // prioridad de almacen, mismo desempate FEFO) porque esa funcion arma la clausula
+    // para UN producto a la vez; si cambias el criterio ahi, cambialo aqui tambien.
+    $idsProducto = array_keys($itemsValidos);
+    $lotesPorProducto = [];
+    try {
+        $ph = implode(',', array_fill(0, count($idsProducto), '?'));
+        $where = ["id_producto IN ($ph)", "estado = 'activo'", 'cantidad_restante > 0'];
+        $params = $idsProducto;
+        $ordenTerminos = ['id_producto ASC'];
+        if ($idAlmacen !== null && $idAlmacen > 0) {
+            $where[] = '(id_almacen = ? OR id_almacen IS NULL)';
+            $params[] = $idAlmacen;
+            $ordenTerminos[] = '(CASE WHEN id_almacen = ? THEN 0 ELSE 1 END)';
+            $params[] = $idAlmacen;
+        }
+        $ordenTerminos[] = 'fecha_caducidad ASC';
+        $ordenTerminos[] = 'fecha_ingreso ASC';
+        $ordenTerminos[] = 'id_lote ASC';
+
+        $sql = 'SELECT id_producto, id_lote, codigo_lote, fecha_caducidad, cantidad_restante FROM lotes_inventario
+                WHERE ' . implode(' AND ', $where) . '
+                ORDER BY ' . implode(', ', $ordenTerminos);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $lotesPorProducto[(int) $row['id_producto']][] = $row;
+        }
+    } catch (Throwable $e) {
+        error_log('loteFetchPlanVentaFEFO: ' . $e->getMessage());
+        return [];
+    }
+
     $out = [];
     foreach ($itemsValidos as $idProducto => $cantidad) {
-        try {
-            $clausula = loteClausulaFEFO($idProducto, $idAlmacen);
-            $sql = 'SELECT id_lote, codigo_lote, fecha_caducidad, cantidad_restante FROM lotes_inventario
-                    WHERE ' . $clausula['where'] . '
-                    ORDER BY ' . $clausula['orden'];
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($clausula['params']);
-            $lotes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (Throwable $e) {
-            error_log('loteFetchPlanVentaFEFO: ' . $e->getMessage());
-            continue;
-        }
-
+        $lotes = $lotesPorProducto[$idProducto] ?? [];
         if ($lotes === []) {
             continue; // producto sin lotes registrados: nada que verificar
         }
@@ -1393,31 +1431,58 @@ function loteFetchPlanVentaFEFO(PDO $pdo, array $items, ?int $idAlmacen): array
  */
 function loteFetchPlanPedido(PDO $pdo, int $idPedido): array
 {
-    if ($idPedido <= 0 || !loteTablaExiste($pdo, 'detalle_pedido_lotes') || !loteTablaExiste($pdo, 'lotes_inventario')) {
+    if ($idPedido <= 0) {
         return [];
     }
 
+    return loteFetchPlanesPorPedidos($pdo, [$idPedido])[$idPedido] ?? [];
+}
+
+/**
+ * Version por lotes de pedidos de loteFetchPlanPedido(): una sola consulta con
+ * IN(...) para varios pedidos a la vez, en vez de N consultas -- pensada para vistas
+ * que listan muchos pedidos (p.ej. views/entregas.php), mismo patron que ya usa esa
+ * vista para batch-cargar detalle_pedidos.
+ *
+ * @param array<int,int> $idsPedidos
+ * @return array<int,array<int,array{
+ *   id_detalle:int, id_producto:int, producto_nombre:string, cantidad_pedida:int,
+ *   asignaciones:array<int,array{id_lote:int,codigo_lote:string,fecha_caducidad:string,cantidad:int}>
+ * }>>  planes agrupados por id_pedido (solo trae llaves con al menos un plan)
+ */
+function loteFetchPlanesPorPedidos(PDO $pdo, array $idsPedidos): array
+{
+    $idsPedidos = array_values(array_unique(array_filter(
+        array_map('intval', $idsPedidos),
+        static fn(int $id): bool => $id > 0
+    )));
+    if ($idsPedidos === [] || !loteTablaExiste($pdo, 'detalle_pedido_lotes') || !loteTablaExiste($pdo, 'lotes_inventario')) {
+        return [];
+    }
+
+    $ph = implode(',', array_fill(0, count($idsPedidos), '?'));
     $stmt = $pdo->prepare(
-        'SELECT dp.id_detalle, dp.id_producto, dp.cantidad AS cantidad_pedida,
+        'SELECT dp.id_pedido, dp.id_detalle, dp.id_producto, dp.cantidad AS cantidad_pedida,
                 p.nombre AS producto_nombre, l.id_lote, l.codigo_lote,
                 l.fecha_caducidad, dpl.cantidad
          FROM detalle_pedidos dp
          JOIN detalle_pedido_lotes dpl ON dpl.id_detalle = dp.id_detalle
          JOIN lotes_inventario l ON l.id_lote = dpl.id_lote
          LEFT JOIN productos p ON p.id_producto = dp.id_producto
-         WHERE dp.id_pedido = :id_pedido AND dpl.cantidad > 0
-         ORDER BY dp.id_detalle ASC, dpl.id ASC'
+         WHERE dp.id_pedido IN (' . $ph . ') AND dpl.cantidad > 0
+         ORDER BY dp.id_pedido ASC, dp.id_detalle ASC, dpl.id ASC'
     );
-    $stmt->execute([':id_pedido' => $idPedido]);
+    $stmt->execute($idsPedidos);
 
-    $planes = [];
+    $porPedido = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $idPedido = (int)($row['id_pedido'] ?? 0);
         $idDetalle = (int)($row['id_detalle'] ?? 0);
-        if ($idDetalle <= 0) {
+        if ($idPedido <= 0 || $idDetalle <= 0) {
             continue;
         }
-        if (!isset($planes[$idDetalle])) {
-            $planes[$idDetalle] = [
+        if (!isset($porPedido[$idPedido][$idDetalle])) {
+            $porPedido[$idPedido][$idDetalle] = [
                 'id_detalle' => $idDetalle,
                 'id_producto' => (int)($row['id_producto'] ?? 0),
                 'producto_nombre' => (string)($row['producto_nombre'] ?? 'Producto'),
@@ -1425,7 +1490,7 @@ function loteFetchPlanPedido(PDO $pdo, int $idPedido): array
                 'asignaciones' => [],
             ];
         }
-        $planes[$idDetalle]['asignaciones'][] = [
+        $porPedido[$idPedido][$idDetalle]['asignaciones'][] = [
             'id_lote' => (int)($row['id_lote'] ?? 0),
             'codigo_lote' => (string)($row['codigo_lote'] ?? ''),
             'fecha_caducidad' => (string)($row['fecha_caducidad'] ?? ''),
@@ -1433,7 +1498,12 @@ function loteFetchPlanPedido(PDO $pdo, int $idPedido): array
         ];
     }
 
-    return array_values($planes);
+    $out = [];
+    foreach ($porPedido as $idPedido => $planes) {
+        $out[$idPedido] = array_values($planes);
+    }
+
+    return $out;
 }
 
 /**
@@ -1514,10 +1584,16 @@ function loteRegresarDetalleALotes(PDO $pdo, int $idDetallePedido, ?int $cantida
  *      es que loteDescontarVentaFEFO() ya lo haya marcado en el momento de la venta).
  *   2) 'activo' con fecha_caducidad ya pasada -> 'caducado'.
  *   3) Purga (DELETE) de lotes 'agotado'/'retirado' que llevan mas de $diasRetencion
- *      dias sin actualizarse. Es lo que evita que la tabla se llene de lotes muertos:
- *      ya cumplieron su ciclo (se vendieron o se retiraron) y su rastro de venta/costo
- *      real vive en detalle_pedido_lotes y movimientos_inventario, no aqui.
+ *      dias sin actualizarse. Es lo que evita que la tabla se llene de lotes muertos.
  *      Los 'caducado' NO se purgan aqui (se conservan para el analisis de merma).
+ *
+ *      IMPORTANTE: un lote con filas en detalle_pedido_lotes NUNCA se purga aqui,
+ *      aunque cumpla el corte de retencion -- detalle_pedido_lotes.id_lote tiene
+ *      ON DELETE CASCADE hacia lotes_inventario, asi que borrar el lote borraria
+ *      tambien el rastro de que lote surtio esa venta (el COGS real), justo lo que
+ *      esta tabla existe para conservar. Esos lotes se quedan en la tabla para
+ *      siempre como historico; solo se purgan los que nunca se vendieron via FEFO
+ *      (ajustes manuales, mermas, ventas anteriores a este feature).
  *
  * @return array{agotados:int, caducados:int, purgados:int}
  */
@@ -1529,6 +1605,9 @@ function loteMantenimientoAutomatico(PDO $pdo, int $diasRetencion = 90, bool $dr
 
     $hoy = (new DateTimeImmutable('today'))->format('Y-m-d');
     $corteRetencion = (new DateTimeImmutable("-{$diasRetencion} days"))->format('Y-m-d H:i:s');
+    $sinHistorico = loteTablaExiste($pdo, 'detalle_pedido_lotes')
+        ? ' AND id_lote NOT IN (SELECT id_lote FROM detalle_pedido_lotes)'
+        : '';
 
     if ($dryRun) {
         $agotados = (int) $pdo->query(
@@ -1539,9 +1618,8 @@ function loteMantenimientoAutomatico(PDO $pdo, int $diasRetencion = 90, bool $dr
         );
         $stmtCad->execute([':hoy' => $hoy]);
         $caducados = (int) $stmtCad->fetchColumn();
-        $stmtPurga = $pdo->prepare(
-            "SELECT COUNT(*) FROM lotes_inventario WHERE estado IN ('agotado','retirado') AND actualizado_en < :corte"
-        );
+        $sqlPurgaConteo = "SELECT COUNT(*) FROM lotes_inventario WHERE estado IN ('agotado','retirado') AND actualizado_en < :corte" . $sinHistorico;
+        $stmtPurga = $pdo->prepare($sqlPurgaConteo);
         $stmtPurga->execute([':corte' => $corteRetencion]);
         $purgados = (int) $stmtPurga->fetchColumn();
 
@@ -1559,9 +1637,8 @@ function loteMantenimientoAutomatico(PDO $pdo, int $diasRetencion = 90, bool $dr
     $upd2->execute([':hoy' => $hoy]);
     $caducados = $upd2->rowCount();
 
-    $del = $pdo->prepare(
-        "DELETE FROM lotes_inventario WHERE estado IN ('agotado','retirado') AND actualizado_en < :corte"
-    );
+    $sqlPurgaDelete = "DELETE FROM lotes_inventario WHERE estado IN ('agotado','retirado') AND actualizado_en < :corte" . $sinHistorico;
+    $del = $pdo->prepare($sqlPurgaDelete);
     $del->execute([':corte' => $corteRetencion]);
     $purgados = $del->rowCount();
 

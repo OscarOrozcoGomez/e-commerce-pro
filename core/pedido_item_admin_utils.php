@@ -86,6 +86,15 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             ':costo' => $costoUnitario,
             ':subtotal' => $subtotalLinea,
         ]);
+        $idDetalle = (int) $pdo->lastInsertId();
+
+        // Descuenta lotes en FEFO (best-effort, nunca bloquea: ver loteDescontarVentaFEFO).
+        // Sin esto, un producto agregado a mano quedaba fuera del control de lotes: el
+        // inventario_almacen ya bajaba pero lotes_inventario/detalle_pedido_lotes nunca se
+        // enteraban, desincronizando el conteo real de lotes con el stock del sistema.
+        if (function_exists('loteDescontarVentaFEFO')) {
+            loteDescontarVentaFEFO($pdo, $idProducto, $idAlmacen, $cantidad, $idDetalle);
+        }
 
         $stmtMovSalida = $pdo->prepare(
             "INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, id_almacen_origen, cantidad, id_usuario, observacion)

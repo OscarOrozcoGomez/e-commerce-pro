@@ -209,7 +209,12 @@ try {
         $stmtRestock->execute([$releaseQty, (int)$detail['id_producto'], (int)$detail['id_almacen']]);
         // Libera solo lo que efectivamente se regresa a inventario_almacen (puede ser
         // parcial); el resto de la linea sigue vendida y sus lotes siguen consumidos.
-        loteRegresarDetalleALotes($pdo, $detailId, $releaseQty);
+        $lotesRegresados = loteRegresarDetalleALotes($pdo, $detailId, $releaseQty);
+        if ($lotesRegresados > 0 && $lotesRegresados < $releaseQty) {
+            // Habia registro de lotes pero no alcanzo para cuadrar con lo restockeado:
+            // inventario_almacen y lotes_inventario quedan desincronizados para esta linea.
+            error_log("cleanup_reservations: detalle {$detailId} regreso solo {$lotesRegresados}/{$releaseQty} unidades a lotes_inventario");
+        }
 
         $newSubtotal = $newQty * (float)$detail['precio_unitario'];
         $stmtUpdateDetail = $pdo->prepare("UPDATE detalle_pedidos SET cantidad = ?, subtotal = ? WHERE id_detalle = ?");
@@ -300,7 +305,11 @@ try {
                                          WHERE id_producto = ? AND id_almacen = ?");
             $stmtRestock->execute([(int)$item['cantidad'], (int)$item['id_producto'], $id_almacen]);
             // Pedido completo liberado: regresa TODO lo registrado para esa linea.
-            loteRegresarDetalleALotes($pdo, (int)$item['id_detalle']);
+            $lotesRegresados = loteRegresarDetalleALotes($pdo, (int)$item['id_detalle']);
+            $cantidadEsperada = (int)$item['cantidad'];
+            if ($lotesRegresados > 0 && $lotesRegresados < $cantidadEsperada) {
+                error_log("cleanup_reservations: detalle {$item['id_detalle']} regreso solo {$lotesRegresados}/{$cantidadEsperada} unidades a lotes_inventario");
+            }
         }
 
         $stmtCancel = $pdo->prepare("UPDATE pedidos SET estado = 'cancelado', observaciones = CONCAT(COALESCE(observaciones,''), ' | Expirado por tiempo limite de reserva; inventario liberado para otros clientes.') WHERE id_pedido = ?");

@@ -223,6 +223,16 @@ try {
         throw new Exception('No tienes una sucursal asignada para registrar el pedido.');
     }
 
+    // Mismo candado que ya existe del lado de entregas (deliveryValidateLotesAntesSalida):
+    // si hay algo que verificar (el mismo calculo que ya vio el cajero en el modal antes
+    // de cobrar, ver modo=plan_lotes arriba), la venta exige confirmar_lotes=1. Sin esto,
+    // llamar a este endpoint directo se saltaba el aviso por completo -- el checkbox del
+    // modal nunca se mandaba al servidor.
+    $planLotesVenta = loteFetchPlanVentaFEFO($pdo, $productos, $almacenVentaId);
+    if ($planLotesVenta !== [] && ($_POST['confirmar_lotes'] ?? '') !== '1') {
+        throw new Exception('Debes confirmar que verificaste los lotes antes de cobrar.');
+    }
+
     $pdo->beginTransaction();
 
     try {
