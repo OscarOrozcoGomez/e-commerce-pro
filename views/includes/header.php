@@ -96,6 +96,101 @@
             line-height: 18px;
             padding: 0 4px;
         }
+        /* Contenido del mini-carrito: lo usa la burbuja flotante de
+           floating_cart_widget.php (solo en catalogo.php / product_detail.php). */
+        .cart-mini-dropdown-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #eee;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .cart-mini-dropdown-items {
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        .cart-mini-item {
+            display: flex;
+            gap: 10px;
+            padding: 10px 16px;
+            border-bottom: 1px solid #f2f2f2;
+            align-items: center;
+        }
+        .cart-mini-item img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            background: #f9f9f9;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .cart-mini-item-info {
+            flex-grow: 1;
+            min-width: 0;
+        }
+        .cart-mini-item-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .cart-mini-item-price {
+            font-size: 0.8rem;
+            color: #616161;
+        }
+        .cart-mini-item-subtotal {
+            font-size: 0.85rem;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .cart-mini-qty {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .cart-mini-qty button {
+            background: #eee;
+            border: none;
+            width: 28px;
+            height: 28px;
+            line-height: 28px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            padding: 0;
+        }
+        .cart-mini-qty span {
+            font-size: 0.85rem;
+            min-width: 16px;
+            text-align: center;
+        }
+        .cart-mini-remove {
+            color: #e53935;
+            cursor: pointer;
+            font-size: 20px !important;
+            margin-left: 4px;
+            padding: 4px;
+        }
+        .cart-mini-empty {
+            padding: 24px 16px;
+            text-align: center;
+            color: #757575;
+            font-size: 0.9rem;
+        }
+        .cart-mini-dropdown-footer {
+            padding: 12px 16px;
+            border-top: 1px solid #eee;
+        }
+        .cart-mini-total {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
         .nav-favorites-link {
             position: relative;
             display: flex !important;
@@ -570,6 +665,65 @@
                 badge.textContent = totalItems;
                 badge.style.setProperty('display', totalItems > 0 ? 'inline-block' : 'none', 'important');
             });
+            renderCartMiniDropdown();
+            if (typeof updateFloatingCartBubbleBadge === 'function') {
+                updateFloatingCartBubbleBadge();
+            }
+        }
+
+        // --- Mini-carrito desplegable (icono del header) ---------------------------
+        const CART_MINI_DEFAULT_IMG = '<?php echo getDefaultProductImageUrl(); ?>';
+
+        function renderCartMiniDropdown() {
+            const cart = getCart();
+            let total = 0;
+
+            const itemsHtml = cart.length === 0
+                ? '<div class="cart-mini-empty">Tu carrito está vacío</div>'
+                : cart.map(item => {
+                    const price = parseFloat(item.precio) || 0;
+                    const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
+                    const subtotal = price * qty;
+                    total += subtotal;
+                    const cleanName = String(item.nombre || '')
+                        .replace(/\s*\(Unidades\)\s*$/i, '')
+                        .trim();
+                    const img = item.imagen || CART_MINI_DEFAULT_IMG;
+                    const idProducto = String(item.id_producto || item.id || '');
+                    return `
+                        <div class="cart-mini-item">
+                            <img src="${img}" alt="" onerror="this.onerror=null;this.src='${CART_MINI_DEFAULT_IMG}';">
+                            <div class="cart-mini-item-info">
+                                <div class="cart-mini-item-name" title="${cleanName.replace(/"/g, '&quot;')}">${cleanName}</div>
+                                <div class="cart-mini-item-price">$${price.toFixed(2)} c/u</div>
+                                <div class="cart-mini-qty">
+                                    <button type="button" onclick="cartMiniChangeQty('${idProducto}', -1)">-</button>
+                                    <span>${qty}</span>
+                                    <button type="button" onclick="cartMiniChangeQty('${idProducto}', 1)">+</button>
+                                    <i class="material-icons cart-mini-remove" onclick="cartMiniRemoveItem('${idProducto}')">delete</i>
+                                </div>
+                            </div>
+                            <div class="cart-mini-item-subtotal">$${subtotal.toFixed(2)}</div>
+                        </div>`;
+                }).join('');
+
+            document.querySelectorAll('.cart-mini-dropdown-items').forEach(el => { el.innerHTML = itemsHtml; });
+            document.querySelectorAll('.cart-mini-total-amount').forEach(el => { el.textContent = total.toFixed(2); });
+        }
+
+        function cartMiniChangeQty(idProducto, delta) {
+            const cart = getCart();
+            const item = cart.find(i => String(i.id_producto || i.id) === idProducto);
+            if (!item) return;
+            item.quantity = Math.max(1, (parseInt(item.quantity, 10) || 1) + delta);
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartBadge();
+        }
+
+        function cartMiniRemoveItem(idProducto) {
+            const cart = getCart().filter(i => String(i.id_producto || i.id) !== idProducto);
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartBadge();
         }
 
         function paintFavoritesBadge(totalFavorites) {
