@@ -586,39 +586,55 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('confirmalo con el cliente en vez de asumirlo tal cual', $prompt);
     }
 
-    public function testAiBuildSystemPromptMentionsPhotosAreAutoTransferredToHuman(): void
+    public function testAiBuildSystemPromptMentionsUnreadableMediaAreAutoTransferredToHuman(): void
     {
         $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
 
-        $this->assertStringContainsString('ya se transfieren directo a un asesor humano por codigo', $prompt);
+        $this->assertStringContainsString('ya se transfiere directo a un asesor humano por codigo', $prompt);
+        $this->assertStringContainsString('ni tienes que pedirle al cliente que lo reescriba en texto', $prompt);
     }
 
-    public function testAiEsFotoNoInterpretadaIsTrueForImageWithoutOcrText(): void
+    public function testAiEsMensajeNoInterpretableIsTrueForImageWithoutOcrText(): void
     {
-        $this->assertTrue(aiEsFotoNoInterpretada('image', '[El cliente envio una foto]'));
+        $this->assertTrue(aiEsMensajeNoInterpretable('image', '[El cliente envio una foto]'));
     }
 
-    public function testAiEsFotoNoInterpretadaIsFalseWhenOcrFoundText(): void
+    public function testAiEsMensajeNoInterpretableIsFalseWhenOcrFoundText(): void
     {
-        $this->assertFalse(aiEsFotoNoInterpretada(
+        $this->assertFalse(aiEsMensajeNoInterpretable(
             'image',
             '[El cliente envio una foto. Texto detectado en la imagen (puede tener errores de OCR): PAGO CONFIRMADO 349.00 MXN]'
         ));
     }
 
-    public function testAiEsFotoNoInterpretadaIsFalseForNonImageKinds(): void
+    public function testAiEsMensajeNoInterpretableIsFalseForTextAndAudio(): void
     {
-        $this->assertFalse(aiEsFotoNoInterpretada('audio', '[El cliente envio un audio]'));
-        $this->assertFalse(aiEsFotoNoInterpretada('video', '[El cliente envio un video]'));
-        $this->assertFalse(aiEsFotoNoInterpretada('text', 'hola'));
-        $this->assertFalse(aiEsFotoNoInterpretada(null, '[El cliente envio una foto]'));
+        $this->assertFalse(aiEsMensajeNoInterpretable('audio', '[Nota de voz transcrita]: quiero 2 omega 3'));
+        $this->assertFalse(aiEsMensajeNoInterpretable('text', 'hola'));
+        $this->assertFalse(aiEsMensajeNoInterpretable(null, '[El cliente envio una foto]'));
     }
 
-    public function testAiBuildSystemPromptStillWarnsAboutPlainMediaPlaceholdersWithoutTranscription(): void
+    public function testAiEsMensajeNoInterpretableIsTrueForUnreadableKinds(): void
+    {
+        // Audio SI se transcribe (Whisper); video, sticker, ubicacion, contacto y
+        // documento no tienen ninguna lectura automatica hoy -- se transfieren a humano.
+        $this->assertTrue(aiEsMensajeNoInterpretable('video', '[El cliente envio un video]'));
+        $this->assertTrue(aiEsMensajeNoInterpretable('sticker', '[El cliente envio un sticker]'));
+        $this->assertTrue(aiEsMensajeNoInterpretable('location', '[El cliente compartio su ubicacion: ...]'));
+        $this->assertTrue(aiEsMensajeNoInterpretable('contact', '[El cliente compartio un contacto]'));
+        $this->assertTrue(aiEsMensajeNoInterpretable('document', '[El cliente envio un documento]'));
+        $this->assertTrue(aiEsMensajeNoInterpretable('other', '[El cliente envio un mensaje que no es de texto]'));
+    }
+
+    public function testAiBuildSystemPromptStillTeachesRealTranscriptionsCanBeTrustedWithCaution(): void
     {
         $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
 
-        $this->assertStringContainsString('NO puedes ver ni escuchar el archivo real', $prompt);
+        // Nota de voz transcrita y OCR de imagen SI llegan a Alex como contenido usable
+        // (a diferencia de video/sticker/ubicacion/etc., que ya se interceptan por codigo
+        // antes de llamarlo -- ver testAiBuildSystemPromptMentionsUnreadableMediaAreAutoTransferredToHuman).
+        $this->assertStringContainsString('Nota de voz transcrita', $prompt);
+        $this->assertStringContainsString('confirmalo con el cliente en vez de asumirlo tal cual', $prompt);
     }
 
     public function testAiGetToolDefinitionsNeverSuggestsTarjetaAsAValidPaymentMethod(): void

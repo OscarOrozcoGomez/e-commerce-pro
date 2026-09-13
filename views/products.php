@@ -90,18 +90,6 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
-                            <input type="text" id="sku" name="sku">
-                            <label for="sku">SKU (Código Interno)</label>
-                            <span class="helper-text">Opcional</span>
-                        </div>
-
-                        <div class="input-field">
-                            <input type="text" id="codigo_barras" name="codigo_barras">
-                            <label for="codigo_barras">Código de Barras</label>
-                            <span class="helper-text">Opcional</span>
-                        </div>
-                        
-                        <div class="input-field">
                             <textarea id="descripcion" name="descripcion" class="materialize-textarea" placeholder="Breve resumen comercial..."></textarea>
                             <label for="descripcion">Descripción</label>
                         </div>
@@ -144,56 +132,11 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
-                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea json-textarea-constrained" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
-                            <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
-                            <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
-                        </div>
-
-                        <div class="input-field" style="margin-bottom: 20px;">
-                            <div class="switch">
-                                <label>
-                                    Ocultar Tabla
-                                    <input type="checkbox" name="mostrar_tabla" id="mostrar_tabla" value="1" checked>
-                                    <span class="lever"></span>
-                                    Mostrar Información Nutrimental
-                                </label>
-                            </div>
-                        </div>
-
-                        <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
-                        
-                        <div class="input-field">
                             <select id="unidad" name="unidad" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px;">
                                 <option value="" disabled selected>Presentación / Unidad (Elegir)</option>
                             </select>
                             <span class="helper-text">Ej: Cápsulas, Gramos (g), Mililitros (ml)...</span>
                         </div>
-
-                        <div class="row" style="margin-bottom:0;">
-                            <div class="input-field col s6">
-                                <input type="number" min="0" id="capsulas_por_envase" name="capsulas_por_envase">
-                                <label for="capsulas_por_envase">Cápsulas por envase</label>
-                            </div>
-                            <div class="input-field col s6">
-                                <input type="number" min="0" id="porcion_capsulas" name="porcion_capsulas">
-                                <label for="porcion_capsulas">Cápsulas por porción</label>
-                            </div>
-                            <span class="helper-text col s12" style="margin-top:-10px;">Opcional. Se usa en el Control de Caducidades para capturar lotes "en cápsulas" y para calcular cuánto rinde un envase.</span>
-                            <span class="col s12 teal-text" id="rinde-hint" style="font-size:.85rem;"></span>
-                        </div>
-                        <script>
-                        (function(){
-                          function rinde(){
-                            var c = parseInt(document.getElementById('capsulas_por_envase').value || '0', 10);
-                            var p = parseInt(document.getElementById('porcion_capsulas').value || '0', 10) || 1;
-                            var el = document.getElementById('rinde-hint');
-                            el.textContent = c > 0 ? ('Rinde ≈ ' + Math.floor(c / p) + ' días por envase (' + c + ' ÷ ' + p + '/toma)') : '';
-                          }
-                          ['capsulas_por_envase','porcion_capsulas'].forEach(function(id){
-                            document.getElementById(id).addEventListener('input', rinde);
-                          });
-                        })();
-                        </script>
 
                         <div id="lotes-producto-wrap" style="display:none; margin: 15px 0; padding: 12px; border: 1px solid #ffcc80; border-radius: 4px; background: #fff8e1;">
                             <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
@@ -235,29 +178,91 @@ include __DIR__ . '/includes/header.php';
                             <label for="precio_venta">Precio de Venta</label>
                         </div>
 
-                        <div class="input-field">
-                            <input type="number" id="precio_comparacion" name="precio_comparacion" step="0.01" value="0">
-                            <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
-                        </div>
+                        <details id="advanced-fields-details" class="product-advanced-fields">
+                            <summary>Campos avanzados / opcionales (SKU, código de barras, nutrimental, cápsulas, precios de comparación/oferta)</summary>
+                            <div class="product-advanced-fields-body">
+                                <div class="input-field">
+                                    <input type="text" id="sku" name="sku">
+                                    <label for="sku">SKU (Código Interno)</label>
+                                    <span class="helper-text">Opcional</span>
+                                </div>
 
-                        <div class="input-field">
-                            <input type="number" id="precio_oferta" name="precio_oferta" step="0.01" placeholder="Vacío = automático (costo + $50)">
-                            <label for="precio_oferta" class="active">Precio de Oferta</label>
-                            <span class="helper-text">Solo se usa cuando el producto está en la categoría "Ofertas". Vacío = costo + $50 automático.</span>
-                            <button type="button" id="btn-sugerir-oferta" class="btn-small grey lighten-1 black-text" style="margin-top:6px;">Sugerir (costo + $50)</button>
-                        </div>
-                        <script>
-                        (function(){
-                          var btn = document.getElementById('btn-sugerir-oferta');
-                          if (!btn) return;
-                          btn.addEventListener('click', function(){
-                            var costo = parseFloat(document.getElementById('precio_costo').value || '0') || 0;
-                            var of = document.getElementById('precio_oferta');
-                            of.value = (Math.round((costo + 50) * 100) / 100).toFixed(2);
-                            if (window.M && M.updateTextFields) M.updateTextFields();
-                          });
-                        })();
-                        </script>
+                                <div class="input-field">
+                                    <input type="text" id="codigo_barras" name="codigo_barras">
+                                    <label for="codigo_barras">Código de Barras</label>
+                                    <span class="helper-text">Opcional</span>
+                                </div>
+
+                                <div class="input-field">
+                                    <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea json-textarea-constrained" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
+                                    <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
+                                    <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
+                                </div>
+
+                                <div class="input-field" style="margin-bottom: 20px;">
+                                    <div class="switch">
+                                        <label>
+                                            Ocultar Tabla
+                                            <input type="checkbox" name="mostrar_tabla" id="mostrar_tabla" value="1" checked>
+                                            <span class="lever"></span>
+                                            Mostrar Información Nutrimental
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
+
+                                <div class="row" style="margin-bottom:0;">
+                                    <div class="input-field col s6">
+                                        <input type="number" min="0" id="capsulas_por_envase" name="capsulas_por_envase">
+                                        <label for="capsulas_por_envase">Cápsulas por envase</label>
+                                    </div>
+                                    <div class="input-field col s6">
+                                        <input type="number" min="0" id="porcion_capsulas" name="porcion_capsulas">
+                                        <label for="porcion_capsulas">Cápsulas por porción</label>
+                                    </div>
+                                    <span class="helper-text col s12" style="margin-top:-10px;">Opcional. Se usa en el Control de Caducidades para capturar lotes "en cápsulas" y para calcular cuánto rinde un envase.</span>
+                                    <span class="col s12 teal-text" id="rinde-hint" style="font-size:.85rem;"></span>
+                                </div>
+                                <script>
+                                (function(){
+                                  function rinde(){
+                                    var c = parseInt(document.getElementById('capsulas_por_envase').value || '0', 10);
+                                    var p = parseInt(document.getElementById('porcion_capsulas').value || '0', 10) || 1;
+                                    var el = document.getElementById('rinde-hint');
+                                    el.textContent = c > 0 ? ('Rinde ≈ ' + Math.floor(c / p) + ' días por envase (' + c + ' ÷ ' + p + '/toma)') : '';
+                                  }
+                                  ['capsulas_por_envase','porcion_capsulas'].forEach(function(id){
+                                    document.getElementById(id).addEventListener('input', rinde);
+                                  });
+                                })();
+                                </script>
+
+                                <div class="input-field">
+                                    <input type="number" id="precio_comparacion" name="precio_comparacion" step="0.01" value="0">
+                                    <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
+                                </div>
+
+                                <div class="input-field">
+                                    <input type="number" id="precio_oferta" name="precio_oferta" step="0.01" placeholder="Vacío = automático (costo + $50)">
+                                    <label for="precio_oferta" class="active">Precio de Oferta</label>
+                                    <span class="helper-text">Solo se usa cuando el producto está en la categoría "Ofertas". Vacío = costo + $50 automático.</span>
+                                    <button type="button" id="btn-sugerir-oferta" class="btn-small grey lighten-1 black-text" style="margin-top:6px;">Sugerir (costo + $50)</button>
+                                </div>
+                                <script>
+                                (function(){
+                                  var btn = document.getElementById('btn-sugerir-oferta');
+                                  if (!btn) return;
+                                  btn.addEventListener('click', function(){
+                                    var costo = parseFloat(document.getElementById('precio_costo').value || '0') || 0;
+                                    var of = document.getElementById('precio_oferta');
+                                    of.value = (Math.round((costo + 50) * 100) / 100).toFixed(2);
+                                    if (window.M && M.updateTextFields) M.updateTextFields();
+                                  });
+                                })();
+                                </script>
+                            </div>
+                        </details>
 
                         <div class="input-field" style="margin-top: 30px; margin-bottom: 30px;">
                             <div class="switch">
@@ -428,9 +433,15 @@ include __DIR__ . '/includes/header.php';
             .then(r => r.json())
             .then(res => {
                 if(!res.success) throw new Error(res.message);
-                
+
                 const fullData = res.blife_data;
-                
+
+                // SINC llena SKU, código de barras y tabla nutrimental, que viven
+                // dentro del acordeón de campos avanzados: se abre para que se vea
+                // lo que acaba de traer sin que el usuario tenga que buscarlo.
+                const advancedDetailsSinc = document.getElementById('advanced-fields-details');
+                if (advancedDetailsSinc) advancedDetailsSinc.open = true;
+
                 // 1. Llenar Ingredientes y Modo de Uso si vienen en la API
                 if (fullData.producto) {
                     // Extraer ingredientes: puede venir en .ingredients o como una fila en la tabla
@@ -1316,6 +1327,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
         document.getElementById('precio_oferta').value = (prod.precio_oferta === null || prod.precio_oferta === undefined || prod.precio_oferta === '') ? '' : prod.precio_oferta;
 
+        // Al editar, siempre se abre: puede traer SKU/código de barras/nutrimental
+        // ya capturados y no queremos esconderlos dentro del acordeón.
+        const advancedDetails = document.getElementById('advanced-fields-details');
+        if (advancedDetails) advancedDetails.open = true;
+
         // Manejo del Autocomplete de Padre
         const idPadreHidden = document.getElementById('id_padre');
         const searchInput = document.getElementById('search_padre');
@@ -1419,6 +1435,9 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('precio_oferta').value = '';
         document.getElementById('capsulas_por_envase').value = '';
         document.getElementById('porcion_capsulas').value = '';
+
+        const advancedDetails = document.getElementById('advanced-fields-details');
+        if (advancedDetails) advancedDetails.open = false;
 
         document.getElementById('lotes-producto-wrap').style.display = 'none';
         document.getElementById('lotes-producto-tabla').innerHTML = '';
@@ -1652,6 +1671,33 @@ include __DIR__ . '/includes/header.php';
 </script>
 
 <style>
+    .product-advanced-fields {
+        margin: 15px 0 25px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px 12px;
+        background: #fafafa;
+    }
+    .product-advanced-fields > summary {
+        cursor: pointer;
+        padding: 10px 0;
+        font-weight: 500;
+        color: #455a64;
+        list-style: none;
+    }
+    .product-advanced-fields > summary::-webkit-details-marker {
+        display: none;
+    }
+    .product-advanced-fields > summary::before {
+        content: '▸ ';
+    }
+    .product-advanced-fields[open] > summary::before {
+        content: '▾ ';
+    }
+    .product-advanced-fields-body {
+        padding: 4px 0 10px;
+        border-top: 1px solid #e0e0e0;
+    }
     .centered-table-preview {
         font-size: 0.8rem;
         border: 1px solid #e0e0e0;

@@ -310,10 +310,8 @@ function aiBuildSystemPrompt(
     $lines[] = '- El costo de envio NUNCA lo calculas ni lo decides tu: agendar_venta ya revisa la direccion por su cuenta y te regresa el total real (que puede incluir un cargo agregado) y un mensaje indicandote si aplica. Usa siempre el total y el mensaje que te regresa la funcion, no el que tu mismo calculaste antes -- si cambio, es porque la direccion quedo fuera de la Zona Metropolitana de Guadalajara.';
     $lines[] = '- Si agendar_venta (o consultar_inventario) te regresa que no hay suficiente existencia de un producto, di el numero disponible tal cual te lo regreso la funcion y ofrece opciones concretas: ajustar la cantidad a lo disponible, cambiar a otra presentacion si existe, o avisar cuando el cliente quiera que le confirmen la fecha de reabastecimiento (llama a transferir_a_humano si insiste en la cantidad original). Nunca dejes la conversacion en un punto muerto ni digas solo que "no hay" sin ofrecer una alternativa.';
     $lines[] = '';
-    $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes describiendo que envio una nota de voz, video, archivo o ubicacion, revisa cual de estos casos es:';
-    $lines[] = '- Si el corchete trae "Nota de voz transcrita" o "Texto detectado en la imagen" seguido de dos puntos y contenido real (ej. "[Nota de voz transcrita, puede tener errores]: quiero 2 omega 3"), SI puedes usar ese contenido como si el cliente lo hubiera escrito -- es una transcripcion/OCR automatica. Puede traer errores (nombres de producto raros, numeros mal leidos), asi que si algo no tiene sentido o es un dato critico (direccion, cantidad, monto de un pago), confirmalo con el cliente en vez de asumirlo tal cual.';
-    $lines[] = '- Cualquier otro corchete (ej. "[El cliente envio un video]", "[El cliente compartio su ubicacion: ...]") es solo una descripcion -- NO puedes ver ni escuchar el archivo real. Reconocelo con naturalidad y pide que te escriba en texto lo importante; si es algo que debe revisar una persona, llama a transferir_a_humano. Si es una ubicacion, puedes usar el enlace de mapa que viene en el corchete para el pedido, pero confirma con el cliente la direccion en texto igual.';
-    $lines[] = 'Nota: las fotos que el sistema no logra leer automaticamente (sin texto detectado) ya se transfieren directo a un asesor humano por codigo, antes de que la conversacion llegue a ti -- nunca vas a ver ese caso.';
+    $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes con una nota de voz transcrita o texto detectado en una imagen (ej. "[Nota de voz transcrita, puede tener errores]: quiero 2 omega 3", "...Texto detectado en la imagen (puede tener errores de OCR): PAGO CONFIRMADO 349.00 MXN"), SI puedes usar ese contenido como si el cliente lo hubiera escrito -- es una transcripcion/OCR automatica. Puede traer errores (nombres de producto raros, numeros mal leidos), asi que si algo no tiene sentido o es un dato critico (direccion, cantidad, monto de un pago), confirmalo con el cliente en vez de asumirlo tal cual.';
+    $lines[] = 'Nota: cualquier otro tipo de mensaje que el sistema no pueda leer por su cuenta (foto sin texto legible, video, sticker, ubicacion, contacto, documento, etc.) ya se transfiere directo a un asesor humano por codigo, antes de que la conversacion llegue a ti -- nunca vas a ver ese caso ni tienes que pedirle al cliente que lo reescriba en texto.';
     $lines[] = 'En todos los casos, nunca ignores ese mensaje ni actues como si no hubiera llegado nada.';
     $lines[] = '';
     $lines[] = 'Formato de salida: WhatsApp permite *negritas*, _cursivas_ y listas con emojis; usalos con moderacion para que se lea claro. No uses Markdown web (##, dobles asteriscos, backticks) ni HTML. Parrafos cortos.';
@@ -2731,20 +2729,29 @@ function aiBuildClientProfileContextLine(array $compras, array $temas): string
  * ------------------------------------------------------------------- */
 
 /**
- * true si es una foto que el sistema no pudo interpretar por su cuenta (el OCR no le
- * encontro texto legible -- no es un comprobante de pago). Decision del negocio: el
- * cliente nunca debe enterarse de que Alex "no puede ver" su foto ni se le pide que la
- * describa en texto -- en vez de eso, aiRunAssistantTurn() transfiere la conversacion
- * directo a un humano (el equipo revisa la imagen real en WhatsApp) sin siquiera llamar
- * a DeepSeek. Pura y testeable.
+ * true si el mensaje entrante es de un tipo que el sistema no puede interpretar por su
+ * cuenta: fotos sin texto legible (el OCR no encontro nada -- no es un comprobante de
+ * pago), o cualquier otro tipo sin lectura automatica real hoy (video, sticker, ubicacion,
+ * contacto, documento, u otro tipo nuevo que el puente llegue a mandar). Audio SI tiene
+ * soporte real -- el puente ya lo transcribe con Whisper antes de que esto se llame -- por
+ * eso se trata igual que texto normal.
+ *
+ * Decision del negocio: el cliente nunca debe enterarse de que Alex "no puede ver/escuchar"
+ * lo que mando ni se le pide que lo describa en texto -- en vez de eso, aiRunAssistantTurn()
+ * transfiere la conversacion directo a un humano (el equipo revisa el contenido real en
+ * WhatsApp) sin siquiera llamar a DeepSeek. Pura y testeable.
  */
-function aiEsFotoNoInterpretada(?string $messageKind, string $textoUsuario): bool
+function aiEsMensajeNoInterpretable(?string $messageKind, string $textoUsuario): bool
 {
-    if ($messageKind !== 'image') {
+    if ($messageKind === null || $messageKind === 'text' || $messageKind === 'audio') {
         return false;
     }
 
-    return strpos($textoUsuario, 'Texto detectado en la imagen') === false;
+    if ($messageKind === 'image') {
+        return strpos($textoUsuario, 'Texto detectado en la imagen') === false;
+    }
+
+    return true;
 }
 
 function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUsuario, ?string $waMessageId = null, ?string $messageKind = null): array
@@ -2787,10 +2794,10 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
 
     aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
 
-    if (aiEsFotoNoInterpretada($messageKind, $textoUsuario)) {
+    if (aiEsMensajeNoInterpretable($messageKind, $textoUsuario)) {
         aiToolTransferirHumano(
             $pdo,
-            ['motivo' => 'Cliente envio una foto que el sistema no pudo leer automaticamente (sin texto detectado) -- revisar la imagen real en WhatsApp.'],
+            ['motivo' => 'Cliente envio un mensaje (tipo: ' . ($messageKind ?? 'desconocido') . ') que el sistema no pudo leer automaticamente -- revisar el contenido real en WhatsApp.'],
             [
                 'wa_id' => $waId,
                 'id_conversacion' => $idConversacion,
@@ -2798,7 +2805,7 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
             ]
         );
 
-        return [['type' => 'text', 'text' => 'Gracias por la foto, dame un segundo para revisarla con el equipo y ahorita seguimos por aqui. 🙏']];
+        return [['type' => 'text', 'text' => 'Gracias por tu mensaje, dame un segundo para revisarlo con el equipo y ahorita seguimos por aqui. 🙏']];
     }
 
     $etiquetasDisponibles = aiGetAllTags($pdo);

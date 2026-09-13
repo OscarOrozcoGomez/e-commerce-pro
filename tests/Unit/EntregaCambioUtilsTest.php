@@ -294,4 +294,57 @@ final class EntregaCambioUtilsTest extends TestCase
         $this->assertSame(20.01, $r['paga_con']);  // 20.006 -> 20.01
         $this->assertSame(10.01, $r['cambio']);
     }
+
+    // ---- deliveryQuitarCargoEnvio --------------------------------------------------
+
+    public function testQuitarCargoEnvioAppliesWhenRequestedAndFeeExists(): void
+    {
+        $r = deliveryQuitarCargoEnvio(true, 240.0, 40.0);
+        $this->assertTrue($r['aplica']);
+        $this->assertSame(200.0, $r['nuevo_total']);
+        $this->assertSame(40.0, $r['monto_quitado']);
+    }
+
+    public function testQuitarCargoEnvioDoesNothingWhenNotRequested(): void
+    {
+        $r = deliveryQuitarCargoEnvio(false, 240.0, 40.0);
+        $this->assertFalse($r['aplica']);
+        $this->assertSame(240.0, $r['nuevo_total']);
+        $this->assertSame(0.0, $r['monto_quitado']);
+    }
+
+    public function testQuitarCargoEnvioDoesNothingWhenThereIsNoFeeToRemove(): void
+    {
+        // El checkbox llego marcado (formulario viejo en cache, doble clic, etc.) pero el
+        // pedido nunca tuvo cargo foraneo: no hay nada que quitar.
+        $r = deliveryQuitarCargoEnvio(true, 200.0, 0.0);
+        $this->assertFalse($r['aplica']);
+        $this->assertSame(200.0, $r['nuevo_total']);
+        $this->assertSame(0.0, $r['monto_quitado']);
+    }
+
+    public function testQuitarCargoEnvioNeverGoesNegativeEvenWithCorruptData(): void
+    {
+        // costo_envio mayor al total no deberia poder pasar en la practica, pero si
+        // pasara (dato corrupto), el nuevo total nunca debe quedar negativo.
+        $r = deliveryQuitarCargoEnvio(true, 30.0, 40.0);
+        $this->assertTrue($r['aplica']);
+        $this->assertSame(0.0, $r['nuevo_total']);
+        $this->assertSame(40.0, $r['monto_quitado']);
+    }
+
+    public function testQuitarCargoEnvioHandlesStringInputsWithCurrencyFormatting(): void
+    {
+        $r = deliveryQuitarCargoEnvio(true, '1,240.00', '$40');
+        $this->assertTrue($r['aplica']);
+        $this->assertSame(1200.0, $r['nuevo_total']);
+    }
+
+    public function testQuitarCargoEnvioRoundsToTwoDecimals(): void
+    {
+        // 240.005 -> 240.01, 40.001 -> 40.00 (round() de PHP, no bankers' rounding).
+        $r = deliveryQuitarCargoEnvio(true, 240.005, 40.001);
+        $this->assertSame(200.01, $r['nuevo_total']);
+        $this->assertSame(40.0, $r['monto_quitado']);
+    }
 }
