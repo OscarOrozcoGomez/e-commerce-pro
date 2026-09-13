@@ -140,6 +140,7 @@ include __DIR__ . '/includes/header.php';
 
                         <div id="lotes-producto-wrap" style="display:none; margin: 15px 0; padding: 12px; border: 1px solid #ffcc80; border-radius: 4px; background: #fff8e1;">
                             <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
+                            <p class="grey-text" style="margin:0 0 8px; font-size:.85rem;">Se registran en el almacén elegido arriba en "Control de Inventario" (<span id="lp-almacen-nombre">-</span>).</p>
                             <div id="lotes-producto-tabla" style="overflow-x:auto;"></div>
                             <div class="row" style="margin: 10px 0 0;">
                                 <div class="input-field col s6 m3" style="margin-top:0;">
@@ -881,6 +882,11 @@ include __DIR__ . '/includes/header.php';
         // Actualizar previsualización cuando se mueva el toggle de mostrar/ocultar
         document.getElementById('mostrar_tabla')?.addEventListener('change', renderNutritionalPreview);
 
+        // Los lotes que se agreguen deben quedar etiquetados con el almacén que se
+        // está viendo aquí (si no, el filtro por almacén de Caducidades > Inconsistencias
+        // nunca puede ubicar sus lotes: ver id_almacen en loteFetchDescuadres).
+        document.getElementById('id_almacen_stock')?.addEventListener('change', actualizarLpAlmacenNombre);
+
         // Inicializar el Drag and Drop en el contenedor de previsualización
         const previewContainer = document.getElementById('preview-container');
         if (previewContainer) {
@@ -977,7 +983,8 @@ include __DIR__ . '/includes/header.php';
                     if(!el) return;
                     el.innerHTML = res.almacenes.map(a => `<option value="${a.id_almacen}">${a.nombre}</option>`).join('');
                 });
-                
+                actualizarLpAlmacenNombre();
+
                 // Llenar categorías
                 const catSelect = document.getElementById('select-categorias');
                 catSelect.innerHTML = '<option value="" disabled>Selecciona una o varias categorías</option>' + 
@@ -1059,15 +1066,47 @@ include __DIR__ . '/includes/header.php';
             });
     }
 
+    function actualizarLpAlmacenNombre() {
+        const sel = document.getElementById('id_almacen_stock');
+        const label = document.getElementById('lp-almacen-nombre');
+        if (!sel || !label) return;
+        const opt = sel.options[sel.selectedIndex];
+        label.textContent = opt ? opt.textContent : '-';
+    }
+
     function autoOpenPendingEdit(products) {
         if (!pendingEditProductId || !Array.isArray(products)) return;
 
-        const product = products.find(p => String(p.id_producto) === pendingEditProductId);
-        if (!product) return;
+        const idBuscado = pendingEditProductId;
+        const product = products.find(p => String(p.id_producto) === idBuscado);
+        if (product) {
+            pendingEditProductId = '';
+            abrirEditar(product);
+            scrollToEditForm();
+            return;
+        }
 
+        // No aparece en el listado (p.ej. quedó "eliminado" -> estado 'inactivo' -
+        // pero todavía tiene lotes por caducar en Control de Caducidades): buscarlo
+        // directo por id para poder abrirlo igual y retirar/editar sus lotes.
         pendingEditProductId = '';
-        abrirEditar(product);
+        const almacenId = document.getElementById('almacen_view_selector')?.value || 1;
+        fetch(`${BASE_API}?action=get_one&id_producto=${idBuscado}&almacen_id=${almacenId}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.success && res.data) {
+                    abrirEditar(res.data);
+                    scrollToEditForm();
+                } else {
+                    M.toast({ html: 'No se encontró ese producto (¿fue eliminado?).', classes: 'red' });
+                }
+            })
+            .catch(() => {
+                M.toast({ html: 'No se pudo cargar ese producto.', classes: 'red' });
+            });
+    }
 
+    function scrollToEditForm() {
         const targetCard = document.getElementById('form-title');
         if (targetCard) {
             targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1302,6 +1341,7 @@ include __DIR__ . '/includes/header.php';
         if (stockWarehouseSelector && currentViewWarehouse) {
             stockWarehouseSelector.value = String(currentViewWarehouse);
         }
+        actualizarLpAlmacenNombre();
 
         document.getElementById('accion').value = 'editar';
         document.getElementById('id_producto').value = prod.id_producto;
@@ -1610,6 +1650,7 @@ include __DIR__ . '/includes/header.php';
         postLote({
             accion: 'guardar', id_lote: 0, id_producto: loteProductoActualId,
             codigo_lote: codigo, fecha_caducidad: fecha, cantidad: cantidad,
+            id_almacen: document.getElementById('id_almacen_stock')?.value || '',
         }).then(res => {
             despuesDeLote(res);
             if (res.success) {
