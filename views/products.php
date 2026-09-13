@@ -142,6 +142,14 @@ include __DIR__ . '/includes/header.php';
                             <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
                             <p class="grey-text" style="margin:0 0 8px; font-size:.85rem;">Se registran en el almacén elegido arriba en "Control de Inventario" (<span id="lp-almacen-nombre">-</span>).</p>
                             <div id="lotes-producto-tabla" style="overflow-x:auto;"></div>
+                            <div style="margin-top:10px;">
+                                <button type="button" class="btn-small blue waves-effect" id="btn-lote-camara">
+                                    <i class="material-icons left" style="margin-right:4px;">photo_camera</i>Escanear etiqueta
+                                </button>
+                                <input type="file" accept="image/*" capture="environment" id="lp-ocr-input" style="display:none;">
+                                <span id="lp-ocr-status" class="grey-text" style="margin-left:8px; font-size:.85rem;"></span>
+                                <input type="hidden" id="lp-aproximada" value="0">
+                            </div>
                             <div class="row" style="margin: 10px 0 0;">
                                 <div class="input-field col s6 m3" style="margin-top:0;">
                                     <input type="text" id="lp-codigo">
@@ -1481,6 +1489,7 @@ include __DIR__ . '/includes/header.php';
 
         document.getElementById('lotes-producto-wrap').style.display = 'none';
         document.getElementById('lotes-producto-tabla').innerHTML = '';
+        document.getElementById('lp-aproximada').value = '0';
         loteProductoActualId = null;
 
         document.getElementById('search_padre').value = '';
@@ -1650,6 +1659,7 @@ include __DIR__ . '/includes/header.php';
         postLote({
             accion: 'guardar', id_lote: 0, id_producto: loteProductoActualId,
             codigo_lote: codigo, fecha_caducidad: fecha, cantidad: cantidad,
+            caducidad_aproximada: document.getElementById('lp-aproximada').value || '0',
             id_almacen: document.getElementById('id_almacen_stock')?.value || '',
         }).then(res => {
             despuesDeLote(res);
@@ -1657,10 +1667,99 @@ include __DIR__ . '/includes/header.php';
                 document.getElementById('lp-codigo').value = '';
                 document.getElementById('lp-fecha').value = '';
                 document.getElementById('lp-cantidad').value = '';
+                document.getElementById('lp-aproximada').value = '0';
                 M.updateTextFields();
             }
         });
     };
+
+    /* ------------------------- Escanear etiqueta (lote/caducidad) ------------------------- */
+
+    document.getElementById('btn-lote-camara')?.addEventListener('click', function () {
+        document.getElementById('lp-ocr-input').click();
+    });
+
+    document.getElementById('lp-ocr-input')?.addEventListener('change', function (e) {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+
+        const status = document.getElementById('lp-ocr-status');
+        status.textContent = 'Leyendo etiqueta...';
+
+        const lector = new FileReader();
+        lector.onload = function () {
+            const img = new Image();
+            img.onload = function () {
+                // Reducir la foto antes de mandarla: más rápido y de sobra para que Vision lea texto.
+                const maxLado = 1600;
+                let w = img.width, h = img.height;
+                if (w > maxLado || h > maxLado) {
+                    const escala = maxLado / Math.max(w, h);
+                    w = Math.round(w * escala);
+                    h = Math.round(h * escala);
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                enviarFotoLote(canvas.toDataURL('image/jpeg', 0.85), status);
+            };
+            img.src = lector.result;
+        };
+        lector.readAsDataURL(file);
+    });
+
+    function enviarFotoLote(dataUrl, status) {
+        const payload = new URLSearchParams({
+            imagen: dataUrl,
+            csrf_token: document.querySelector('input[name="csrf_token"]').value,
+        });
+        fetch('<?php echo BASE_URL; ?>api/lote_ocr.php', { method: 'POST', body: payload })
+            .then(r => r.json())
+            .then(res => {
+                status.textContent = '';
+                if (!res.success) {
+                    M.toast({html: res.message || 'No se pudo leer la etiqueta', classes: 'red'});
+                    return;
+                }
+                const leido = [];
+                const loteConHuecos = !!(res.codigo_lote && res.codigo_lote.includes('_'));
+                if (res.codigo_lote) {
+                    document.getElementById('lp-codigo').value = res.codigo_lote;
+                    leido.push('lote');
+                }
+                if (res.fecha_caducidad) {
+                    document.getElementById('lp-fecha').value = res.fecha_caducidad;
+                    document.getElementById('lp-aproximada').value = res.caducidad_aproximada ? '1' : '0';
+                    leido.push('caducidad');
+                }
+                M.updateTextFields();
+                if (loteConHuecos) {
+                    // "_" = caracter que Vision no pudo leer con confianza (típico: texto
+                    // partido por la costura del bote). No se adivina: se marca para que
+                    // el usuario lo complete viendo el bote de cerca.
+                    const campoCodigo = document.getElementById('lp-codigo');
+                    campoCodigo.focus();
+                    campoCodigo.select();
+                    M.toast({html: 'Hay caracteres del lote que no se leyeron bien (marcados con "_"). Complétalos viendo el bote de cerca.', classes: 'orange', displayLength: 6000});
+                } else if (leido.length === 2) {
+                    M.toast({
+                        html: 'Lote y caducidad detectados' + (res.caducidad_aproximada ? ' (día aproximado, fin de mes)' : '') + '. Solo falta la cantidad.',
+                        classes: 'green',
+                    });
+                    document.getElementById('lp-cantidad').focus();
+                } else if (leido.length === 1) {
+                    M.toast({html: 'Solo se detectó ' + (leido[0] === 'lote' ? 'el código de lote' : 'la caducidad') + '. Completa lo demás a mano.', classes: 'orange'});
+                } else {
+                    M.toast({html: 'No se detectó lote ni caducidad en la foto. Captúralos a mano.', classes: 'orange'});
+                }
+            })
+            .catch(() => {
+                status.textContent = '';
+                M.toast({html: 'Error de conexión al leer la etiqueta', classes: 'red'});
+            });
+    }
 
     window.ajustarLote = function (id, actual) {
         const val = prompt('Nueva cantidad restante:', actual);

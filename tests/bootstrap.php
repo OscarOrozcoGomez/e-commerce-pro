@@ -36,6 +36,7 @@ require_once __DIR__ . '/../core/sale_inventory_bypass_utils.php';
 require_once __DIR__ . '/../core/sale_delivery_mode.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+require_once __DIR__ . '/../core/lote_ocr_utils.php';
 require_once __DIR__ . '/../core/caducidad_notificaciones_utils.php';
 require_once __DIR__ . '/../core/stock_prediction.php';
 require_once __DIR__ . '/../core/ventas_features.php';
