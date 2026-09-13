@@ -642,16 +642,16 @@ window.addEventListener('popstate', function(event) {
 toggleClearButton(); // Ejecutar al cargar por si la página ya tiene un valor de búsqueda
 bindLoadMoreHandler();
 
-function handleAddToCart(event, id, nombre, precio) {
+function handleAddToCart(event, id, nombre, precio, imagen) {
     // Detenemos la propagación para que no se active el enlace de la tarjeta
     event.preventDefault();
     event.stopPropagation();
 
     let cart = JSON.parse(localStorage.getItem('cart') || '[]');
-    
+
     // Buscar si el producto ya está en el carrito
     let item = cart.find(i => i.id_producto === id);
-    
+
     if (item) {
         // Si ya existe, solo incrementamos la cantidad
         item.quantity = (parseInt(item.quantity) || 0) + 1;
@@ -661,10 +661,11 @@ function handleAddToCart(event, id, nombre, precio) {
             id_producto: id,
             nombre: nombre,
             precio: precio,
+            imagen: imagen || '',
             quantity: 1
         });
     }
-    
+
     localStorage.setItem('cart', JSON.stringify(cart));
     M.toast({html: '🛒 <b>' + nombre + '</b> añadido al carrito', classes: 'green rounded'});
 
@@ -752,4 +753,5 @@ document.getElementById('share-ofertas-btn')?.addEventListener('click', function
     .hoverable-item { transition: background-color 0.2s ease; }
     .hoverable-item:hover { background-color: #f5f5f5 !important; }
 </style>
+<?php include __DIR__ . '/includes/floating_cart_widget.php'; ?>
 <?php include __DIR__ . '/includes/footer.php'; ?>

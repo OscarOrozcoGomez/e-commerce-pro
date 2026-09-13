@@ -467,7 +467,7 @@ function catalogRenderProductCard(array $p, bool $mostrarBotonCompartir = false)
                         $precioCarrito = (float) ($p['precio_venta'] ?? $p['precio_efectivo'] ?? $p['precio_desde'] ?? 0);
                         ?>
                         <button class="btn blue darken-4 waves-effect waves-light"
-                                onclick="handleAddToCart(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo $precioCarrito; ?>)">
+                                onclick="handleAddToCart(event, <?php echo (int) ($p['id_producto'] ?? 0); ?>, '<?php echo addslashes(esc((string) ($p['nombre'] ?? ''))); ?>', <?php echo $precioCarrito; ?>, '<?php echo addslashes($imgSrc); ?>')">
                             <i class="material-icons">add_shopping_cart</i>
                         </button>
                     <?php endif; ?>

@@ -1089,6 +1089,51 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertContains((int) $lid['id_conversacion'], $ids);
     }
 
+    public function testFindConversationsToAutoReactivateOnlyReturnsStalePausedOnes(): void
+    {
+        $pausadaVieja = aiGetOrCreateConversation($this->pdo, '5213300030001', null);
+        aiSetConversationState($this->pdo, (int) $pausadaVieja['id_conversacion'], 'pausado', 'Intervencion manual detectada.');
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-25 hours')), (int) $pausadaVieja['id_conversacion']]);
+
+        $pausadaReciente = aiGetOrCreateConversation($this->pdo, '5213300030002', null);
+        aiSetConversationState($this->pdo, (int) $pausadaReciente['id_conversacion'], 'pausado', 'Intervencion manual detectada.');
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-2 hours')), (int) $pausadaReciente['id_conversacion']]);
+
+        $activaVieja = aiGetOrCreateConversation($this->pdo, '5213300030003', null);
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-40 hours')), (int) $activaVieja['id_conversacion']]);
+
+        $cerradaVieja = aiGetOrCreateConversation($this->pdo, '5213300030004', null);
+        aiSetConversationState($this->pdo, (int) $cerradaVieja['id_conversacion'], 'cerrado', 'Cerrado automaticamente.');
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-40 hours')), (int) $cerradaVieja['id_conversacion']]);
+
+        $ids = array_map(
+            static fn(array $r) => (int) $r['id_conversacion'],
+            aiFindConversationsToAutoReactivate($this->pdo)
+        );
+
+        $this->assertContains((int) $pausadaVieja['id_conversacion'], $ids);
+        $this->assertNotContains((int) $pausadaReciente['id_conversacion'], $ids);
+        $this->assertNotContains((int) $activaVieja['id_conversacion'], $ids);
+        $this->assertNotContains((int) $cerradaVieja['id_conversacion'], $ids);
+    }
+
+    public function testAutoReactivateConversationSetsEstadoActivoYLimpiaMotivo(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030005', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiSetConversationState($this->pdo, $idConversacion, 'pausado', 'Intervencion manual detectada.');
+
+        aiAutoReactivateConversation($this->pdo, $idConversacion);
+
+        $row = $this->pdo->query('SELECT estado_bot, motivo_transferencia FROM whatsapp_conversaciones WHERE id_conversacion = ' . $idConversacion)->fetch();
+        $this->assertSame('activo', $row['estado_bot']);
+        $this->assertNull($row['motivo_transferencia']);
+    }
+
     public function testCustomerRepliedAfterFollowupDetectsNewerUserMessage(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020004', null);

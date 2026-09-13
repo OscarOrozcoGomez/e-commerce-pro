@@ -859,6 +859,11 @@ function aiHandleHumanOutboundMessage(PDO $pdo, string $waId, string $texto, ?st
 const AI_FOLLOWUP_INACTIVITY_HOURS = 24;
 const AI_FOLLOWUP_CLOSE_HOURS = 48;
 
+// Si un humano pauso el bot (intervencion manual o transferir_a_humano) y la conversacion
+// se queda muda -- ni el cliente ni el asesor vuelven a escribir -- Alex retoma solo despues
+// de este numero de horas, para no dejar al cliente sin atencion de forma indefinida.
+const AI_AUTO_REACTIVATE_INACTIVITY_HOURS = 24;
+
 /**
  * Conversaciones activas, sin seguimiento enviado todavia, cuyo ultimo mensaje realmente
  * mandado al cliente (rol=assistant, enviado_whatsapp=1) tiene mas de $horas de antiguedad.
@@ -996,6 +1001,39 @@ function aiCloseUnresponsiveConversation(PDO $pdo, int $idConversacion): void
         'cerrado',
         'Cerrado automaticamente: sin respuesta ' . AI_FOLLOWUP_CLOSE_HOURS . 'h despues del seguimiento.'
     );
+}
+
+/**
+ * Conversaciones pausadas (intervencion humana o transferir_a_humano) cuyo ultimo mensaje
+ * -- de cualquier rol, incluido el asesor escribiendo desde el celular -- tiene mas de
+ * $horas de antiguedad. No incluye 'cerrado': esas ya se dieron por perdidas via el cron
+ * de seguimiento y no deben revivir solas.
+ */
+function aiFindConversationsToAutoReactivate(PDO $pdo, int $horas = AI_AUTO_REACTIVATE_INACTIVITY_HOURS): array
+{
+    $stmt = $pdo->query(
+        "SELECT id_conversacion, wa_id, nombre_perfil, ultimo_mensaje_en
+         FROM whatsapp_conversaciones
+         WHERE estado_bot = 'pausado'"
+    );
+    $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+
+    $cutoff = time() - ($horas * 3600);
+
+    return array_values(array_filter($rows, static function (array $row) use ($cutoff): bool {
+        if (empty($row['ultimo_mensaje_en'])) {
+            return false;
+        }
+
+        $ts = strtotime((string)$row['ultimo_mensaje_en']);
+
+        return $ts !== false && $ts <= $cutoff;
+    }));
+}
+
+function aiAutoReactivateConversation(PDO $pdo, int $idConversacion): void
+{
+    aiSetConversationState($pdo, $idConversacion, 'activo', null);
 }
 
 function aiGetFollowupTemplateText(PDO $pdo): string

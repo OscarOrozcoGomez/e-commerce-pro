@@ -309,6 +309,11 @@ include __DIR__ . '/views/includes/header.php';
 </style>
 
 <div class="container" id="pdp-container" style="display: none; width: 90%; max-width: 1600px;">
+    <div style="padding-top: 15px;">
+        <a href="<?php echo BASE_URL; ?>views/catalogo.php" class="btn-flat blue-text text-darken-4 waves-effect" style="text-transform: none; font-weight: 600; padding-left: 0;">
+            <i class="material-icons left" style="margin-right: 4px;">arrow_back</i>Volver al Catálogo
+        </a>
+    </div>
     <div class="breadcrumb-nav">
         <a href="<?php echo BASE_URL; ?>index.php">Todos los productos</a> / <span id="bread-cat">Categoria</span> / <span id="bread-name" style="color: #999;">Cargando...</span>
     </div>
@@ -627,6 +632,7 @@ include __DIR__ . '/views/includes/header.php';
                         id_producto: currentProduct.id_producto,
                         nombre: currentProduct.display_cart_name || currentProduct.nombre,
                         precio: currentProduct.precio_venta,
+                        imagen: currentProduct.imagen || '',
                         quantity: qty
                     });
                 }
@@ -1097,4 +1103,5 @@ include __DIR__ . '/views/includes/header.php';
     }
 </script>
 
+<?php include __DIR__ . '/views/includes/floating_cart_widget.php'; ?>
 <?php include __DIR__ . '/views/includes/footer.php'; ?>
