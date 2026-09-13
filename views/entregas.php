@@ -158,6 +158,31 @@ if ($isRepartidorView && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['
                     $stmt = $pdo->prepare("UPDATE pedidos SET estado = 'entregado', fecha_entrega = NOW(), fecha_pago = NOW() WHERE id_pedido = ? AND id_repartidor = ? AND estado IN ('pendiente_pago','pagado','en_reparto')");
                     $stmt->execute([$id_pedido, $usuario['id_usuario']]);
                     if ($stmt->rowCount() > 0) {
+                        // El repartidor puede quitar el cargo de envio foraneo que Alex/el
+                        // checkout ya aplico si al llegar ve que el cliente en realidad esta
+                        // cerca del periferico. Se recalcula contra el total real en BD (nunca
+                        // se confia en un monto que venga del formulario).
+                        $stmtPedidoEnvio = $pdo->prepare('SELECT total, costo_envio FROM pedidos WHERE id_pedido = ? AND id_repartidor = ?');
+                        $stmtPedidoEnvio->execute([$id_pedido, $usuario['id_usuario']]);
+                        $pedidoEnvioRow = $stmtPedidoEnvio->fetch();
+                        $quitarCargoEnvio = deliveryQuitarCargoEnvio(
+                            !empty($_POST['quitar_cargo_periferico']),
+                            $pedidoEnvioRow['total'] ?? 0,
+                            $pedidoEnvioRow['costo_envio'] ?? 0
+                        );
+                        if ($quitarCargoEnvio['aplica']) {
+                            $stmtQuitarCargo = $pdo->prepare('UPDATE pedidos SET total = ?, costo_envio = 0 WHERE id_pedido = ? AND id_repartidor = ?');
+                            $stmtQuitarCargo->execute([$quitarCargoEnvio['nuevo_total'], $id_pedido, $usuario['id_usuario']]);
+                            logAudit(
+                                'PEDIDO_CARGO_ENVIO_QUITADO',
+                                'pedidos',
+                                $id_pedido,
+                                'Repartidor quito el cargo de $' . number_format($quitarCargoEnvio['monto_quitado'], 2)
+                                    . ' por entrega fuera del periferico (cliente estaba cerca). Nuevo total: $'
+                                    . number_format($quitarCargoEnvio['nuevo_total'], 2)
+                            );
+                        }
+
                         if ($entregaSinEvidencia) {
                             // Marcador en observaciones para que admin/encargado lo vea sin abrir
                             // el log de auditoria (mismo estilo que otros marcadores de esta pantalla).
@@ -976,6 +1001,10 @@ include __DIR__ . '/includes/header.php';
                                     $tieneEvidencia = !empty($ent['id_publicacion_evidencia']);
                                     $pubFacebookDone = !empty($ent['pub_facebook']);
                                     $pubWhatsappDone = !empty($ent['pub_whatsapp']);
+                                    // Cargo por entrega fuera del periferico que ya aplico Alex/el
+                                    // checkout: el repartidor puede quitarlo al cobrar si ve que el
+                                    // cliente en realidad esta cerca (ver deliveryQuitarCargoEnvio()).
+                                    $costoEnvioPedido = (float)($ent['costo_envio'] ?? 0);
                                 ?>
                                 <?php if ($entregado): ?>
                                     <!-- Ya se cobro: solo falta publicar en redes. Se queda aqui (no
@@ -1055,7 +1084,7 @@ include __DIR__ . '/includes/header.php';
                                          en_reparto. La venta se queda en esta lista (no desaparece) hasta que
                                          el repartidor confirma "ENTREGADO Y COBRADO" mas abajo. -->
                                     <p class="orange-text" style="font-size:0.85rem; margin-bottom:4px;">
-                                        <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                        <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong id="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>">$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                     </p>
                                     <p class="blue-text text-darken-2" style="font-size:0.85rem; margin-bottom:8px;">
                                         <i class="material-icons tiny">photo_camera</i> Sube una o varias fotos de evidencia antes de cobrar
@@ -1097,6 +1126,12 @@ include __DIR__ . '/includes/header.php';
                                             <?php endforeach; ?>
                                         </select>
                                         <input type="text" name="motivo_sin_evidencia_otro" data-omitir-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
+                                        <?php if ($costoEnvioPedido > 0): ?>
+                                            <label class="quitar-cargo-periferico-label" style="display:flex; align-items:flex-start; gap:8px; background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px 10px; margin-bottom:10px; cursor:pointer;">
+                                                <input type="checkbox" class="quitar-cargo-periferico" name="quitar_cargo_periferico" value="1" data-total="<?php echo esc(number_format((float)$ent['total'], 2, '.', '')); ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioPedido, 2, '.', '')); ?>" data-cobrar-target="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:3px;">
+                                                <span style="font-size:0.78rem; color:#7a4e00;">Este pedido trae un cargo de <strong>$<?php echo number_format($costoEnvioPedido, 2); ?></strong> por entrega fuera del periférico. Si el cliente esta cerca, puedes quitarlo.</span>
+                                            </label>
+                                        <?php endif; ?>
                                         <button type="submit" class="btn blue-grey darken-1 waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro SIN foto de evidencia? Quedara registrado el motivo.', 'blue-grey darken-1', 'Sí, entregar sin foto'); return false;">
                                             ENTREGAR SIN EVIDENCIA <i class="material-icons right">done_all</i>
                                         </button>
@@ -1109,8 +1144,14 @@ include __DIR__ . '/includes/header.php';
                                         <p class="green-text text-darken-2" style="font-size:0.8rem; margin-bottom:4px;">
                                             <i class="material-icons tiny">check_circle</i> Evidencia subida
                                         </p>
+                                        <?php if ($costoEnvioPedido > 0): ?>
+                                            <label class="quitar-cargo-periferico-label" style="display:flex; align-items:flex-start; gap:8px; background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px 10px; margin-bottom:8px; cursor:pointer;">
+                                                <input type="checkbox" class="quitar-cargo-periferico" name="quitar_cargo_periferico" value="1" data-total="<?php echo esc(number_format((float)$ent['total'], 2, '.', '')); ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioPedido, 2, '.', '')); ?>" data-cobrar-target="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:3px;">
+                                                <span style="font-size:0.78rem; color:#7a4e00;">Este pedido trae un cargo de <strong>$<?php echo number_format($costoEnvioPedido, 2); ?></strong> por entrega fuera del periférico. Si el cliente esta cerca, puedes quitarlo.</span>
+                                            </label>
+                                        <?php endif; ?>
                                         <p class="orange-text" style="font-size:0.85rem; margin-bottom:8px;">
-                                            <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong>$<?php echo number_format((float)$ent['total'], 2); ?></strong>
+                                            <i class="material-icons tiny">attach_money</i> Cobrar al entregar: <strong id="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>">$<?php echo number_format((float)$ent['total'], 2); ?></strong>
                                         </p>
                                         <button type="submit" class="btn green waves-effect waves-light w-100" onclick="event.preventDefault(); mceConfirmarFormulario(this.form, '¿Confirmas la entrega y el cobro de este pedido? Despues podras publicarlo en redes.', 'green', 'Sí, confirmar'); return false;">
                                             ENTREGADO Y COBRADO <i class="material-icons right">done_all</i>
@@ -1545,6 +1586,25 @@ document.addEventListener('DOMContentLoaded', function () {
             }, 250);
         })();
     }
+});
+</script>
+
+<script>
+// Checkbox "quitar cargo por entrega fuera del periferico": solo recalcula en vivo el
+// texto "Cobrar al entregar" que ve el repartidor; el monto real que se guarda lo
+// recalcula el servidor contra pedidos.costo_envio (ver deliveryQuitarCargoEnvio()),
+// nunca se confia en lo que mande el formulario.
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.quitar-cargo-periferico').forEach(function (chk) {
+        const targetEl = document.getElementById(chk.getAttribute('data-cobrar-target') || '');
+        if (!targetEl) return;
+        const total = parseFloat(chk.getAttribute('data-total') || '0') || 0;
+        const costoEnvio = parseFloat(chk.getAttribute('data-costo-envio') || '0') || 0;
+        chk.addEventListener('change', function () {
+            const monto = chk.checked ? Math.max(0, total - costoEnvio) : total;
+            targetEl.textContent = '$' + monto.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        });
+    });
 });
 </script>
 

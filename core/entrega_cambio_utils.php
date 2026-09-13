@@ -7,6 +7,7 @@ declare(strict_types=1);
  *  - Agrupacion de tarjetas por dia (encabezados de fecha legibles en espanol).
  *  - Validacion de "entregar sin evidencia" (el repartidor no tomo la foto).
  *  - Calculo del cambio a devolver cuando el cliente paga en efectivo.
+ *  - Quitar el cargo de envio foraneo cuando el repartidor ve que el cliente esta cerca.
  *
  * Sin dependencias de PDO ni de sesion para poder cubrirlas con pruebas unitarias.
  */
@@ -200,6 +201,40 @@ function deliveryParseMonto($valor): ?float
         return null;
     }
     return (float) $txt;
+}
+
+/**
+ * Recalcula el total del pedido si el repartidor decide quitar el cargo de envio foraneo
+ * (Alex/el checkout ya lo aplico porque la direccion cayo fuera del periferico, pero al
+ * llegar el repartidor ve que el cliente en realidad esta cerca). Nunca deja el total en
+ * negativo aunque costo_envio venga corrupto o mayor al total.
+ *
+ * Pura y testeable: no toca la base de datos, solo calcula. El caller (views/entregas.php)
+ * es quien decide si de verdad hay que persistir el nuevo total.
+ *
+ * @param bool  $solicitado  true si el repartidor marco el checkbox de quitar el cargo.
+ * @param mixed $total       pedidos.total actual (numero o texto).
+ * @param mixed $costoEnvio  pedidos.costo_envio actual (numero o texto).
+ * @return array{aplica: bool, nuevo_total: float, monto_quitado: float}
+ *   - aplica: true solo si se solicito Y hay un cargo real que quitar (costo_envio > 0).
+ *   - nuevo_total: total - costo_envio cuando aplica; total tal cual (redondeado, nunca
+ *     negativo) cuando no aplica.
+ */
+function deliveryQuitarCargoEnvio(bool $solicitado, $total, $costoEnvio): array
+{
+    $totalNum = deliveryParseMonto($total) ?? 0.0;
+    $totalNum = round(max(0.0, $totalNum), 2);
+    $costoNum = deliveryParseMonto($costoEnvio) ?? 0.0;
+
+    if (!$solicitado || $costoNum <= 0) {
+        return ['aplica' => false, 'nuevo_total' => $totalNum, 'monto_quitado' => 0.0];
+    }
+
+    return [
+        'aplica' => true,
+        'nuevo_total' => round(max(0.0, $totalNum - $costoNum), 2),
+        'monto_quitado' => round($costoNum, 2),
+    ];
 }
 
 /**

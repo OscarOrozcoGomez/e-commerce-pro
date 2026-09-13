@@ -598,10 +598,20 @@ include __DIR__ . '/includes/header.php';
         max-width: 100%;
         pointer-events: auto;
     }
-    .selected-customer-chip > span {
+    .selected-customer-chip > span,
+    .selected-customer-chip-name {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .selected-customer-chip-name {
+        color: inherit;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .selected-customer-chip-name:hover,
+    .selected-customer-chip-name:focus {
+        text-decoration: underline;
     }
     .selected-customer-chip-remove {
         border: none;
@@ -1314,9 +1324,13 @@ include __DIR__ . '/includes/header.php';
         }
 
         const chipLabel = escapeHtml(`${cliente.nombre || 'Cliente'}${cliente.telefono ? ` (${cliente.telefono})` : ''}`);
+        const idCliente = parseInt(cliente.id_cliente, 10) || 0;
+        const nameHtml = (CAN_MANAGE_CUSTOMERS && idCliente > 0)
+            ? `<a href="${MANAGE_CUSTOMERS_URL}?id_cliente=${idCliente}" target="_blank" rel="noopener noreferrer" class="selected-customer-chip-name" title="Editar este cliente en Administrar Clientes">${chipLabel}</a>`
+            : `<span>${chipLabel}</span>`;
         wrap.innerHTML = `
             <span class="selected-customer-chip" title="Cliente seleccionado">
-                <span>${chipLabel}</span>
+                ${nameHtml}
                 <button type="button" class="selected-customer-chip-remove" aria-label="Quitar cliente seleccionado">&times;</button>
             </span>
         `;
