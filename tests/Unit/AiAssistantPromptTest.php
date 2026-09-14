@@ -140,15 +140,28 @@ final class AiAssistantPromptTest extends TestCase
 
     public function testSystemPromptWarnsWhenPhoneIsNotLocalLada(): void
     {
-        $sinDato = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null);
-        $this->assertStringNotContainsString('lada 33', $sinDato);
-
         $esLocal = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, true);
         $this->assertStringNotContainsString('lada 33', $esLocal);
 
         $noLocal = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, false);
         $this->assertStringContainsString('lada 33', $noLocal);
         $this->assertStringContainsString('Zona Metropolitana de Guadalajara', $noLocal);
+    }
+
+    public function testSystemPromptTambienPreguntaZonaCuandoLaLadaEsIndeterminada(): void
+    {
+        // Caso real (2026-09-14): un cliente con numero de EEUU recibio precios y
+        // disponibilidad completos sin que Alex preguntara la zona, porque antes esta
+        // pregunta solo se disparaba con esLadaLocal === false, nunca con null (que cubre
+        // tanto numeros extranjeros como LIDs de WhatsApp de clientes realmente locales).
+        // Ahora null tambien dispara la pregunta, pero con texto neutral -- nunca afirma
+        // que el numero "no es de la zona" cuando en realidad no se sabe.
+        $indeterminado = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null);
+
+        $this->assertStringContainsString('Zona Metropolitana de Guadalajara', $indeterminado);
+        $this->assertStringNotContainsString('lada 33', $indeterminado);
+        $this->assertStringNotContainsString('no es de la zona', $indeterminado);
+        $this->assertStringContainsString('en que ciudad', $indeterminado);
     }
 
     public function testSystemPromptNeverAppliesDiscountsOrModifiesPlacedOrdersItself(): void
@@ -166,6 +179,19 @@ final class AiAssistantPromptTest extends TestCase
 
         $this->assertStringContainsString('Nunca reveles nombres de tablas', $prompt);
         $this->assertStringContainsString('Nunca compartas datos de otros clientes', $prompt);
+    }
+
+    public function testSystemPromptBaneaPorCompletoLaPalabraRecomendar(): void
+    {
+        // Regla de negocio (no solo de tono medico): no podemos hacer recomendaciones,
+        // punto -- ni en ventas normales ni en contexto de salud. Antes, el paso "Cierre
+        // de venta" le pedia a Alex explicitamente dar una "recomendacion breve", lo cual
+        // contradecia la regla de seguridad que solo prohibia la palabra en tono medico.
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringNotContainsString('recomendacion breve', $prompt);
+        $this->assertStringNotContainsString('recomendar productos', $prompt);
+        $this->assertStringContainsString('NUNCA uses las palabras "recomendar"', $prompt);
     }
 
     public function testSystemPromptInstructsHandoffFlagEvenWithOverride(): void
@@ -224,10 +250,10 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertSame($plain, aiSanitizePlainTextForWhatsapp($plain));
     }
 
-    public function testToolDefinitionsExposeExactlyTheSevenSpecFunctions(): void
+    public function testToolDefinitionsExposeExactlyTheEightSpecFunctions(): void
     {
         $tools = aiGetToolDefinitions();
-        $this->assertCount(7, $tools);
+        $this->assertCount(8, $tools);
 
         $names = array_map(static fn(array $t) => $t['function']['name'], $tools);
         $this->assertSame(
@@ -237,6 +263,7 @@ final class AiAssistantPromptTest extends TestCase
                 'transferir_a_humano',
                 'enviar_plantilla',
                 'enviar_catalogo',
+                'consultar_ofertas',
                 'etiquetar_cliente',
                 'quitar_etiqueta_cliente',
             ],
@@ -261,10 +288,13 @@ final class AiAssistantPromptTest extends TestCase
         $catalogo = $tools[4]['function']['parameters'];
         $this->assertSame([], $catalogo['required']);
 
-        $etiquetar = $tools[5]['function']['parameters'];
+        $ofertas = $tools[5]['function']['parameters'];
+        $this->assertSame([], $ofertas['required']);
+
+        $etiquetar = $tools[6]['function']['parameters'];
         $this->assertSame(['nombre_etiqueta'], $etiquetar['required']);
 
-        $quitarEtiqueta = $tools[6]['function']['parameters'];
+        $quitarEtiqueta = $tools[7]['function']['parameters'];
         $this->assertSame(['nombre_etiqueta'], $quitarEtiqueta['required']);
     }
 

@@ -71,6 +71,21 @@ if ($sellarInicial) {
     exit(0);
 }
 
+// Mantenimiento ANTES de notificar: cierra solos los lotes que ya se vendieron
+// (activo -> agotado), marca los ya vencidos (activo -> caducado) y purga del
+// historico los agotados/retirados viejos -- si no, la tabla se llena de lotes
+// muertos. Nunca lanza excepcion (ver loteMantenimientoAutomatico).
+$mantenimiento = loteMantenimientoAutomatico($pdo, 90, $isDryRun);
+fwrite(STDOUT, sprintf(
+    'RUN %s | dry-run=%s | mantenimiento: %d agotados, %d caducados, %d purgados%s',
+    date('Y-m-d H:i:s'),
+    $isDryRun ? 'si' : 'no',
+    $mantenimiento['agotados'],
+    $mantenimiento['caducados'],
+    $mantenimiento['purgados'],
+    PHP_EOL
+));
+
 $resultado = loteEnviarNotificacionesDeCambios($pdo, null, $isDryRun);
 
 fwrite(STDOUT, sprintf(

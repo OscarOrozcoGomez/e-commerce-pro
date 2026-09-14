@@ -74,9 +74,6 @@ include __DIR__ . '/includes/header.php';
                         <p class="display-metric" id="stat-ventas-hoy-total">0</p>
                         <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
                     </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="white-text">Agendar Pedido</a>
-                    </div>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -621,9 +618,6 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Ventas Hoy</span>
                         <p class="display-metric" id="stat-ventas-hoy-total">0</p>
                         <p class="text-small" id="stat-ventas-hoy-monto">$ 0.00</p>
-                    </div>
-                    <div class="card-action">
-                        <a href="<?php echo BASE_URL; ?>views/sales.php" class="white-text">Agendar Pedido</a>
                     </div>
                 </div>
             </div>

@@ -80,7 +80,7 @@ function dbCancelOrderByCustomer(PDO $pdo, int $idPedido, int $idUsuario, int $i
             return ['success' => false, 'message' => 'Este pedido ya fue entregado/recogido y no se puede cancelar.'];
         }
 
-        $stmtItems = $pdo->prepare("SELECT id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = ? AND cantidad > 0");
+        $stmtItems = $pdo->prepare("SELECT id_detalle, id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = ? AND cantidad > 0");
         $stmtItems->execute([$idPedido]);
         $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
@@ -89,6 +89,13 @@ function dbCancelOrderByCustomer(PDO $pdo, int $idPedido, int $idUsuario, int $i
         );
         foreach ($items as $item) {
             $stmtRestock->execute([(int)$item['cantidad'], (int)$item['id_producto'], (int)$pedido['id_almacen']]);
+            // Regresa las unidades a sus lotes de origen (best-effort, ver
+            // loteRegresarDetalleALotes): no hace nada si la venta no tenia lotes.
+            $lotesRegresados = loteRegresarDetalleALotes($pdo, (int)$item['id_detalle']);
+            $cantidadEsperada = (int)$item['cantidad'];
+            if ($lotesRegresados > 0 && $lotesRegresados < $cantidadEsperada) {
+                error_log("dbCancelOrderByCustomer: detalle {$item['id_detalle']} regreso solo {$lotesRegresados}/{$cantidadEsperada} unidades a lotes_inventario");
+            }
         }
 
         // Se arma el texto en PHP (en vez de CONCAT en SQL) para no depender de una

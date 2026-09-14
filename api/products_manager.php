@@ -46,7 +46,33 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':id_alm' => $id_alm]);
             echo json_encode(['success' => true, 'data' => $stmt->fetchAll()]);
-        } 
+        }
+        elseif ($action === 'get_one') {
+            // Como 'list' oculta productos con estado 'inactivo' (soft-delete de
+            // "Eliminar producto"), vistas que enlazan aquí por id (p.ej. Caducidades,
+            // que sigue mostrando lotes de un producto ya "eliminado") necesitan poder
+            // recuperarlo igual para poder editarlo o retirar sus lotes.
+            $id_alm = (int)($_GET['almacen_id'] ?? 1);
+            $id_prod = (int)($_GET['id_producto'] ?? 0);
+            $sql = "SELECT p.*,
+                    (SELECT pi2.ruta_archivo FROM producto_imagenes pi2 WHERE pi2.id_producto = p.id_producto ORDER BY pi2.orden ASC LIMIT 1) as imagen,
+                    GROUP_CONCAT(DISTINCT pc.id_categoria) as categorias_ids,
+                    GROUP_CONCAT(DISTINCT pi.ruta_archivo ORDER BY pi.orden ASC) as galeria_paths,
+                    COALESCE(ia.stock_minimo, 2) as stock_minimo,
+                    COALESCE(ia.stock_maximo, 5) as stock_maximo,
+                    COALESCE(ia.cantidad_actual, 0) as cantidad_actual,
+                    COALESCE((SELECT SUM(ia_total.cantidad_actual) FROM inventario_almacen ia_total WHERE ia_total.id_producto = p.id_producto), 0) as total_stock
+                    FROM productos p
+                    LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
+                    LEFT JOIN producto_imagenes pi ON p.id_producto = pi.id_producto
+                    LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_alm
+                    WHERE p.id_producto = :id_prod
+                    GROUP BY p.id_producto";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':id_alm' => $id_alm, ':id_prod' => $id_prod]);
+            $row = $stmt->fetch();
+            echo json_encode(['success' => true, 'data' => $row ?: null]);
+        }
         elseif ($action === 'get_dependencies') {
             // Carga almacenes y categorías para los dropdowns
             try {
@@ -562,7 +588,7 @@ try {
             // que cambiar el nombre/foto/precio de un producto reescribía cantidad_actual,
             // stock_minimo y stock_maximo del almacén seleccionado (y con el selector de la
             // lista podía terminar escribiendo en el almacén equivocado).
-            if (isAdmin() && ($data['stock_touched'] ?? '0') === '1') {
+            if (hasPermission('ajustar_inventario_producto') && ($data['stock_touched'] ?? '0') === '1') {
                 $id_alm = (int)($data['id_almacen_stock'] ?? 0);
                 if ($id_alm > 0) {
                     $nuevaCantidad = max(0, (int)($data['cantidad_actual'] ?? 0));

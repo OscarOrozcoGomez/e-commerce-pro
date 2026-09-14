@@ -21,6 +21,11 @@ $error = '';
 $success = '';
 $sessionFlashKey = 'manage_customers_flash';
 
+// Llegar con ?id_cliente=NN (p.ej. desde sales.php al hacer clic en el
+// nombre del cliente ya seleccionado) filtra el listado a ese cliente y
+// abre directamente su modal de edicion.
+$presetEditClienteId = (int)($_GET['id_cliente'] ?? 0);
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
@@ -1470,6 +1475,7 @@ include __DIR__ . '/includes/header.php';
 
 <script>
 const dirMapState = {};
+const PRESET_EDIT_CLIENT_ID = <?php echo (int)$presetEditClienteId; ?>;
 
 function initAutocompleteManageCustomers() {
     window.googleMapsReadyManageCustomers = true;
@@ -1762,6 +1768,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return nombre.includes(searchValue);
     }
 
+    let presetClienteId = PRESET_EDIT_CLIENT_ID > 0 ? String(PRESET_EDIT_CLIENT_ID) : null;
+
+    function matchesPreset(row) {
+        if (!presetClienteId) return true;
+        return row.getAttribute('data-client-id') === presetClienteId;
+    }
+
+    function clearPresetFilter() {
+        presetClienteId = null;
+    }
+
     function applyFilters() {
         const searchValue = (buscarInput?.value || '').trim().toLowerCase();
         const sucursalValue = (sucursalSelect?.value || '__todas__').toLowerCase();
@@ -1771,7 +1788,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let visibles = 0;
 
         tableRows.forEach((row) => {
-            const ok = matchesSearch(row, searchValue)
+            const ok = matchesPreset(row)
+                && matchesSearch(row, searchValue)
                 && matchesOrigen(row, origenValue)
                 && matchesAcceso(row, accesoValue)
                 && matchesEstado(row, estadoValue)
@@ -1790,12 +1808,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (buscarInput) {
-        buscarInput.addEventListener('input', applyFilters);
+        buscarInput.addEventListener('input', () => {
+            clearPresetFilter();
+            applyFilters();
+        });
     }
 
     [origenSelect, accesoSelect, estadoSelect, sucursalSelect].forEach((select) => {
         if (select) {
-            select.addEventListener('change', applyFilters);
+            select.addEventListener('change', () => {
+                clearPresetFilter();
+                applyFilters();
+            });
         }
     });
 
@@ -1806,6 +1830,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     applyFilters();
+
+    if (PRESET_EDIT_CLIENT_ID > 0) {
+        const targetRow = document.querySelector(`tr[data-client-id="${PRESET_EDIT_CLIENT_ID}"]`);
+        if (targetRow) {
+            targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        // Se espera a que M.AutoInit() del footer termine de (re)inicializar los
+        // modales de la pagina; si se abre antes, ese AutoInit pisa la instancia
+        // y el modal nunca llega a mostrarse (mismo problema documentado arriba
+        // para el buscador de direcciones).
+        setTimeout(() => {
+            const modalEl = document.getElementById(`modal-editar-cliente-${PRESET_EDIT_CLIENT_ID}`);
+            if (!modalEl) return;
+            const instance = M.Modal.getInstance(modalEl) || M.Modal.init(modalEl);
+            instance.open();
+        }, 400);
+    }
 
     const cardsContainer = document.querySelector('.manage-customers-cards');
     document.querySelectorAll('.alpha-index-letter[data-letter]').forEach((letterEl) => {

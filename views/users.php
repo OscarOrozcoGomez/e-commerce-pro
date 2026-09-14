@@ -840,12 +840,16 @@ include __DIR__ . '/includes/header.php';
 
 <!-- ===== MODAL: Permisos individuales del usuario (Fase 3) ===== -->
 <div id="modalPermUser" class="modal modal-fixed-footer">
+    <button type="button" class="modal-close up-close" aria-label="Cerrar"
+            style="position:absolute;top:8px;right:10px;z-index:3;background:none;border:none;cursor:pointer;padding:6px;line-height:1;">
+        <i class="material-icons grey-text text-darken-1">close</i>
+    </button>
     <form method="POST" id="upPermForm">
         <?php echo csrfInput(); ?>
         <input type="hidden" name="accion" value="guardar_permisos_usuario">
         <input type="hidden" name="id_usuario" id="upUserId" value="">
         <div class="modal-content">
-            <h5 style="font-weight:700;margin-top:0;">Permisos de <span id="upUserName"></span></h5>
+            <h5 style="font-weight:700;margin-top:0;padding-right:32px;">Permisos de <span id="upUserName"></span></h5>
             <p class="grey-text" id="upUserMeta" style="margin-top:-4px;"></p>
             <p class="grey-text" style="font-size:13px;">
                 Activa lo que quieres que tenga <b>esta persona</b>. Lo que viene de su rol ya está activo;
@@ -867,7 +871,7 @@ include __DIR__ . '/includes/header.php';
             </p>
         </div>
         <div class="modal-footer">
-            <a href="#!" class="modal-close btn-flat">Cancelar</a>
+            <button type="button" class="modal-close up-close btn-flat">Cancelar</button>
             <button type="submit" class="btn green darken-1 waves-effect"><i class="material-icons left">save</i> Guardar permisos</button>
         </div>
     </form>
@@ -906,8 +910,25 @@ include __DIR__ . '/includes/header.php';
             syncInvitar();
         }
 
+        // El footer ya llama M.AutoInit(), que inicializa este .modal. Si ademas lo
+        // inicializabamos aqui, quedaban DOS instancias Materialize sobre el mismo
+        // nodo y sus overlays se desincronizaban: el modal se abria pero ni "Cancelar"
+        // ni el clic en el fondo ni Esc lo cerraban. Ahora se reutiliza la instancia
+        // de AutoInit (y solo se crea aqui si por lo que sea AutoInit no corrio).
         var modalEl = document.getElementById('modalPermUser');
-        var modal = modalEl ? M.Modal.init(modalEl) : null;
+        function getPermModal() {
+            if (!modalEl || typeof M === 'undefined' || !M.Modal) return null;
+            return M.Modal.getInstance(modalEl) || M.Modal.init(modalEl);
+        }
+
+        // Cierre robusto: no dependemos solo del binding de .modal-close.
+        (modalEl ? modalEl.querySelectorAll('.up-close') : []).forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                var inst = getPermModal();
+                if (inst) inst.close();
+            });
+        });
 
         function escHtml(str) {
             return String(str == null ? '' : str)
@@ -988,7 +1009,8 @@ include __DIR__ . '/includes/header.php';
                     cb.addEventListener('change', refreshTags);
                 });
                 refreshTags();
-                if (modal) modal.open();
+                var inst = getPermModal();
+                if (inst) inst.open();
             });
         });
     });

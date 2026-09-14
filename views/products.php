@@ -8,6 +8,19 @@ require_once __DIR__ . '/../core/auth.php';
 requireAuth();
 requirePermission('gestionar_productos', BASE_URL . 'views/dashboard.php');
 $pageTitle = 'Gestionar Productos';
+
+// Botón de regreso contextual. Algunas vistas enlazan aquí para "ver / editar" un
+// producto (hoy: Control de Caducidades, pestañas Caducidades e Inconsistencias).
+// Sin esto, products.php solo ofrece "Volver al Dashboard" y el usuario pierde el
+// hilo de dónde venía. Se activa solo si el enlace trae ?from=...
+$volverUrl = '';
+$volverLabel = '';
+if ((string) ($_GET['from'] ?? '') === 'caducidades') {
+    $backTab = ($_GET['back_tab'] ?? '') === 'inc' ? '?tab=inc' : '';
+    $volverUrl = BASE_URL . 'views/caducidades.php' . $backTab;
+    $volverLabel = 'Volver a Caducidades';
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 <!-- Librería para Arrastrar y Soltar -->
@@ -20,6 +33,9 @@ include __DIR__ . '/includes/header.php';
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; flex-wrap: wrap; gap: 8px;">
                 <h4 style="margin: 0;">Gestionar Productos</h4>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <?php if ($volverUrl !== ''): ?>
+                        <a href="<?php echo esc($volverUrl); ?>" class="btn orange darken-3 waves-effect waves-light"><i class="material-icons left">arrow_back</i> <?php echo esc($volverLabel); ?></a>
+                    <?php endif; ?>
                     <?php if (canBulkAssignCategories()): ?>
                         <a href="bulk_assign_category.php" class="btn purple darken-1 waves-effect waves-light"><i class="material-icons left">label</i> Asignar Categoría a Varios</a>
                     <?php endif; ?>
@@ -74,18 +90,6 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
-                            <input type="text" id="sku" name="sku">
-                            <label for="sku">SKU (Código Interno)</label>
-                            <span class="helper-text">Opcional</span>
-                        </div>
-
-                        <div class="input-field">
-                            <input type="text" id="codigo_barras" name="codigo_barras">
-                            <label for="codigo_barras">Código de Barras</label>
-                            <span class="helper-text">Opcional</span>
-                        </div>
-                        
-                        <div class="input-field">
                             <textarea id="descripcion" name="descripcion" class="materialize-textarea" placeholder="Breve resumen comercial..."></textarea>
                             <label for="descripcion">Descripción</label>
                         </div>
@@ -128,60 +132,24 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="input-field">
-                            <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea json-textarea-constrained" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
-                            <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
-                            <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
-                        </div>
-
-                        <div class="input-field" style="margin-bottom: 20px;">
-                            <div class="switch">
-                                <label>
-                                    Ocultar Tabla
-                                    <input type="checkbox" name="mostrar_tabla" id="mostrar_tabla" value="1" checked>
-                                    <span class="lever"></span>
-                                    Mostrar Información Nutrimental
-                                </label>
-                            </div>
-                        </div>
-
-                        <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
-                        
-                        <div class="input-field">
                             <select id="unidad" name="unidad" class="browser-default" style="border: 1px solid #ccc; border-radius: 4px;">
                                 <option value="" disabled selected>Presentación / Unidad (Elegir)</option>
                             </select>
                             <span class="helper-text">Ej: Cápsulas, Gramos (g), Mililitros (ml)...</span>
                         </div>
 
-                        <div class="row" style="margin-bottom:0;">
-                            <div class="input-field col s6">
-                                <input type="number" min="0" id="capsulas_por_envase" name="capsulas_por_envase">
-                                <label for="capsulas_por_envase">Cápsulas por envase</label>
-                            </div>
-                            <div class="input-field col s6">
-                                <input type="number" min="0" id="porcion_capsulas" name="porcion_capsulas">
-                                <label for="porcion_capsulas">Cápsulas por porción</label>
-                            </div>
-                            <span class="helper-text col s12" style="margin-top:-10px;">Opcional. Se usa en el Control de Caducidades para capturar lotes "en cápsulas" y para calcular cuánto rinde un envase.</span>
-                            <span class="col s12 teal-text" id="rinde-hint" style="font-size:.85rem;"></span>
-                        </div>
-                        <script>
-                        (function(){
-                          function rinde(){
-                            var c = parseInt(document.getElementById('capsulas_por_envase').value || '0', 10);
-                            var p = parseInt(document.getElementById('porcion_capsulas').value || '0', 10) || 1;
-                            var el = document.getElementById('rinde-hint');
-                            el.textContent = c > 0 ? ('Rinde ≈ ' + Math.floor(c / p) + ' días por envase (' + c + ' ÷ ' + p + '/toma)') : '';
-                          }
-                          ['capsulas_por_envase','porcion_capsulas'].forEach(function(id){
-                            document.getElementById(id).addEventListener('input', rinde);
-                          });
-                        })();
-                        </script>
-
                         <div id="lotes-producto-wrap" style="display:none; margin: 15px 0; padding: 12px; border: 1px solid #ffcc80; border-radius: 4px; background: #fff8e1;">
                             <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
+                            <p class="grey-text" style="margin:0 0 8px; font-size:.85rem;">Se registran en el almacén elegido arriba en "Control de Inventario" (<span id="lp-almacen-nombre">-</span>).</p>
                             <div id="lotes-producto-tabla" style="overflow-x:auto;"></div>
+                            <div style="margin-top:10px;">
+                                <button type="button" class="btn-small blue waves-effect" id="btn-lote-camara">
+                                    <i class="material-icons left" style="margin-right:4px;">photo_camera</i>Escanear etiqueta
+                                </button>
+                                <input type="file" accept="image/*" capture="environment" id="lp-ocr-input" style="display:none;">
+                                <span id="lp-ocr-status" class="grey-text" style="margin-left:8px; font-size:.85rem;"></span>
+                                <input type="hidden" id="lp-aproximada" value="0">
+                            </div>
                             <div class="row" style="margin: 10px 0 0;">
                                 <div class="input-field col s6 m3" style="margin-top:0;">
                                     <input type="text" id="lp-codigo">
@@ -219,29 +187,91 @@ include __DIR__ . '/includes/header.php';
                             <label for="precio_venta">Precio de Venta</label>
                         </div>
 
-                        <div class="input-field">
-                            <input type="number" id="precio_comparacion" name="precio_comparacion" step="0.01" value="0">
-                            <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
-                        </div>
+                        <details id="advanced-fields-details" class="product-advanced-fields">
+                            <summary>Campos avanzados / opcionales (SKU, código de barras, nutrimental, cápsulas, precios de comparación/oferta)</summary>
+                            <div class="product-advanced-fields-body">
+                                <div class="input-field">
+                                    <input type="text" id="sku" name="sku">
+                                    <label for="sku">SKU (Código Interno)</label>
+                                    <span class="helper-text">Opcional</span>
+                                </div>
 
-                        <div class="input-field">
-                            <input type="number" id="precio_oferta" name="precio_oferta" step="0.01" placeholder="Vacío = automático (costo + $50)">
-                            <label for="precio_oferta" class="active">Precio de Oferta</label>
-                            <span class="helper-text">Solo se usa cuando el producto está en la categoría "Ofertas". Vacío = costo + $50 automático.</span>
-                            <button type="button" id="btn-sugerir-oferta" class="btn-small grey lighten-1 black-text" style="margin-top:6px;">Sugerir (costo + $50)</button>
-                        </div>
-                        <script>
-                        (function(){
-                          var btn = document.getElementById('btn-sugerir-oferta');
-                          if (!btn) return;
-                          btn.addEventListener('click', function(){
-                            var costo = parseFloat(document.getElementById('precio_costo').value || '0') || 0;
-                            var of = document.getElementById('precio_oferta');
-                            of.value = (Math.round((costo + 50) * 100) / 100).toFixed(2);
-                            if (window.M && M.updateTextFields) M.updateTextFields();
-                          });
-                        })();
-                        </script>
+                                <div class="input-field">
+                                    <input type="text" id="codigo_barras" name="codigo_barras">
+                                    <label for="codigo_barras">Código de Barras</label>
+                                    <span class="helper-text">Opcional</span>
+                                </div>
+
+                                <div class="input-field">
+                                    <textarea id="tabla_nutrimental" name="tabla_nutrimental" class="materialize-textarea json-textarea-constrained" placeholder='[{"label":"Sodio","porcion":"0.05mg","total":"10mg"}]' oninput="renderNutritionalPreview()"></textarea>
+                                    <label for="tabla_nutrimental">Información Nutrimental (Formato JSON)</label>
+                                    <span class="helper-text">Pega aquí el array de datos o usa el formato: [{"label":"Nutriente","porcion":"X","total":"Y"}]</span>
+                                </div>
+
+                                <div class="input-field" style="margin-bottom: 20px;">
+                                    <div class="switch">
+                                        <label>
+                                            Ocultar Tabla
+                                            <input type="checkbox" name="mostrar_tabla" id="mostrar_tabla" value="1" checked>
+                                            <span class="lever"></span>
+                                            Mostrar Información Nutrimental
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div id="nutritional-preview-container" style="margin-bottom: 20px;"></div>
+
+                                <div class="row" style="margin-bottom:0;">
+                                    <div class="input-field col s6">
+                                        <input type="number" min="0" id="capsulas_por_envase" name="capsulas_por_envase">
+                                        <label for="capsulas_por_envase">Cápsulas por envase</label>
+                                    </div>
+                                    <div class="input-field col s6">
+                                        <input type="number" min="0" id="porcion_capsulas" name="porcion_capsulas">
+                                        <label for="porcion_capsulas">Cápsulas por porción</label>
+                                    </div>
+                                    <span class="helper-text col s12" style="margin-top:-10px;">Opcional. Se usa en el Control de Caducidades para capturar lotes "en cápsulas" y para calcular cuánto rinde un envase.</span>
+                                    <span class="col s12 teal-text" id="rinde-hint" style="font-size:.85rem;"></span>
+                                </div>
+                                <script>
+                                (function(){
+                                  function rinde(){
+                                    var c = parseInt(document.getElementById('capsulas_por_envase').value || '0', 10);
+                                    var p = parseInt(document.getElementById('porcion_capsulas').value || '0', 10) || 1;
+                                    var el = document.getElementById('rinde-hint');
+                                    el.textContent = c > 0 ? ('Rinde ≈ ' + Math.floor(c / p) + ' días por envase (' + c + ' ÷ ' + p + '/toma)') : '';
+                                  }
+                                  ['capsulas_por_envase','porcion_capsulas'].forEach(function(id){
+                                    document.getElementById(id).addEventListener('input', rinde);
+                                  });
+                                })();
+                                </script>
+
+                                <div class="input-field">
+                                    <input type="number" id="precio_comparacion" name="precio_comparacion" step="0.01" value="0">
+                                    <label for="precio_comparacion">Precio de Comparación (Tachado)</label>
+                                </div>
+
+                                <div class="input-field">
+                                    <input type="number" id="precio_oferta" name="precio_oferta" step="0.01" placeholder="Vacío = automático (costo + $50)">
+                                    <label for="precio_oferta" class="active">Precio de Oferta</label>
+                                    <span class="helper-text">Solo se usa cuando el producto está en la categoría "Ofertas". Vacío = costo + $50 automático.</span>
+                                    <button type="button" id="btn-sugerir-oferta" class="btn-small grey lighten-1 black-text" style="margin-top:6px;">Sugerir (costo + $50)</button>
+                                </div>
+                                <script>
+                                (function(){
+                                  var btn = document.getElementById('btn-sugerir-oferta');
+                                  if (!btn) return;
+                                  btn.addEventListener('click', function(){
+                                    var costo = parseFloat(document.getElementById('precio_costo').value || '0') || 0;
+                                    var of = document.getElementById('precio_oferta');
+                                    of.value = (Math.round((costo + 50) * 100) / 100).toFixed(2);
+                                    if (window.M && M.updateTextFields) M.updateTextFields();
+                                  });
+                                })();
+                                </script>
+                            </div>
+                        </details>
 
                         <div class="input-field" style="margin-top: 30px; margin-bottom: 30px;">
                             <div class="switch">
@@ -272,7 +302,7 @@ include __DIR__ . '/includes/header.php';
                             <label>Asignar Categorías</label>
                         </div>
 
-                        <?php if (isAdmin()): ?>
+                        <?php if (hasPermission('ajustar_inventario_producto')): ?>
                         <div class="row grey lighten-4" style="padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
                             <div class="col s12"><p style="margin:0 0 10px 0;"><strong>Control de Inventario</strong></p></div>
                             <!-- Solo se escribe inventario_almacen si el usuario tocó de verdad alguno de los
@@ -412,9 +442,15 @@ include __DIR__ . '/includes/header.php';
             .then(r => r.json())
             .then(res => {
                 if(!res.success) throw new Error(res.message);
-                
+
                 const fullData = res.blife_data;
-                
+
+                // SINC llena SKU, código de barras y tabla nutrimental, que viven
+                // dentro del acordeón de campos avanzados: se abre para que se vea
+                // lo que acaba de traer sin que el usuario tenga que buscarlo.
+                const advancedDetailsSinc = document.getElementById('advanced-fields-details');
+                if (advancedDetailsSinc) advancedDetailsSinc.open = true;
+
                 // 1. Llenar Ingredientes y Modo de Uso si vienen en la API
                 if (fullData.producto) {
                     // Extraer ingredientes: puede venir en .ingredients o como una fila en la tabla
@@ -854,6 +890,11 @@ include __DIR__ . '/includes/header.php';
         // Actualizar previsualización cuando se mueva el toggle de mostrar/ocultar
         document.getElementById('mostrar_tabla')?.addEventListener('change', renderNutritionalPreview);
 
+        // Los lotes que se agreguen deben quedar etiquetados con el almacén que se
+        // está viendo aquí (si no, el filtro por almacén de Caducidades > Inconsistencias
+        // nunca puede ubicar sus lotes: ver id_almacen en loteFetchDescuadres).
+        document.getElementById('id_almacen_stock')?.addEventListener('change', actualizarLpAlmacenNombre);
+
         // Inicializar el Drag and Drop en el contenedor de previsualización
         const previewContainer = document.getElementById('preview-container');
         if (previewContainer) {
@@ -950,7 +991,8 @@ include __DIR__ . '/includes/header.php';
                     if(!el) return;
                     el.innerHTML = res.almacenes.map(a => `<option value="${a.id_almacen}">${a.nombre}</option>`).join('');
                 });
-                
+                actualizarLpAlmacenNombre();
+
                 // Llenar categorías
                 const catSelect = document.getElementById('select-categorias');
                 catSelect.innerHTML = '<option value="" disabled>Selecciona una o varias categorías</option>' + 
@@ -1032,15 +1074,47 @@ include __DIR__ . '/includes/header.php';
             });
     }
 
+    function actualizarLpAlmacenNombre() {
+        const sel = document.getElementById('id_almacen_stock');
+        const label = document.getElementById('lp-almacen-nombre');
+        if (!sel || !label) return;
+        const opt = sel.options[sel.selectedIndex];
+        label.textContent = opt ? opt.textContent : '-';
+    }
+
     function autoOpenPendingEdit(products) {
         if (!pendingEditProductId || !Array.isArray(products)) return;
 
-        const product = products.find(p => String(p.id_producto) === pendingEditProductId);
-        if (!product) return;
+        const idBuscado = pendingEditProductId;
+        const product = products.find(p => String(p.id_producto) === idBuscado);
+        if (product) {
+            pendingEditProductId = '';
+            abrirEditar(product);
+            scrollToEditForm();
+            return;
+        }
 
+        // No aparece en el listado (p.ej. quedó "eliminado" -> estado 'inactivo' -
+        // pero todavía tiene lotes por caducar en Control de Caducidades): buscarlo
+        // directo por id para poder abrirlo igual y retirar/editar sus lotes.
         pendingEditProductId = '';
-        abrirEditar(product);
+        const almacenId = document.getElementById('almacen_view_selector')?.value || 1;
+        fetch(`${BASE_API}?action=get_one&id_producto=${idBuscado}&almacen_id=${almacenId}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.success && res.data) {
+                    abrirEditar(res.data);
+                    scrollToEditForm();
+                } else {
+                    M.toast({ html: 'No se encontró ese producto (¿fue eliminado?).', classes: 'red' });
+                }
+            })
+            .catch(() => {
+                M.toast({ html: 'No se pudo cargar ese producto.', classes: 'red' });
+            });
+    }
 
+    function scrollToEditForm() {
         const targetCard = document.getElementById('form-title');
         if (targetCard) {
             targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1275,6 +1349,7 @@ include __DIR__ . '/includes/header.php';
         if (stockWarehouseSelector && currentViewWarehouse) {
             stockWarehouseSelector.value = String(currentViewWarehouse);
         }
+        actualizarLpAlmacenNombre();
 
         document.getElementById('accion').value = 'editar';
         document.getElementById('id_producto').value = prod.id_producto;
@@ -1299,6 +1374,11 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('precio_venta').value = prod.precio_venta;
         document.getElementById('precio_comparacion').value = prod.precio_comparacion || 0;
         document.getElementById('precio_oferta').value = (prod.precio_oferta === null || prod.precio_oferta === undefined || prod.precio_oferta === '') ? '' : prod.precio_oferta;
+
+        // Al editar, siempre se abre: puede traer SKU/código de barras/nutrimental
+        // ya capturados y no queremos esconderlos dentro del acordeón.
+        const advancedDetails = document.getElementById('advanced-fields-details');
+        if (advancedDetails) advancedDetails.open = true;
 
         // Manejo del Autocomplete de Padre
         const idPadreHidden = document.getElementById('id_padre');
@@ -1404,8 +1484,12 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('capsulas_por_envase').value = '';
         document.getElementById('porcion_capsulas').value = '';
 
+        const advancedDetails = document.getElementById('advanced-fields-details');
+        if (advancedDetails) advancedDetails.open = false;
+
         document.getElementById('lotes-producto-wrap').style.display = 'none';
         document.getElementById('lotes-producto-tabla').innerHTML = '';
+        document.getElementById('lp-aproximada').value = '0';
         loteProductoActualId = null;
 
         document.getElementById('search_padre').value = '';
@@ -1575,16 +1659,107 @@ include __DIR__ . '/includes/header.php';
         postLote({
             accion: 'guardar', id_lote: 0, id_producto: loteProductoActualId,
             codigo_lote: codigo, fecha_caducidad: fecha, cantidad: cantidad,
+            caducidad_aproximada: document.getElementById('lp-aproximada').value || '0',
+            id_almacen: document.getElementById('id_almacen_stock')?.value || '',
         }).then(res => {
             despuesDeLote(res);
             if (res.success) {
                 document.getElementById('lp-codigo').value = '';
                 document.getElementById('lp-fecha').value = '';
                 document.getElementById('lp-cantidad').value = '';
+                document.getElementById('lp-aproximada').value = '0';
                 M.updateTextFields();
             }
         });
     };
+
+    /* ------------------------- Escanear etiqueta (lote/caducidad) ------------------------- */
+
+    document.getElementById('btn-lote-camara')?.addEventListener('click', function () {
+        document.getElementById('lp-ocr-input').click();
+    });
+
+    document.getElementById('lp-ocr-input')?.addEventListener('change', function (e) {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+
+        const status = document.getElementById('lp-ocr-status');
+        status.textContent = 'Leyendo etiqueta...';
+
+        const lector = new FileReader();
+        lector.onload = function () {
+            const img = new Image();
+            img.onload = function () {
+                // Reducir la foto antes de mandarla: más rápido y de sobra para que Vision lea texto.
+                const maxLado = 1600;
+                let w = img.width, h = img.height;
+                if (w > maxLado || h > maxLado) {
+                    const escala = maxLado / Math.max(w, h);
+                    w = Math.round(w * escala);
+                    h = Math.round(h * escala);
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                enviarFotoLote(canvas.toDataURL('image/jpeg', 0.85), status);
+            };
+            img.src = lector.result;
+        };
+        lector.readAsDataURL(file);
+    });
+
+    function enviarFotoLote(dataUrl, status) {
+        const payload = new URLSearchParams({
+            imagen: dataUrl,
+            csrf_token: document.querySelector('input[name="csrf_token"]').value,
+        });
+        fetch('<?php echo BASE_URL; ?>api/lote_ocr.php', { method: 'POST', body: payload })
+            .then(r => r.json())
+            .then(res => {
+                status.textContent = '';
+                if (!res.success) {
+                    M.toast({html: res.message || 'No se pudo leer la etiqueta', classes: 'red'});
+                    return;
+                }
+                const leido = [];
+                const loteConHuecos = !!(res.codigo_lote && res.codigo_lote.includes('_'));
+                if (res.codigo_lote) {
+                    document.getElementById('lp-codigo').value = res.codigo_lote;
+                    leido.push('lote');
+                }
+                if (res.fecha_caducidad) {
+                    document.getElementById('lp-fecha').value = res.fecha_caducidad;
+                    document.getElementById('lp-aproximada').value = res.caducidad_aproximada ? '1' : '0';
+                    leido.push('caducidad');
+                }
+                M.updateTextFields();
+                if (loteConHuecos) {
+                    // "_" = caracter que Vision no pudo leer con confianza (típico: texto
+                    // partido por la costura del bote). No se adivina: se marca para que
+                    // el usuario lo complete viendo el bote de cerca.
+                    const campoCodigo = document.getElementById('lp-codigo');
+                    campoCodigo.focus();
+                    campoCodigo.select();
+                    M.toast({html: 'Hay caracteres del lote que no se leyeron bien (marcados con "_"). Complétalos viendo el bote de cerca.', classes: 'orange', displayLength: 6000});
+                } else if (leido.length === 2) {
+                    M.toast({
+                        html: 'Lote y caducidad detectados' + (res.caducidad_aproximada ? ' (día aproximado, fin de mes)' : '') + '. Solo falta la cantidad.',
+                        classes: 'green',
+                    });
+                    document.getElementById('lp-cantidad').focus();
+                } else if (leido.length === 1) {
+                    M.toast({html: 'Solo se detectó ' + (leido[0] === 'lote' ? 'el código de lote' : 'la caducidad') + '. Completa lo demás a mano.', classes: 'orange'});
+                } else {
+                    M.toast({html: 'No se detectó lote ni caducidad en la foto. Captúralos a mano.', classes: 'orange'});
+                }
+            })
+            .catch(() => {
+                status.textContent = '';
+                M.toast({html: 'Error de conexión al leer la etiqueta', classes: 'red'});
+            });
+    }
 
     window.ajustarLote = function (id, actual) {
         const val = prompt('Nueva cantidad restante:', actual);
@@ -1636,6 +1811,33 @@ include __DIR__ . '/includes/header.php';
 </script>
 
 <style>
+    .product-advanced-fields {
+        margin: 15px 0 25px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px 12px;
+        background: #fafafa;
+    }
+    .product-advanced-fields > summary {
+        cursor: pointer;
+        padding: 10px 0;
+        font-weight: 500;
+        color: #455a64;
+        list-style: none;
+    }
+    .product-advanced-fields > summary::-webkit-details-marker {
+        display: none;
+    }
+    .product-advanced-fields > summary::before {
+        content: '▸ ';
+    }
+    .product-advanced-fields[open] > summary::before {
+        content: '▾ ';
+    }
+    .product-advanced-fields-body {
+        padding: 4px 0 10px;
+        border-top: 1px solid #e0e0e0;
+    }
     .centered-table-preview {
         font-size: 0.8rem;
         border: 1px solid #e0e0e0;

@@ -136,6 +136,12 @@ function dbMarkProductoNoEntregado(PDO $pdo, int $idPedido, int $idDetalle, ?int
                 ':usuario' => $idUsuarioAccion,
                 ':observacion' => 'Producto no entregado, pedido #' . $idPedido . ': ' . $motivoEtiqueta,
             ]);
+
+            // Regresa las unidades a sus lotes de origen (best-effort).
+            $lotesRegresados = loteRegresarDetalleALotes($pdo, $idDetalle);
+            if ($lotesRegresados > 0 && $lotesRegresados < $cantidad) {
+                error_log("dbMarkProductoNoEntregado: detalle {$idDetalle} regreso solo {$lotesRegresados}/{$cantidad} unidades a lotes_inventario");
+            }
         }
 
         $stmtRechazar = $pdo->prepare("UPDATE detalle_pedidos SET estado_entrega = 'rechazado', motivo_rechazo = :motivo WHERE id_detalle = :id_detalle");
@@ -234,7 +240,7 @@ function dbCancelarPedidoCompleto(PDO $pdo, int $idPedido, ?int $idRepartidorFil
 
         // Solo restituye lo que sigue 'entregado': un item ya 'rechazado' (quitado antes de
         // cancelar todo el pedido) ya devolvio su cantidad al inventario en ese momento.
-        $stmtItems = $pdo->prepare("SELECT id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = :id_pedido AND cantidad > 0 AND estado_entrega = 'entregado'{$lockClause}");
+        $stmtItems = $pdo->prepare("SELECT id_detalle, id_producto, cantidad FROM detalle_pedidos WHERE id_pedido = :id_pedido AND cantidad > 0 AND estado_entrega = 'entregado'{$lockClause}");
         $stmtItems->execute([':id_pedido' => $idPedido]);
         $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
 
@@ -279,6 +285,13 @@ function dbCancelarPedidoCompleto(PDO $pdo, int $idPedido, ?int $idRepartidorFil
                 ':usuario' => $idUsuarioAccion,
                 ':observacion' => 'Pedido #' . $idPedido . ' cancelado por completo. Motivo: ' . $motivoEtiqueta,
             ]);
+
+            // Regresa las unidades a sus lotes de origen (best-effort).
+            $idDetalleIt = (int)($it['id_detalle'] ?? 0);
+            $lotesRegresados = loteRegresarDetalleALotes($pdo, $idDetalleIt);
+            if ($lotesRegresados > 0 && $lotesRegresados < $cantidad) {
+                error_log("dbCancelarPedidoCompleto: detalle {$idDetalleIt} regreso solo {$lotesRegresados}/{$cantidad} unidades a lotes_inventario");
+            }
         }
 
         $obsActual = (string)($pedido['observaciones'] ?? '');

@@ -95,9 +95,25 @@ sendSecurityHeaders();
 
 // Rutas y constantes del proyecto (definidas temprano para manejo de errores seguro).
 if (!defined('BASE_URL')) {
-    // Detección automática: si es localhost usa la subcarpeta, si no, usa la raíz.
+    // Detección automática: en red local (localhost, 127.0.0.1, IP privada de LAN
+    // para probar desde el teléfono, o hostname .local/.lan) usa la subcarpeta bajo
+    // htdocs; en remoto (dominio público) usa la raíz.
     $host = $_SERVER['HTTP_HOST'] ?? '';
-    if (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false) {
+    $hostSinPuerto = (string) preg_replace('/:\d+$/', '', $host);
+    // Túneles de desarrollo (Cloudflare quick tunnel, ngrok, localtunnel, etc.) que
+    // exponen el XAMPP local hacia afuera: ningún sitio de producción se sirve desde
+    // estos dominios, así que se tratan como red local para conservar la subcarpeta.
+    $esTunelDev = preg_match(
+        '/(\.trycloudflare\.com|\.ngrok\.io|\.ngrok-free\.app|\.ngrok\.app|\.loca\.lt|\.lhr\.life|\.serveo\.net)$/',
+        $hostSinPuerto
+    ) === 1;
+    $esRedLocal = strpos($host, 'localhost') !== false
+        || strpos($host, '127.0.0.1') !== false
+        || substr($hostSinPuerto, -6) === '.local'
+        || substr($hostSinPuerto, -4) === '.lan'
+        || $esTunelDev
+        || preg_match('/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/', $hostSinPuerto) === 1;
+    if ($esRedLocal) {
         // Deriva la subcarpeta del propio script para que un git worktree servido en
         // htdocs (p.ej. /e-commerce-pro-roles-permisos/) también funcione en el navegador
         // local; cae a /e-commerce-pro/ si no se puede determinar.
@@ -260,6 +276,11 @@ function preloadSecretSources(): void
             'PII_ENCRYPTION_KEY' => ['PII_ENCRYPTION_KEY', 'CUSTOMER_PII_KEY'],
             'MAPS_KEY' => ['MAPS_KEY', 'Maps_KEY', 'GOOGLE_MAPS_API_KEY'],
             'GOOGLE_MAPS_API_KEY' => ['GOOGLE_MAPS_API_KEY', 'MAPS_KEY', 'Maps_KEY'],
+            // Google Cloud Vision para leer lote/caducidad desde la foto de la etiqueta
+            // (views/products.php). Puede ser la misma llave que MAPS_KEY si en la consola de
+            // GCP se habilita la API "Cloud Vision" sobre ese mismo proyecto/llave.
+            'VISION_KEY' => ['VISION_KEY', 'Vision_KEY', 'GOOGLE_VISION_API_KEY'],
+            'GOOGLE_VISION_API_KEY' => ['GOOGLE_VISION_API_KEY', 'VISION_KEY', 'Vision_KEY'],
             'TELEGRAM_BOT_TOKEN' => ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_TOKEN'],
             'TELEGRAM_CHAT_ID' => ['TELEGRAM_CHAT_ID'],
             'TELEGRAM_NOTIFICATIONS_ENABLED' => ['TELEGRAM_NOTIFICATIONS_ENABLED'],
@@ -481,6 +502,32 @@ function getMapsApiKey(bool $required = false): string
     return '';
 }
 
+function getVisionApiKey(bool $required = false): string
+{
+    $visionKey = getEnvVar('VISION_KEY');
+    if ($visionKey !== null) {
+        return $visionKey;
+    }
+
+    // Compatibilidad con nombres legacy o con diferente capitalización.
+    $visionKeyLegacyCase = getEnvVar('Vision_KEY');
+    if ($visionKeyLegacyCase !== null) {
+        return $visionKeyLegacyCase;
+    }
+
+    $legacyKey = getEnvVar('GOOGLE_VISION_API_KEY');
+    if ($legacyKey !== null) {
+        return $legacyKey;
+    }
+
+    if ($required) {
+        error_log('ERROR: Falta secreto requerido de Google Vision: VISION_KEY, Vision_KEY o GOOGLE_VISION_API_KEY.');
+        throw new RuntimeException('Falta secreto requerido de Google Vision: VISION_KEY, Vision_KEY o GOOGLE_VISION_API_KEY.');
+    }
+
+    return '';
+}
+
 // Modo de ejecución: QA por defecto en localhost/CLI, producción fuera de ahí.
 $hostForEnv = $_SERVER['HTTP_HOST'] ?? '';
 $isLocalHost = strpos($hostForEnv, 'localhost') !== false || strpos($hostForEnv, '127.0.0.1') !== false;
@@ -499,6 +546,12 @@ define('DB_CHARSET', getEnvVar('DB_CHARSET', 'utf8mb4'));
 if (!defined('GOOGLE_MAPS_API_KEY')) {
     // No bloquear toda la app si falta la llave; solo afectará vistas que usan Maps.
     define('GOOGLE_MAPS_API_KEY', getMapsApiKey(false));
+}
+
+// Llave de API para Google Cloud Vision (lectura de lote/caducidad desde foto de etiqueta).
+if (!defined('GOOGLE_VISION_API_KEY')) {
+    // No bloquear toda la app si falta la llave; solo afectará el botón "Escanear etiqueta".
+    define('GOOGLE_VISION_API_KEY', getVisionApiKey(false));
 }
 
 // Palabra clave que, si aparece en las notas de un pedido capturado por un admin/encargado,

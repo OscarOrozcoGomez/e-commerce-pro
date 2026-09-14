@@ -31,8 +31,9 @@ try {
 
     $renderStartMs = catalogPerfNowMs();
     $itemsHtml = '';
+    $puedeCompartir = isAuthenticated();
     foreach ($result['productos'] as $producto) {
-        $itemsHtml .= catalogRenderProductCard($producto);
+        $itemsHtml .= catalogRenderProductCard($producto, $puedeCompartir);
     }
     $renderMs = round(catalogPerfNowMs() - $renderStartMs, 2);
     $requestMs = round(catalogPerfNowMs() - $requestStartMs, 2);

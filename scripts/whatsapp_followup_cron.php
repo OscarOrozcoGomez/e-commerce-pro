@@ -26,6 +26,17 @@ $resueltas = 0;
 $cerradasPorInactividad = 0;
 $seguimientosEnviados = 0;
 $seguimientosFallidos = 0;
+$reactivadasPorInactividad = 0;
+
+// 0) Conversaciones pausadas por intervencion humana (o transferir_a_humano) donde nadie
+//    -- ni cliente ni asesor -- volvio a escribir en 24h: Alex retoma solo para no dejar
+//    al cliente sin atencion de forma indefinida si el asesor se olvido de reactivarla.
+foreach (aiFindConversationsToAutoReactivate($pdo) as $conversacion) {
+    if (!$isDryRun) {
+        aiAutoReactivateConversation($pdo, (int) $conversacion['id_conversacion']);
+    }
+    $reactivadasPorInactividad++;
+}
 
 // 1) Conversaciones que ya tienen un seguimiento enviado: si el cliente contesto, se
 //    limpia la marca (vuelve al flujo normal); si no y ya pasaron 48h desde el primer
@@ -50,31 +61,67 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
     }
 }
 
-// 2) Conversaciones activas sin seguimiento, con mas de 24h desde la ultima respuesta del bot.
-foreach (aiFindConversationsNeedingFollowup($pdo) as $conversacion) {
-    if ($isDryRun) {
-        $seguimientosEnviados++;
-        continue;
-    }
+// 2+3) Mensajes PROACTIVOS de Alex -- el cliente NO escribio primero. Dos origenes
+//      posibles: seguimiento de 24h (reenganchar a alguien que se quedo callado, ver
+//      aiFindConversationsNeedingFollowup()) o catch-up de horario (contestar a alguien
+//      que sigue esperando una respuesta desde fuera del horario de atencion, ver
+//      aiFindConversationsPendingRespuesta()).
+//
+// Decision del negocio (2026-09-14, tras el incidente 2026-09-13): jamas mas de UN
+// mensaje proactivo combinado por hora -- nunca "N por corrida" como en la version
+// anterior de este mismo mecanismo (esa fue, sin tope, la causa real del bloqueo de
+// WhatsApp). El catch-up tiene prioridad sobre el seguimiento (alguien esperando una
+// respuesta real pesa mas que un recordatorio); si no hay ninguno de los dos pendiente,
+// no se manda nada. Si el backlog no se alcanza a vaciar en el dia, sigue al dia
+// siguiente sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
+$retomadas = 0;
+$retomadasFallidas = 0;
 
-    $ok = aiSendFollowupMessage($pdo, $conversacion);
-    if ($ok) {
-        $seguimientosEnviados++;
-    } else {
-        $seguimientosFallidos++;
+if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo)) {
+    $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
+    $pendienteSeguimiento = $pendienteCatchup === null ? (aiFindConversationsNeedingFollowup($pdo)[0] ?? null) : null;
+
+    if ($isDryRun) {
+        if ($pendienteCatchup !== null) {
+            $retomadas++;
+        } elseif ($pendienteSeguimiento !== null) {
+            $seguimientosEnviados++;
+        }
+    } elseif ($pendienteCatchup !== null) {
+        $replyParts = aiRetomarConversacionPendiente($pdo, $pendienteCatchup);
+        if (!empty($replyParts)) {
+            $resultado = waSendOutboundMessage((string) $pendienteCatchup['wa_id'], $replyParts);
+            aiRegistrarEnvioProactivo($pdo);
+            if (!empty($resultado['ok'])) {
+                $retomadas++;
+            } else {
+                $retomadasFallidas++;
+            }
+        }
+    } elseif ($pendienteSeguimiento !== null) {
+        $ok = aiSendFollowupMessage($pdo, $pendienteSeguimiento);
+        aiRegistrarEnvioProactivo($pdo);
+        if ($ok) {
+            $seguimientosEnviados++;
+        } else {
+            $seguimientosFallidos++;
+        }
     }
 }
 
 fwrite(
     STDOUT,
     sprintf(
-        "RUN %s | dry-run=%s | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d%s",
+        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d | retomadas=%d | retomadas_fallidas=%d%s",
         date('Y-m-d H:i:s'),
         $isDryRun ? 'yes' : 'no',
+        $reactivadasPorInactividad,
         $seguimientosEnviados,
         $seguimientosFallidos,
         $resueltas,
         $cerradasPorInactividad,
+        $retomadas,
+        $retomadasFallidas,
         PHP_EOL
     )
 );

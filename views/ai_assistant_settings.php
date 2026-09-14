@@ -98,6 +98,31 @@ try {
     // La tabla puede no existir todavia si la migracion no se ha aplicado en este entorno.
 }
 
+// Clientes a los que ya se les mando el seguimiento automatico de 24h: el bot no puede
+// crear ni asignar etiquetas nuevas dentro de la app de WhatsApp Business por su cuenta
+// (la API solo permite asignar etiquetas que ya existen ahi), asi que esta lista es para
+// que un asesor entre al chat y las ponga/quite a mano (ej. marcar "Preguntón").
+$conversacionesSeguimiento = [];
+try {
+    $conversacionesSeguimiento = $pdo->query(
+        'SELECT id_conversacion, wa_id, nombre_perfil, estado_bot, seguimiento_enviado_en
+         FROM whatsapp_conversaciones
+         WHERE seguimiento_enviado_en IS NOT NULL
+         ORDER BY seguimiento_enviado_en DESC
+         LIMIT 100'
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($conversacionesSeguimiento as &$conv) {
+        $conv['tags'] = aiGetConversationTags($pdo, (int)$conv['id_conversacion']);
+        $conv['contesto'] = aiCustomerRepliedAfterFollowup($pdo, (int)$conv['id_conversacion']);
+        $digitsNacionales = aiWaIdToMxDigits((string)$conv['wa_id']);
+        $conv['wa_link_phone'] = $digitsNacionales !== null ? waBuildBusinessLinkPhone($digitsNacionales) : '';
+    }
+    unset($conv);
+} catch (Throwable $e) {
+    // La columna puede no existir todavia si la migracion no se ha aplicado en este entorno.
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -220,7 +245,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <span class="card-title">Conversaciones recientes de WhatsApp</span>
-                    <p class="grey-text" style="margin-top: 0;">Cuando Alex transfiere a un cliente, la conversacion queda pausada hasta que un asesor la reactiva aqui.</p>
+                    <p class="grey-text" style="margin-top: 0;">Cuando Alex transfiere a un cliente, la conversacion queda pausada hasta que un asesor la reactiva aqui (o hasta 24h despues de que nadie -- ni cliente ni asesor -- vuelva a escribir, que se reactiva sola).</p>
                     <?php if (empty($conversaciones)): ?>
                         <p class="grey-text">Sin conversaciones todavia.</p>
                     <?php else: ?>
@@ -277,6 +302,82 @@ include __DIR__ . '/includes/header.php';
                                 <?php endif; ?>
                             </div>
                         <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col s12">
+            <div class="card">
+                <div class="card-content">
+                    <span class="card-title">Seguimiento enviado (24h) — marcar manualmente en WhatsApp</span>
+                    <p class="grey-text" style="margin-top: 0;">
+                        Estos clientes ya recibieron el mensaje automatico de seguimiento a las 24h de inactividad.
+                        El sistema NO puede crear ni asignar etiquetas nuevas dentro de la app de WhatsApp Business por su cuenta
+                        (la API solo deja asignar etiquetas que ya existen ahi), asi que usa "Abrir WhatsApp" para entrar al chat
+                        y poner/quitar las etiquetas reales a mano (ej. quitarles la que tengan y marcarlos como "Preguntón" si nunca contestaron).
+                    </p>
+                    <?php if (empty($conversacionesSeguimiento)): ?>
+                        <p class="grey-text">Nadie tiene un seguimiento enviado por ahora.</p>
+                    <?php else: ?>
+                        <table class="responsive-table striped">
+                            <thead>
+                                <tr>
+                                    <th>Cliente</th>
+                                    <th>Seguimiento enviado</th>
+                                    <th>Contesto</th>
+                                    <th>Estado</th>
+                                    <th>Etiquetas internas</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($conversacionesSeguimiento as $conv): ?>
+                                    <?php
+                                        $stTelefono = aiWaIdToDisplayPhone((string)$conv['wa_id']);
+                                        $stNombre = trim((string)($conv['nombre_perfil'] ?? ''));
+                                        $stTitulo = $stNombre !== '' ? $stNombre : ($stTelefono ?? 'Contacto de WhatsApp');
+                                    ?>
+                                    <tr>
+                                        <td>
+                                            <strong><?php echo esc($stTitulo); ?></strong>
+                                            <?php if ($stNombre !== '' && $stTelefono !== null): ?>
+                                                <br><span class="grey-text text-darken-1" style="font-size: 12px;"><?php echo esc($stTelefono); ?></span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td><?php echo esc((string)$conv['seguimiento_enviado_en']); ?></td>
+                                        <td>
+                                            <span class="chip <?php echo $conv['contesto'] ? 'green lighten-4' : 'orange lighten-4'; ?>" style="margin:0;">
+                                                <?php echo $conv['contesto'] ? 'Si' : 'Sin respuesta'; ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="chip <?php echo $conv['estado_bot'] === 'activo' ? 'green lighten-4' : 'orange lighten-4'; ?>" style="margin:0;">
+                                                <?php echo esc((string)$conv['estado_bot']); ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <?php if (empty($conv['tags'])): ?>
+                                                <span class="grey-text" style="font-size:12px;">—</span>
+                                            <?php else: ?>
+                                                <?php foreach ($conv['tags'] as $tag): ?>
+                                                    <div class="chip <?php echo esc((string)$tag['color']); ?> lighten-4" style="margin:2px;"><?php echo esc((string)$tag['nombre']); ?></div>
+                                                <?php endforeach; ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php if ($conv['wa_link_phone'] !== ''): ?>
+                                                <a href="https://wa.me/<?php echo esc((string)$conv['wa_link_phone']); ?>" target="_blank" class="btn-small green darken-1 waves-effect waves-light whatsapp-business-link" data-wa-phone="<?php echo esc((string)$conv['wa_link_phone']); ?>">Abrir WhatsApp</a>
+                                            <?php else: ?>
+                                                <span class="grey-text" style="font-size:12px;">Sin numero</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     <?php endif; ?>
                 </div>
             </div>
