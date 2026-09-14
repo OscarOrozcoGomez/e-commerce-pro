@@ -3057,7 +3057,7 @@ function aiEsMensajeNoInterpretable(?string $messageKind, string $textoUsuario):
     return true;
 }
 
-function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUsuario, ?string $waMessageId = null, ?string $messageKind = null): array
+function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUsuario, ?string $waMessageId = null, ?string $messageKind = null, ?DateTimeImmutable $ahora = null, ?PDO $pdo = null): array
 {
     $waId = trim($waId);
     $textoUsuario = trim($textoUsuario);
@@ -3065,7 +3065,7 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         return [];
     }
 
-    $pdo = getPDO();
+    $pdo ??= getPDO();
 
     if ($waMessageId !== null && $waMessageId !== '' && aiHasWaMessageBeenProcessed($pdo, $waMessageId)) {
         return []; // Reintento del puente sobre un mensaje ya procesado.
@@ -3090,7 +3090,7 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         return [];
     }
 
-    if (!aiEstaEnHorarioAtencion()) {
+    if (!aiEstaEnHorarioAtencion($ahora)) {
         // Fuera de horario: se guarda el mensaje (sigue visible y sin marcar como leido en
         // WhatsApp -- eso no se toca) pero Alex no genera ni manda nada ahorita mismo. Se
         // retoma con una respuesta real, pausada entre cada una, cuando abre el horario --

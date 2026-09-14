@@ -1457,6 +1457,216 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, $fila));
     }
 
+    // ------------------------------------------------------------------
+    // Bateria adicional: positivos, negativos y edge cases para el horario de atencion,
+    // el catch-up, y el refactor de aiRunAssistantTurn() (a proposito de romper lo que se
+    // pueda antes de que lo haga un cliente real). Ver [[project_whatsapp_bloqueo_2026_09_13]].
+    // ------------------------------------------------------------------
+
+    // --- aiEstaEnHorarioAtencion(): edge cases extra sobre los limites ---
+
+    public function testEstaEnHorarioAtencionEdgeCasesAdicionales(): void
+    {
+        $fabrica = static fn(string $hora): DateTimeImmutable => new DateTimeImmutable("2026-09-14 {$hora}");
+
+        // Justo 1 segundo despues de abrir y 1 segundo antes de medianoche.
+        $this->assertTrue(aiEstaEnHorarioAtencion($fabrica('07:00:01')));
+        $this->assertFalse(aiEstaEnHorarioAtencion($fabrica('23:59:59')));
+        // Sin argumento no debe tronar (usa la hora real del sistema) -- solo se checa el tipo.
+        $this->assertIsBool(aiEstaEnHorarioAtencion());
+    }
+
+    // --- aiRunAssistantTurn(): compuerta de horario end-to-end, con reloj inyectado ---
+
+    public function testRunAssistantTurnFueraDeHorarioGuardaElMensajeYNoContestaNadaNiTocaDeepSeek(): void
+    {
+        $madrugada = new DateTimeImmutable('2026-09-14 03:00:00');
+
+        $reply = aiRunAssistantTurn('5215500050001', null, 'Hola, buenas noches', null, null, $madrugada, $this->pdo);
+
+        $this->assertSame([], $reply);
+
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500050001', null);
+        $this->assertSame('activo', (string) $conversacion['estado_bot']); // no se toco/transfirio
+
+        $mensajes = $this->pdo->query(
+            'SELECT rol, contenido FROM whatsapp_mensajes WHERE id_conversacion = ' . (int) $conversacion['id_conversacion']
+        )->fetchAll();
+        $this->assertCount(1, $mensajes); // el mensaje SI se guardo
+        $this->assertSame('user', $mensajes[0]['rol']);
+        $this->assertSame('Hola, buenas noches', $mensajes[0]['contenido']);
+    }
+
+    #[Group('ai_deepseek')]
+    public function testRunAssistantTurnDentroDeHorarioProcedeNormalYLlegaHastaDeepSeek(): void
+    {
+        $medioDia = new DateTimeImmutable('2026-09-14 12:00:00');
+
+        // Sin llave de DeepSeek configurada en el entorno de tests, debe llegar hasta ahi y
+        // fallar con gracia (transferir a humano) -- prueba que la compuerta de horario NO
+        // bloquea quando SI es horario de atencion.
+        $reply = aiRunAssistantTurn('5215500050002', null, 'Hola, buenos dias', null, null, $medioDia, $this->pdo);
+
+        $this->assertNotEmpty($reply);
+        $this->assertSame('text', $reply[0]['type']);
+
+        $row = $this->pdo->query(
+            "SELECT estado_bot FROM whatsapp_conversaciones WHERE wa_id = '5215500050002'"
+        )->fetch();
+        $this->assertSame('pausado', $row['estado_bot']);
+    }
+
+    #[Group('ai_deepseek')]
+    public function testRunAssistantTurnEnElLimiteExactoDeAperturaProcedeNormal(): void
+    {
+        $justoAlAbrir = new DateTimeImmutable('2026-09-14 07:00:00');
+
+        $reply = aiRunAssistantTurn('5215500050003', null, 'Hola', null, null, $justoAlAbrir, $this->pdo);
+
+        // 07:00:00 en punto ya cuenta como horario de atencion -> debe intentar contestar
+        // (y fallar con gracia por falta de llave de DeepSeek), no quedarse callado.
+        $this->assertNotEmpty($reply);
+    }
+
+    public function testRunAssistantTurnEnElLimiteExactoDeCierreNoContesta(): void
+    {
+        $justoAlCerrar = new DateTimeImmutable('2026-09-14 22:00:00');
+
+        $reply = aiRunAssistantTurn('5215500050004', null, 'Hola', null, null, $justoAlCerrar, $this->pdo);
+
+        $this->assertSame([], $reply);
+        $mensaje = $this->pdo->query(
+            "SELECT rol FROM whatsapp_mensajes wm JOIN whatsapp_conversaciones wc ON wc.id_conversacion = wm.id_conversacion WHERE wc.wa_id = '5215500050004' ORDER BY wm.id_mensaje DESC LIMIT 1"
+        )->fetch();
+        $this->assertSame('user', $mensaje['rol']);
+    }
+
+    public function testRunAssistantTurnFueraDeHorarioNoTransfiereAHumanoAunqueElMensajeSeaMediaNoInterpretable(): void
+    {
+        // Antes de esta feature, un sticker/video fuera de horario disparaba
+        // transferir_a_humano de inmediato con un texto instantaneo. Ahora debe quedarse
+        // en el mismo limbo "pendiente" que un mensaje de texto normal -- se retoma en la
+        // manana, no se le contesta nada a las 3am ni siquiera el texto de "dame un segundo".
+        $madrugada = new DateTimeImmutable('2026-09-14 03:00:00');
+
+        $reply = aiRunAssistantTurn('5215500050005', null, '[El cliente envio un sticker]', null, 'sticker', $madrugada, $this->pdo);
+
+        $this->assertSame([], $reply);
+        $row = $this->pdo->query(
+            "SELECT estado_bot FROM whatsapp_conversaciones WHERE wa_id = '5215500050005'"
+        )->fetch();
+        $this->assertSame('activo', $row['estado_bot']); // NO se transfirio a humano todavia
+    }
+
+    public function testRunAssistantTurnFueraDeHorarioNoDuplicaElMensajeSiSeLlamaDosVeces(): void
+    {
+        // Dos mensajes reales del cliente la misma madrugada: ambos deben guardarse (no se
+        // pierde informacion), pero ninguno genera respuesta.
+        $madrugada1 = new DateTimeImmutable('2026-09-14 02:00:00');
+        $madrugada2 = new DateTimeImmutable('2026-09-14 04:30:00');
+
+        $this->assertSame([], aiRunAssistantTurn('5215500050006', null, 'Primer mensaje de la noche', 'MSG-A', null, $madrugada1, $this->pdo));
+        $this->assertSame([], aiRunAssistantTurn('5215500050006', null, 'Segundo mensaje de la noche', 'MSG-B', null, $madrugada2, $this->pdo));
+
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500050006', null);
+        $total = (int) $this->pdo->query(
+            'SELECT COUNT(*) FROM whatsapp_mensajes WHERE id_conversacion = ' . (int) $conversacion['id_conversacion']
+        )->fetchColumn();
+        $this->assertSame(2, $total);
+    }
+
+    public function testRunAssistantTurnFueraDeHorarioSigueRespetandoElDedupDeMensajeYaProcesado(): void
+    {
+        // Regresion: el chequeo de reintento del puente (mismo wa_message_id) debe seguir
+        // funcionando igual, sin importar la hora -- no debe volver a guardar el mensaje.
+        $madrugada = new DateTimeImmutable('2026-09-14 03:00:00');
+
+        aiRunAssistantTurn('5215500050007', null, 'Hola', 'MSG-DEDUP-1', null, $madrugada, $this->pdo);
+        aiRunAssistantTurn('5215500050007', null, 'Hola', 'MSG-DEDUP-1', null, $madrugada, $this->pdo);
+
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500050007', null);
+        $total = (int) $this->pdo->query(
+            'SELECT COUNT(*) FROM whatsapp_mensajes WHERE id_conversacion = ' . (int) $conversacion['id_conversacion']
+        )->fetchColumn();
+        $this->assertSame(1, $total);
+    }
+
+    // --- aiFindConversationsPendingRespuesta(): edge cases adicionales ---
+
+    public function testFindConversationsPendingRespuestaExcluyeConversacionesCerradas(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500060001', null);
+        aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'user', 'Hola?');
+        aiSetConversationState($this->pdo, (int) $conv['id_conversacion'], 'cerrado', 'sin respuesta 48h');
+
+        $ids = array_map(static fn(array $c) => (int) $c['id_conversacion'], aiFindConversationsPendingRespuesta($this->pdo));
+        $this->assertNotContains((int) $conv['id_conversacion'], $ids);
+    }
+
+    public function testFindConversationsPendingRespuestaNoIncluyeConversacionesSinNingunMensaje(): void
+    {
+        // Una conversacion recien creada, sin un solo mensaje todavia, no debe aparecer ni
+        // tronar (el JOIN exige al menos un mensaje real).
+        aiGetOrCreateConversation($this->pdo, '5215500060002', null);
+
+        $ids = array_map(static fn(array $c) => (string) $c['wa_id'], aiFindConversationsPendingRespuesta($this->pdo));
+        $this->assertNotContains('5215500060002', $ids);
+    }
+
+    public function testFindConversationsPendingRespuestaExcluyeCuandoElUltimoMensajeEsDeUnaHerramienta(): void
+    {
+        // Caso raro (proceso interrumpido a media generacion): el ultimo mensaje quedo con
+        // rol='tool'. No debe contarse como "pendiente de respuesta de usuario" -- solo
+        // rol='user' califica.
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500060003', null);
+        $idConversacion = (int) $conv['id_conversacion'];
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Quiero comprar');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', null, [['id' => 'call_1', 'function' => ['name' => 'consultar_inventario']]]);
+        aiAppendMessage($this->pdo, $idConversacion, 'tool', '{"ok":true}', null, 'call_1', 'consultar_inventario');
+
+        $ids = array_map(static fn(array $c) => (int) $c['id_conversacion'], aiFindConversationsPendingRespuesta($this->pdo));
+        $this->assertNotContains($idConversacion, $ids);
+    }
+
+    // --- aiRetomarConversacionPendiente(): negativos / edge cases de entrada invalida ---
+
+    public function testRetomarConversacionPendienteRegresaVacioConFilaVacia(): void
+    {
+        $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, []));
+    }
+
+    public function testRetomarConversacionPendienteRegresaVacioSiElUltimoMensajeEsSoloEspacios(): void
+    {
+        $fila = ['id_conversacion' => 1, 'wa_id' => '5215500070001', 'nombre_perfil' => null, 'ultimo_mensaje' => '   '];
+        $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, $fila));
+    }
+
+    public function testRetomarConversacionPendienteRegresaVacioConIdConversacionInvalido(): void
+    {
+        $fila = ['id_conversacion' => 0, 'wa_id' => '5215500070002', 'nombre_perfil' => null, 'ultimo_mensaje' => 'Hola'];
+        $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, $fila));
+    }
+
+    public function testRetomarConversacionPendienteRegresaVacioConWaIdVacio(): void
+    {
+        $fila = ['id_conversacion' => 1, 'wa_id' => '', 'nombre_perfil' => null, 'ultimo_mensaje' => 'Hola'];
+        $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, $fila));
+    }
+
+    public function testRetomarConversacionPendienteRegresaVacioSiUnHumanoYaAtendioAMitadDeLaCorrida(): void
+    {
+        // Simula la condicion de carrera documentada en el docblock: la fila se listo con
+        // la conversacion activa, pero para cuando le toca su turno un humano ya la pauso.
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070003', null);
+        $idConversacion = (int) $conv['id_conversacion'];
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Hola, sigo esperando');
+
+        $fila = aiFindConversationsPendingRespuesta($this->pdo)[0];
+        aiSetConversationState($this->pdo, $idConversacion, 'pausado', 'un asesor ya esta contestando');
+
+        $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, $fila));
+    }
+
     public function testLogDiagnosticErrorInsertsRowWithJsonContext(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500030001', null);
