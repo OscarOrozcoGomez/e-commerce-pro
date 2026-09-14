@@ -883,6 +883,19 @@ function aiHandleHumanOutboundMessage(PDO $pdo, string $waId, string $texto, ?st
 const AI_FOLLOWUP_INACTIVITY_HOURS = 24;
 const AI_FOLLOWUP_CLOSE_HOURS = 48;
 
+// Tope de seguimientos REALES que whatsapp_followup_cron.php manda por corrida, y rango
+// (segundos) de la pausa aleatoria entre cada uno.
+//
+// Incidente 2026-09-13: la primera corrida de la reactivacion automatica de 24h encontro
+// un backlog grande y disparo ~24 mensajes identicos a WhatsApp en el mismo segundo. Ese
+// patron (mismo texto, muchos destinatarios, sin pausa, via un cliente no oficial) es
+// justo lo que el antispam de WhatsApp detecta -- la cuenta quedo bloqueada/en revision.
+// Con este tope, un backlog grande se vacia poco a poco a lo largo de varias corridas (el
+// cron ya corre cada 20 min) en vez de de un jalon.
+const AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA = 8;
+const AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS = 8;
+const AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS = 20;
+
 // Si un humano pauso el bot (intervencion manual o transferir_a_humano) y la conversacion
 // se queda muda -- ni el cliente ni el asesor vuelven a escribir -- Alex retoma solo despues
 // de este numero de horas, para no dejar al cliente sin atencion de forma indefinida.

@@ -62,13 +62,28 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
 }
 
 // 2) Conversaciones activas sin seguimiento, con mas de 24h desde la ultima respuesta del bot.
+//
+// Nunca mas de AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA envios reales por corrida, con una pausa
+// aleatoria entre cada uno -- ver el comentario junto a esas constantes en ai_assistant.php
+// (incidente real: una rafaga sin pausa aqui puso la cuenta de WhatsApp en revision). El
+// resto del backlog, si lo hay, se manda en la siguiente corrida (20 min despues).
+$enviosRealesEnEstaCorrida = 0;
 foreach (aiFindConversationsNeedingFollowup($pdo) as $conversacion) {
     if ($isDryRun) {
         $seguimientosEnviados++;
         continue;
     }
 
+    if ($enviosRealesEnEstaCorrida >= AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA) {
+        break;
+    }
+
+    if ($enviosRealesEnEstaCorrida > 0) {
+        sleep(random_int(AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS, AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS));
+    }
+
     $ok = aiSendFollowupMessage($pdo, $conversacion);
+    $enviosRealesEnEstaCorrida++;
     if ($ok) {
         $seguimientosEnviados++;
     } else {
