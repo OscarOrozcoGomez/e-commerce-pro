@@ -61,40 +61,58 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
     }
 }
 
-// 2) Conversaciones activas sin seguimiento, con mas de 24h desde la ultima respuesta del bot.
+// 2+3) Mensajes PROACTIVOS de Alex -- el cliente NO escribio primero. Dos origenes
+//      posibles: seguimiento de 24h (reenganchar a alguien que se quedo callado, ver
+//      aiFindConversationsNeedingFollowup()) o catch-up de horario (contestar a alguien
+//      que sigue esperando una respuesta desde fuera del horario de atencion, ver
+//      aiFindConversationsPendingRespuesta()).
 //
-// Nunca mas de AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA envios reales por corrida, con una pausa
-// aleatoria entre cada uno -- ver el comentario junto a esas constantes en ai_assistant.php
-// (incidente real: una rafaga sin pausa aqui puso la cuenta de WhatsApp en revision). El
-// resto del backlog, si lo hay, se manda en la siguiente corrida (20 min despues).
-$enviosRealesEnEstaCorrida = 0;
-foreach (aiFindConversationsNeedingFollowup($pdo) as $conversacion) {
+// Decision del negocio (2026-09-14, tras el incidente 2026-09-13): jamas mas de UN
+// mensaje proactivo combinado por hora -- nunca "N por corrida" como en la version
+// anterior de este mismo mecanismo (esa fue, sin tope, la causa real del bloqueo de
+// WhatsApp). El catch-up tiene prioridad sobre el seguimiento (alguien esperando una
+// respuesta real pesa mas que un recordatorio); si no hay ninguno de los dos pendiente,
+// no se manda nada. Si el backlog no se alcanza a vaciar en el dia, sigue al dia
+// siguiente sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
+$retomadas = 0;
+$retomadasFallidas = 0;
+
+if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo)) {
+    $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
+    $pendienteSeguimiento = $pendienteCatchup === null ? (aiFindConversationsNeedingFollowup($pdo)[0] ?? null) : null;
+
     if ($isDryRun) {
-        $seguimientosEnviados++;
-        continue;
-    }
-
-    if ($enviosRealesEnEstaCorrida >= AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA) {
-        break;
-    }
-
-    if ($enviosRealesEnEstaCorrida > 0) {
-        sleep(random_int(AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS, AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS));
-    }
-
-    $ok = aiSendFollowupMessage($pdo, $conversacion);
-    $enviosRealesEnEstaCorrida++;
-    if ($ok) {
-        $seguimientosEnviados++;
-    } else {
-        $seguimientosFallidos++;
+        if ($pendienteCatchup !== null) {
+            $retomadas++;
+        } elseif ($pendienteSeguimiento !== null) {
+            $seguimientosEnviados++;
+        }
+    } elseif ($pendienteCatchup !== null) {
+        $replyParts = aiRetomarConversacionPendiente($pdo, $pendienteCatchup);
+        if (!empty($replyParts)) {
+            $resultado = waSendOutboundMessage((string) $pendienteCatchup['wa_id'], $replyParts);
+            aiRegistrarEnvioProactivo($pdo);
+            if (!empty($resultado['ok'])) {
+                $retomadas++;
+            } else {
+                $retomadasFallidas++;
+            }
+        }
+    } elseif ($pendienteSeguimiento !== null) {
+        $ok = aiSendFollowupMessage($pdo, $pendienteSeguimiento);
+        aiRegistrarEnvioProactivo($pdo);
+        if ($ok) {
+            $seguimientosEnviados++;
+        } else {
+            $seguimientosFallidos++;
+        }
     }
 }
 
 fwrite(
     STDOUT,
     sprintf(
-        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d%s",
+        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d | retomadas=%d | retomadas_fallidas=%d%s",
         date('Y-m-d H:i:s'),
         $isDryRun ? 'yes' : 'no',
         $reactivadasPorInactividad,
@@ -102,6 +120,8 @@ fwrite(
         $seguimientosFallidos,
         $resueltas,
         $cerradasPorInactividad,
+        $retomadas,
+        $retomadasFallidas,
         PHP_EOL
     )
 );
