@@ -85,6 +85,40 @@ Archivo grande (~2900 líneas). Helpers clave: `requireAuth()`, `hasPermission(s
 | `blife_sync_utils.php` | Sincronización de productos contra `blifemx.myshopify.com` | — |
 | `attribution.php` / `site_behavior.php` / `referrals.php` | Atribución de marketing, bandera de tráfico interno, códigos de referido | — |
 
+### ⚠️ WhatsApp/Alex: nunca ráfagas de mensajes (obligatorio revisar en CADA cambio)
+
+**Incidente real (2026-09-13):** el cron `scripts/whatsapp_followup_cron.php` mandó ~24 mensajes
+idénticos a WhatsApp en el mismo segundo (backlog acumulado de la reactivación automática de
+24h). WhatsApp lo detectó como automatización/spam y puso la cuenta de negocio **en revisión
+(bloqueada)**. El puente (`wa-bridge`, Baileys — cliente NO oficial) ya de por sí corre ese
+riesgo constante; una ráfaga real es lo que lo dispara.
+
+Reglas ya aplicadas para que no se repita — **cualquier cambio a Alex, al puente de WhatsApp,
+o a un cron/script que le mande algo a un cliente por WhatsApp debe verificar que se sigan
+cumpliendo, y si se toca ese código, se tiene que volver a razonar explícitamente si sigue
+cumpliéndolas**:
+
+1. **Nunca mandar el mismo texto (o textos parecidos) a varios destinatarios en el mismo
+   segundo/ventana corta.** Cualquier loop que recorra varias conversaciones/clientes y le
+   mande un mensaje a cada uno (crons, funciones de "seguimiento", futuras campañas/broadcast)
+   necesita: (a) una pausa aleatoria entre cada envío real (ver
+   `AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS`/`AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS` en `ai_assistant.php`), y
+   (b) un tope de cuántos manda por corrida (`AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA`) — un backlog
+   grande se vacía poco a poco en varias corridas, nunca de un jalón.
+2. **Las respuestas de Alex en vivo (conversación normal) se mandan con un retraso humano
+   deliberado** (60-120s aleatorios, ver `enviarReplyParts`/el delay antes de llamarla dentro
+   de `messages.upsert` en `/opt/wa-bridge/app/index.js` — código del puente, vive en el VPS,
+   sin control de versiones en este repo) — un bot que contesta en milisegundos, siempre, es
+   en sí mismo una señal de automatización.
+3. Antes de dar por terminado cualquier cambio que toque `ai_assistant.php` (specialmente
+   `aiSendFollowupMessage`, `aiRunAssistantTurn`, cualquier tool nueva, o cualquier cron
+   `scripts/whatsapp_*`), pregúntate explícitamente: *¿este cambio puede hacer que se manden
+   varios mensajes reales a WhatsApp en una ráfaga sin pausa?* Si la respuesta no es un "no"
+   claro y verificado, hay que agregar pausa/tope antes de considerarlo terminado.
+
+Ver `private/HOWTO_VPS_BD.md` sección 8 para logs/edición del puente (`journalctl -u
+wa-bridge`, `/opt/wa-bridge/app/index.js`).
+
 ### Tests
 
 - PHPUnit 10.5, **solo `tests/Unit/`** (~60 archivos).
