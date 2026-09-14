@@ -896,6 +896,34 @@ const AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA = 8;
 const AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS = 8;
 const AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS = 20;
 
+// Horario de atencion de Alex: fuera de [HORA_INICIO, HORA_FIN) el mensaje del cliente se
+// guarda (sigue visible/sin marcar como leido en WhatsApp) pero Alex no contesta en vivo --
+// un bot que responde a las 3am, siempre, es en si mismo una senal de automatizacion. Se
+// retoma con una respuesta real cuando abre el horario, ver AI_HORARIO_CATCHUP_*.
+const AI_HORARIO_ATENCION_HORA_INICIO = 7;  // 7:00 am
+const AI_HORARIO_ATENCION_HORA_FIN = 22;    // 10:00 pm (exclusivo)
+
+// Tope de conversaciones "atoradas" (ver aiFindConversationsPendingRespuesta()) que se
+// retoman por corrida al abrir el horario de atencion, y pausa entre cada una -- mismo
+// principio anti-rafaga que AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA: un backlog de toda la
+// madrugada se contesta poco a poco, nunca de un jalon.
+const AI_HORARIO_CATCHUP_MAX_POR_CORRIDA = 8;
+const AI_HORARIO_CATCHUP_PAUSA_MIN_SEGUNDOS = 10;
+const AI_HORARIO_CATCHUP_PAUSA_MAX_SEGUNDOS = 30;
+
+/**
+ * True si $ahora cae dentro del horario de atencion de Alex. Usa la zona horaria que ya
+ * tiene fijada la app (America/Mexico_City, ver config.php) cuando no se le pasa una hora
+ * explicita -- pura y testeable con un DateTimeImmutable especifico.
+ */
+function aiEstaEnHorarioAtencion(?DateTimeImmutable $ahora = null): bool
+{
+    $ahora ??= new DateTimeImmutable('now');
+    $hora = (int)$ahora->format('G');
+
+    return $hora >= AI_HORARIO_ATENCION_HORA_INICIO && $hora < AI_HORARIO_ATENCION_HORA_FIN;
+}
+
 // Si un humano pauso el bot (intervencion manual o transferir_a_humano) y la conversacion
 // se queda muda -- ni el cliente ni el asesor vuelven a escribir -- Alex retoma solo despues
 // de este numero de horas, para no dejar al cliente sin atencion de forma indefinida.
@@ -3062,6 +3090,16 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         return [];
     }
 
+    if (!aiEstaEnHorarioAtencion()) {
+        // Fuera de horario: se guarda el mensaje (sigue visible y sin marcar como leido en
+        // WhatsApp -- eso no se toca) pero Alex no genera ni manda nada ahorita mismo. Se
+        // retoma con una respuesta real, pausada entre cada una, cuando abre el horario --
+        // ver aiFindConversationsPendingRespuesta()/aiRetomarConversacionPendiente(),
+        // corridas por whatsapp_followup_cron.php.
+        aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
+        return [];
+    }
+
     // Se mide ANTES de guardar el mensaje entrante actual, para que refleje el silencio
     // previo a este turno y no siempre de ~0 horas.
     $horasInactividad = aiHoursSinceLastMessage($pdo, $idConversacion);
@@ -3069,6 +3107,40 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
 
     aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
 
+    return aiGenerarRespuestaParaConversacion(
+        $pdo,
+        $idConversacion,
+        $waId,
+        $textoUsuario,
+        $messageKind,
+        $conversacion,
+        $perfilNombre,
+        $config,
+        $horasInactividad,
+        $esLadaLocal
+    );
+}
+
+/**
+ * Genera (DeepSeek + loop de tool-calls) y persiste la respuesta de Alex para una
+ * conversacion cuyo mensaje entrante YA esta guardado en whatsapp_mensajes -- esta funcion
+ * NUNCA vuelve a guardarlo, eso es responsabilidad de quien llama. Comparte esta logica
+ * aiRunAssistantTurn() (flujo en vivo, dentro del horario de atencion) y
+ * aiRetomarConversacionPendiente() (catch-up de conversaciones que llegaron fuera de
+ * horario, ver AI_HORARIO_ATENCION_*).
+ */
+function aiGenerarRespuestaParaConversacion(
+    PDO $pdo,
+    int $idConversacion,
+    string $waId,
+    string $textoUsuario,
+    ?string $messageKind,
+    array $conversacion,
+    ?string $perfilNombre,
+    array $config,
+    ?float $horasInactividad,
+    ?bool $esLadaLocal
+): array {
     if (aiEsMensajeNoInterpretable($messageKind, $textoUsuario)) {
         aiToolTransferirHumano(
             $pdo,
@@ -3130,7 +3202,7 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         try {
             $response = aiCallDeepSeek($messages, $tools, $modelo, $temperatura, $apiKeyVariable);
         } catch (Throwable $e) {
-            error_log('ERROR llamando a DeepSeek en aiRunAssistantTurn: ' . $e->getMessage());
+            error_log('ERROR llamando a DeepSeek en aiGenerarRespuestaParaConversacion: ' . $e->getMessage());
             aiLogDiagnosticError($pdo, $idConversacion, 'deepseek_conexion', $textoUsuario, ['excepcion' => $e->getMessage()]);
             aiToolTransferirHumano($pdo, ['motivo' => 'Fallo tecnico del asistente de IA: ' . $e->getMessage()], $context);
             $finalText = 'Dame un segundo, te transfiero con un companero del equipo para que te de el detalle exacto de inmediato.';
@@ -3253,4 +3325,79 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
     }
 
     return $replyParts;
+}
+
+/**
+ * Conversaciones activas cuyo ULTIMO mensaje es del cliente -- nadie, ni Alex ni un humano,
+ * las ha contestado todavia. El caso tipico es que llegaron fuera del horario de atencion
+ * (aiEstaEnHorarioAtencion() en aiRunAssistantTurn ya las dejo sin respuesta a proposito),
+ * pero tambien cubre sin querer el caso de un mensaje que quedo sin contestar por rate
+ * limit -- antes de esto, ese caso se quedaba huerfano para siempre si el cliente no volvia
+ * a escribir.
+ *
+ * @return array<int,array{id_conversacion:int,wa_id:string,nombre_perfil:?string,id_cliente:?int,ultimo_mensaje:string}>
+ */
+function aiFindConversationsPendingRespuesta(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente, ultimo.contenido AS ultimo_mensaje
+         FROM whatsapp_conversaciones c
+         JOIN whatsapp_mensajes ultimo ON ultimo.id_mensaje = (
+             SELECT MAX(m2.id_mensaje) FROM whatsapp_mensajes m2 WHERE m2.id_conversacion = c.id_conversacion
+         )
+         WHERE c.estado_bot = 'activo' AND ultimo.rol = 'user'"
+    );
+
+    return $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+}
+
+/**
+ * Retoma UNA conversacion "atorada" (ver aiFindConversationsPendingRespuesta()): genera y
+ * regresa la respuesta de Alex a partir de todo el historial ya guardado, sin volver a
+ * guardar el ultimo mensaje del cliente (ya esta en whatsapp_mensajes). Quien llama es
+ * responsable de mandar el resultado por WhatsApp (waSendOutboundMessage) -- esta funcion
+ * NO lo hace, para que el caller controle la pausa entre una conversacion y la siguiente
+ * (ver el paso 3 de whatsapp_followup_cron.php).
+ *
+ * Se vuelve a checar el estado (bot global + estado_bot de la conversacion) por si cambio
+ * entre que se listo y que le toco su turno en esta corrida -- ej. un humano ya la atendio,
+ * o alguien apago a Alex a la mitad de la corrida.
+ *
+ * @param array{id_conversacion:int,wa_id:string,nombre_perfil:?string,id_cliente:?int,ultimo_mensaje:string} $fila
+ */
+function aiRetomarConversacionPendiente(PDO $pdo, array $fila): array
+{
+    $idConversacion = (int)($fila['id_conversacion'] ?? 0);
+    $waId = trim((string)($fila['wa_id'] ?? ''));
+    $textoUsuario = trim((string)($fila['ultimo_mensaje'] ?? ''));
+    if ($idConversacion <= 0 || $waId === '' || $textoUsuario === '') {
+        return [];
+    }
+
+    $config = aiGetConfig($pdo);
+    $botGlobalActivo = !isset($config['activo']) || (int)$config['activo'] === 1;
+    if (!$botGlobalActivo) {
+        return [];
+    }
+
+    $conversacion = aiGetOrCreateConversation($pdo, $waId, $fila['nombre_perfil'] ?? null);
+    if ((string)($conversacion['estado_bot'] ?? 'activo') !== 'activo') {
+        return [];
+    }
+
+    $horasInactividad = aiHoursSinceLastMessage($pdo, $idConversacion);
+    $esLadaLocal = aiPhoneHasLocalLada($waId);
+
+    return aiGenerarRespuestaParaConversacion(
+        $pdo,
+        $idConversacion,
+        $waId,
+        $textoUsuario,
+        null,
+        $conversacion,
+        $conversacion['nombre_perfil'] ?? null,
+        $config,
+        $horasInactividad,
+        $esLadaLocal
+    );
 }

@@ -91,10 +91,50 @@ foreach (aiFindConversationsNeedingFollowup($pdo) as $conversacion) {
     }
 }
 
+// 3) Conversaciones "atoradas": el ultimo mensaje es del cliente y nadie -- ni Alex ni un
+//    humano -- las contesto (tipico: llegaron fuera del horario de atencion de Alex, ver
+//    AI_HORARIO_ATENCION_* / aiEstaEnHorarioAtencion()). Si ahorita SI es horario de
+//    atencion, se retoman con una respuesta real (DeepSeek, ya con todo lo que escribieron
+//    en el contexto), nunca mas de AI_HORARIO_CATCHUP_MAX_POR_CORRIDA por corrida y con
+//    pausa aleatoria entre cada una -- mismo principio anti-rafaga que el paso 2.
+$retomadas = 0;
+$retomadasFallidas = 0;
+if (aiEstaEnHorarioAtencion()) {
+    $catchupEnEstaCorrida = 0;
+    foreach (aiFindConversationsPendingRespuesta($pdo) as $conversacion) {
+        if ($isDryRun) {
+            $retomadas++;
+            continue;
+        }
+
+        if ($catchupEnEstaCorrida >= AI_HORARIO_CATCHUP_MAX_POR_CORRIDA) {
+            break;
+        }
+
+        if ($catchupEnEstaCorrida > 0) {
+            sleep(random_int(AI_HORARIO_CATCHUP_PAUSA_MIN_SEGUNDOS, AI_HORARIO_CATCHUP_PAUSA_MAX_SEGUNDOS));
+        }
+
+        $replyParts = aiRetomarConversacionPendiente($pdo, $conversacion);
+        $catchupEnEstaCorrida++;
+
+        if (empty($replyParts)) {
+            continue; // la conversacion ya no calificaba (humano la atendio, bot apagado, etc.)
+        }
+
+        $resultado = waSendOutboundMessage((string) $conversacion['wa_id'], $replyParts);
+        if (!empty($resultado['ok'])) {
+            $retomadas++;
+        } else {
+            $retomadasFallidas++;
+        }
+    }
+}
+
 fwrite(
     STDOUT,
     sprintf(
-        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d%s",
+        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d | retomadas=%d | retomadas_fallidas=%d%s",
         date('Y-m-d H:i:s'),
         $isDryRun ? 'yes' : 'no',
         $reactivadasPorInactividad,
@@ -102,6 +142,8 @@ fwrite(
         $seguimientosFallidos,
         $resueltas,
         $cerradasPorInactividad,
+        $retomadas,
+        $retomadasFallidas,
         PHP_EOL
     )
 );

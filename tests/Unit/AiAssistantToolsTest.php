@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 final class AiAssistantToolsTest extends TestCase
@@ -1377,6 +1378,85 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
     }
 
+    // ------------------------------------------------------------------
+    // Horario de atencion (aiEstaEnHorarioAtencion) + catch-up de conversaciones
+    // "atoradas" (aiFindConversationsPendingRespuesta / aiRetomarConversacionPendiente).
+    // Incidente 2026-09-13: nunca contestar en rafaga, tampoco al retomar la manana.
+    // ------------------------------------------------------------------
+
+    public function testEstaEnHorarioAtencionRespetaLosLimitesDeHora(): void
+    {
+        $fabrica = static fn(string $hora): DateTimeImmutable => new DateTimeImmutable("2026-09-14 {$hora}");
+
+        $this->assertFalse(aiEstaEnHorarioAtencion($fabrica('06:59:59')));
+        $this->assertTrue(aiEstaEnHorarioAtencion($fabrica('07:00:00')));
+        $this->assertTrue(aiEstaEnHorarioAtencion($fabrica('12:00:00')));
+        $this->assertTrue(aiEstaEnHorarioAtencion($fabrica('21:59:59')));
+        $this->assertFalse(aiEstaEnHorarioAtencion($fabrica('22:00:00')));
+        $this->assertFalse(aiEstaEnHorarioAtencion($fabrica('00:00:00')));
+        $this->assertFalse(aiEstaEnHorarioAtencion($fabrica('03:40:00')));
+    }
+
+    public function testFindConversationsPendingRespuestaSoloEncuentraLasQueTerminaronEnMensajeDeUsuario(): void
+    {
+        // A: el ultimo mensaje es del cliente -- nadie la contesto, debe salir.
+        $convA = aiGetOrCreateConversation($this->pdo, '5215500040001', null);
+        aiAppendMessage($this->pdo, (int) $convA['id_conversacion'], 'user', 'Hola, sigues ahi?');
+
+        // B: el ultimo mensaje es de Alex -- ya se contesto, no debe salir.
+        $convB = aiGetOrCreateConversation($this->pdo, '5215500040002', null);
+        aiAppendMessage($this->pdo, (int) $convB['id_conversacion'], 'user', 'Hola');
+        aiAppendMessage($this->pdo, (int) $convB['id_conversacion'], 'assistant', 'Hola! En que te ayudo?', null, null, null, null, true);
+
+        // C: ultimo mensaje del cliente, pero la conversacion esta pausada (humano
+        // atendiendo) -- no debe salir, Alex no debe interrumpir.
+        $convC = aiGetOrCreateConversation($this->pdo, '5215500040003', null);
+        aiAppendMessage($this->pdo, (int) $convC['id_conversacion'], 'user', 'Necesito ayuda');
+        aiSetConversationState($this->pdo, (int) $convC['id_conversacion'], 'pausado', 'atendido a mano');
+
+        $pendientes = aiFindConversationsPendingRespuesta($this->pdo);
+        $idsPendientes = array_map(static fn(array $c) => (int) $c['id_conversacion'], $pendientes);
+
+        $this->assertContains((int) $convA['id_conversacion'], $idsPendientes);
+        $this->assertNotContains((int) $convB['id_conversacion'], $idsPendientes);
+        $this->assertNotContains((int) $convC['id_conversacion'], $idsPendientes);
+    }
+
+    #[Group('ai_deepseek')]
+    public function testRetomarConversacionPendienteTransfiereAHumanoSiDeepSeekNoEstaDisponible(): void
+    {
+        // Sin DEEPSEEK_AI_ASSISTANT configurado en el entorno de tests, aiCallDeepSeek()
+        // lanza antes de intentar cualquier llamada de red real -- aiGenerarRespuestaParaConversacion()
+        // debe capturarlo con gracia (transferir_a_humano + texto de respaldo), igual que
+        // en el flujo en vivo, sin tronar ni mandar texto vacio.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500040004', null);
+        aiAppendMessage($this->pdo, (int) $conversacion['id_conversacion'], 'user', 'Hola, sigo esperando el precio');
+
+        $fila = aiFindConversationsPendingRespuesta($this->pdo)[0] ?? null;
+        $this->assertIsArray($fila);
+
+        $replyParts = aiRetomarConversacionPendiente($this->pdo, $fila);
+
+        $this->assertNotEmpty($replyParts);
+        $this->assertSame('text', $replyParts[0]['type']);
+        $this->assertNotSame('', trim($replyParts[0]['text']));
+
+        // La conversacion debe quedar pausada/transferida, no en un limbo silencioso.
+        $row = $this->pdo->query('SELECT estado_bot FROM whatsapp_conversaciones WHERE id_conversacion = ' . (int) $conversacion['id_conversacion'])->fetch();
+        $this->assertSame('pausado', $row['estado_bot']);
+    }
+
+    public function testRetomarConversacionPendienteNoHaceNadaSiElBotEstaApagadoGlobalmente(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 0)');
+
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500040005', null);
+        aiAppendMessage($this->pdo, (int) $conversacion['id_conversacion'], 'user', 'Hola?');
+        $fila = aiFindConversationsPendingRespuesta($this->pdo)[0] ?? null;
+
+        $this->assertSame([], aiRetomarConversacionPendiente($this->pdo, $fila));
+    }
+
     public function testLogDiagnosticErrorInsertsRowWithJsonContext(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500030001', null);
@@ -1846,6 +1926,17 @@ final class AiAssistantToolsTest extends TestCase
                 id_etiqueta INTEGER NOT NULL,
                 asignado_en TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (id_conversacion, id_etiqueta)
+            )'
+        );
+        $this->pdo->exec(
+            'CREATE TABLE whatsapp_historial_temas (
+                id_tema INTEGER PRIMARY KEY AUTOINCREMENT,
+                wa_id TEXT NOT NULL,
+                tipo TEXT NOT NULL,
+                valor TEXT NOT NULL,
+                veces_mencionado INTEGER NOT NULL DEFAULT 1,
+                primera_mencion TEXT NOT NULL,
+                ultima_mencion TEXT NOT NULL
             )'
         );
     }
