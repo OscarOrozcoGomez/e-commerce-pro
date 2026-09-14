@@ -181,6 +181,19 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('Nunca compartas datos de otros clientes', $prompt);
     }
 
+    public function testSystemPromptBaneaPorCompletoLaPalabraRecomendar(): void
+    {
+        // Regla de negocio (no solo de tono medico): no podemos hacer recomendaciones,
+        // punto -- ni en ventas normales ni en contexto de salud. Antes, el paso "Cierre
+        // de venta" le pedia a Alex explicitamente dar una "recomendacion breve", lo cual
+        // contradecia la regla de seguridad que solo prohibia la palabra en tono medico.
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringNotContainsString('recomendacion breve', $prompt);
+        $this->assertStringNotContainsString('recomendar productos', $prompt);
+        $this->assertStringContainsString('NUNCA uses las palabras "recomendar"', $prompt);
+    }
+
     public function testSystemPromptInstructsHandoffFlagEvenWithOverride(): void
     {
         $normal = aiBuildSystemPrompt($this->baseConfig(), null);
