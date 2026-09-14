@@ -140,15 +140,28 @@ final class AiAssistantPromptTest extends TestCase
 
     public function testSystemPromptWarnsWhenPhoneIsNotLocalLada(): void
     {
-        $sinDato = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null);
-        $this->assertStringNotContainsString('lada 33', $sinDato);
-
         $esLocal = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, true);
         $this->assertStringNotContainsString('lada 33', $esLocal);
 
         $noLocal = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, false);
         $this->assertStringContainsString('lada 33', $noLocal);
         $this->assertStringContainsString('Zona Metropolitana de Guadalajara', $noLocal);
+    }
+
+    public function testSystemPromptTambienPreguntaZonaCuandoLaLadaEsIndeterminada(): void
+    {
+        // Caso real (2026-09-14): un cliente con numero de EEUU recibio precios y
+        // disponibilidad completos sin que Alex preguntara la zona, porque antes esta
+        // pregunta solo se disparaba con esLadaLocal === false, nunca con null (que cubre
+        // tanto numeros extranjeros como LIDs de WhatsApp de clientes realmente locales).
+        // Ahora null tambien dispara la pregunta, pero con texto neutral -- nunca afirma
+        // que el numero "no es de la zona" cuando en realidad no se sabe.
+        $indeterminado = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null);
+
+        $this->assertStringContainsString('Zona Metropolitana de Guadalajara', $indeterminado);
+        $this->assertStringNotContainsString('lada 33', $indeterminado);
+        $this->assertStringNotContainsString('no es de la zona', $indeterminado);
+        $this->assertStringContainsString('en que ciudad', $indeterminado);
     }
 
     public function testSystemPromptNeverAppliesDiscountsOrModifiesPlacedOrdersItself(): void

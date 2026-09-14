@@ -98,13 +98,17 @@ o a un cron/script que le mande algo a un cliente por WhatsApp debe verificar qu
 cumpliendo, y si se toca ese código, se tiene que volver a razonar explícitamente si sigue
 cumpliéndolas**:
 
-1. **Nunca mandar el mismo texto (o textos parecidos) a varios destinatarios en el mismo
-   segundo/ventana corta.** Cualquier loop que recorra varias conversaciones/clientes y le
-   mande un mensaje a cada uno (crons, funciones de "seguimiento", futuras campañas/broadcast)
-   necesita: (a) una pausa aleatoria entre cada envío real (ver
-   `AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS`/`AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS` en `ai_assistant.php`), y
-   (b) un tope de cuántos manda por corrida (`AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA`) — un backlog
-   grande se vacía poco a poco en varias corridas, nunca de un jalón.
+1. **Los mensajes PROACTIVOS de Alex (el cliente no escribió primero — seguimiento de 24h y
+   catch-up de horario) nunca pasan de UNO combinado por hora**, sin importar qué tan grande
+   sea el backlog ni cuántas veces corra el cron mientras tanto (`scripts/whatsapp_followup_cron.php`
+   corre cada 20 min, pero solo manda algo si `aiPuedeEnviarProactivoAhora()` lo permite — ver
+   `AI_PROACTIVO_INTERVALO_MIN_MINUTOS` en `ai_assistant.php`). Un backlog grande se vacía a lo
+   largo de varios días si hace falta, nunca de un jalón ni sostenido hora tras hora. El texto
+   del seguimiento de 24h además se genera distinto cada vez (`aiGenerarTextoSeguimientoUnico()`,
+   vía DeepSeek con el historial real) — mandar siempre el mismo texto fijo a distintos
+   destinatarios es en sí mismo un patrón detectable, aunque vaya espaciado. Cualquier futura
+   funcionalidad de "mensaje a varios clientes" (campañas/broadcast) debe pasar por esta misma
+   disciplina: cadencia de horas, no de segundos, y texto variado.
 2. **Las respuestas de Alex en vivo (conversación normal) se mandan con un retraso humano
    deliberado** (60-120s aleatorios, ver `enviarReplyParts`/el delay antes de llamarla dentro
    de `messages.upsert` en `/opt/wa-bridge/app/index.js` — código del puente, vive en el VPS,
@@ -113,8 +117,9 @@ cumpliéndolas**:
 3. Antes de dar por terminado cualquier cambio que toque `ai_assistant.php` (specialmente
    `aiSendFollowupMessage`, `aiRunAssistantTurn`, cualquier tool nueva, o cualquier cron
    `scripts/whatsapp_*`), pregúntate explícitamente: *¿este cambio puede hacer que se manden
-   varios mensajes reales a WhatsApp en una ráfaga sin pausa?* Si la respuesta no es un "no"
-   claro y verificado, hay que agregar pausa/tope antes de considerarlo terminado.
+   varios mensajes reales a WhatsApp en una ráfaga, o que se sostenga un volumen alto de
+   mensajes proactivos por muchas horas seguidas?* Si la respuesta no es un "no" claro y
+   verificado, hay que agregar pausa/tope antes de considerarlo terminado.
 
 Ver `private/HOWTO_VPS_BD.md` sección 8 para logs/edición del puente (`journalctl -u
 wa-bridge`, `/opt/wa-bridge/app/index.js`).

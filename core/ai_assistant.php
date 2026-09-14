@@ -256,6 +256,15 @@ function aiBuildSystemPrompt(
     }
     if ($esLadaLocal === false) {
         $lines[] = 'El telefono de este cliente no tiene lada 33 (Guadalajara). Las entregas fisicas contra entrega solo aplican dentro de la Zona Metropolitana de Guadalajara. Si todavia no lo has confirmado en esta conversacion, pregunta con transparencia y amabilidad si se encuentra actualmente en la zona o si necesita el envio a un domicilio ahi, antes de avanzar con precios o pedidos. Ejemplo de tono: "Notamos que tu numero no es de la zona local de Guadalajara (lada 33). Te comento que en Blife realizamos entregas contra entrega unicamente dentro de la Zona Metropolitana de Guadalajara. Te encuentras por aqui o necesitas el envio a un domicilio local?"';
+    } elseif ($esLadaLocal === null) {
+        // No se pudo determinar la lada -- puede ser un LID de WhatsApp (privacidad) de un
+        // cliente realmente local, o puede ser un numero de otro pais (ver caso real
+        // 2026-09-14: un cliente con numero de EEUU recibio precios y disponibilidad
+        // completos sin que se le preguntara la zona, porque antes esta pregunta solo se
+        // disparaba con $esLadaLocal === false, nunca con null). No se puede afirmar "tu
+        // numero no es de la zona" (seria falso para el caso LID), asi que se pregunta de
+        // forma neutral en vez de asumir nada en ningun sentido.
+        $lines[] = 'No se pudo determinar automaticamente si el telefono de este cliente es de la Zona Metropolitana de Guadalajara. Las entregas fisicas contra entrega solo aplican dentro de esa zona. Si todavia no lo has confirmado en esta conversacion, pregunta con naturalidad en que ciudad se encuentra o si necesita el envio a un domicilio en Guadalajara, antes de avanzar con precios o pedidos -- sin asumir ni decirle que su numero "parece" de fuera, solo pregunta con transparencia. Ejemplo de tono: "Antes de darte los detalles, ¿en que ciudad te encuentras o a donde seria el envio?"';
     }
 
     if (!empty($etiquetasDisponibles)) {
@@ -883,33 +892,12 @@ function aiHandleHumanOutboundMessage(PDO $pdo, string $waId, string $texto, ?st
 const AI_FOLLOWUP_INACTIVITY_HOURS = 24;
 const AI_FOLLOWUP_CLOSE_HOURS = 48;
 
-// Tope de seguimientos REALES que whatsapp_followup_cron.php manda por corrida, y rango
-// (segundos) de la pausa aleatoria entre cada uno.
-//
-// Incidente 2026-09-13: la primera corrida de la reactivacion automatica de 24h encontro
-// un backlog grande y disparo ~24 mensajes identicos a WhatsApp en el mismo segundo. Ese
-// patron (mismo texto, muchos destinatarios, sin pausa, via un cliente no oficial) es
-// justo lo que el antispam de WhatsApp detecta -- la cuenta quedo bloqueada/en revision.
-// Con este tope, un backlog grande se vacia poco a poco a lo largo de varias corridas (el
-// cron ya corre cada 20 min) en vez de de un jalon.
-const AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA = 8;
-const AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS = 8;
-const AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS = 20;
-
 // Horario de atencion de Alex: fuera de [HORA_INICIO, HORA_FIN) el mensaje del cliente se
 // guarda (sigue visible/sin marcar como leido en WhatsApp) pero Alex no contesta en vivo --
 // un bot que responde a las 3am, siempre, es en si mismo una senal de automatizacion. Se
-// retoma con una respuesta real cuando abre el horario, ver AI_HORARIO_CATCHUP_*.
+// retoma con una respuesta real cuando abre el horario, ver AI_PROACTIVO_INTERVALO_MIN_MINUTOS.
 const AI_HORARIO_ATENCION_HORA_INICIO = 7;  // 7:00 am
 const AI_HORARIO_ATENCION_HORA_FIN = 22;    // 10:00 pm (exclusivo)
-
-// Tope de conversaciones "atoradas" (ver aiFindConversationsPendingRespuesta()) que se
-// retoman por corrida al abrir el horario de atencion, y pausa entre cada una -- mismo
-// principio anti-rafaga que AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA: un backlog de toda la
-// madrugada se contesta poco a poco, nunca de un jalon.
-const AI_HORARIO_CATCHUP_MAX_POR_CORRIDA = 8;
-const AI_HORARIO_CATCHUP_PAUSA_MIN_SEGUNDOS = 10;
-const AI_HORARIO_CATCHUP_PAUSA_MAX_SEGUNDOS = 30;
 
 /**
  * True si $ahora cae dentro del horario de atencion de Alex. Usa la zona horaria que ya
@@ -922,6 +910,97 @@ function aiEstaEnHorarioAtencion(?DateTimeImmutable $ahora = null): bool
     $hora = (int)$ahora->format('G');
 
     return $hora >= AI_HORARIO_ATENCION_HORA_INICIO && $hora < AI_HORARIO_ATENCION_HORA_FIN;
+}
+
+// Cadencia de mensajes PROACTIVOS de Alex -- los que el cliente NO disparo escribiendo
+// primero (seguimiento de 24h y catch-up de horario, ver whatsapp_followup_cron.php).
+//
+// Incidente 2026-09-13: la primera corrida de la reactivacion automatica de 24h encontro
+// un backlog grande y disparo ~24 mensajes identicos a WhatsApp en el mismo segundo. Un
+// tope "por corrida" con pausas (lo que se probo primero) reduce el riesgo de rafaga
+// puntual, pero no el de VOLUMEN sostenido: con el cron corriendo cada 20 min, un backlog
+// grande podia seguir mandando su tope maximo corrida tras corrida durante horas. Decision
+// del negocio (2026-09-14): maximo UN mensaje proactivo por hora, combinando seguimiento y
+// catch-up (nunca los dos en la misma hora) -- si el backlog no se alcanza a vaciar en el
+// dia, sigue al dia siguiente sin problema. Con horario 7am-10pm eso da un techo natural de
+// ~15 mensajes proactivos maximo al dia, cadencia de alguien checando manualmente, no de un
+// bot.
+const AI_PROACTIVO_INTERVALO_MIN_MINUTOS = 60;
+
+/**
+ * True si Alex puede mandar un mensaje proactivo (seguimiento/catch-up) AHORA MISMO: hay
+ * que estar en horario de atencion Y que haya pasado al menos AI_PROACTIVO_INTERVALO_MIN_MINUTOS
+ * desde el ultimo mensaje proactivo real (de cualquiera de los dos tipos). Nunca se basa en
+ * el reloj de la corrida del cron (que corre cada 20 min) sino en un timestamp persistido
+ * en ai_asistente_config -- asi la cadencia de 1/hora se cumple sin importar cuantas veces
+ * dispare el cron mientras tanto.
+ */
+function aiPuedeEnviarProactivoAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
+{
+    if (!aiEstaEnHorarioAtencion($ahora)) {
+        return false;
+    }
+
+    $config = aiGetConfig($pdo);
+    $ultimo = trim((string)($config['ultimo_envio_proactivo_en'] ?? ''));
+    if ($ultimo === '') {
+        return true;
+    }
+
+    $tsUltimo = strtotime($ultimo);
+    if ($tsUltimo === false) {
+        return true;
+    }
+
+    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
+
+    return ($tsAhora - $tsUltimo) >= (AI_PROACTIVO_INTERVALO_MIN_MINUTOS * 60);
+}
+
+/**
+ * Marca que Alex acaba de mandar un mensaje proactivo (seguimiento o catch-up), para que
+ * aiPuedeEnviarProactivoAhora() bloquee el siguiente hasta que pase la hora completa.
+ */
+function aiRegistrarEnvioProactivo(PDO $pdo): void
+{
+    $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
+}
+
+/**
+ * Texto de seguimiento (reenganche de 24h) generado por DeepSeek a partir del historial
+ * REAL de esa conversacion, para que nunca sea el mismo texto repetido a distintos
+ * destinatarios -- un mensaje identico mandado a muchas personas (aunque sea uno por hora)
+ * sigue siendo un patron reconocible. Si DeepSeek no esta disponible o regresa vacio, cae
+ * al texto fijo de siempre (aiGetFollowupTemplateText()) como respaldo seguro -- nunca se
+ * queda sin mandar el seguimiento solo porque la generacion fallo.
+ */
+function aiGenerarTextoSeguimientoUnico(PDO $pdo, int $idConversacion, array $config): string
+{
+    try {
+        $historial = aiLoadConversationHistory($pdo, $idConversacion);
+        if ($historial === []) {
+            return aiGetFollowupTemplateText($pdo);
+        }
+
+        $modelo = trim((string)($config['modelo_llm'] ?? '')) !== '' ? (string)$config['modelo_llm'] : 'deepseek-chat';
+        $apiKeyVariable = trim((string)($config['api_key_variable'] ?? '')) !== '' ? (string)$config['api_key_variable'] : 'DEEPSEEK_AI_ASSISTANT';
+        $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
+
+        $instruccion = [
+            'role' => 'system',
+            'content' => "Eres {$persona}, asistente de ventas de WhatsApp. Han pasado mas de 24 horas sin que este cliente responda desde tu ultimo mensaje. Escribe UN mensaje breve (1-2 lineas), calido y natural retomando el tema real de la conversacion (el producto o duda que menciono), invitandolo a seguir. Nunca repitas siempre la misma frase -- varia la redaccion cada vez que se te pida esto. No uses markdown web ni firmes el mensaje. Responde SOLO con el texto del mensaje, nada mas.",
+        ];
+
+        $respuesta = aiCallDeepSeek(array_merge([$instruccion], $historial), [], $modelo, 0.9, $apiKeyVariable);
+        $texto = trim((string)($respuesta['message']['content'] ?? ''));
+        if ($texto !== '') {
+            return aiSanitizePlainTextForWhatsapp($texto);
+        }
+    } catch (Throwable $e) {
+        error_log('WARNING: no se pudo generar texto de seguimiento unico via DeepSeek, se usa la plantilla fija: ' . $e->getMessage());
+    }
+
+    return aiGetFollowupTemplateText($pdo);
 }
 
 // Si un humano pauso el bot (intervencion manual o transferir_a_humano) y la conversacion
@@ -1132,7 +1211,8 @@ function aiSendFollowupMessage(PDO $pdo, array $conversacion): bool
         return false;
     }
 
-    $texto = aiGetFollowupTemplateText($pdo);
+    $config = aiGetConfig($pdo);
+    $texto = aiGenerarTextoSeguimientoUnico($pdo, $idConversacion, $config);
     $resultado = waSendOutboundMessage($waId, [['type' => 'text', 'text' => $texto]]);
 
     aiAppendMessage($pdo, $idConversacion, 'assistant', $texto, null, null, null, null, true);

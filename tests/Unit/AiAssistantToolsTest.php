@@ -1379,6 +1379,75 @@ final class AiAssistantToolsTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // Cadencia de mensajes proactivos: maximo 1 combinado por hora (ver incidente
+    // 2026-09-13 y el rediseno del 2026-09-14 en whatsapp_followup_cron.php).
+    // ------------------------------------------------------------------
+
+    public function testPuedeEnviarProactivoAhoraEsTrueLaPrimeraVez(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $medioDia = new DateTimeImmutable('2026-09-14 12:00:00');
+
+        $this->assertTrue(aiPuedeEnviarProactivoAhora($this->pdo, $medioDia));
+    }
+
+    public function testPuedeEnviarProactivoAhoraEsFalseFueraDeHorarioAunqueNuncaSeHayaMandadoNada(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $madrugada = new DateTimeImmutable('2026-09-14 03:00:00');
+
+        $this->assertFalse(aiPuedeEnviarProactivoAhora($this->pdo, $madrugada));
+    }
+
+    public function testPuedeEnviarProactivoAhoraBloqueaAntesDeQuePaseUnaHora(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = '2026-09-14 12:00:00' WHERE id_config = 1");
+
+        $this->assertFalse(aiPuedeEnviarProactivoAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:59:59')));
+        $this->assertTrue(aiPuedeEnviarProactivoAhora($this->pdo, new DateTimeImmutable('2026-09-14 13:00:00')));
+    }
+
+    public function testRegistrarEnvioProactivoActualizaElTimestamp(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $this->assertNull($this->pdo->query('SELECT ultimo_envio_proactivo_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
+
+        aiRegistrarEnvioProactivo($this->pdo);
+
+        $this->assertNotNull($this->pdo->query('SELECT ultimo_envio_proactivo_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
+    }
+
+    public function testGenerarTextoSeguimientoUnicoUsaLaPlantillaFijaSiLaConversacionNoTieneHistorial(): void
+    {
+        // Conversacion recien creada, sin un solo mensaje -- no tiene caso gastar una
+        // llamada a DeepSeek (ni siquiera deberia poder pasar en la practica, un
+        // seguimiento de 24h implica que ya hubo conversacion antes).
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500080001', null);
+
+        $texto = aiGenerarTextoSeguimientoUnico($this->pdo, (int) $conversacion['id_conversacion'], aiGetConfig($this->pdo));
+
+        $this->assertSame(aiGetFollowupTemplateText($this->pdo), $texto);
+    }
+
+    #[Group('ai_deepseek')]
+    public function testGenerarTextoSeguimientoUnicoCaeALaPlantillaFijaSiDeepSeekFalla(): void
+    {
+        // Con historial real, si intenta generar via DeepSeek -- sin llave configurada en
+        // el entorno de tests, debe caer con gracia a la plantilla fija, nunca tronar ni
+        // regresar texto vacio.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500080002', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Hola, quiero Omega 3');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'Claro, tenemos varias opciones...', null, null, null, null, true);
+
+        $texto = aiGenerarTextoSeguimientoUnico($this->pdo, $idConversacion, aiGetConfig($this->pdo));
+
+        $this->assertNotSame('', trim($texto));
+        $this->assertSame(aiGetFollowupTemplateText($this->pdo), $texto);
+    }
+
+    // ------------------------------------------------------------------
     // Horario de atencion (aiEstaEnHorarioAtencion) + catch-up de conversaciones
     // "atoradas" (aiFindConversationsPendingRespuesta / aiRetomarConversacionPendiente).
     // Incidente 2026-09-13: nunca contestar en rafaga, tampoco al retomar la manana.
@@ -2119,7 +2188,8 @@ final class AiAssistantToolsTest extends TestCase
                 modelo_llm TEXT NOT NULL DEFAULT "deepseek-chat",
                 temperatura REAL NOT NULL DEFAULT 0.30,
                 prompt_sistema_override TEXT NULL,
-                api_key_variable TEXT NOT NULL DEFAULT "DEEPSEEK_AI_ASSISTANT"
+                api_key_variable TEXT NOT NULL DEFAULT "DEEPSEEK_AI_ASSISTANT",
+                ultimo_envio_proactivo_en TEXT NULL
             )'
         );
         $this->pdo->exec(

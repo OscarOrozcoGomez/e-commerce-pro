@@ -61,72 +61,50 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
     }
 }
 
-// 2) Conversaciones activas sin seguimiento, con mas de 24h desde la ultima respuesta del bot.
+// 2+3) Mensajes PROACTIVOS de Alex -- el cliente NO escribio primero. Dos origenes
+//      posibles: seguimiento de 24h (reenganchar a alguien que se quedo callado, ver
+//      aiFindConversationsNeedingFollowup()) o catch-up de horario (contestar a alguien
+//      que sigue esperando una respuesta desde fuera del horario de atencion, ver
+//      aiFindConversationsPendingRespuesta()).
 //
-// Nunca mas de AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA envios reales por corrida, con una pausa
-// aleatoria entre cada uno -- ver el comentario junto a esas constantes en ai_assistant.php
-// (incidente real: una rafaga sin pausa aqui puso la cuenta de WhatsApp en revision). El
-// resto del backlog, si lo hay, se manda en la siguiente corrida (20 min despues).
-$enviosRealesEnEstaCorrida = 0;
-foreach (aiFindConversationsNeedingFollowup($pdo) as $conversacion) {
-    if ($isDryRun) {
-        $seguimientosEnviados++;
-        continue;
-    }
-
-    if ($enviosRealesEnEstaCorrida >= AI_FOLLOWUP_MAX_ENVIOS_POR_CORRIDA) {
-        break;
-    }
-
-    if ($enviosRealesEnEstaCorrida > 0) {
-        sleep(random_int(AI_FOLLOWUP_PAUSA_MIN_SEGUNDOS, AI_FOLLOWUP_PAUSA_MAX_SEGUNDOS));
-    }
-
-    $ok = aiSendFollowupMessage($pdo, $conversacion);
-    $enviosRealesEnEstaCorrida++;
-    if ($ok) {
-        $seguimientosEnviados++;
-    } else {
-        $seguimientosFallidos++;
-    }
-}
-
-// 3) Conversaciones "atoradas": el ultimo mensaje es del cliente y nadie -- ni Alex ni un
-//    humano -- las contesto (tipico: llegaron fuera del horario de atencion de Alex, ver
-//    AI_HORARIO_ATENCION_* / aiEstaEnHorarioAtencion()). Si ahorita SI es horario de
-//    atencion, se retoman con una respuesta real (DeepSeek, ya con todo lo que escribieron
-//    en el contexto), nunca mas de AI_HORARIO_CATCHUP_MAX_POR_CORRIDA por corrida y con
-//    pausa aleatoria entre cada una -- mismo principio anti-rafaga que el paso 2.
+// Decision del negocio (2026-09-14, tras el incidente 2026-09-13): jamas mas de UN
+// mensaje proactivo combinado por hora -- nunca "N por corrida" como en la version
+// anterior de este mismo mecanismo (esa fue, sin tope, la causa real del bloqueo de
+// WhatsApp). El catch-up tiene prioridad sobre el seguimiento (alguien esperando una
+// respuesta real pesa mas que un recordatorio); si no hay ninguno de los dos pendiente,
+// no se manda nada. Si el backlog no se alcanza a vaciar en el dia, sigue al dia
+// siguiente sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
 $retomadas = 0;
 $retomadasFallidas = 0;
-if (aiEstaEnHorarioAtencion()) {
-    $catchupEnEstaCorrida = 0;
-    foreach (aiFindConversationsPendingRespuesta($pdo) as $conversacion) {
-        if ($isDryRun) {
+
+if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo)) {
+    $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
+    $pendienteSeguimiento = $pendienteCatchup === null ? (aiFindConversationsNeedingFollowup($pdo)[0] ?? null) : null;
+
+    if ($isDryRun) {
+        if ($pendienteCatchup !== null) {
             $retomadas++;
-            continue;
+        } elseif ($pendienteSeguimiento !== null) {
+            $seguimientosEnviados++;
         }
-
-        if ($catchupEnEstaCorrida >= AI_HORARIO_CATCHUP_MAX_POR_CORRIDA) {
-            break;
+    } elseif ($pendienteCatchup !== null) {
+        $replyParts = aiRetomarConversacionPendiente($pdo, $pendienteCatchup);
+        if (!empty($replyParts)) {
+            $resultado = waSendOutboundMessage((string) $pendienteCatchup['wa_id'], $replyParts);
+            aiRegistrarEnvioProactivo($pdo);
+            if (!empty($resultado['ok'])) {
+                $retomadas++;
+            } else {
+                $retomadasFallidas++;
+            }
         }
-
-        if ($catchupEnEstaCorrida > 0) {
-            sleep(random_int(AI_HORARIO_CATCHUP_PAUSA_MIN_SEGUNDOS, AI_HORARIO_CATCHUP_PAUSA_MAX_SEGUNDOS));
-        }
-
-        $replyParts = aiRetomarConversacionPendiente($pdo, $conversacion);
-        $catchupEnEstaCorrida++;
-
-        if (empty($replyParts)) {
-            continue; // la conversacion ya no calificaba (humano la atendio, bot apagado, etc.)
-        }
-
-        $resultado = waSendOutboundMessage((string) $conversacion['wa_id'], $replyParts);
-        if (!empty($resultado['ok'])) {
-            $retomadas++;
+    } elseif ($pendienteSeguimiento !== null) {
+        $ok = aiSendFollowupMessage($pdo, $pendienteSeguimiento);
+        aiRegistrarEnvioProactivo($pdo);
+        if ($ok) {
+            $seguimientosEnviados++;
         } else {
-            $retomadasFallidas++;
+            $seguimientosFallidos++;
         }
     }
 }
