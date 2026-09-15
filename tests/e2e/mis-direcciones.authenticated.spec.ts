@@ -47,4 +47,22 @@ test.describe('Mis Direcciones', () => {
     await expect(page.getByText('Dirección predeterminada actualizada.')).toBeVisible();
     await expect(trabajoItem.getByText('Predeterminada')).toBeVisible();
   });
+
+  test('al llegar a 5 direcciones el formulario para agregar una nueva desaparece', async ({ page }) => {
+    await registerAndLogin(page);
+    await page.goto('views/mis_direcciones.php');
+
+    for (let i = 1; i <= 5; i++) {
+      await page.locator('#alias').fill(`Dirección Playwright ${i}`);
+      await page.locator('#direccion').fill(`Calle Playwright ${i}, Colonia Centro`);
+      await page.locator('#btn-submit').click();
+      await expect(page.getByText('Dirección guardada.')).toBeVisible();
+    }
+
+    // "Direcciones Guardadas (5/5)": views/mis_direcciones.php esconde el formulario de alta
+    // en cuanto count($direcciones) deja de ser < 5 -- límite duro de 5 por cliente.
+    await expect(page.locator('.card-title', { hasText: 'Direcciones Guardadas' })).toHaveText('Direcciones Guardadas (5/5)');
+    await expect(page.locator('#btn-submit')).toHaveCount(0);
+    await expect(page.locator('li.collection-item')).toHaveCount(5);
+  });
 });

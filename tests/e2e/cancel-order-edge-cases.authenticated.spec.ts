@@ -34,4 +34,29 @@ test.describe('Cancelar pedido: edge cases', () => {
     const body = await response.json();
     expect(body.success).toBe(false);
   });
+
+  test('el motivo "Otro motivo" exige el detalle antes de dejar confirmar la cancelación', async ({ page }) => {
+    let apiCalled = false;
+    await page.route('**/api/cancel_order.php', (route) => {
+      apiCalled = true;
+      route.continue();
+    });
+
+    const idPedido = await completeDomicilioCheckout(page);
+    await page.goto(`views/detalle_compra.php?id=${idPedido}`);
+    await page.getByRole('button', { name: 'CANCELAR PEDIDO' }).click();
+
+    // "Otro motivo" es requiere_detalle=1 (ver migración 20260817_000002) -- confirmar sin
+    // llenar el textarea debe bloquearse en el propio Swal (preConfirm), sin llamar la API.
+    await page.locator('#swal-motivo-cancelacion').selectOption({ label: 'Otro motivo' });
+    await page.getByRole('button', { name: 'Sí, cancelar pedido' }).click();
+    await expect(page.locator('.swal2-validation-message')).toHaveText('Cuéntanos brevemente el motivo de tu cancelación.');
+    expect(apiCalled).toBe(false);
+
+    // Al completar el detalle, sí procede.
+    await page.locator('#swal-detalle-cancelacion').fill('Detalle de prueba generado por Playwright.');
+    await page.getByRole('button', { name: 'Sí, cancelar pedido' }).click();
+    await expect(page.getByText('Pedido cancelado')).toBeVisible();
+    expect(apiCalled).toBe(true);
+  });
 });
