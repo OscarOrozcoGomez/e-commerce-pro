@@ -26,6 +26,9 @@ export const E2E_PRODUCTO_INCOMPLETO_NOMBRE = 'Playwright E2E Producto Incomplet
 // Uso exclusivo del import de "Pedido de mayoreo (B Life)" en views/purchase_orders.php
 // (pestaña "Cargar Pedido"). precio_costo=10.00 fijo -- ver scripts/seed_e2e_test_data.php.
 export const E2E_MAYOREO_PRODUCT_NAME = 'Playwright E2E Mayoreo Product';
+// Segundo producto (junto con E2E_PRODUCT_NAME) de uso exclusivo de
+// cleanup-reservations.staff.spec.ts -- necesita un pedido real de 2 renglones distintos.
+export const E2E_CLEANUP_PRODUCT_NAME = 'Playwright E2E Cleanup Reservations Product';
 // Cliente fijo (no autoregistrado) con domicilio guardado, para views/sales.php.
 export const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
 

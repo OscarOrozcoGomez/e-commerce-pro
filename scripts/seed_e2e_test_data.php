@@ -62,6 +62,16 @@ const E2E_PO_LIFECYCLE_STOCK_MAXIMO = 10;
 const E2E_MAYOREO_PRODUCT_NAME = 'Playwright E2E Mayoreo Product';
 const E2E_MAYOREO_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0007';
 
+// Segundo producto (aparte de E2E_PRODUCT_NAME) de uso exclusivo de
+// tests/e2e/cleanup-reservations.staff.spec.ts (views/cleanup_reservations.php): necesita un
+// pedido real con DOS renglones distintos para poder probar "Liberar producto" (parcial, el
+// pedido sigue vivo con el otro renglón) sin tocar el stock de ningún fixture compartido con
+// otros specs (E2E_LOW_STOCK_PRODUCT_NAME/E2E_PURCHASE_ORDER_PRODUCT_NAME tienen sus propios
+// invariantes de stock que otros tests dan por hecho). Stock alto a propósito: el checkout
+// real de este spec lo consume de verdad antes de liberarlo.
+const E2E_CLEANUP_PRODUCT_NAME = 'Playwright E2E Cleanup Reservations Product';
+const E2E_CLEANUP_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0008';
+
 // Producto de uso exclusivo de tests/e2e/productos-incompletos.staff.spec.ts (views/
 // productos_incompletos.php): a proposito sin precio_venta, sin precio_costo, sin sku,
 // sin codigo_barras y sin fila en inventario_almacen -- las 5 banderas de "falta" a la
@@ -443,6 +453,31 @@ try {
     }
 
     echo 'Seed OK: ' . E2E_MAYOREO_PRODUCT_NAME . " -> id_producto={$idProductoMayoreo}, id_almacen={$idAlmacen}\n";
+
+    // Segundo producto para el pedido de dos renglones de cleanup-reservations.staff.spec.ts
+    // (ver comentario junto a la constante). Stock alto porque el checkout real lo consume.
+    $stmt = $pdo->prepare(
+        'INSERT INTO productos (nombre, codigo_barras, precio_venta, estado)
+         VALUES (:nombre, :codigo_barras, 15.00, "activo")
+         ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), precio_venta = VALUES(precio_venta), estado = "activo"'
+    );
+    $stmt->execute(['nombre' => E2E_CLEANUP_PRODUCT_NAME, 'codigo_barras' => E2E_CLEANUP_PRODUCT_BARCODE]);
+
+    $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE codigo_barras = :codigo_barras');
+    $stmt->execute(['codigo_barras' => E2E_CLEANUP_PRODUCT_BARCODE]);
+    $idProductoCleanup = (int) $stmt->fetchColumn();
+    if ($idProductoCleanup <= 0) {
+        throw new RuntimeException('No se pudo resolver id_producto para ' . E2E_CLEANUP_PRODUCT_BARCODE . '.');
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual)
+         VALUES (:id_producto, :id_almacen, 500)
+         ON DUPLICATE KEY UPDATE cantidad_actual = 500'
+    );
+    $stmt->execute(['id_producto' => $idProductoCleanup, 'id_almacen' => $idAlmacen]);
+
+    echo 'Seed OK: ' . E2E_CLEANUP_PRODUCT_NAME . " -> id_producto={$idProductoCleanup}, id_almacen={$idAlmacen}, stock=500\n";
 
     // Producto deliberadamente incompleto (sin precio_venta/precio_costo/sku/codigo_barras
     // ni fila en inventario_almacen). Se busca por nombre porque no tiene codigo_barras.
