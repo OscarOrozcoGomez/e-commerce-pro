@@ -23,6 +23,11 @@ test-results/
 playwright-report/
 tests/
 test_payloads/
+package.json
+package-lock.json
+playwright.config.ts
+tsconfig.json
+.mcp.json
 
 # --- Automatizacion de mayoreo.blife.mx: requiere Chrome/Playwright + login manual
 #     (codigo de un solo uso), solo tiene sentido corriendo en una PC local con

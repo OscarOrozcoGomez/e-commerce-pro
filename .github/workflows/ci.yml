@@ -36,3 +36,21 @@ jobs:
           DB_PASSWORD: ""
           DB_CHARSET: utf8mb4
         run: composer test
+
+# E2E (Playwright, tests/e2e/) intencionalmente NO corre en CI (quitado 2026-09-01).
+#
+# El runner gratuito de GitHub Actions tiene solo 2 nucleos compartidos -- correr ahi
+# MariaDB + el server de PHP + Playwright/Chromium en paralelo hacia que la suite (o
+# incluso un subconjunto "smoke" curado de solo 11 tests) fallara por contencion de
+# recursos real -- la mayoria de las pruebas se colgaban 30s en page.waitForURL tras el
+# login -- sin reproducirse igual nunca en local, confirmado repetidas veces (128/128 en
+# verde localmente, tanto en verificacion propia como en una corrida aparte del usuario).
+# Se probaron varios fixes reales de CI antes de esta decision (motor de BD correcto,
+# concurrencia real del server via PHP_CLI_SERVER_WORKERS, override de BASE_URL, saltar
+# una resolucion DNS real en registro, bloquear CDNs no esenciales, reducir de 128 a un
+# subconjunto de 11) sin resolver el problema de fondo.
+#
+# La suite E2E completa (128 tests) sigue existiendo tal cual y pasando en verde --
+# se corre a mano cuando se quiere confianza end-to-end:
+#   php scripts/seed_e2e_test_data.php && php scripts/seed_e2e_staff_accounts.php
+#   npx playwright test --workers=2
