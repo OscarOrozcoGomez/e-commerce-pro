@@ -115,7 +115,7 @@ test.describe('Compras y Resurtido (purchase_orders.php)', () => {
     await page.locator('#po-groups .po-item-row').first().locator('input[name$="[cantidad]"]').fill('0');
 
     await page.getByRole('button', { name: /GENERAR ORDEN DE COMPRA/ }).click();
-    await expect(page.getByText('No hay cantidades para ordenar')).toBeVisible();
+    await expect(page.getByText('No hay productos seleccionados con cantidad para ordenar')).toBeVisible();
     expect(createCalled).toBe(false);
   });
 

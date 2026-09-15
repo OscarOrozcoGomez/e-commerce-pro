@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures';
 import {
   addProductToCartByName,
+  confirmDomicilioZoneFeeIfPresent,
   registerAndLogin,
   submitDomicilioCheckoutForm,
   E2E_LOW_STOCK_PRODUCT_NAME,
@@ -21,6 +22,7 @@ test.describe('Checkout: edge cases (autenticado)', () => {
     await page.locator('#telefono').fill('3311234567');
     await page.locator('#direccion').fill('Calle Falsa 123, Colonia Centro');
     await page.getByRole('button', { name: 'Confirmar Pedido' }).click();
+    await confirmDomicilioZoneFeeIfPresent(page);
 
     await expect(page.getByText('Sin stock suficiente')).toBeVisible();
     await expect(

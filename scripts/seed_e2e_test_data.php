@@ -50,6 +50,18 @@ const E2E_PO_CANCEL_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0006';
 const E2E_PO_LIFECYCLE_STOCK_MINIMO = 5;
 const E2E_PO_LIFECYCLE_STOCK_MAXIMO = 10;
 
+// Producto de uso exclusivo del import de "Pedido de mayoreo (B Life)" en
+// views/purchase_orders.php (pestaña "Cargar Pedido") -- ver
+// tests/e2e/purchase-orders-import.staff.spec.ts. purchaseOrderBuildMayoreoPreview()
+// empareja por nombre contra TODO el catálogo; con este nombre no hay riesgo de
+// confundirse con un producto real. Igual que el ciclo real de Ordenes de Compra de
+// arriba, "registrar orden por llegar" SI mutan ordenes_compra/detalle_orden_compra de
+// verdad (aunque sin tocar inventario -- por diseño, "por llegar" no surte), así que
+// cualquier orden abierta que haya quedado de una corrida anterior se cancela aquí para
+// que el test sea repetible sin acumular órdenes duplicadas.
+const E2E_MAYOREO_PRODUCT_NAME = 'Playwright E2E Mayoreo Product';
+const E2E_MAYOREO_PRODUCT_BARCODE = 'E2E-PLAYWRIGHT-TEST-0007';
+
 // Producto de uso exclusivo de tests/e2e/productos-incompletos.staff.spec.ts (views/
 // productos_incompletos.php): a proposito sin precio_venta, sin precio_costo, sin sku,
 // sin codigo_barras y sin fila en inventario_almacen -- las 5 banderas de "falta" a la
@@ -393,6 +405,44 @@ try {
 
         echo "Seed OK: {$nombreLifecycle} -> id_producto={$idProductoLifecycle}, id_almacen={$idAlmacen}, stock_minimo=" . E2E_PO_LIFECYCLE_STOCK_MINIMO . "\n";
     }
+
+    // Producto de "Pedido de mayoreo (B Life)": precio_costo=10.00 fijo, sin regla de
+    // stock_minimo/maximo (el import no depende de la Lista de Compra, solo del match
+    // por nombre contra el catálogo).
+    $stmt = $pdo->prepare(
+        'INSERT INTO productos (nombre, codigo_barras, precio_venta, precio_costo, estado)
+         VALUES (:nombre, :codigo_barras, 39.99, 10.00, "activo")
+         ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), precio_venta = VALUES(precio_venta), precio_costo = VALUES(precio_costo), estado = "activo"'
+    );
+    $stmt->execute(['nombre' => E2E_MAYOREO_PRODUCT_NAME, 'codigo_barras' => E2E_MAYOREO_PRODUCT_BARCODE]);
+
+    $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE codigo_barras = :codigo_barras');
+    $stmt->execute(['codigo_barras' => E2E_MAYOREO_PRODUCT_BARCODE]);
+    $idProductoMayoreo = (int) $stmt->fetchColumn();
+    if ($idProductoMayoreo <= 0) {
+        throw new RuntimeException('No se pudo resolver id_producto para ' . E2E_MAYOREO_PRODUCT_BARCODE . '.');
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual)
+         VALUES (:id_producto, :id_almacen, 3)
+         ON DUPLICATE KEY UPDATE cantidad_actual = 3'
+    );
+    $stmt->execute(['id_producto' => $idProductoMayoreo, 'id_almacen' => $idAlmacen]);
+
+    $stmtCancelStaleMayoreo = $pdo->prepare(
+        "UPDATE ordenes_compra oc
+         JOIN detalle_orden_compra doc ON doc.id_orden_compra = oc.id_orden_compra
+         SET oc.estado = 'cancelada'
+         WHERE doc.id_producto = :id_producto
+           AND oc.estado IN ('borrador','enviada','parcial')"
+    );
+    $stmtCancelStaleMayoreo->execute(['id_producto' => $idProductoMayoreo]);
+    if ($stmtCancelStaleMayoreo->rowCount() > 0) {
+        echo 'Correccion: ' . E2E_MAYOREO_PRODUCT_NAME . " tenia {$stmtCancelStaleMayoreo->rowCount()} orden(es) de compra abierta(s) de una corrida anterior -- canceladas.\n";
+    }
+
+    echo 'Seed OK: ' . E2E_MAYOREO_PRODUCT_NAME . " -> id_producto={$idProductoMayoreo}, id_almacen={$idAlmacen}\n";
 
     // Producto deliberadamente incompleto (sin precio_venta/precio_costo/sku/codigo_barras
     // ni fila en inventario_almacen). Se busca por nombre porque no tiene codigo_barras.

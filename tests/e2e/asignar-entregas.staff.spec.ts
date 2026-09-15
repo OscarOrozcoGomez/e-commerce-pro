@@ -10,11 +10,13 @@ function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-// select.selectOption({label}) exige coincidencia exacta, pero la opcion incluye el precio
-// ($XX.XX) al final -- se resuelve el value real buscando la opcion por texto parcial.
-async function seleccionarProductoPorNombre(select: import('@playwright/test').Locator, nombreProducto: string): Promise<void> {
-  const value = await select.locator('option', { hasText: nombreProducto }).getAttribute('value');
-  await select.selectOption(value ?? '');
+// "Agregar producto" ya no es un <select> nativo: es un combo de búsqueda
+// (.assign-prod-combo-search + lista filtrada en vivo) que llena un input hidden
+// (.assign-prod-combo-id) al hacer clic en un resultado -- ver el <script> de
+// views/asignar_entregas.php (catálogo completo en JS, filtro sin acentos/mayúsculas).
+async function seleccionarProductoPorNombre(combo: import('@playwright/test').Locator, nombreProducto: string): Promise<void> {
+  await combo.locator('.assign-prod-combo-search').fill(nombreProducto);
+  await combo.locator('.assign-prod-combo-list li[data-id]').filter({ hasText: nombreProducto }).first().click();
 }
 
 async function asignarRepartidor(page: import('@playwright/test').Page, idPedido: number): Promise<void> {
@@ -87,7 +89,7 @@ test.describe('Asignar Entregas a Domicilio (asignar_entregas.php)', () => {
     const totalAntesTexto = await card.locator('.assign-delivery-total').textContent();
     const totalAntes = Number((totalAntesTexto ?? '').replace(/[^0-9.]/g, ''));
 
-    await seleccionarProductoPorNombre(card.locator('select[name="id_producto"]'), E2E_PRODUCT_NAME);
+    await seleccionarProductoPorNombre(card.locator('.assign-prod-combo'), E2E_PRODUCT_NAME);
     await card.locator('input[name="cantidad"]').fill('1');
     await card.getByRole('button', { name: 'Agregar' }).click();
 
@@ -113,7 +115,7 @@ test.describe('Asignar Entregas a Domicilio (asignar_entregas.php)', () => {
     // -- si solo quedara 1, el boton de quitar aparece deshabilitado (ver siguiente test).
     await page.goto('views/asignar_entregas.php?tab=asignadas');
     let card = page.locator('.assign-delivery-card').filter({ hasText: numeroPedido });
-    await seleccionarProductoPorNombre(card.locator('select[name="id_producto"]'), E2E_PRODUCT_NAME);
+    await seleccionarProductoPorNombre(card.locator('.assign-prod-combo'), E2E_PRODUCT_NAME);
     await card.locator('input[name="cantidad"]').fill('1');
     await card.getByRole('button', { name: 'Agregar' }).click();
     await page.waitForURL(/asignar_entregas\.php\?tab=asignadas/);

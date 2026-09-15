@@ -24,9 +24,10 @@ async function asignarRepartidor(page: import('@playwright/test').Page, idPedido
 async function agregarSegundoProducto(page: import('@playwright/test').Page, numeroPedido: string): Promise<void> {
   await page.goto('views/asignar_entregas.php?tab=asignadas');
   const card = page.locator('.assign-delivery-card').filter({ hasText: numeroPedido });
-  const select = card.locator('select[name="id_producto"]');
-  const value = await select.locator('option', { hasText: E2E_PRODUCT_NAME }).getAttribute('value');
-  await select.selectOption(value ?? '');
+  // "Agregar producto" es un combo de búsqueda (no un <select> nativo) -- ver
+  // views/asignar_entregas.php, catálogo completo en JS filtrado en vivo por texto.
+  await card.locator('.assign-prod-combo-search').fill(E2E_PRODUCT_NAME);
+  await card.locator('.assign-prod-combo-list li[data-id]').filter({ hasText: E2E_PRODUCT_NAME }).first().click();
   await card.locator('input[name="cantidad"]').fill('1');
   await card.getByRole('button', { name: 'Agregar' }).click();
   await page.waitForURL(/asignar_entregas\.php\?tab=asignadas/);

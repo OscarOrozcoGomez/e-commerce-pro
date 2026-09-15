@@ -23,6 +23,9 @@ export const E2E_PO_CANCEL_PRODUCT_NAME = 'Playwright E2E PO Cancel Product';
 // Sin precio_venta/precio_costo/sku/codigo_barras ni fila en inventario_almacen a
 // proposito, para views/productos_incompletos.php.
 export const E2E_PRODUCTO_INCOMPLETO_NOMBRE = 'Playwright E2E Producto Incompleto';
+// Uso exclusivo del import de "Pedido de mayoreo (B Life)" en views/purchase_orders.php
+// (pestaña "Cargar Pedido"). precio_costo=10.00 fijo -- ver scripts/seed_e2e_test_data.php.
+export const E2E_MAYOREO_PRODUCT_NAME = 'Playwright E2E Mayoreo Product';
 // Cliente fijo (no autoregistrado) con domicilio guardado, para views/sales.php.
 export const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
 
@@ -134,11 +137,34 @@ export async function addProductToCartByName(page: Page, productName: string): P
   await page.goto(`views/catalogo.php?search=${encodeURIComponent(productName)}`);
   const card = page.locator('.product-card-container').filter({ hasText: productName }).first();
   await card.waitFor({ state: 'visible' });
-  await card.locator('.card-action button').click();
+  // No basta ".card-action button": a cualquier sesión iniciada (cliente o staff),
+  // catalogRenderProductCard() (core/catalogo_utils.php) también le pinta un botón verde
+  // "Compartir por WhatsApp" ahí mismo -- hay que apuntar al de agregar al carrito por su
+  // onclick, no por posición.
+  await card.locator('.card-action button[onclick^="handleAddToCart"]').click();
 }
 
 export async function addSeededProductToCart(page: Page): Promise<void> {
   await addProductToCartByName(page, E2E_PRODUCT_NAME);
+}
+
+/**
+ * Si la dirección de Domicilio queda fuera de la periferia de Guadalajara, cart.php
+ * muestra un Swal "Tu domicilio está fuera de la periferia" (cotización en vivo vía
+ * api/delivery_zone_quote.php) que hay que confirmar ("De acuerdo, confirmar") antes de que
+ * el pedido se registre -- ver el bloque `if (tipoEntregaSeleccionada === 'Domicilio')` en
+ * views/cart.php. Es condicional (solo aparece si costo_envio > 0), así que no falla si no
+ * aparece: la dirección fija 'Calle Falsa 123, Colonia Centro' que usan los specs sí cae
+ * fuera de la periferia en este ambiente, pero no hay que asumirlo en todos los casos.
+ */
+export async function confirmDomicilioZoneFeeIfPresent(page: Page): Promise<void> {
+  const confirmar = page.getByRole('button', { name: 'De acuerdo, confirmar' });
+  try {
+    await confirmar.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmar.click();
+  } catch {
+    // No aplicó cargo de envío foráneo (dirección dentro de la periferia) -- seguir.
+  }
 }
 
 /** Llena y envía el formulario de checkout por Domicilio con los datos dados. */
@@ -152,6 +178,7 @@ export async function submitDomicilioCheckoutForm(
   await page.locator('#telefono').fill(overrides.telefono ?? '3311234567');
   await page.locator('#direccion').fill(overrides.direccion ?? 'Calle Falsa 123, Colonia Centro');
   await page.getByRole('button', { name: 'Confirmar Pedido' }).click();
+  await confirmDomicilioZoneFeeIfPresent(page);
 }
 
 /** Llena y envía el formulario de checkout por "Recoger en Sucursal" (sin dirección). */
