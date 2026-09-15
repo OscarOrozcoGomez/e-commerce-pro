@@ -1,10 +1,12 @@
 import { test, expect } from './fixtures';
 import {
   addProductToCartByName,
+  addSeededProductToCart,
   confirmDomicilioZoneFeeIfPresent,
   registerAndLogin,
   submitDomicilioCheckoutForm,
   E2E_LOW_STOCK_PRODUCT_NAME,
+  E2E_PRODUCT_NAME,
 } from './helpers';
 
 test.describe('Checkout: edge cases (autenticado)', () => {
@@ -31,6 +33,36 @@ test.describe('Checkout: edge cases (autenticado)', () => {
 
     // El carrito no debió vaciarse ni redirigir a gracias.php: el pedido fue rechazado.
     expect(page.url()).toContain('cart.php');
+  });
+
+  test('declinar el cargo de envío foráneo ("Volver") no registra el pedido y deja el carrito intacto', async ({ page }) => {
+    let orderApiCalled = false;
+    await page.route('**/api/public_orders.php', (route) => {
+      orderApiCalled = true;
+      route.continue();
+    });
+
+    await registerAndLogin(page);
+    await addSeededProductToCart(page);
+    await page.goto('views/cart.php');
+    await page.locator('#tipo_entrega').selectOption('Domicilio');
+    await page.locator('#nombre').fill('Playwright QA');
+    await page.locator('#telefono').fill('3311234567');
+    // Misma dirección fija que usan el resto de los specs -- cae fuera de la periferia en
+    // este ambiente (ver confirmDomicilioZoneFeeIfPresent en helpers.ts).
+    await page.locator('#direccion').fill('Calle Falsa 123, Colonia Centro');
+    await page.getByRole('button', { name: 'Confirmar Pedido' }).click();
+
+    const dialogTitle = page.getByText('Tu domicilio está fuera de la periferia');
+    await expect(dialogTitle).toBeVisible();
+    await page.getByRole('button', { name: 'Volver' }).click();
+    await expect(dialogTitle).toBeHidden();
+
+    // Ni se llamó a la API de registrar pedido ni se navegó a gracias.php: el carrito sigue
+    // como estaba, listo para que el cliente lo intente de nuevo o cambie de dirección.
+    expect(orderApiCalled).toBe(false);
+    expect(page.url()).toContain('cart.php');
+    await expect(page.getByText(E2E_PRODUCT_NAME)).toBeVisible();
   });
 
   test('el nombre del cliente se guarda escapado, no como HTML/script ejecutable', async ({ page }) => {
