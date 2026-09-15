@@ -647,6 +647,7 @@ final class LoteCaducidadUtilsTest extends TestCase
             id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, sku TEXT NULL,
             codigo_barras TEXT NULL, categoria TEXT NULL, unidad TEXT NULL,
             capsulas_por_envase INTEGER NULL, porcion_capsulas INTEGER NULL,
+            requiere_lote INTEGER NOT NULL DEFAULT 1,
             estado TEXT NOT NULL DEFAULT 'activo'
         )");
         $this->pdo->exec("CREATE TABLE inventario_almacen (
@@ -1620,6 +1621,17 @@ final class LoteCaducidadUtilsTest extends TestCase
 
         // Matriz sigue cuadrando.
         $this->assertSame([], loteFetchDescuadres($this->pdo, ['id_almacen' => 1]));
+    }
+
+    public function testDescuadreIgnoraProductosQueNoRequierenLote(): void
+    {
+        // Ej. pastilleros/accesorios: tienen stock pero nunca se les va a
+        // registrar un lote a proposito, no tiene caso marcarlos "faltante".
+        $this->seedProducto(1, 'Pastillero');
+        $this->pdo->exec("UPDATE productos SET requiere_lote = 0 WHERE id_producto = 1");
+        $this->seedInventario(1, 1, 20); // sistema 20, lotes 0 -> se ignora
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
     }
 
     public function testDescuadreFiltroPorAlmacenCuentaLotesSinAlmacenAsignadoComoRespaldo(): void

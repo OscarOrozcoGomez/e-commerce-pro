@@ -743,9 +743,11 @@ function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
     }
     $tieneEstado = loteColumnaExiste($pdo, 'productos', 'estado');
     $tieneCategoria = loteColumnaExiste($pdo, 'productos', 'categoria');
+    $tieneRequiereLote = loteColumnaExiste($pdo, 'productos', 'requiere_lote');
     $sqlProd = 'SELECT p.id_producto, p.nombre, ' . loteSkuExpr($pdo) . ' AS sku'
         . ($tieneCategoria ? ', p.categoria' : ", '' AS categoria")
         . ($tieneEstado ? ', p.estado' : ", 'activo' AS estado")
+        . ($tieneRequiereLote ? ', p.requiere_lote' : ', 1 AS requiere_lote')
         . ' FROM productos p WHERE p.id_producto IN (' . implode(',', $ph) . ')';
     $st = $pdo->prepare($sqlProd);
     $st->execute($pProd);
@@ -761,6 +763,11 @@ function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
     foreach ($ids as $id) {
         $prod = $prods[$id] ?? null;
         if ($prod === null || (string) ($prod['estado'] ?? 'activo') === 'archivado') {
+            continue;
+        }
+        // Productos que no caducan (pastilleros, accesorios...) no participan del
+        // cuadre lote-vs-stock: no tiene caso pedirles lote.
+        if ((int) ($prod['requiere_lote'] ?? 1) === 0) {
             continue;
         }
         $s = $sistema[$id] ?? 0;

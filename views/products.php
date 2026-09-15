@@ -138,6 +138,18 @@ include __DIR__ . '/includes/header.php';
                             <span class="helper-text">Ej: Cápsulas, Gramos (g), Mililitros (ml)...</span>
                         </div>
 
+                        <div class="input-field" style="margin: 10px 0;">
+                            <div class="switch">
+                                <label>
+                                    Controla lotes
+                                    <input type="checkbox" name="no_requiere_lote" id="no_requiere_lote" value="1">
+                                    <span class="lever"></span>
+                                    No caduca (omitir control de lotes)
+                                </label>
+                            </div>
+                            <span class="helper-text">Para productos que no vencen (ej. pastilleros, accesorios): oculta la tarjeta de Lotes y deja de marcarlo como "faltante" en Caducidades &gt; Inconsistencias.</span>
+                        </div>
+
                         <div id="lotes-producto-wrap" style="display:none; margin: 15px 0; padding: 12px; border: 1px solid #ffcc80; border-radius: 4px; background: #fff8e1;">
                             <p style="margin:0 0 8px;"><strong><i class="material-icons tiny">event_busy</i> Lotes de este producto</strong></p>
                             <p class="grey-text" style="margin:0 0 8px; font-size:.85rem;">Se registran en el almacén elegido arriba en "Control de Inventario" (<span id="lp-almacen-nombre">-</span>).</p>
@@ -890,6 +902,19 @@ include __DIR__ . '/includes/header.php';
         // Actualizar previsualización cuando se mueva el toggle de mostrar/ocultar
         document.getElementById('mostrar_tabla')?.addEventListener('change', renderNutritionalPreview);
 
+        // Si el usuario marca "No caduca" mientras edita, oculta la tarjeta de
+        // Lotes al toque (los lotes que ya tuviera, si acaso, no se tocan).
+        document.getElementById('no_requiere_lote')?.addEventListener('change', function () {
+            const wrap = document.getElementById('lotes-producto-wrap');
+            if (!wrap) return;
+            if (this.checked) {
+                wrap.style.display = 'none';
+            } else if (loteProductoActualId) {
+                wrap.style.display = 'block';
+                cargarLotesProducto(loteProductoActualId);
+            }
+        });
+
         // Los lotes que se agreguen deben quedar etiquetados con el almacén que se
         // está viendo aquí (si no, el filtro por almacén de Caducidades > Inconsistencias
         // nunca puede ubicar sus lotes: ver id_almacen en loteFetchDescuadres).
@@ -1367,8 +1392,10 @@ include __DIR__ . '/includes/header.php';
         document.getElementById('capsulas_por_envase').value = prod.capsulas_por_envase || '';
         document.getElementById('porcion_capsulas').value = prod.porcion_capsulas || '';
 
-        document.getElementById('lotes-producto-wrap').style.display = 'block';
-        cargarLotesProducto(prod.id_producto);
+        const requiereLote = prod.requiere_lote == null || Number(prod.requiere_lote) !== 0;
+        document.getElementById('no_requiere_lote').checked = !requiereLote;
+        document.getElementById('lotes-producto-wrap').style.display = requiereLote ? 'block' : 'none';
+        if (requiereLote) cargarLotesProducto(prod.id_producto);
         document.getElementById('mostrar_tabla').checked = (prod.mostrar_tabla == 1);
         document.getElementById('precio_costo').value = prod.precio_costo;
         document.getElementById('precio_venta').value = prod.precio_venta;
