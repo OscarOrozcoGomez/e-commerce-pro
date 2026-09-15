@@ -944,6 +944,53 @@ function loteGuardar(PDO $pdo, array $datos, int $userId, bool $validarContraSto
         return $idLote;
     }
 
+    // El (id_producto, codigo_lote) ya existe? uq_lote_producto_codigo lo
+    // rechazaria con un error opaco de BD. Si ese lote esta agotado (se vendio
+    // por completo) es la reposicion normal de la misma remesa/codigo: se
+    // reactiva y se le suma la cantidad, igual que loteRegistrarEntrada. Si
+    // sigue activo/caducado/retirado es un duplicado real y se avisa claro.
+    $stmtExistente = $pdo->prepare(
+        'SELECT id_lote, estado FROM lotes_inventario WHERE id_producto = :p AND codigo_lote = :c LIMIT 1'
+    );
+    $stmtExistente->execute([':p' => $n['id_producto'], ':c' => $n['codigo_lote']]);
+    $existente = $stmtExistente->fetch(PDO::FETCH_ASSOC);
+
+    if ($existente && $existente['estado'] !== 'agotado') {
+        throw new InvalidArgumentException(sprintf(
+            'Ya existe un lote con el codigo "%s" para este producto (estado: %s). '
+            . 'Ajusta la cantidad de ese lote en vez de crear uno nuevo, o usa un codigo distinto.',
+            $n['codigo_lote'],
+            $existente['estado']
+        ));
+    }
+
+    if ($existente) {
+        $idExistente = (int) $existente['id_lote'];
+        $upd = $pdo->prepare(
+            "UPDATE lotes_inventario
+             SET id_almacen = :id_almacen,
+                 fecha_caducidad = :fecha, caducidad_aproximada = :aprox,
+                 cantidad_inicial = cantidad_inicial + :inc_ini,
+                 cantidad_restante = cantidad_restante + :inc_rest,
+                 costo_unitario = :costo, notas_seguimiento = :notas,
+                 id_usuario_seguimiento = :uid, estado = 'activo'
+             WHERE id_lote = :id"
+        );
+        $upd->execute([
+            ':id_almacen' => $n['id_almacen'],
+            ':fecha' => $n['fecha_caducidad'],
+            ':aprox' => $n['caducidad_aproximada'],
+            ':inc_ini' => $n['cantidad'],
+            ':inc_rest' => $n['cantidad'],
+            ':costo' => $n['costo_unitario'],
+            ':notas' => $n['notas'],
+            ':uid' => $userId,
+            ':id' => $idExistente,
+        ]);
+
+        return $idExistente;
+    }
+
     $stmt = $pdo->prepare(
         'INSERT INTO lotes_inventario
             (id_producto, id_almacen, codigo_lote, fecha_caducidad, caducidad_aproximada,

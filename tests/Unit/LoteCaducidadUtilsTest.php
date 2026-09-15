@@ -443,10 +443,39 @@ final class LoteCaducidadUtilsTest extends TestCase
             'id_producto' => 1, 'codigo_lote' => 'DUP1', 'fecha_caducidad' => $this->enDias(90), 'cantidad' => 10,
         ], 1);
 
-        $this->expectException(PDOException::class);
+        // El primer lote sigue 'activo': es un duplicado real, se rechaza con
+        // un mensaje claro (antes tronaba con el PDOException opaco de la
+        // restriccion unica uq_lote_producto_codigo).
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Ya existe un lote con el codigo "DUP1"');
         loteGuardar($this->pdo, [
             'id_producto' => 1, 'codigo_lote' => 'DUP1', 'fecha_caducidad' => $this->enDias(60), 'cantidad' => 5,
         ], 1);
+    }
+
+    public function testGuardarReactivaLoteAgotadoConMismoCodigoYSumaCantidad(): void
+    {
+        $this->seedProducto(1, 'Reponer');
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'AGOT1', 'fecha_caducidad' => $this->enDias(90), 'cantidad' => 10,
+        ], 1);
+        loteAjustarCantidad($this->pdo, $id, 0, 1);
+        $row = $this->pdo->query("SELECT estado FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('agotado', $row['estado']);
+
+        // Llega mas mercancia con el mismo codigo de lote (caso real: el codigo
+        // impreso en la caja no cambia entre remesas). No debe tronar por el
+        // duplicado -- debe reactivar el mismo lote y sumar cantidad.
+        $idReactivado = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'AGOT1', 'fecha_caducidad' => $this->enDias(120), 'cantidad' => 15,
+        ], 1);
+
+        $this->assertSame($id, $idReactivado, 'reactiva el mismo lote, no crea uno nuevo');
+        $row = $this->pdo->query("SELECT estado, cantidad_inicial, cantidad_restante, fecha_caducidad FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('activo', $row['estado']);
+        $this->assertSame(25, (int) $row['cantidad_inicial'], 'inicial acumula historico: 10 + 15');
+        $this->assertSame(15, (int) $row['cantidad_restante'], 'restante parte de 0 (agotado) + 15 nuevas');
+        $this->assertSame($this->enDias(120), $row['fecha_caducidad']);
     }
 
     /**
