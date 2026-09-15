@@ -1622,6 +1622,41 @@ final class LoteCaducidadUtilsTest extends TestCase
         $this->assertSame([], loteFetchDescuadres($this->pdo, ['id_almacen' => 1]));
     }
 
+    public function testDescuadreFiltroPorAlmacenCuentaLotesSinAlmacenAsignadoComoRespaldo(): void
+    {
+        // Caso real: lotes capturados antes de que el formulario mandara
+        // id_almacen (alta masiva 2026-09-09) quedaron con id_almacen NULL.
+        // Al filtrar Descuadres por un almacen especifico deben seguir
+        // contando -- mismo criterio de "respaldo" que loteClausulaFEFO()
+        // usa al vender -- si no, un producto con lotes de sobra se marca
+        // "faltante" solo porque nadie les puso almacen.
+        $this->seedProducto(1, 'Omega sin almacen en lote');
+        $this->seedInventario(1, 1, 12);
+        $this->seedLote(1, 'L1', $this->enDias(120), 2, null);
+        $this->seedLote(1, 'L2', $this->enDias(120), 10, null);
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo), 'global cuadra 12 = 12');
+        $this->assertSame(
+            [],
+            loteFetchDescuadres($this->pdo, ['id_almacen' => 1]),
+            'los lotes sin almacen cuentan como respaldo del almacen filtrado'
+        );
+    }
+
+    public function testFetchProyeccionesFiltroAlmacenIncluyeLotesSinAlmacenAsignado(): void
+    {
+        $this->seedAlmacen(2, 'Sucursal');
+        $this->seedProducto(1, 'Sin almacen en lote');
+        $this->seedLote(1, 'L1', $this->enDias(90), 5, null);
+
+        // El filtro de almacen en la vista de Caducidades no debe ocultar un
+        // lote viejo sin id_almacen asignado -- mismo criterio que Descuadres.
+        $lotes1 = loteFetchProyecciones($this->pdo, ['id_almacen' => 1])['lotes'];
+        $this->assertCount(1, $lotes1);
+        $lotes2 = loteFetchProyecciones($this->pdo, ['id_almacen' => 2])['lotes'];
+        $this->assertCount(1, $lotes2);
+    }
+
     public function testResumenSeveridadIncluyeConteoDeDescuadres(): void
     {
         $this->seedProducto(1, 'Descuadrado'); $this->seedInventario(1, 1, 3);

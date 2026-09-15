@@ -475,7 +475,10 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
         $where[] = 'l.id_producto IN (' . implode(',', $ph) . ')';
     }
     if (!empty($filtros['id_almacen'])) {
-        $where[] = 'l.id_almacen = :id_almacen';
+        // Igual que loteClausulaFEFO(): un lote sin almacen asignado (captura vieja,
+        // ver loteFetchDescuadres()) cuenta como respaldo de cualquier almacen, no
+        // se excluye del filtro.
+        $where[] = '(l.id_almacen = :id_almacen OR l.id_almacen IS NULL)';
         $params[':id_almacen'] = (int) $filtros['id_almacen'];
     }
     if (isset($filtros['categoria']) && trim((string) $filtros['categoria']) !== '') {
@@ -674,8 +677,13 @@ function loteReconciliacionStock(PDO $pdo, array $idsProducto): array
  *                      stock del sistema quedo sin actualizar.
  *
  * @param array{id_almacen?:int, q?:string, tipo?:string} $filtros
- *   id_almacen restringe AMBOS lados a ese almacen (los lotes con almacen NULL
- *   quedan fuera en ese modo).
+ *   id_almacen restringe el lado del sistema (inventario_almacen) a ese
+ *   almacen. Del lado de los lotes, un id_almacen filtrado cuenta los lotes
+ *   de ESE almacen mas los que no tienen almacen asignado (id_almacen NULL,
+ *   captura vieja anterior a que el formulario lo mandara) -- mismo criterio
+ *   de "respaldo" que ya usa loteClausulaFEFO() al vender. Sin esto, un lote
+ *   NULL nunca aparece bajo ningun almacen y el producto se marca "faltante"
+ *   aunque si tenga lotes.
  * @return array<int,array{
  *   id_producto:int, producto_nombre:string, producto_sku:string,
  *   producto_categoria:?string, stock_sistema:int, stock_lotes:int,
@@ -711,7 +719,7 @@ function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
                FROM lotes_inventario WHERE estado IN ('activo','caducado')";
     $pLot = [];
     if ($idAlmacen !== null) {
-        $sqlLot .= ' AND id_almacen = :a';
+        $sqlLot .= ' AND (id_almacen = :a OR id_almacen IS NULL)';
         $pLot[':a'] = $idAlmacen;
     }
     $sqlLot .= ' GROUP BY id_producto';
