@@ -15,13 +15,18 @@ declare(strict_types=1);
  * Todo aqui es PURO y testeable: sin PDO, sin red, sin sesion, sin estado global.
  *
  * Estrategia hibrida (ver DeliveryZoneUtilsTest):
- *   1. Si el pedido trae coordenadas validas -> se decide por geometria:
- *      punto-en-poligono si se pasa un poligono, si no, radio (haversine) desde la
- *      sucursal de despacho. Las coordenadas MANDAN: nunca cae en 'indeterminado'.
+ *   1. Si el pedido trae coordenadas validas -> se decide por geometria: punto-en-poligono
+ *      si se pasa un poligono (foraneo sin limite de distancia -- se asume que el poligono
+ *      ya esta bien dibujado), si no, radio (haversine) desde la sucursal de despacho:
+ *      dentro de DELIVERY_ZONE_RADIUS_KM -> 'local', mas alla pero dentro de
+ *      DELIVERY_ZONE_MAX_FORANEO_RADIUS_KM -> 'foraneo', mas lejos de eso -> 'indeterminado'
+ *      (el negocio no entrega a otras ciudades, sin importar que tan buenas sean las
+ *      coordenadas).
  *   2. Sin coordenadas -> heuristica de texto: colonias/fraccionamientos perifericos
- *      conocidos (cobran aunque el municipio sea de la ZMG) -> municipio de la ZMG
- *      -> mencion de Jalisco -> 'indeterminado' (para revision manual, nunca se
- *      asume ni local ni foraneo por falta de dato).
+ *      conocidos (cobran aunque el municipio sea de la ZMG) -> municipio de la ZMG ->
+ *      cualquier otra cosa (incluida otra ciudad de Jalisco) -> 'indeterminado' (para
+ *      revision manual, nunca se asume ni local ni foraneo por falta de dato real de
+ *      distancia).
  */
 
 // Cargo fijo (MXN) para entregas fuera de la periferia de Guadalajara cuando el
@@ -40,6 +45,16 @@ const DELIVERY_ZONE_STORE_LNG = -103.24000;
 // hay coordenadas pero no se pasa un poligono explicito. Valor conservador: cubre la
 // mancha urbana de la ZMG sin llegar a los desarrollos del sur de Tlajomulco / El Salto.
 const DELIVERY_ZONE_RADIUS_KM = 18.0;
+
+// Radio MAXIMO (km) mas alla del cual, aunque haya coordenadas validas, ya NO se asume
+// "foraneo" (=entregable con cargo de $40) sino 'indeterminado' -- el negocio NO hace
+// entregas a otras ciudades ni envios por paqueteria, solo entrega personal dentro de la
+// ZMG y su periferia cercana (ver DELIVERY_ZONE_PERIFERIA_TOKENS, todas a ~20-35 km de la
+// sucursal). Incidente real: direcciones en Puerto Vallarta (~180 km) y Autlan de Navarro
+// (~170 km) se cotizaban con el cargo foraneo de $40 como si fueran entregables, cuando en
+// realidad el negocio no llega ahi. Valor conservador con margen sobre la periferia
+// conocida; ajustalo si el negocio define un limite distinto.
+const DELIVERY_ZONE_MAX_FORANEO_RADIUS_KM = 40.0;
 
 // Municipios de la Zona Metropolitana de Guadalajara con reparto sin costo. Sin
 // acentos y en minusculas: deliveryZoneClassifyByText() normaliza antes de comparar.
@@ -197,11 +212,14 @@ function deliveryZoneClassifyByText(string $direccion): string
         }
     }
 
-    // 3. Esta en Jalisco pero en ningun municipio de la ZMG -> foraneo del estado.
-    if (mb_strpos($n, 'jalisco') !== false) {
-        return 'foraneo';
-    }
-
+    // 3. Cualquier otra cosa (incluida una ciudad/municipio de Jalisco que NO sea de la
+    // ZMG ni una colonia periferica conocida, ej. "Puerto Vallarta, Jalisco" o "Autlan de
+    // Navarro, Jalisco") NUNCA se asume "foraneo" (=entregable con cargo de $40): el
+    // negocio no hace entregas fuera de la ZMG/periferia ni envios por paqueteria a otras
+    // ciudades, sin importar que digan "Jalisco" -- mencionar el estado no dice nada sobre
+    // que tan lejos esta. Queda "indeterminado" para que un humano decida caso por caso
+    // (ver aiToolAgendarVenta en ai_assistant.php, que nunca le promete envio al cliente
+    // para esta zona).
     return 'indeterminado';
 }
 
@@ -224,7 +242,11 @@ function deliveryZoneClassify($lat, $lng, string $direccion = '', ?array $polygo
 
         $km = deliveryZoneHaversineKm($latNum, $lngNum, DELIVERY_ZONE_STORE_LAT, DELIVERY_ZONE_STORE_LNG);
 
-        return $km <= DELIVERY_ZONE_RADIUS_KM ? 'local' : 'foraneo';
+        if ($km <= DELIVERY_ZONE_RADIUS_KM) {
+            return 'local';
+        }
+
+        return $km <= DELIVERY_ZONE_MAX_FORANEO_RADIUS_KM ? 'foraneo' : 'indeterminado';
     }
 
     return deliveryZoneClassifyByText($direccion);

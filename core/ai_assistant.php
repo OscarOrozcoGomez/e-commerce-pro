@@ -267,15 +267,26 @@ function aiBuildSystemPrompt(
         $lines[] = 'No se pudo determinar automaticamente si el telefono de este cliente es de la Zona Metropolitana de Guadalajara. Las entregas fisicas contra entrega solo aplican dentro de esa zona. Si todavia no lo has confirmado en esta conversacion, pregunta con naturalidad en que ciudad se encuentra o si necesita el envio a un domicilio en Guadalajara, antes de avanzar con precios o pedidos -- sin asumir ni decirle que su numero "parece" de fuera, solo pregunta con transparencia. Ejemplo de tono: "Antes de darte los detalles, ¿en que ciudad te encuentras o a donde seria el envio?"';
     }
 
+    // Cobertura real de entrega -- independiente de la lada (la lada es solo una senal
+    // inicial para preguntar, nunca la fuente de verdad de a donde se puede entregar).
+    // Incidentes reales (2026-09-16): Alex le cotizo el cargo "foraneo" de $40 a clientes
+    // de Autlan de Navarro (~170 km) y Puerto Vallarta (~180 km) en cuanto dijeron su
+    // ciudad, como si fueran entregables -- el negocio NUNCA entrega ahi ni hace envios por
+    // paqueteria, solo reparto personal dentro de la ZMG y su periferia cercana. Se le da a
+    // Alex la lista real de cobertura (la misma que usa agendar_venta/deliveryZoneClassifyByText)
+    // para que decline con claridad ANTES de cotizar nada, en vez de prometer con texto libre.
+    $municipiosCobertura = implode(', ', array_map('ucwords', DELIVERY_ZONE_ZMG_MUNICIPIOS));
+    $lines[] = 'Cobertura real de entrega a domicilio (memoriza esta lista, es la unica que existe): ' . $municipiosCobertura . ', y algunas colonias del extremo sur/periferia de esos municipios (ahi puede aplicar el cargo de $40 "foraneo" que menciona la politica de envio, gratis con 2+ productos distintos). En cuanto el cliente te diga en que ciudad o municipio esta (o a donde seria el envio), compara contra esta lista. Si es cualquier OTRO lugar -- otra ciudad o municipio, AUNQUE siga siendo del estado de Jalisco (ej. Puerto Vallarta, Autlan de Navarro, Tepatitlan, Ciudad Guzman, Ocotlan, Lagos de Moreno, cualquier otro que no este en la lista) -- NUNCA le digas que si hacemos el envio, NUNCA le cotices el cargo de $40 ni la promocion de envio gratis con 2 productos: eso solo aplica dentro de la lista de cobertura. No hacemos envios por paqueteria a otras ciudades bajo ninguna circunstancia, sin importar que tan lejos este dispuesto a esperar o cuanto este dispuesto a pagar el cliente. En ese caso dile con calidez pero con claridad que por ahora no tenemos cobertura de entrega en su zona (sin prometer que se puede resolver ni dar un costo), y si el cliente insiste, llama a transferir_a_humano para que el equipo decida caso por caso -- nunca decidas tu ni dejes al cliente con la idea de que "tal vez si" mientras tanto.';
+
     if (!empty($etiquetasDisponibles)) {
         $nombresEtiquetas = array_values(array_filter(
             array_map(
                 static fn(array $t): string => trim((string)($t['nombre'] ?? '')),
                 $etiquetasDisponibles
             ),
-            // "Pedido Agendado" la pone solo el codigo al confirmar un pedido; Alex
-            // no debe verla como opcion para no aplicarla por intencion de compra.
-            static fn(string $n): bool => $n !== '' && $n !== AI_TAG_PEDIDO_AGENDADO
+            // "Pedido Agendado" y "Fuera de Cobertura" las pone solo el codigo; Alex no
+            // debe verlas como opcion para no aplicarlas por su cuenta.
+            static fn(string $n): bool => $n !== '' && $n !== AI_TAG_PEDIDO_AGENDADO && $n !== AI_TAG_FUERA_COBERTURA
         ));
         if (!empty($nombresEtiquetas)) {
             $lines[] = '';
@@ -662,6 +673,13 @@ const AI_TAG_PREGUNTON = 'Preguntón';
 // de "esta conversacion cerro un pedido real", no de intencion de compra.
 const AI_TAG_PEDIDO_AGENDADO = 'Pedido Agendado';
 
+// La aplica SOLO el codigo (aiToolAgendarVenta) cuando la direccion del pedido queda
+// 'indeterminado' -- fuera de la ZMG y de la periferia conocida, el negocio no confirma
+// que se pueda entregar. Sirve para EXCLUIR a estas conversaciones del seguimiento
+// proactivo de 24h (aiFindConversationsNeedingFollowup): no tiene sentido recontactar a
+// alguien para venderle algo que ya sabemos que no le podemos entregar.
+const AI_TAG_FUERA_COBERTURA = 'Fuera de Cobertura';
+
 function aiFindOrCreateTag(PDO $pdo, string $nombre): ?int
 {
     $nombre = trim($nombre);
@@ -1017,14 +1035,24 @@ const AI_AUTO_REACTIVATE_INACTIVITY_HOURS = 24;
  */
 function aiFindConversationsNeedingFollowup(PDO $pdo, int $horas = AI_FOLLOWUP_INACTIVITY_HOURS): array
 {
-    $stmt = $pdo->query(
+    // NOT EXISTS contra AI_TAG_FUERA_COBERTURA: aunque la conversacion se haya reactivado
+    // sola despues de estar pausada (AI_AUTO_REACTIVATE_INACTIVITY_HOURS), si ya se le
+    // avisamos (o esta pendiente de que el equipo confirme) que no tenemos cobertura para
+    // su zona, jamas se le vuelve a contactar de forma proactiva para intentar venderle algo.
+    $stmt = $pdo->prepare(
         "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil,
                 (SELECT MAX(m.creado_en) FROM whatsapp_mensajes m
                  WHERE m.id_conversacion = c.id_conversacion AND m.rol = 'assistant' AND m.enviado_whatsapp = 1) AS ultimo_envio_bot
          FROM whatsapp_conversaciones c
-         WHERE c.estado_bot = 'activo' AND c.seguimiento_enviado_en IS NULL"
+         WHERE c.estado_bot = 'activo' AND c.seguimiento_enviado_en IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM whatsapp_conversacion_etiquetas ce
+               INNER JOIN whatsapp_etiquetas e ON e.id_etiqueta = ce.id_etiqueta
+               WHERE ce.id_conversacion = c.id_conversacion AND e.nombre = ?
+           )"
     );
-    $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+    $stmt->execute([AI_TAG_FUERA_COBERTURA]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $cutoff = time() - ($horas * 3600);
 
@@ -2402,17 +2430,6 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
     // asi que aqui solo se leen los valores que ya quedaron guardados en el pedido.
     $zonaEntrega = (string)($result['zona_entrega'] ?? deliveryZoneClassifyByText($direccion));
     $cargoEnvio = round((float)($result['costo_envio'] ?? 0.0), 2);
-    if ($zonaEntrega === 'indeterminado') {
-        // No se asume nada (ni local ni foraneo) por falta de dato en la direccion, pero
-        // queda registrado para que un admin lo revise en el panel de diagnostico.
-        aiLogDiagnosticError(
-            $pdo,
-            (int)($context['id_conversacion'] ?? 0) ?: null,
-            'zona_entrega_indeterminada',
-            $nombre,
-            ['direccion' => $direccion, 'id_pedido' => $result['id_pedido'] ?? null]
-        );
-    }
 
     $listaItems = implode(', ', array_map(
         static fn(array $item): string => "{$item['quantity']}x {$item['nombre']}",
@@ -2420,6 +2437,60 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
     ));
     $totalPedido = isset($result['total']) ? number_format((float)$result['total'], 2) : '?';
     $waIdVenta = (string)($context['wa_id'] ?? '');
+
+    if ($zonaEntrega === 'indeterminado') {
+        // Direccion fuera de la ZMG/periferia conocida (o sin datos suficientes): el
+        // negocio NO hace entregas foraneas reales ni envios por paqueteria, asi que nunca
+        // se asume que se puede entregar ni se le promete un costo al cliente -- eso es
+        // justo lo que causo el incidente real del 2026-09-16 (Autlan de Navarro, Puerto
+        // Vallarta). El pedido queda registrado (no se pierden los datos del cliente ni del
+        // carrito) pero se deja pendiente de que un humano confirme si aplica servicio.
+        aiLogDiagnosticError(
+            $pdo,
+            (int)($context['id_conversacion'] ?? 0) ?: null,
+            'zona_entrega_indeterminada',
+            $nombre,
+            ['direccion' => $direccion, 'id_pedido' => $result['id_pedido'] ?? null]
+        );
+        aiSendTelegramAlert(
+            "\xE2\x9A\xA0\xEF\xB8\x8F Pedido de Alex con zona de entrega SIN CONFIRMAR (fuera de la ZMG y de la periferia conocida).\n"
+            . "Cliente: {$nombre}\n"
+            . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
+            . "Direccion: {$direccion}\n"
+            . "Productos: {$listaItems}\n"
+            . 'Confirma si se puede entregar ahi y que costo aplica -- Alex NO le prometio nada al cliente sobre el envio.'
+            . aiBuildWhatsAppLinkLine($waIdVenta)
+        );
+
+        if (!empty($context['id_conversacion'])) {
+            $idConversacionIndeterminada = (int)$context['id_conversacion'];
+            aiToolTransferirHumano(
+                $pdo,
+                ['motivo' => 'Direccion fuera de la zona de entrega conocida (ni ZMG ni periferia) -- se necesita confirmar manualmente si aplica servicio y el costo.'],
+                $context
+            );
+            // Excluye esta conversacion del seguimiento proactivo de 24h -- aunque se
+            // reactive sola tras un rato en silencio (AI_AUTO_REACTIVATE_INACTIVITY_HOURS),
+            // no tiene sentido recontactar al cliente para venderle algo que ya sabemos que
+            // no le podemos entregar. Ver aiFindConversationsNeedingFollowup().
+            try {
+                aiAssignTag($pdo, $idConversacionIndeterminada, AI_TAG_FUERA_COBERTURA);
+            } catch (Throwable $e) {
+                error_log('WARNING: no se pudo asignar etiqueta "Fuera de Cobertura": ' . $e->getMessage());
+            }
+        }
+
+        return [
+            'ok' => true,
+            'numero_pedido' => (string)($result['pedido'] ?? ''),
+            'id_pedido' => $result['id_pedido'] ?? null,
+            'total' => $result['total'] ?? null,
+            'zona_entrega' => $zonaEntrega,
+            'cargo_envio_foraneo' => $cargoEnvio,
+            'message' => 'El pedido quedo registrado con los datos del cliente y los productos, pero la direccion esta fuera de nuestra zona habitual de reparto. Dile al cliente que un companero del equipo le va a confirmar en breve si se puede entregar ahi y el costo -- nunca le prometas que si se entrega ni le des un costo de envio tu mismo.',
+        ];
+    }
+
     aiSendTelegramAlert(
         "Venta agendada por Alex: {$nombre}\n"
         . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
@@ -2602,8 +2673,8 @@ function aiToolEtiquetarCliente(PDO $pdo, array $args, array $context): array
     if ($nombre === '' || $idConversacion <= 0) {
         return ['ok' => false, 'message' => 'Falta el nombre de la etiqueta.'];
     }
-    if (strcasecmp($nombre, AI_TAG_PEDIDO_AGENDADO) === 0) {
-        return ['ok' => false, 'message' => 'Esa etiqueta la aplica el sistema automaticamente al agendar un pedido; no la asignes tu.'];
+    if (strcasecmp($nombre, AI_TAG_PEDIDO_AGENDADO) === 0 || strcasecmp($nombre, AI_TAG_FUERA_COBERTURA) === 0) {
+        return ['ok' => false, 'message' => 'Esa etiqueta la aplica el sistema automaticamente; no la asignes tu.'];
     }
     if (!aiTagExists($pdo, $nombre)) {
         return ['ok' => false, 'message' => 'Esa etiqueta no existe. Usa unicamente un nombre de la lista disponible.'];
@@ -3278,6 +3349,11 @@ function aiGenerarRespuestaParaConversacion(
     $finalText = null;
     $mediaParts = [];
     $yaTransferido = false;
+    // Distinto de $yaTransferido (que dispara el texto de cierre GENERICO de
+    // transferir_a_humano): esta marca que ESTE turno, por la razon que sea, ya dejo la
+    // conversacion pausada -- la usa el re-chequeo de estado_bot al final de la funcion para
+    // no confundir "yo la pause" con "un humano la pauso mientras yo generaba la respuesta".
+    $pausadoPorEsteTurno = false;
 
     for ($i = 0; $i < AI_ASSISTANT_MAX_TOOL_LOOPS; $i++) {
         try {
@@ -3287,6 +3363,10 @@ function aiGenerarRespuestaParaConversacion(
             aiLogDiagnosticError($pdo, $idConversacion, 'deepseek_conexion', $textoUsuario, ['excepcion' => $e->getMessage()]);
             aiToolTransferirHumano($pdo, ['motivo' => 'Fallo tecnico del asistente de IA: ' . $e->getMessage()], $context);
             $finalText = 'Dame un segundo, te transfiero con un companero del equipo para que te de el detalle exacto de inmediato.';
+            $yaTransferido = true;
+            $pausadoPorEsteTurno = true; // este turno ya pauso la conversacion por su cuenta --
+            // el re-chequeo de estado_bot antes de regresar (mas abajo) no debe suprimir este
+            // mensaje de despedida solo porque el estado ya quedo 'pausado' por esta misma linea.
             break;
         }
 
@@ -3351,6 +3431,23 @@ function aiGenerarRespuestaParaConversacion(
                 $yaTransferido = true;
             }
 
+            if (!$pausadoPorEsteTurno) {
+                // Deteccion generica (no solo del tool transferir_a_humano): agendar_venta
+                // tambien puede pausar la conversacion por su cuenta (direccion fuera de la
+                // zona de cobertura conocida, ver aiToolAgendarVenta) llamando a
+                // transferir_a_humano internamente, sin que $functionName sea
+                // 'transferir_a_humano'. Se trackea aparte de $yaTransferido (que ademas
+                // dispara el texto de cierre GENERICO mas abajo) para que el re-chequeo de
+                // estado_bot al final de la funcion no suprima por error la respuesta
+                // especifica que Alex esta a punto de dar sobre ese pedido, como si fuera una
+                // intervencion humana concurrente.
+                $stmtEstadoTrasTool = $pdo->prepare('SELECT estado_bot FROM whatsapp_conversaciones WHERE id_conversacion = ?');
+                $stmtEstadoTrasTool->execute([$idConversacion]);
+                if ((string)($stmtEstadoTrasTool->fetchColumn() ?: 'activo') !== 'activo') {
+                    $pausadoPorEsteTurno = true;
+                }
+            }
+
             // Deteccion por forma del resultado (no por nombre de funcion) para que cubra
             // tanto enviar_plantilla como enviar_catalogo (y cualquier tool futura que
             // regrese el mismo shape) sin tener que listar cada nombre aqui.
@@ -3395,6 +3492,34 @@ function aiGenerarRespuestaParaConversacion(
     }
 
     $finalText = aiSanitizePlainTextForWhatsapp($finalText);
+
+    // Re-chequeo de ultimo momento: generar la respuesta (DeepSeek + tool-calls) puede
+    // tardar varios segundos, tiempo suficiente para que un asesor humano ya haya
+    // intervenido manualmente en este mismo chat (ver aiHandleHumanOutboundMessage(), que
+    // pausa la conversacion en cuanto detecta un mensaje fromMe=true del celular). El chequeo
+    // de estado_bot al INICIO del turno (aiRunAssistantTurn) ya no basta para cubrir ese caso
+    // -- sin este segundo chequeo, la respuesta que ya se genero se manda de todos modos
+    // porque el webhook es sincrono y no vuelve a preguntar.
+    //
+    // Solo aplica si la pausa NO la causo este mismo turno (!$pausadoPorEsteTurno): cuando
+    // Alex mismo pauso la conversacion (transferir_a_humano directo, el fallback tecnico, o
+    // indirectamente via agendar_venta), el estado tambien queda 'pausado' mas arriba en esta
+    // misma funcion, pero ESE mensaje si se debe mandar -- suprimirlo tambien ahi dejaria al
+    // cliente sin ninguna respuesta.
+    //
+    // Se guarda igual en el historial (para que quede constancia de lo que Alex iba a
+    // contestar) pero marcada como NO enviada, y no se regresa nada para que el puente no
+    // la reenvie a WhatsApp encima del humano.
+    if (!$pausadoPorEsteTurno) {
+        $stmtEstadoActual = $pdo->prepare('SELECT estado_bot FROM whatsapp_conversaciones WHERE id_conversacion = ?');
+        $stmtEstadoActual->execute([$idConversacion]);
+        $estadoBotActual = (string)($stmtEstadoActual->fetchColumn() ?: 'activo');
+        if ($estadoBotActual !== 'activo') {
+            aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, false);
+            return [];
+        }
+    }
+
     aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
 
     $replyParts = [];

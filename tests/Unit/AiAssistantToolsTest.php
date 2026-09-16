@@ -1296,24 +1296,29 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('local', aiClasificarZonaEntrega('Tlajomulco de Zuniga, Jal'));
     }
 
-    public function testAiClasificarZonaEntregaFlagsRealIncidentAddressAsForanea(): void
+    public function testAiClasificarZonaEntregaFlagsRealIncidentAddressAsIndeterminado(): void
     {
-        // Caso real: pedido agendado a Villa Purificacion, Jalisco -- fuera de la ZMG pero
-        // dentro del estado. Debe marcarse "foraneo", no "local" ni "indeterminado".
+        // Caso real: pedido agendado a Villa Purificacion, Jalisco -- fuera de la ZMG y de
+        // la periferia real con reparto. NO debe marcarse "local" (nunca se le regalo el
+        // envio) ni "foraneo" (el negocio no entrega ahi ni con cargo, no es periferia
+        // cercana): queda "indeterminado" para que un humano decida.
         $this->assertSame(
-            'foraneo',
+            'indeterminado',
             aiClasificarZonaEntrega('Nicolas Bravo 221, Colonia Centro, CP 48900, Villa Purificacion, Jalisco')
         );
     }
 
-    public function testAiClasificarZonaEntregaDoesNotConfuseOtherJaliscoMunicipiosWithZmg(): void
+    public function testAiClasificarZonaEntregaNeverAssumesForaneoForOtherJaliscoCities(): void
     {
-        // Ninguno de estos es municipio de la ZMG, aunque varios empiecen igual que "Tonala"
-        // o esten en el mismo estado -- deben quedar "foraneo", no "local".
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Puerto Vallarta, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Ciudad Guzman, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Tepatitlan de Morelos, Jalisco'));
+        // Incidente real (2026-09-16): Autlan de Navarro (~170 km) y Puerto Vallarta
+        // (~180 km) se cotizaban con el cargo "foraneo" de $40 como si fueran entregables
+        // solo por mencionar "Jalisco". El negocio no hace envios por paqueteria a otras
+        // ciudades, asi que ninguno de estos debe quedar "foraneo" (=entregable con cargo)
+        // ni "local" (=gratis): quedan "indeterminado" para revision humana.
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Puerto Vallarta, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Ciudad Guzman, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Tepatitlan de Morelos, Jalisco'));
     }
 
     public function testAiClasificarZonaEntregaReturnsIndeterminadoWithoutEnoughInfo(): void
