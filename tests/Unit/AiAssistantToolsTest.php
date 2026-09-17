@@ -361,6 +361,120 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('c!!d', aiEscapeLikeTerm('c!d'));
     }
 
+    // --- aiNombreParaCliente(): nombre_corto (etiqueta del pomo) sobre el nombre largo de Shopify ---
+
+    public function testNombreParaClientePrefiereNombreCortoSobreElNombreLargo(): void
+    {
+        $this->assertSame(
+            'Maca Blend',
+            aiNombreParaCliente('Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'Maca Blend')
+        );
+    }
+
+    public function testNombreParaClienteAgregaLaVarianteAlNombreCorto(): void
+    {
+        $this->assertSame(
+            'Vegan Protein - Vainilla',
+            aiNombreParaCliente('Organic Vegan Protein Suplemento Natural Proteina Vegana Vainilla', 'Vegan Protein', 'Vainilla')
+        );
+    }
+
+    public function testNombreParaClienteCaeAlNombreLargoCuandoNoHayNombreCorto(): void
+    {
+        // Regresion: la gran mayoria del catalogo todavia no tiene nombre_corto capturado --
+        // nunca debe quedarse sin nombre.
+        $this->assertSame('Nombre Largo Oficial', aiNombreParaCliente('Nombre Largo Oficial', null));
+        $this->assertSame('Nombre Largo Oficial', aiNombreParaCliente('Nombre Largo Oficial', ''));
+    }
+
+    public function testNombreParaClienteTrataNombreCortoDeSoloEspaciosComoVacio(): void
+    {
+        // Dato sucio (captura a medias desde el admin): un nombre_corto de puros espacios
+        // no debe convertirse en un nombre de producto en blanco para el cliente.
+        $this->assertSame('Nombre Largo Oficial', aiNombreParaCliente('Nombre Largo Oficial', '   '));
+    }
+
+    public function testNombreParaClienteRecortaEspaciosSobrantesDelNombreCorto(): void
+    {
+        $this->assertSame('Maca Blend', aiNombreParaCliente('Nombre Largo', '  Maca Blend  '));
+    }
+
+    public function testNombreParaClienteIgnoraVarianteDeSoloEspacios(): void
+    {
+        $this->assertSame('Maca Blend', aiNombreParaCliente('Nombre Largo', 'Maca Blend', '   '));
+    }
+
+    public function testNombreParaClienteSinVarianteNiNombreCortoUsaSoloElNombreLargo(): void
+    {
+        $this->assertSame('Zinc', aiNombreParaCliente('Zinc', null, null));
+    }
+
+    // --- aiSearchInventory() / aiCountInventoryMatches(): buscar y mostrar por nombre_corto ---
+
+    public function testAiSearchInventoryEncuentraPorNombreCortoAunqueNoAparezcaEnElNombreLargo(): void
+    {
+        // Caso real reportado: el cliente pregunta por la etiqueta del pomo ("Maca Blend"),
+        // no por el nombre largo sincronizado de blifemx.myshopify.com.
+        $this->seedProducto(90, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA90', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(90, 1, 25);
+
+        $resultados = aiSearchInventory($this->pdo, 'Maca Blend');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame(90, $resultados[0]['id_producto']);
+        $this->assertSame('Maca Blend', $resultados[0]['nombre']);
+    }
+
+    public function testAiSearchInventoryMuestraNombreCortoAunqueLaCoincidenciaVengaDelNombreLargo(): void
+    {
+        // Si el cliente busca usando el nombre largo (o parte de el), Alex igual debe
+        // OFRECERLO con la etiqueta corta, no con el nombre de SEO.
+        $this->seedProducto(91, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA91', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(91, 1, 10);
+
+        $resultados = aiSearchInventory($this->pdo, 'Organic Vegan Maca Root');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Maca Blend', $resultados[0]['nombre']);
+    }
+
+    public function testAiSearchInventorySigueMostrandoElNombreLargoCuandoNoHayNombreCortoCapturado(): void
+    {
+        // Regresion explicita: sin nombre_corto, el comportamiento debe ser identico al de
+        // antes de esta feature.
+        $this->seedProducto(92, 'Omega 3 Forte 1000mg', 'OM92', null, 280.00);
+        $this->seedInventario(92, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Omega 3 Forte');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Omega 3 Forte 1000mg', $resultados[0]['nombre']);
+    }
+
+    public function testAiSearchInventoryCombinaNombreCortoConVariante(): void
+    {
+        $this->seedProducto(93, 'Organic Vegan Protein Suplemento Natural Proteina Vegana Vainilla', 'PROT93', 'Vainilla', 599.00, 'activo', null, null, null, null, null, null, null, 'Vegan Protein');
+        $this->seedInventario(93, 1, 8);
+
+        $resultados = aiSearchInventory($this->pdo, 'Vegan Protein');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Vegan Protein - Vainilla', $resultados[0]['nombre']);
+    }
+
+    public function testAiCountInventoryMatchesCuentaCoincidenciasPorNombreCortoIgualQueAiSearchInventory(): void
+    {
+        // Antes de este fix, aiSearchInventory() SI hubiera podido encontrar el producto por
+        // nombre_corto (una vez arreglado) pero aiCountInventoryMatches() no lo contaba --
+        // el LLM hubiera visto "1 resultado" en la lista pero "total_encontrados: 0", una
+        // inconsistencia que confunde a Alex sobre si hay mas para mostrar.
+        $this->seedProducto(94, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA94', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(94, 1, 3);
+
+        $this->assertCount(1, aiSearchInventory($this->pdo, 'Maca Blend'));
+        $this->assertSame(1, aiCountInventoryMatches($this->pdo, 'Maca Blend'));
+    }
+
     public function testAiToolConsultarInventarioRejectsEmptySearch(): void
     {
         $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => '  ']);
@@ -743,6 +857,111 @@ final class AiAssistantToolsTest extends TestCase
 
         $this->assertSame([], $resolved['items']);
         $this->assertNotEmpty($resolved['errores']);
+    }
+
+    public function testAiResolveOrderItemsUsaNombreCortoEnElItemDelPedido(): void
+    {
+        // El pedido final debe llamar al producto igual que ya lo hizo Alex durante toda la
+        // conversacion (consultar_inventario/consultar_ofertas) -- si aqui se usara el
+        // nombre largo de Shopify, el aviso interno de Telegram y el mensaje de "sin
+        // existencia" mencionarian un nombre distinto al que el cliente ya vio.
+        $this->seedProducto(95, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA95', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(95, 1, 10);
+
+        $resolved = aiResolveOrderItems($this->pdo, [['id_producto' => 95, 'cantidad' => 2]]);
+
+        $this->assertSame([], $resolved['errores']);
+        $this->assertSame('Maca Blend', $resolved['items'][0]['nombre']);
+    }
+
+    public function testAiResolveOrderItemsUsaNombreCortoEnElMensajeDeSinExistencia(): void
+    {
+        $this->seedProducto(96, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA96', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(96, 1, 1);
+
+        $resolved = aiResolveOrderItems($this->pdo, [['id_producto' => 96, 'cantidad' => 5]]);
+
+        $this->assertSame([], $resolved['items']);
+        $this->assertStringContainsString('Maca Blend', $resolved['errores'][0]);
+        $this->assertStringNotContainsString('Organic Vegan Maca Root Extract', $resolved['errores'][0]);
+    }
+
+    public function testAiResolveOrderItemsSigueUsandoElNombreLargoSinNombreCorto(): void
+    {
+        // Regresion: sin nombre_corto capturado, identico al comportamiento de antes.
+        $this->seedProducto(97, 'Creatina Monohidratada', 'CRT97', null, 499.00);
+        $this->seedInventario(97, 1, 5);
+
+        $resolved = aiResolveOrderItems($this->pdo, [['id_producto' => 97, 'cantidad' => 1]]);
+
+        $this->assertSame('Creatina Monohidratada', $resolved['items'][0]['nombre']);
+    }
+
+    public function testAiResolveOrderItemsConVariosProductosUsaNombreCortoSoloDondeExiste(): void
+    {
+        // Un pedido mixto (un producto con etiqueta de pomo capturada, otro sin ella) no debe
+        // "contagiar" el fallback de uno al otro -- cada item resuelve su propio nombre.
+        $this->seedProducto(98, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA98', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedProducto(99, 'Creatina Monohidratada', 'CRT99', null, 499.00);
+        $this->seedInventario(98, 1, 10);
+        $this->seedInventario(99, 1, 10);
+
+        $resolved = aiResolveOrderItems($this->pdo, [
+            ['id_producto' => 98, 'cantidad' => 1],
+            ['id_producto' => 99, 'cantidad' => 1],
+        ]);
+
+        $this->assertSame([], $resolved['errores']);
+        $nombres = array_column($resolved['items'], 'nombre');
+        $this->assertContains('Maca Blend', $nombres);
+        $this->assertContains('Creatina Monohidratada', $nombres);
+    }
+
+    // --- aiGetProductosRelacionadosConStock(): venta cruzada usando nombre_corto ---
+
+    private function seedProductoRelacionado(int $idProducto, int $idProductoRelacionado, ?string $nota = null): void
+    {
+        $this->pdo->prepare('INSERT INTO producto_relacionados (id_producto, id_producto_relacionado, nota) VALUES (?, ?, ?)')
+            ->execute([$idProducto, $idProductoRelacionado, $nota]);
+    }
+
+    public function testGetProductosRelacionadosConStockUsaNombreCortoDelSugerido(): void
+    {
+        $this->seedProducto(100, 'Magnesio Glicinato', 'MAG100', null, 350.00);
+        $this->seedInventario(100, 1, 10);
+        $this->seedProducto(101, 'Organic Melatonin Sleep Support Supplement Natural', 'MEL101', null, 199.00, 'activo', null, null, null, null, null, null, null, 'Melatonina Blend');
+        $this->seedInventario(101, 1, 6);
+        $this->seedProductoRelacionado(100, 101, 'mismo ritual antes de dormir');
+
+        $relacionados = aiGetProductosRelacionadosConStock($this->pdo, [100]);
+
+        $this->assertArrayHasKey(100, $relacionados);
+        $this->assertCount(1, $relacionados[100]);
+        $this->assertSame('Melatonina Blend', $relacionados[100][0]['nombre']);
+    }
+
+    public function testGetProductosRelacionadosConStockExcluyeSugeridosSinStock(): void
+    {
+        $this->seedProducto(102, 'Magnesio Glicinato', 'MAG102', null, 350.00);
+        $this->seedInventario(102, 1, 10);
+        $this->seedProducto(103, 'Melatonina', 'MEL103', null, 199.00, 'activo', null, null, null, null, null, null, null, 'Melatonina Blend');
+        $this->seedInventario(103, 1, 0);
+        $this->seedProductoRelacionado(102, 103);
+
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, [102]));
+    }
+
+    public function testGetProductosRelacionadosConStockSinRelacionesRegresaArregloVacio(): void
+    {
+        $this->seedProducto(104, 'Producto Sin Relaciones', 'SOLO104', null, 100.00);
+
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, [104]));
+    }
+
+    public function testGetProductosRelacionadosConStockConIdsInvalidosRegresaArregloVacio(): void
+    {
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, [0, -1]));
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, []));
     }
 
     public function testAiGetOrCreateConversationIsIdempotentByWaId(): void
@@ -2276,6 +2495,7 @@ final class AiAssistantToolsTest extends TestCase
                 nombre TEXT NOT NULL,
                 codigo_barras TEXT NOT NULL DEFAULT "",
                 nombre_variante TEXT NULL,
+                nombre_corto TEXT NULL,
                 precio_venta REAL NOT NULL DEFAULT 0,
                 estado TEXT NOT NULL DEFAULT "activo",
                 descripcion TEXT NULL,
@@ -2448,12 +2668,13 @@ final class AiAssistantToolsTest extends TestCase
         ?string $modoUso = null,
         ?string $tablaNutrimental = null,
         ?int $capsulasPorEnvase = null,
-        ?int $porcionCapsulas = null
+        ?int $porcionCapsulas = null,
+        ?string $nombreCorto = null
     ): void {
         $this->pdo->prepare(
-            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental, capsulas_por_envase, porcion_capsulas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental, $capsulasPorEnvase, $porcionCapsulas]);
+            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental, capsulas_por_envase, porcion_capsulas, nombre_corto)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental, $capsulasPorEnvase, $porcionCapsulas, $nombreCorto]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void

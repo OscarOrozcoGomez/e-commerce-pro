@@ -621,6 +621,7 @@ final class SecurityAndEdgeCasesTest extends TestCase
                 nombre TEXT NOT NULL,
                 codigo_barras TEXT NOT NULL DEFAULT "",
                 nombre_variante TEXT NULL,
+                nombre_corto TEXT NULL,
                 precio_venta REAL NOT NULL DEFAULT 0,
                 estado TEXT NOT NULL DEFAULT "activo",
                 descripcion TEXT NULL,

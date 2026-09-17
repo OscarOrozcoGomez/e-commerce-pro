@@ -124,6 +124,50 @@ final class AiAssistantOfertasTest extends TestCase
         $this->assertSame(8, $ofertas[0]['id_producto']);
     }
 
+    public function testListarOfertasVigentesMuestraNombreCortoEnVezDelNombreLargo(): void
+    {
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(70, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 450.0, 200.0, null, null, 'activo', null, null, 'Maca Blend');
+        $this->ponerEnOferta(70, $idOferta);
+        $this->seedInventario(70, 1, 10);
+
+        $ofertas = aiListarOfertasVigentes($this->pdo);
+
+        $this->assertCount(1, $ofertas);
+        $this->assertSame('Maca Blend', $ofertas[0]['nombre']);
+    }
+
+    public function testBusquedaTextoEnOfertasEncuentraPorNombreCorto(): void
+    {
+        // El cliente pregunta por la oferta usando la etiqueta del pomo, no el nombre largo.
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(71, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 450.0, 200.0, null, null, 'activo', null, null, 'Maca Blend');
+        $this->seedProducto(72, 'Colageno Hidrolizado', 399.0, 150.0);
+        $this->ponerEnOferta(71, $idOferta);
+        $this->ponerEnOferta(72, $idOferta);
+        $this->seedInventario(71, 1, 10);
+        $this->seedInventario(72, 1, 10);
+
+        $ofertas = aiListarOfertasVigentes($this->pdo, 'Maca Blend');
+
+        $this->assertCount(1, $ofertas);
+        $this->assertSame(71, $ofertas[0]['id_producto']);
+    }
+
+    public function testListarOfertasVigentesSigueMostrandoElNombreLargoSinNombreCorto(): void
+    {
+        // Regresion: sin nombre_corto capturado, el comportamiento es identico al de antes.
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(73, 'Creatina Monohidratada', 350.0, 140.0);
+        $this->ponerEnOferta(73, $idOferta);
+        $this->seedInventario(73, 1, 5);
+
+        $ofertas = aiListarOfertasVigentes($this->pdo);
+
+        $this->assertCount(1, $ofertas);
+        $this->assertSame('Creatina Monohidratada', $ofertas[0]['nombre']);
+    }
+
     public function testToolConsultarOfertasRegresaMensajeCuandoNoHayNinguna(): void
     {
         $resultado = aiToolConsultarOfertas($this->pdo, []);
@@ -235,6 +279,7 @@ final class AiAssistantOfertasTest extends TestCase
         $this->pdo->exec("CREATE TABLE almacenes (id_almacen INTEGER PRIMARY KEY, nombre TEXT NOT NULL)");
         $this->pdo->exec("CREATE TABLE productos (
             id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, nombre_variante TEXT NULL,
+            nombre_corto TEXT NULL,
             codigo_barras TEXT NOT NULL DEFAULT '', descripcion TEXT NULL,
             ingredientes TEXT NULL, beneficios TEXT NULL, perfil_recomendado TEXT NULL, modo_uso TEXT NULL, tabla_nutrimental TEXT NULL,
             precio_venta REAL NOT NULL DEFAULT 0, precio_costo REAL NOT NULL DEFAULT 0,
@@ -291,12 +336,13 @@ final class AiAssistantOfertasTest extends TestCase
         ?string $variante = null,
         string $estado = 'activo',
         ?int $capsulasPorEnvase = null,
-        ?int $porcionCapsulas = null
+        ?int $porcionCapsulas = null,
+        ?string $nombreCorto = null
     ): void {
         $this->pdo->prepare(
-            'INSERT INTO productos (id_producto, nombre, nombre_variante, precio_venta, precio_costo, precio_oferta, estado, capsulas_por_envase, porcion_capsulas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$id, $nombre, $variante, $precioVenta, $precioCosto, $precioOferta, $estado, $capsulasPorEnvase, $porcionCapsulas]);
+            'INSERT INTO productos (id_producto, nombre, nombre_variante, precio_venta, precio_costo, precio_oferta, estado, capsulas_por_envase, porcion_capsulas, nombre_corto)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $variante, $precioVenta, $precioCosto, $precioOferta, $estado, $capsulasPorEnvase, $porcionCapsulas, $nombreCorto]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void
