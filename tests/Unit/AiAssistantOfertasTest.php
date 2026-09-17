@@ -236,7 +236,7 @@ final class AiAssistantOfertasTest extends TestCase
         $this->pdo->exec("CREATE TABLE productos (
             id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, nombre_variante TEXT NULL,
             codigo_barras TEXT NOT NULL DEFAULT '', descripcion TEXT NULL,
-            ingredientes TEXT NULL, beneficios TEXT NULL, modo_uso TEXT NULL, tabla_nutrimental TEXT NULL,
+            ingredientes TEXT NULL, beneficios TEXT NULL, perfil_recomendado TEXT NULL, modo_uso TEXT NULL, tabla_nutrimental TEXT NULL,
             precio_venta REAL NOT NULL DEFAULT 0, precio_costo REAL NOT NULL DEFAULT 0,
             precio_oferta REAL NULL, categoria TEXT NULL,
             capsulas_por_envase INTEGER NULL, porcion_capsulas INTEGER NULL,
@@ -244,6 +244,9 @@ final class AiAssistantOfertasTest extends TestCase
         )");
         $this->pdo->exec("CREATE TABLE inventario_almacen (
             id_producto INTEGER NOT NULL, id_almacen INTEGER NOT NULL, cantidad_actual INTEGER NOT NULL DEFAULT 0
+        )");
+        $this->pdo->exec("CREATE TABLE producto_relacionados (
+            id_producto INTEGER NOT NULL, id_producto_relacionado INTEGER NOT NULL, nota TEXT NULL
         )");
         $this->pdo->exec("CREATE TABLE categorias (id_categoria INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, estado TEXT DEFAULT 'activo')");
         $this->pdo->exec("CREATE TABLE producto_categorias (id_producto INTEGER, id_categoria INTEGER, PRIMARY KEY (id_producto, id_categoria))");

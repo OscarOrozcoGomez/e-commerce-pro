@@ -1122,6 +1122,25 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotContains((int) $cerradaVieja['id_conversacion'], $ids);
     }
 
+    public function testFindConversationsToAutoReactivateSkipsStaleHumanIntervention(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030006', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiSetConversationState($this->pdo, $idConversacion, 'pausado', 'Intervencion manual detectada.');
+        $this->pdo->prepare(
+            'INSERT INTO whatsapp_mensajes (id_conversacion, rol, contenido, enviado_whatsapp, creado_en) VALUES (?, "humano", ?, 1, ?)'
+        )->execute([$idConversacion, 'Yo te apoyo directamente.', date('Y-m-d H:i:s', strtotime('-25 hours'))]);
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-25 hours')), $idConversacion]);
+
+        $ids = array_map(
+            static fn(array $r) => (int) $r['id_conversacion'],
+            aiFindConversationsToAutoReactivate($this->pdo)
+        );
+
+        $this->assertNotContains($idConversacion, $ids);
+    }
+
     public function testAutoReactivateConversationSetsEstadoActivoYLimpiaMotivo(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030005', null);
@@ -2086,6 +2105,7 @@ final class AiAssistantToolsTest extends TestCase
                 descripcion TEXT NULL,
                 ingredientes TEXT NULL,
                 beneficios TEXT NULL,
+                perfil_recomendado TEXT NULL,
                 modo_uso TEXT NULL,
                 tabla_nutrimental TEXT NULL,
                 capsulas_por_envase INTEGER NULL,
@@ -2097,6 +2117,13 @@ final class AiAssistantToolsTest extends TestCase
                 id_producto INTEGER NOT NULL,
                 id_almacen INTEGER NOT NULL,
                 cantidad_actual INTEGER NOT NULL DEFAULT 0
+            )'
+        );
+        $this->pdo->exec(
+            'CREATE TABLE producto_relacionados (
+                id_producto INTEGER NOT NULL,
+                id_producto_relacionado INTEGER NOT NULL,
+                nota TEXT NULL
             )'
         );
         $this->pdo->exec(
