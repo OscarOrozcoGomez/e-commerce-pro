@@ -1651,7 +1651,8 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         // nativo de MySQL no soporta reutilizar el mismo placeholder con nombre varias
         // veces en una sola consulta -- cada ocurrencia necesita su propio nombre.
         $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
-                       OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!')";
+                       OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
+                       OR p.perfil_recomendado LIKE :term7 ESCAPE '!')";
         $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
         $params[':term1'] = $term;
         $params[':term2'] = $term;
@@ -1659,6 +1660,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         $params[':term4'] = $term;
         $params[':term5'] = $term;
         $params[':term6'] = $term;
+        $params[':term7'] = $term;
     }
     $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
                        p.ingredientes, p.modo_uso, p.tabla_nutrimental,
@@ -1858,9 +1860,9 @@ function aiFormatTablaNutrimentalGrilla(array $columnas, array $filas): string
 /**
  * Cuenta el total real de productos activos que coinciden con la busqueda, usando el mismo
  * criterio que aiSearchInventory() (nombre/codigo_barras/nombre_variante/descripcion/
- * ingredientes/beneficios), sin el LIMIT. Sirve para que consultar_inventario le diga al LLM
- * cuantas coincidencias hay en total aunque la lista que le manda este acotada -- probado
- * contra datos reales, busquedas como "vitamina" superan las 60 coincidencias.
+ * ingredientes/beneficios/perfil_recomendado), sin el LIMIT. Sirve para que consultar_inventario
+ * le diga al LLM cuantas coincidencias hay en total aunque la lista que le manda este acotada --
+ * probado contra datos reales, busquedas como "vitamina" superan las 60 coincidencias.
  */
 function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
 {
@@ -1874,7 +1876,8 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
     $sql = "SELECT COUNT(*) FROM productos p
             WHERE p.estado = 'activo'
               AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
-                   OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!')";
+                   OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
+                   OR p.perfil_recomendado LIKE :term7 ESCAPE '!')";
     $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
@@ -1884,6 +1887,7 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
         ':term4' => $term,
         ':term5' => $term,
         ':term6' => $term,
+        ':term7' => $term,
     ]);
 
     return (int)$stmt->fetchColumn();

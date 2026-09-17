@@ -2086,6 +2086,7 @@ final class AiAssistantToolsTest extends TestCase
                 descripcion TEXT NULL,
                 ingredientes TEXT NULL,
                 beneficios TEXT NULL,
+                perfil_recomendado TEXT NULL,
                 modo_uso TEXT NULL,
                 tabla_nutrimental TEXT NULL,
                 capsulas_por_envase INTEGER NULL,
