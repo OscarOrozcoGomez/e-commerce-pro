@@ -641,6 +641,13 @@ final class SecurityAndEdgeCasesTest extends TestCase
             )'
         );
         $this->pdo->exec(
+            'CREATE TABLE producto_relacionados (
+                id_producto INTEGER NOT NULL,
+                id_producto_relacionado INTEGER NOT NULL,
+                nota TEXT NULL
+            )'
+        );
+        $this->pdo->exec(
             'CREATE TABLE clientes (
                 id_cliente INTEGER PRIMARY KEY,
                 id_usuario INTEGER NULL,

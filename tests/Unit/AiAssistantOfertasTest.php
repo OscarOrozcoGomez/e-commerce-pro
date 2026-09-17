@@ -245,6 +245,9 @@ final class AiAssistantOfertasTest extends TestCase
         $this->pdo->exec("CREATE TABLE inventario_almacen (
             id_producto INTEGER NOT NULL, id_almacen INTEGER NOT NULL, cantidad_actual INTEGER NOT NULL DEFAULT 0
         )");
+        $this->pdo->exec("CREATE TABLE producto_relacionados (
+            id_producto INTEGER NOT NULL, id_producto_relacionado INTEGER NOT NULL, nota TEXT NULL
+        )");
         $this->pdo->exec("CREATE TABLE categorias (id_categoria INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, estado TEXT DEFAULT 'activo')");
         $this->pdo->exec("CREATE TABLE producto_categorias (id_producto INTEGER, id_categoria INTEGER, PRIMARY KEY (id_producto, id_categoria))");
         $this->pdo->exec("CREATE TABLE lotes_inventario (

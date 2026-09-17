@@ -202,6 +202,7 @@ function aiBuildSystemPrompt(
         $lines[] = '4. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
         $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
         $lines[] = '5b. Ofertas vigentes: llama a consultar_ofertas para saber que productos tienen descuento real ahorita -- ya viene filtrado para excluir cualquier producto cuyo stock restante este caducado o no alcance a consumirse a tiempo, asi que todo lo que te regrese esa funcion es seguro de ofrecer tal cual (precio de oferta, precio normal y ahorro). Sugierelas de forma proactiva cuando encajen con naturalidad (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones. Nunca digas que algo esta en oferta ni inventes un descuento sin haber llamado antes a esta funcion.';
+        $lines[] = '5c. Venta cruzada: si consultar_inventario te regreso productos_relacionados para un producto, ya vienen con stock verificado -- son seguros de ofrecer tal cual (nombre, precio, stock). Sugierelos de forma natural una vez que el cliente ya mostro interes real en el producto principal (por ejemplo justo despues de que pregunte precio/detalles, o al ir cerrando el pedido), como una sugerencia breve, no como lista aparte ni en cada mensaje. Nunca sugieras un producto que no venga en productos_relacionados ni menciones existencia de algo que no hayas consultado -- si consultar_inventario no te regreso productos_relacionados para ese producto, simplemente no hay sugerencia de venta cruzada esta vez, no inventes una.';
         $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad), dia de entrega y metodo de pago preferido.';
         $lines[] = '6b. Dias de entrega: hacemos entregas UNICAMENTE los miercoles y los sabados -- el cliente se adapta a nuestro itinerario (asi ahorramos combustible al repartir varios pedidos juntos), no al reves. Nunca preguntes "que dia te gustaria" de forma abierta -- ofrece tu mismo estas dos opciones de forma proactiva, por ejemplo: "Hacemos entregas los miercoles y los sabados, ¿cual se le acomoda mejor?". Si el cliente insiste en otro dia, no se lo niegues ni le prometas nada tu mismo -- respondele con calidez que lo vas a checar con el equipo y llama a transferir_a_humano.';
         $lines[] = '6c. Metodo de pago: SOLO aceptamos efectivo o transferencia, contra entrega -- nunca ofrezcas ni aceptes tarjeta ni ningun otro metodo. Si el cliente pregunta por pagar con tarjeta o algo distinto, explicale con naturalidad que por ahora solo manejamos efectivo o transferencia contra entrega.';
@@ -355,7 +356,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_inventario',
-                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir.',
+                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, perfil recomendado, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir. Tambien puede regresar beneficios y perfil_recomendado (referencia INTERNA, nunca citarlos tal cual) y productos_relacionados (venta cruzada, YA filtrada por stock real -- solo aparecen productos que de verdad hay en existencia).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1634,6 +1635,68 @@ function aiStockVendible(PDO $pdo, int $idProducto, int $stockSistema): int
     return min($stockSistema, $mapa[$idProducto]);
 }
 
+/**
+ * Venta cruzada: para cada id en $idsProducto, que otro(s) producto(s) sugerir (ver tabla
+ * producto_relacionados) -- pero SOLO los que de verdad tengan stock vendible ahora mismo.
+ * Nunca se regresa un relacionado sin stock: la regla de "jamas menciones existencia sin
+ * verificarla" aplica igual de fuerte a la venta cruzada que al producto principal, asi que
+ * el filtro de stock vive DENTRO de esta consulta, no como un paso que alguien podria
+ * olvidar agregar despues al conectarla con un tool nuevo.
+ *
+ * @return array<int, list<array{id_producto:int, nombre:string, precio:float, stock:int}>>
+ *         indexado por id_producto (el producto que se esta consultando).
+ */
+function aiGetProductosRelacionadosConStock(PDO $pdo, array $idsProducto): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $idsProducto), static fn(int $id): bool => $id > 0)));
+    if ($ids === []) {
+        return [];
+    }
+
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $sql = "SELECT pr.id_producto, pr.id_producto_relacionado,
+                   p.nombre, p.nombre_variante, p.precio_venta,
+                   COALESCE(SUM(ia.cantidad_actual), 0) AS stock_total
+            FROM producto_relacionados pr
+            JOIN productos p ON p.id_producto = pr.id_producto_relacionado AND p.estado = 'activo'
+            LEFT JOIN inventario_almacen ia ON ia.id_producto = p.id_producto
+            WHERE pr.id_producto IN ($ph)
+            GROUP BY pr.id_producto, pr.id_producto_relacionado, p.nombre, p.nombre_variante, p.precio_venta";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($ids);
+    $filas = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    if ($filas === []) {
+        return [];
+    }
+
+    $idsRelacionados = array_values(array_unique(array_map(static fn(array $f): int => (int)$f['id_producto_relacionado'], $filas)));
+    $preciosOferta = aiResolverPreciosOferta($pdo, $idsRelacionados);
+    $stockVendible = aiStockVendiblePorLotesBatch($pdo, $idsRelacionados);
+
+    $resultado = [];
+    foreach ($filas as $f) {
+        $idRelacionado = (int)$f['id_producto_relacionado'];
+        $stock = max(0, (int)$f['stock_total']);
+        if (array_key_exists($idRelacionado, $stockVendible)) {
+            $stock = min($stock, $stockVendible[$idRelacionado]);
+        }
+        if ($stock <= 0) {
+            continue; // sin stock vendible -- nunca se sugiere
+        }
+
+        $nombreVariante = trim((string)($f['nombre_variante'] ?? ''));
+        $idProducto = (int)$f['id_producto'];
+        $resultado[$idProducto][] = [
+            'id_producto' => $idRelacionado,
+            'nombre' => trim((string)$f['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
+            'precio' => $preciosOferta[$idRelacionado] ?? round((float)$f['precio_venta'], 2),
+            'stock' => $stock,
+        ];
+    }
+
+    return $resultado;
+}
+
 function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): array
 {
     $busqueda = trim($busquedaTexto);
@@ -1685,7 +1748,11 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     // (descuadre real observado en produccion) -- misma regla que consultar_ofertas.
     $stockVendible = aiStockVendiblePorLotesBatch($pdo, array_column($rows, 'id_producto'));
 
-    return array_map(static function (array $row) use ($preciosOferta, $stockVendible): array {
+    // Venta cruzada: ya viene pre-filtrada por stock vendible real (ver
+    // aiGetProductosRelacionadosConStock) -- lo que llegue aqui es seguro de sugerir tal cual.
+    $relacionados = aiGetProductosRelacionadosConStock($pdo, array_column($rows, 'id_producto'));
+
+    return array_map(static function (array $row) use ($preciosOferta, $stockVendible, $relacionados): array {
         $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
         $idProducto = (int)$row['id_producto'];
         $stock = max(0, (int)$row['stock_total']);
@@ -1730,6 +1797,9 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         );
         if ($rendimientoEstimado !== '') {
             $producto['rendimiento_estimado'] = $rendimientoEstimado;
+        }
+        if (!empty($relacionados[$idProducto])) {
+            $producto['productos_relacionados'] = $relacionados[$idProducto];
         }
 
         return $producto;
