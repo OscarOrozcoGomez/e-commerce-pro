@@ -26,6 +26,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo isset($pageTitle) ? esc($pageTitle) . ' - Belleza y Bienestar' : 'Belleza y Bienestar'; ?></title>
     <link rel="icon" type="image/png" href="<?php echo BASE_URL; ?>assets/img/logo.png">
+    <?php if (!empty($ogTitle)): ?>
+        <!-- Open Graph: solo lo define una vista que comparte una URL publica (ej. producto_publico.php) -->
+        <meta property="og:type" content="website">
+        <meta property="og:title" content="<?php echo esc((string)$ogTitle); ?>">
+        <?php if (!empty($ogDescription)): ?>
+            <meta property="og:description" content="<?php echo esc((string)$ogDescription); ?>">
+        <?php endif; ?>
+        <?php if (!empty($ogImage)): ?>
+            <meta property="og:image" content="<?php echo esc((string)$ogImage); ?>">
+        <?php endif; ?>
+        <?php if (!empty($ogUrl)): ?>
+            <meta property="og:url" content="<?php echo esc((string)$ogUrl); ?>">
+        <?php endif; ?>
+    <?php endif; ?>
     <!-- Google Tag Manager -->
     <?php if ($gtmContainerId !== ''): ?>
         <script>
