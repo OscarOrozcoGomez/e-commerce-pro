@@ -1598,6 +1598,25 @@ function aiEscapeLikeTerm(string $term): string
 }
 
 /**
+ * Nombre de un producto tal como Alex debe DECIRLO/escribirlo al cliente: prioriza
+ * nombre_corto (la etiqueta real impresa en el pomo, ej. "Maca Blend", "Z Blend",
+ * capturada a mano en views/products.php) sobre el nombre largo sincronizado de
+ * blifemx.myshopify.com (ver core/blife_sync_utils.php), que esta pensado para SEO del
+ * sitio, no para hablar con el cliente -- ej. "Organic Vegan Protein Suplemento Natural
+ * Proteina Vegana Vainilla". Si un producto no tiene nombre_corto capturado todavia, cae
+ * de vuelta al nombre largo (nunca deja el producto sin nombre). La variante (sabor/
+ * tamano) se agrega igual sin importar cual nombre base se use.
+ */
+function aiNombreParaCliente(string $nombre, ?string $nombreCorto, ?string $nombreVariante = null): string
+{
+    $nombreCorto = trim((string)($nombreCorto ?? ''));
+    $base = $nombreCorto !== '' ? $nombreCorto : trim($nombre);
+    $variante = trim((string)($nombreVariante ?? ''));
+
+    return $variante !== '' ? "{$base} - {$variante}" : $base;
+}
+
+/**
  * Devuelve, para los ids que esten en la categoria "Ofertas", su precio de oferta
  * efectivo (override manual o costo + $50). Mapa id_producto => precio; los ids fuera
  * de oferta no aparecen (el llamador usa el precio_venta normal).
@@ -1730,13 +1749,13 @@ function aiGetProductosRelacionadosConStock(PDO $pdo, array $idsProducto): array
 
     $ph = implode(',', array_fill(0, count($ids), '?'));
     $sql = "SELECT pr.id_producto, pr.id_producto_relacionado,
-                   p.nombre, p.nombre_variante, p.precio_venta,
+                   p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta,
                    COALESCE(SUM(ia.cantidad_actual), 0) AS stock_total
             FROM producto_relacionados pr
             JOIN productos p ON p.id_producto = pr.id_producto_relacionado AND p.estado = 'activo'
             LEFT JOIN inventario_almacen ia ON ia.id_producto = p.id_producto
             WHERE pr.id_producto IN ($ph)
-            GROUP BY pr.id_producto, pr.id_producto_relacionado, p.nombre, p.nombre_variante, p.precio_venta";
+            GROUP BY pr.id_producto, pr.id_producto_relacionado, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($ids);
     $filas = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -1759,11 +1778,10 @@ function aiGetProductosRelacionadosConStock(PDO $pdo, array $idsProducto): array
             continue; // sin stock vendible -- nunca se sugiere
         }
 
-        $nombreVariante = trim((string)($f['nombre_variante'] ?? ''));
         $idProducto = (int)$f['id_producto'];
         $resultado[$idProducto][] = [
             'id_producto' => $idRelacionado,
-            'nombre' => trim((string)$f['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
+            'nombre' => aiNombreParaCliente((string)$f['nombre'], $f['nombre_corto'] ?? null, $f['nombre_variante'] ?? null),
             'precio' => $preciosOferta[$idRelacionado] ?? round((float)$f['precio_venta'], 2),
             'stock' => $stock,
         ];
@@ -1777,7 +1795,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     $busqueda = trim($busquedaTexto);
     $safeLimit = max(1, min(20, $limit));
 
-    $sql = "SELECT p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
+    $sql = "SELECT p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta,
                    p.ingredientes, p.modo_uso, p.tabla_nutrimental,
                    p.capsulas_por_envase, p.porcion_capsulas,
                    p.beneficios, p.perfil_recomendado,
@@ -1790,9 +1808,12 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         // PDO::ATTR_EMULATE_PREPARES esta desactivado (ver core/config.php), y el driver
         // nativo de MySQL no soporta reutilizar el mismo placeholder con nombre varias
         // veces en una sola consulta -- cada ocurrencia necesita su propio nombre.
+        // nombre_corto entra a la busqueda para que un cliente que pregunta por la
+        // etiqueta del pomo ("tienen Maca Blend?") si lo encuentre -- antes solo se
+        // buscaba en el nombre largo sincronizado de Shopify.
         $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
                        OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
-                       OR p.perfil_recomendado LIKE :term7 ESCAPE '!')";
+                       OR p.perfil_recomendado LIKE :term7 ESCAPE '!' OR p.nombre_corto LIKE :term8 ESCAPE '!')";
         $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
         $params[':term1'] = $term;
         $params[':term2'] = $term;
@@ -1801,8 +1822,9 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         $params[':term5'] = $term;
         $params[':term6'] = $term;
         $params[':term7'] = $term;
+        $params[':term8'] = $term;
     }
-    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta,
+    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta,
                        p.ingredientes, p.modo_uso, p.tabla_nutrimental,
                        p.capsulas_por_envase, p.porcion_capsulas,
                        p.beneficios, p.perfil_recomendado
@@ -1828,7 +1850,6 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     $relacionados = aiGetProductosRelacionadosConStock($pdo, array_column($rows, 'id_producto'));
 
     return array_map(static function (array $row) use ($preciosOferta, $stockVendible, $relacionados): array {
-        $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
         $idProducto = (int)$row['id_producto'];
         $stock = max(0, (int)$row['stock_total']);
         if (array_key_exists($idProducto, $stockVendible)) {
@@ -1837,7 +1858,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
 
         $producto = [
             'id_producto' => $idProducto,
-            'nombre' => trim((string)$row['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
+            'nombre' => aiNombreParaCliente((string)$row['nombre'], $row['nombre_corto'] ?? null, $row['nombre_variante'] ?? null),
             'precio' => $preciosOferta[$idProducto] ?? round((float)$row['precio_venta'], 2),
             'stock' => $stock,
         ];
@@ -2015,10 +2036,11 @@ function aiFormatTablaNutrimentalGrilla(array $columnas, array $filas): string
 
 /**
  * Cuenta el total real de productos activos que coinciden con la busqueda, usando el mismo
- * criterio que aiSearchInventory() (nombre/codigo_barras/nombre_variante/descripcion/
- * ingredientes/beneficios/perfil_recomendado), sin el LIMIT. Sirve para que consultar_inventario
- * le diga al LLM cuantas coincidencias hay en total aunque la lista que le manda este acotada --
- * probado contra datos reales, busquedas como "vitamina" superan las 60 coincidencias.
+ * criterio que aiSearchInventory() (nombre/nombre_corto/codigo_barras/nombre_variante/
+ * descripcion/ingredientes/beneficios/perfil_recomendado), sin el LIMIT. Sirve para que
+ * consultar_inventario le diga al LLM cuantas coincidencias hay en total aunque la lista
+ * que le manda este acotada -- probado contra datos reales, busquedas como "vitamina"
+ * superan las 60 coincidencias.
  */
 function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
 {
@@ -2033,7 +2055,7 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
             WHERE p.estado = 'activo'
               AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
                    OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
-                   OR p.perfil_recomendado LIKE :term7 ESCAPE '!')";
+                   OR p.perfil_recomendado LIKE :term7 ESCAPE '!' OR p.nombre_corto LIKE :term8 ESCAPE '!')";
     $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
@@ -2044,6 +2066,7 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
         ':term5' => $term,
         ':term6' => $term,
         ':term7' => $term,
+        ':term8' => $term,
     ]);
 
     return (int)$stmt->fetchColumn();
@@ -2069,22 +2092,23 @@ function aiListarOfertasVigentes(PDO $pdo, string $busqueda = ''): array
 {
     $busqueda = trim($busqueda);
 
-    $sql = "SELECT p.id_producto, p.nombre, p.nombre_variante, p.precio_venta, p.precio_costo, p.precio_oferta,
+    $sql = "SELECT p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta, p.precio_costo, p.precio_oferta,
                    COALESCE(SUM(ia.cantidad_actual), 0) AS stock_total
             FROM productos p
             LEFT JOIN inventario_almacen ia ON ia.id_producto = p.id_producto
             WHERE p.estado = 'activo' AND " . ofertaSqlEnOfertaExpr('p');
     $params = [];
     if ($busqueda !== '') {
-        $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.nombre_variante LIKE :term2 ESCAPE '!')";
+        $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.nombre_variante LIKE :term2 ESCAPE '!' OR p.nombre_corto LIKE :term3 ESCAPE '!')";
         $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
         $params[':term1'] = $term;
         $params[':term2'] = $term;
+        $params[':term3'] = $term;
     }
     // La categoria de Ofertas la cura el equipo a mano (lista corta en la practica) -- este
     // tope es solo una salvaguarda contra un descuido (ej. toda una coleccion metida ahi por
     // error), no el limite de negocio real que si aplica aiToolConsultarOfertas().
-    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_variante, p.precio_venta, p.precio_costo, p.precio_oferta
+    $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta, p.precio_costo, p.precio_oferta
               HAVING stock_total > 0
               ORDER BY p.nombre ASC, p.nombre_variante ASC
               LIMIT 200';
@@ -2116,13 +2140,12 @@ function aiListarOfertasVigentes(PDO $pdo, string $busqueda = ''): array
             }
         }
 
-        $nombreVariante = trim((string)($row['nombre_variante'] ?? ''));
         $precioNormal = round((float)$row['precio_venta'], 2);
         $precioOferta = ofertaPrecioEfectivo($precioNormal, (float)($row['precio_costo'] ?? 0), $row['precio_oferta'] ?? null, true);
 
         $ofertas[] = [
             'id_producto' => $idProducto,
-            'nombre' => trim((string)$row['nombre']) . ($nombreVariante !== '' ? ' - ' . $nombreVariante : ''),
+            'nombre' => aiNombreParaCliente((string)$row['nombre'], $row['nombre_corto'] ?? null, $row['nombre_variante'] ?? null),
             'precio_oferta' => $precioOferta,
             'precio_normal' => $precioNormal,
             'ahorro' => round(max(0.0, $precioNormal - $precioOferta), 2),
@@ -2313,7 +2336,7 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
         }
 
         $stmt = $pdo->prepare(
-            "SELECT id_producto, nombre, precio_venta,
+            "SELECT id_producto, nombre, nombre_corto, precio_venta,
                     (SELECT COALESCE(SUM(cantidad_actual), 0) FROM inventario_almacen WHERE id_producto = p.id_producto) AS stock_total
              FROM productos p
              WHERE id_producto = ? AND estado = 'activo'"
@@ -2326,6 +2349,12 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
             continue;
         }
 
+        // Mismo nombre "de cara al cliente" (nombre_corto/etiqueta del pomo si existe) que
+        // ya vio Alex en consultar_inventario/consultar_ofertas -- si aqui se usara el
+        // nombre largo de Shopify, el mensaje de error o la confirmacion del pedido
+        // mencionarian un nombre distinto al que Alex uso en el resto de la conversacion.
+        $nombreParaCliente = aiNombreParaCliente((string)$producto['nombre'], $producto['nombre_corto'] ?? null);
+
         // No basta con el stock crudo de inventario_almacen: si el producto tiene lotes
         // registrados, solo cuenta lo que el control de caducidades confirma que se puede
         // vender a tiempo (ver aiStockVendible()) -- evita agendar una venta de un producto
@@ -2333,7 +2362,7 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
         // pedido por su cuenta sin pasar por consultar_ofertas.
         $stockVendible = aiStockVendible($pdo, $idProducto, (int)$producto['stock_total']);
         if ($stockVendible < $cantidad) {
-            $errores[] = "No hay suficiente existencia de \"{$producto['nombre']}\" (disponible: {$stockVendible}).";
+            $errores[] = "No hay suficiente existencia de \"{$nombreParaCliente}\" (disponible: {$stockVendible}).";
             continue;
         }
 
@@ -2345,7 +2374,7 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
             'id_producto' => (int)$producto['id_producto'],
             'quantity' => $cantidad,
             'precio' => $preciosOferta[$idProducto] ?? round((float)$producto['precio_venta'], 2),
-            'nombre' => (string)$producto['nombre'],
+            'nombre' => $nombreParaCliente,
         ];
     }
 
@@ -3280,12 +3309,12 @@ function aiGetClientPurchaseProfile(PDO $pdo, int $idCliente, int $limit = 5): a
     }
 
     $stmt = $pdo->prepare(
-        "SELECT p.nombre, p.nombre_variante, COUNT(*) AS veces_comprado, MAX(ped.fecha_creacion) AS ultima_compra
+        "SELECT p.nombre, p.nombre_corto, p.nombre_variante, COUNT(*) AS veces_comprado, MAX(ped.fecha_creacion) AS ultima_compra
          FROM detalle_pedidos dp
          INNER JOIN pedidos ped ON ped.id_pedido = dp.id_pedido
          INNER JOIN productos p ON p.id_producto = dp.id_producto
          WHERE ped.id_cliente = ? AND ped.estado <> 'cancelado'
-         GROUP BY p.id_producto, p.nombre, p.nombre_variante
+         GROUP BY p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante
          ORDER BY ultima_compra DESC
          LIMIT " . max(1, min(20, $limit))
     );
@@ -3303,11 +3332,10 @@ function aiBuildClientProfileContextLine(array $compras, array $temas): string
     $partes = [];
 
     if (!empty($compras)) {
-        $nombresCompras = array_map(static function (array $c): string {
-            $nombre = trim((string)($c['nombre'] ?? ''));
-            $variante = trim((string)($c['nombre_variante'] ?? ''));
-            return $variante !== '' ? "{$nombre} {$variante}" : $nombre;
-        }, $compras);
+        $nombresCompras = array_map(
+            static fn(array $c): string => aiNombreParaCliente((string)($c['nombre'] ?? ''), $c['nombre_corto'] ?? null, $c['nombre_variante'] ?? null),
+            $compras
+        );
         $partes[] = 'ya compro antes: ' . implode(', ', array_filter($nombresCompras));
     }
 

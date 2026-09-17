@@ -204,6 +204,18 @@ final class WhatsAppHistoryAnalysisTest extends TestCase
         $this->assertSame([], aiGetClientPurchaseProfile($this->pdo, 0));
     }
 
+    public function testGetClientPurchaseProfileIncluyeNombreCortoCuandoExiste(): void
+    {
+        $this->seedProducto(2, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', null, 'Maca Blend');
+        $this->seedPedido(2, 101, 'entregado');
+        $this->seedDetallePedido(2, 2, 1);
+
+        $perfil = aiGetClientPurchaseProfile($this->pdo, 101);
+
+        $this->assertCount(1, $perfil);
+        $this->assertSame('Maca Blend', $perfil[0]['nombre_corto']);
+    }
+
     /* -------------------- aiBuildClientProfileContextLine (pura) -------------------- */
 
     public function testBuildClientProfileContextLineWithPurchasesAndTopics(): void
@@ -216,7 +228,10 @@ final class WhatsAppHistoryAnalysisTest extends TestCase
             ]
         );
 
-        $this->assertStringContainsString('Magnesio Citrate 240', $linea);
+        // Formato unificado "Nombre - Variante" (aiNombreParaCliente()), igual que
+        // consultar_inventario/consultar_ofertas -- antes decia "Magnesio Citrate 240"
+        // (sin guion), inconsistente con el resto de las menciones de productos de Alex.
+        $this->assertStringContainsString('Magnesio Citrate - 240', $linea);
         $this->assertStringContainsString('Colageno', $linea);
         $this->assertStringContainsString('envio', $linea);
     }
@@ -224,6 +239,42 @@ final class WhatsAppHistoryAnalysisTest extends TestCase
     public function testBuildClientProfileContextLineWithNothingReturnsEmptyString(): void
     {
         $this->assertSame('', aiBuildClientProfileContextLine([], []));
+    }
+
+    public function testBuildClientProfileContextLinePrefiereNombreCortoSobreElNombreLargo(): void
+    {
+        $linea = aiBuildClientProfileContextLine(
+            [['nombre' => 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'nombre_corto' => 'Maca Blend', 'nombre_variante' => null]],
+            []
+        );
+
+        $this->assertStringContainsString('Maca Blend', $linea);
+        $this->assertStringNotContainsString('Organic Vegan Maca Root Extract', $linea);
+    }
+
+    public function testBuildClientProfileContextLineSigueUsandoNombreLargoSinNombreCorto(): void
+    {
+        // Regresion: una compra sin nombre_corto capturado se sigue mencionando igual que antes.
+        $linea = aiBuildClientProfileContextLine(
+            [['nombre' => 'Creatina Monohidratada', 'nombre_variante' => null]],
+            []
+        );
+
+        $this->assertStringContainsString('Creatina Monohidratada', $linea);
+    }
+
+    public function testBuildClientProfileContextLineConVariasComprasMezclaNombreCortoYLargo(): void
+    {
+        $linea = aiBuildClientProfileContextLine(
+            [
+                ['nombre' => 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'nombre_corto' => 'Maca Blend', 'nombre_variante' => null],
+                ['nombre' => 'Creatina Monohidratada', 'nombre_corto' => null, 'nombre_variante' => null],
+            ],
+            []
+        );
+
+        $this->assertStringContainsString('Maca Blend', $linea);
+        $this->assertStringContainsString('Creatina Monohidratada', $linea);
     }
 
     /* -------------------- fixtures -------------------- */
@@ -235,6 +286,7 @@ final class WhatsAppHistoryAnalysisTest extends TestCase
                 id_producto INTEGER PRIMARY KEY,
                 nombre TEXT NOT NULL,
                 nombre_variante TEXT NULL,
+                nombre_corto TEXT NULL,
                 estado TEXT NOT NULL DEFAULT "activo"
             )'
         );
@@ -324,10 +376,10 @@ final class WhatsAppHistoryAnalysisTest extends TestCase
             ->execute([$id, $idConversacion, $rol, $contenido, $fecha]);
     }
 
-    private function seedProducto(int $id, string $nombre, ?string $variante): void
+    private function seedProducto(int $id, string $nombre, ?string $variante, ?string $nombreCorto = null): void
     {
-        $this->pdo->prepare('INSERT INTO productos (id_producto, nombre, nombre_variante) VALUES (?, ?, ?)')
-            ->execute([$id, $nombre, $variante]);
+        $this->pdo->prepare('INSERT INTO productos (id_producto, nombre, nombre_variante, nombre_corto) VALUES (?, ?, ?, ?)')
+            ->execute([$id, $nombre, $variante, $nombreCorto]);
     }
 
     private function seedPedido(int $id, int $idCliente, string $estado): void
