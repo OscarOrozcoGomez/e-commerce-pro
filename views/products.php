@@ -9,13 +9,6 @@ requireAuth();
 requirePermission('gestionar_productos', BASE_URL . 'views/dashboard.php');
 $pageTitle = 'Gestionar Productos';
 
-// URL absoluta (con dominio) para el boton "Compartir" -- WhatsApp/Facebook/correo la usan
-// tal cual, no pueden resolver una ruta relativa como BASE_URL.
-$compartirScheme = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-    || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https'))
-    ? 'https' : 'http';
-$productoPublicoBaseUrl = $compartirScheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . BASE_URL . 'views/producto_publico.php?id=';
-
 // Botón de regreso contextual. Algunas vistas enlazan aquí para "ver / editar" un
 // producto (hoy: Control de Caducidades, pestañas Caducidades e Inconsistencias).
 // Sin esto, products.php solo ofrece "Volver al Dashboard" y el usuario pierde el
@@ -418,21 +411,6 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div id="modal-compartir-producto" class="modal" style="max-width: 480px;">
-    <div class="modal-content">
-        <h5 style="margin-top: 0;"><i class="material-icons left">share</i>Compartir producto</h5>
-        <p class="grey-text text-darken-1 compartir-producto-nombre" style="margin-top: -8px; font-weight: 600;"></p>
-        <p class="grey-text" style="font-size: 0.85rem;">El mensaje se precarga tal cual se ve abajo -- revísalo o edítalo antes de enviarlo, ningún canal lo manda solo.</p>
-        <div class="compartir-producto-preview" style="white-space: pre-wrap; background: #f5f5f5; border-radius: 6px; padding: 10px 12px; font-size: 0.85rem; color: #333; max-height: 160px; overflow-y: auto;"></div>
-    </div>
-    <div class="modal-footer" style="display: flex; gap: 8px; justify-content: flex-end;">
-        <a href="#!" class="modal-close waves-effect waves-grey btn-flat">Cerrar</a>
-        <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light blue darken-2 compartir-link-facebook"><i class="fa-brands fa-facebook left"></i>Facebook</a>
-        <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light grey darken-1 compartir-link-correo"><i class="material-icons left">email</i>Correo</a>
-        <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light green darken-1 compartir-link-whatsapp"><i class="fa-brands fa-whatsapp left"></i>WhatsApp</a>
-    </div>
-</div>
-
 <script>
     let cacheProductosPadre = [];
     let loteProductoActualId = null;
@@ -451,38 +429,7 @@ include __DIR__ . '/includes/header.php';
 
     const BASE_API = '<?php echo BASE_URL; ?>api/products_manager.php';
     const LOTES_API = '<?php echo BASE_URL; ?>api/lotes_manager.php';
-    const PRODUCTO_PUBLICO_BASE_URL = '<?php echo $productoPublicoBaseUrl; ?>';
     let colaImagenes = []; // { type: 'local'|'server', file: File|null, path: string|null, preview: string }
-
-    // Boton "Compartir": arma el mensaje con texto_compartir (redactado para el cliente,
-    // NUNCA con beneficios/perfil_recomendado que son referencia interna) + link a la ficha
-    // publica del producto, y abre WhatsApp/correo/Facebook. El vendedor siempre revisa/edita
-    // antes de mandar -- estos links solo precargan, no envian nada solos.
-    function compartirProducto(p) {
-        const nombreCompleto = p.nombre_variante ? `${p.nombre} - ${p.nombre_variante}` : p.nombre;
-        const precio = parseFloat(p.precio_venta || 0).toFixed(2);
-        const urlPublica = PRODUCTO_PUBLICO_BASE_URL + p.id_producto;
-        const textoVenta = (p.texto_compartir || '').trim();
-
-        let mensaje = `*${nombreCompleto}*\n$${precio}\n`;
-        if (textoVenta !== '') mensaje += `\n${textoVenta}\n`;
-        mensaje += `\n${urlPublica}`;
-
-        const modal = document.getElementById('modal-compartir-producto');
-        if (!modal) return;
-        modal.querySelector('.compartir-producto-nombre').textContent = nombreCompleto;
-        modal.querySelector('.compartir-producto-preview').textContent = mensaje;
-
-        const linkWhatsapp = modal.querySelector('.compartir-link-whatsapp');
-        const linkCorreo = modal.querySelector('.compartir-link-correo');
-        const linkFacebook = modal.querySelector('.compartir-link-facebook');
-        if (linkWhatsapp) linkWhatsapp.href = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
-        if (linkCorreo) linkCorreo.href = `mailto:?subject=${encodeURIComponent(nombreCompleto)}&body=${encodeURIComponent(mensaje)}`;
-        if (linkFacebook) linkFacebook.href = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(urlPublica)}`;
-
-        const modalInstance = M.Modal.getInstance(modal) || M.Modal.init(modal);
-        modalInstance.open();
-    }
 
     // Función para expandir/colapsar variantes
     window.toggleVariants = function(id) {
@@ -1311,9 +1258,6 @@ include __DIR__ . '/includes/header.php';
                     <button type="button" class="btn-floating btn-small blue waves-effect waves-light" onclick='abrirEditar(${jsonP})'>
                         <i class="material-icons">edit</i>
                     </button>
-                    <button type="button" class="btn-floating btn-small green waves-effect waves-light" onclick='compartirProducto(${jsonP})' title="Compartir">
-                        <i class="material-icons">share</i>
-                    </button>
                     <button type="button" class="btn-floating btn-small red waves-effect waves-light" onclick="eliminarProducto(${p.id_producto})">
                         <i class="material-icons">delete</i>
                     </button>
@@ -1352,7 +1296,6 @@ include __DIR__ . '/includes/header.php';
                     <span style="font-size:0.75rem; color:#444;">${label} (${getNormalizedProductStock(v)})</span>
                     <div>
                         <button type="button" class="btn-flat btn-small blue-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='abrirEditar(${jsonV})'>EDITAR</button>
-                        <button type="button" class="btn-flat btn-small green-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='compartirProducto(${jsonV})'>COMPARTIR</button>
                         <button type="button" class="btn-flat btn-small red-text" style="height:18px; line-height:18px; padding:0 4px; font-size:10px; font-weight:bold;" onclick='eliminarProducto(${v.id_producto})'>BORRAR</button>
                     </div>
                 </div>`;
