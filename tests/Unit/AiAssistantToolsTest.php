@@ -1684,6 +1684,182 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame(1, $total);
     }
 
+    #[Group('ai_deepseek')]
+    public function testRunAssistantTurnIncluyeIdMensajeEnLaParteDeTextoParaElRechequeoPostDelay(): void
+    {
+        $medioDia = new DateTimeImmutable('2026-09-14 12:00:00');
+
+        $reply = aiRunAssistantTurn('5215500050098', null, 'Hola, buenos dias', null, null, $medioDia, $this->pdo);
+
+        $this->assertNotEmpty($reply);
+        $this->assertSame('text', $reply[0]['type']);
+        $this->assertArrayHasKey('id_mensaje', $reply[0]);
+        $this->assertIsInt($reply[0]['id_mensaje']);
+        $this->assertGreaterThan(0, $reply[0]['id_mensaje']);
+
+        $stmt = $this->pdo->prepare('SELECT rol, contenido, enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ?');
+        $stmt->execute([$reply[0]['id_mensaje']]);
+        $mensaje = $stmt->fetch();
+        $this->assertSame('assistant', $mensaje['rol']);
+        $this->assertSame($reply[0]['text'], $mensaje['contenido']);
+        $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+    }
+
+    // --- aiHandleHumanOutboundMessage(): pausa el bot cuando un asesor escribe a mano ---
+
+    public function testHandleHumanOutboundMessagePausaUnaConversacionActiva(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070001', null);
+        $this->assertSame('activo', (string) $conv['estado_bot']);
+
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070001', 'Ya te apoyo yo con eso', 'WA-HUMANO-1');
+
+        $row = $this->pdo->query("SELECT estado_bot, motivo_transferencia FROM whatsapp_conversaciones WHERE wa_id = '5215500070001'")->fetch();
+        $this->assertSame('pausado', $row['estado_bot']);
+        $this->assertNotEmpty($row['motivo_transferencia']);
+
+        $mensaje = $this->pdo->query(
+            "SELECT rol, contenido, enviado_whatsapp FROM whatsapp_mensajes WHERE id_conversacion = " . (int) $conv['id_conversacion']
+        )->fetch();
+        $this->assertSame('humano', $mensaje['rol']);
+        $this->assertSame('Ya te apoyo yo con eso', $mensaje['contenido']);
+        $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+    }
+
+    public function testHandleHumanOutboundMessageNoPisaUnMotivoDeTransferenciaYaExistente(): void
+    {
+        // Si ya estaba pausada (p.ej. transferir_a_humano con un motivo especifico), un
+        // segundo mensaje del asesor no debe sobreescribir ese motivo original.
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070002', null);
+        aiSetConversationState($this->pdo, (int) $conv['id_conversacion'], 'pausado', 'Motivo original del tool');
+
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070002', 'Hola, ya vi tu pedido', 'WA-HUMANO-2');
+
+        $row = $this->pdo->query("SELECT estado_bot, motivo_transferencia FROM whatsapp_conversaciones WHERE wa_id = '5215500070002'")->fetch();
+        $this->assertSame('pausado', $row['estado_bot']);
+        $this->assertSame('Motivo original del tool', $row['motivo_transferencia']);
+    }
+
+    public function testHandleHumanOutboundMessageIgnoraTextoOWaIdVacios(): void
+    {
+        aiHandleHumanOutboundMessage($this->pdo, '', 'Hola', 'WA-VACIO-1');
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070003', '   ', 'WA-VACIO-2');
+        aiHandleHumanOutboundMessage($this->pdo, '   ', '   ', null);
+
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM whatsapp_conversaciones')->fetchColumn());
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM whatsapp_mensajes')->fetchColumn());
+    }
+
+    public function testHandleHumanOutboundMessageRespetaElDedupDeWaMessageId(): void
+    {
+        // Reintento del puente sobre el mismo evento fromMe=true: no debe duplicar el
+        // mensaje ni volver a tocar el estado (aunque para eso ya bastaria con que siguiera
+        // pausado, lo importante es que no se inserte una segunda fila).
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070004', 'Primer intento', 'WA-DEDUP-HUMANO');
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070004', 'Primer intento', 'WA-DEDUP-HUMANO');
+
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070004', null);
+        $total = (int) $this->pdo->query(
+            'SELECT COUNT(*) FROM whatsapp_mensajes WHERE id_conversacion = ' . (int) $conv['id_conversacion']
+        )->fetchColumn();
+        $this->assertSame(1, $total);
+    }
+
+    // --- aiConfirmarEnvioWhatsapp(): segundo chequeo, justo antes de enviar de verdad ---
+
+    public function testConfirmarEnvioWhatsappPermiteEnviarCuandoLaConversacionSigueActiva(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080001', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Claro, con gusto te ayudo', null, null, null, null, true);
+
+        $this->assertTrue(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080001', $idMensaje));
+
+        // No debe tocar el flag: sigue marcado como enviado.
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(1, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappBloqueaYMarcaNoEnviadoSiUnHumanoPausoLaConversacionDuranteElDelay(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080002', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Claro, con gusto te ayudo', null, null, null, null, true);
+
+        // Simula que, DESPUES de que Alex genero la respuesta, un asesor escribio desde el
+        // celular mientras el puente todavia esperaba su delay de 60-120s.
+        aiHandleHumanOutboundMessage($this->pdo, '5215500080002', 'Ya te contesto yo', 'WA-CARRERA-1');
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080002', $idMensaje));
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappEsIdempotenteSiElPuenteReintenta(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080003', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Texto', null, null, null, null, true);
+        aiSetConversationState($this->pdo, (int) $conv['id_conversacion'], 'pausado', 'Intervencion manual');
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080003', $idMensaje));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080003', $idMensaje));
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaConversacionInexistente(): void
+    {
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080999', 1));
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM whatsapp_conversaciones')->fetchColumn());
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaIdMensajeInexistente(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080004', null);
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080004', 999999));
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaIdsNoPositivos(): void
+    {
+        aiGetOrCreateConversation($this->pdo, '5215500080005', null);
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080005', 0));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080005', -1));
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaWaIdVacio(): void
+    {
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '', 1));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '   ', 1));
+    }
+
+    public function testConfirmarEnvioWhatsappNoConfundeMensajesDeOtraConversacion(): void
+    {
+        // id_mensaje real, pero de OTRO wa_id -- nunca hay que confiar en el id que manda un
+        // cliente HTTP externo sin cruzarlo contra la conversacion que el mismo dice.
+        $convA = aiGetOrCreateConversation($this->pdo, '5215500080006', null);
+        aiGetOrCreateConversation($this->pdo, '5215500080007', null);
+        $idMensajeDeA = aiAppendMessage($this->pdo, (int) $convA['id_conversacion'], 'assistant', 'Respuesta para A', null, null, null, null, true);
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080007', $idMensajeDeA));
+
+        // Tampoco debio tocar el mensaje real de A solo porque alguien mando su id con el wa_id de B.
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensajeDeA)->fetchColumn();
+        $this->assertSame(1, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaMensajeDeRolUsuarioAunquePerteneceALaConversacion(): void
+    {
+        // Un id_mensaje que si es de la conversacion correcta pero es del CLIENTE (rol
+        // 'user'), no de Alex -- no tiene sentido "confirmar el envio" de algo que el
+        // cliente mando, y no hay que dejar que se le pueda apagar el flag enviado_whatsapp.
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080008', null);
+        $idMensajeUsuario = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'user', 'Hola, tienen omega 3?');
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080008', $idMensajeUsuario));
+    }
+
     // --- aiFindConversationsPendingRespuesta(): edge cases adicionales ---
 
     public function testFindConversationsPendingRespuestaExcluyeConversacionesCerradas(): void

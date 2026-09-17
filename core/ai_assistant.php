@@ -905,6 +905,61 @@ function aiHandleHumanOutboundMessage(PDO $pdo, string $waId, string $texto, ?st
     }
 }
 
+/**
+ * Ultimo chequeo, justo antes de que el puente mande de verdad la respuesta a WhatsApp.
+ *
+ * aiRunAssistantTurn() ya rechequea estado_bot antes de REGRESAR el texto generado (ver
+ * mas abajo), pero esa respuesta HTTP sincrona vuelve al puente y de ahi el puente TODAVIA
+ * espera 60-120s a proposito (delay humanizado, ver CLAUDE.md / incidente 2026-09-13) antes
+ * de llamar sock.sendMessage(). Si un asesor escribe manualmente desde el celular durante
+ * esa espera, aiHandleHumanOutboundMessage() ya deja la conversacion en 'pausado', pero el
+ * puente no tiene forma de enterarse -- ya se le dijo "manda esto" y no vuelve a preguntar.
+ * Este endpoint (llamado por el puente DESPUES del delay, justo antes de enviar) es el
+ * segundo chequeo que si cubre esa ventana.
+ *
+ * Valida que $idMensaje sea de verdad un mensaje 'assistant' de ESA conversacion (nunca
+ * confiar en un id que manda un cliente HTTP externo sin cruzarlo) y, si para entonces la
+ * conversacion ya no esta activa, marca ese mensaje como no enviado -- para que el
+ * historial no diga "enviado" de un mensaje que en realidad nunca salio a WhatsApp.
+ *
+ * @return bool true si el puente debe mandar el mensaje, false si debe descartarlo.
+ */
+function aiConfirmarEnvioWhatsapp(PDO $pdo, string $waId, int $idMensaje): bool
+{
+    $waId = trim($waId);
+    if ($waId === '' || $idMensaje <= 0) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare('SELECT id_conversacion, estado_bot FROM whatsapp_conversaciones WHERE wa_id = ?');
+    $stmt->execute([$waId]);
+    $conversacion = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($conversacion)) {
+        return false;
+    }
+    $idConversacion = (int)$conversacion['id_conversacion'];
+
+    $stmtMensaje = $pdo->prepare(
+        "SELECT id_conversacion FROM whatsapp_mensajes WHERE id_mensaje = ? AND rol = 'assistant'"
+    );
+    $stmtMensaje->execute([$idMensaje]);
+    $idConversacionDelMensaje = $stmtMensaje->fetchColumn();
+    if ($idConversacionDelMensaje === false || (int)$idConversacionDelMensaje !== $idConversacion) {
+        // El mensaje no existe, no es de un asistente, o pertenece a otra conversacion --
+        // nunca confiar en el id_mensaje que manda el puente sin cruzarlo contra el wa_id.
+        return false;
+    }
+
+    if ((string)$conversacion['estado_bot'] !== 'activo') {
+        $pdo->prepare('UPDATE whatsapp_mensajes SET enviado_whatsapp = 0 WHERE id_mensaje = ?')
+            ->execute([$idMensaje]);
+
+        return false;
+    }
+
+    return true;
+}
+
 /* ---------------------------------------------------------------------
  * Seguimiento automatico de 24h / cierre por inactividad a 48h
  * (usado por scripts/whatsapp_followup_cron.php)
@@ -3625,11 +3680,15 @@ function aiGenerarRespuestaParaConversacion(
         }
     }
 
-    aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
+    $idMensajeAsistente = aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
 
     $replyParts = [];
     if ($finalText !== '') {
-        $replyParts[] = ['type' => 'text', 'text' => $finalText];
+        // id_mensaje viaja en la parte de texto para que el puente lo use al llamar
+        // aiConfirmarEnvioWhatsapp() DESPUES del delay humanizado de 60-120s, justo antes
+        // de mandar de verdad -- este re-chequeo de aqui arriba no cubre esa espera (ver
+        // el comentario de aiConfirmarEnvioWhatsapp()).
+        $replyParts[] = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
     }
     foreach ($mediaParts as $media) {
         $replyParts[] = $media;

@@ -211,4 +211,57 @@ final class WhatsAppHelperTest extends TestCase
         $this->assertNull(waParseHistoryImportPayload([]));
         $this->assertNull(waParseHistoryImportPayload(['messages' => 'no es un arreglo']));
     }
+
+    public function testParseConfirmarEnvioPayloadExtractsWaIdDigitsAndIdMensaje(): void
+    {
+        $result = waParseConfirmarEnvioPayload(['wa_id' => '52133 1234 567', 'id_mensaje' => 42]);
+
+        $this->assertNotNull($result);
+        $this->assertSame('521331234567', $result['wa_id']);
+        $this->assertSame(42, $result['id_mensaje']);
+    }
+
+    public function testParseConfirmarEnvioPayloadAcceptsIdMensajeAsDigitString(): void
+    {
+        // El puente manda JSON; un id que llegue como string numerico (p.ej. porque axios lo
+        // serializo distinto) debe seguir aceptandose.
+        $result = waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => '42']);
+
+        $this->assertNotNull($result);
+        $this->assertSame(42, $result['id_mensaje']);
+    }
+
+    public function testParseConfirmarEnvioPayloadReturnsNullWhenWaIdMissingOrTooShort(): void
+    {
+        $this->assertNull(waParseConfirmarEnvioPayload(['id_mensaje' => 1]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '', 'id_mensaje' => 1]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '   ', 'id_mensaje' => 1]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '123', 'id_mensaje' => 1]));
+    }
+
+    public function testParseConfirmarEnvioPayloadReturnsNullWhenIdMensajeMissingOrNotAPositiveInteger(): void
+    {
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345']));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => null]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => 0]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => -1]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => '-1']));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => 1.5]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => '1.5']));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => 'abc']));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => '']));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => true]));
+    }
+
+    public function testParseConfirmarEnvioPayloadRejectsNonScalarTypeConfusion(): void
+    {
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => ['array-en-vez-de-string'], 'id_mensaje' => 1]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => ['1']]));
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => '5213312345', 'id_mensaje' => ['array-en-vez-de-string' => 1]]));
+    }
+
+    public function testParseConfirmarEnvioPayloadRejectsOversizedWaId(): void
+    {
+        $this->assertNull(waParseConfirmarEnvioPayload(['wa_id' => str_repeat('1', 41), 'id_mensaje' => 1]));
+    }
 }

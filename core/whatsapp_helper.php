@@ -149,6 +149,40 @@ function waParseBridgePayload(array $payload): ?array
 }
 
 /**
+ * Parsea el payload que manda el puente al hacer POST a api/whatsapp_confirmar_envio.php
+ * justo antes de mandar de verdad una respuesta a WhatsApp (despues del delay humanizado de
+ * 60-120s -- ver enviarReplyParts() en el puente): { "wa_id": "52133XXXXXXX", "id_mensaje": 123 }
+ * Pura y testeable. id_mensaje viaja en la parte de texto de la respuesta original del
+ * webhook (ver aiRunAssistantTurn()). Regresa null si falta wa_id, si id_mensaje no es un
+ * entero positivo (rechaza floats, negativos, cero, strings no numericos, arrays/objetos),
+ * o si wa_id no tiene la forma de un telefono real.
+ */
+function waParseConfirmarEnvioPayload(array $payload): ?array
+{
+    $waIdRaw = waExtractScalarString($payload, 'wa_id');
+    if ($waIdRaw === null || $waIdRaw === '') {
+        return null;
+    }
+
+    $waIdDigits = preg_replace('/\D+/', '', $waIdRaw) ?? '';
+    if (strlen($waIdDigits) < 10 || strlen($waIdDigits) > 40) {
+        return null;
+    }
+
+    $idMensajeRaw = $payload['id_mensaje'] ?? null;
+    $esEnteroValido = is_int($idMensajeRaw) || (is_string($idMensajeRaw) && ctype_digit($idMensajeRaw));
+    if (!$esEnteroValido) {
+        return null;
+    }
+    $idMensaje = (int)$idMensajeRaw;
+    if ($idMensaje <= 0) {
+        return null;
+    }
+
+    return ['wa_id' => $waIdDigits, 'id_mensaje' => $idMensaje];
+}
+
+/**
  * Envia un mensaje PROACTIVO (sin peticion entrante que responder), llamando al endpoint
  * de envio que el puente Node.js debe exponer. $replyParts usa el mismo formato que la
  * respuesta sincrona del webhook: [{"type":"text","text":"..."}, {"type":"image"|"document","url":"...","caption":"..."}].
