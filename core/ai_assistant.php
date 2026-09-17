@@ -1047,6 +1047,13 @@ function aiFindConversationsNeedingFollowup(PDO $pdo, int $horas = AI_FOLLOWUP_I
                  WHERE m.id_conversacion = c.id_conversacion AND m.rol = 'assistant' AND m.enviado_whatsapp = 1) AS ultimo_envio_bot
          FROM whatsapp_conversaciones c
          WHERE c.estado_bot = 'activo' AND c.seguimiento_enviado_en IS NULL
+                     AND (
+                             SELECT m.rol FROM whatsapp_mensajes m
+                             WHERE m.id_mensaje = (
+                                     SELECT MAX(m2.id_mensaje) FROM whatsapp_mensajes m2
+                                     WHERE m2.id_conversacion = c.id_conversacion
+                             )
+                     ) = 'assistant'
            AND NOT EXISTS (
                SELECT 1 FROM whatsapp_conversacion_etiquetas ce
                INNER JOIN whatsapp_etiquetas e ON e.id_etiqueta = ce.id_etiqueta
@@ -1180,16 +1187,29 @@ function aiCloseUnresponsiveConversation(PDO $pdo, int $idConversacion): void
 
 /**
  * Conversaciones pausadas (intervencion humana o transferir_a_humano) cuyo ultimo mensaje
- * -- de cualquier rol, incluido el asesor escribiendo desde el celular -- tiene mas de
- * $horas de antiguedad. No incluye 'cerrado': esas ya se dieron por perdidas via el cron
- * de seguimiento y no deben revivir solas.
+ * tiene mas de $horas de antiguedad -- EXCEPTO si ese ultimo mensaje es del asesor
+ * escribiendo desde el celular (rol 'humano'): un asesor que ya contesto y se quedo
+ * callado sigue siendo responsable de esa conversacion, el silencio no es motivo para que
+ * Alex se la regrese solo y le conteste encima despues. La red de seguridad real es para
+ * el CLIENTE que quedo sin respuesta de nadie -- si el mensaje mas reciente es del cliente
+ * (o de Alex) y pasaron $horas sin que nadie mas escriba, ahi si se reactiva sola para no
+ * dejarlo colgado si el asesor se olvido de retomar. No incluye 'cerrado': esas ya se
+ * dieron por perdidas via el cron de seguimiento y no deben revivir solas.
  */
 function aiFindConversationsToAutoReactivate(PDO $pdo, int $horas = AI_AUTO_REACTIVATE_INACTIVITY_HOURS): array
 {
     $stmt = $pdo->query(
         "SELECT id_conversacion, wa_id, nombre_perfil, ultimo_mensaje_en
          FROM whatsapp_conversaciones
-         WHERE estado_bot = 'pausado'"
+                 WHERE estado_bot = 'pausado'
+                     AND NOT EXISTS (
+                             SELECT 1 FROM whatsapp_mensajes humano
+                             WHERE humano.id_mensaje = (
+                                     SELECT MAX(ultimo.id_mensaje) FROM whatsapp_mensajes ultimo
+                                     WHERE ultimo.id_conversacion = whatsapp_conversaciones.id_conversacion
+                             )
+                             AND humano.rol = 'humano'
+                     )"
     );
     $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 

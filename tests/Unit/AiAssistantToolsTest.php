@@ -1122,6 +1122,25 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotContains((int) $cerradaVieja['id_conversacion'], $ids);
     }
 
+    public function testFindConversationsToAutoReactivateSkipsStaleHumanIntervention(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030006', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiSetConversationState($this->pdo, $idConversacion, 'pausado', 'Intervencion manual detectada.');
+        $this->pdo->prepare(
+            'INSERT INTO whatsapp_mensajes (id_conversacion, rol, contenido, enviado_whatsapp, creado_en) VALUES (?, "humano", ?, 1, ?)'
+        )->execute([$idConversacion, 'Yo te apoyo directamente.', date('Y-m-d H:i:s', strtotime('-25 hours'))]);
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-25 hours')), $idConversacion]);
+
+        $ids = array_map(
+            static fn(array $r) => (int) $r['id_conversacion'],
+            aiFindConversationsToAutoReactivate($this->pdo)
+        );
+
+        $this->assertNotContains($idConversacion, $ids);
+    }
+
     public function testAutoReactivateConversationSetsEstadoActivoYLimpiaMotivo(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030005', null);
