@@ -590,25 +590,34 @@ function aiFormatMxPhoneDigits(string $digits): string
 }
 
 /**
- * Igual que aiWaIdToDisplayPhone(), pero cuando el wa_id es un LID (WhatsApp oculta el
- * numero real, el caso de la gran mayoria de conversaciones -- ver scripts/
- * resolver_lids_whatsapp.php) cae al telefono que ese script ya haya logrado resolver y
- * guardado en whatsapp_conversaciones.telefono_resuelto. El numero derivado del wa_id
- * (cuando SI es un telefono real) siempre tiene prioridad sobre el resuelto.
+ * 10 digitos nacionales reales para un wa_id, cayendo al telefono ya resuelto (ver
+ * scripts/resolver_lids_whatsapp.php) cuando el wa_id es un LID (WhatsApp oculta el numero
+ * real, el caso de la gran mayoria de conversaciones). El numero derivado del wa_id (cuando
+ * SI es un telefono real) siempre tiene prioridad sobre el resuelto. Unica fuente de verdad
+ * para esta prioridad -- aiWaIdToDisplayPhoneConResuelto() (mostrar en el panel) y las vistas
+ * que arman el link de "Abrir WhatsApp" la comparten en vez de repetir la logica cada una.
  */
-function aiWaIdToDisplayPhoneConResuelto(string $waId, ?string $telefonoResuelto): ?string
+function aiWaIdDigitsConResuelto(string $waId, ?string $telefonoResuelto): ?string
 {
-    $directo = aiWaIdToDisplayPhone($waId);
+    $directo = aiWaIdToMxDigits($waId);
     if ($directo !== null) {
         return $directo;
     }
 
     $resuelto = trim((string) ($telefonoResuelto ?? ''));
-    if (!preg_match('/^\d{10}$/', $resuelto)) {
-        return null;
-    }
 
-    return aiFormatMxPhoneDigits($resuelto);
+    return preg_match('/^\d{10}$/', $resuelto) ? $resuelto : null;
+}
+
+/**
+ * Igual que aiWaIdToDisplayPhone(), pero cayendo al telefono resuelto para un LID -- ver
+ * aiWaIdDigitsConResuelto().
+ */
+function aiWaIdToDisplayPhoneConResuelto(string $waId, ?string $telefonoResuelto): ?string
+{
+    $digits = aiWaIdDigitsConResuelto($waId, $telefonoResuelto);
+
+    return $digits !== null ? aiFormatMxPhoneDigits($digits) : null;
 }
 
 /**
@@ -2710,7 +2719,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             "No se pudo registrar un pedido con Alex (fallo tecnico).\n"
             . "Cliente: {$nombre}\n"
             . 'Error: ' . $e->getMessage()
-            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? '')),
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''), $context['telefono_resuelto'] ?? null),
             (string)($context['wa_id'] ?? '')
         );
         return ['ok' => false, 'message' => 'No fue posible registrar el pedido, intentemos de nuevo en un momento.'];
@@ -2722,7 +2731,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             "No se pudo registrar un pedido con Alex.\n"
             . "Cliente: {$nombre}\n"
             . "Motivo: {$motivoFallo}"
-            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? '')),
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''), $context['telefono_resuelto'] ?? null),
             (string)($context['wa_id'] ?? '')
         );
         return ['ok' => false, 'message' => $motivoFallo];
@@ -2805,7 +2814,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             . "Direccion: {$direccion}\n"
             . "Productos: {$listaItems}\n"
             . 'Confirma si se puede entregar ahi y que costo aplica -- Alex NO le prometio nada al cliente sobre el envio.'
-            . aiBuildWhatsAppLinkLine($waIdVenta),
+            . aiBuildWhatsAppLinkLine($waIdVenta, $context['telefono_resuelto'] ?? null),
             $waIdVenta
         );
 
@@ -2843,7 +2852,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
         . "Productos: {$listaItems}"
         . ($cargoEnvio > 0 ? "\nIncluye cargo de envio foraneo: +\${$cargoEnvio} MXN" : '')
-        . aiBuildWhatsAppLinkLine($waIdVenta),
+        . aiBuildWhatsAppLinkLine($waIdVenta, $context['telefono_resuelto'] ?? null),
         $waIdVenta
     );
 
@@ -2871,13 +2880,21 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
  * (wa.me) para incluir en las alertas de Telegram. wa_id ya trae el codigo de pais (52),
  * asi que primero se reduce al numero nacional de 10 digitos (aiWaIdToMxDigits) antes de
  * pasarselo a waBuildBusinessLinkPhone(), que es quien vuelve a anteponer el "52" -- de lo
- * contrario quedaria duplicado. Regresa cadena vacia si no se pudo determinar un numero de
- * 10 digitos -- ej. cuando wa_id es en realidad un LID de WhatsApp (identificador de
- * privacidad sin relacion con el telefono real).
+ * contrario quedaria duplicado.
+ *
+ * Cuando wa_id es en realidad un LID de WhatsApp (identificador de privacidad, la gran
+ * mayoria de las conversaciones -- ver scripts/resolver_lids_whatsapp.php) cae al telefono
+ * ya resuelto si se le pasa uno; regresa cadena vacia solo si ninguno de los dos dio un
+ * numero real -- antes de esto, TODA alerta de Telegram sobre una conversacion LID se
+ * quedaba sin link alguno para abrir el chat.
  */
-function aiBuildWhatsAppLinkLine(string $waId): string
+function aiBuildWhatsAppLinkLine(string $waId, ?string $telefonoResuelto = null): string
 {
     $digitsNacionales = aiWaIdToMxDigits($waId);
+    if ($digitsNacionales === null) {
+        $resuelto = trim((string) ($telefonoResuelto ?? ''));
+        $digitsNacionales = preg_match('/^\d{10}$/', $resuelto) ? $resuelto : null;
+    }
     if ($digitsNacionales === null) {
         return '';
     }
@@ -2988,7 +3005,7 @@ function aiToolTransferirHumano(PDO $pdo, array $args, array $context): array
     $nombrePerfil = trim((string)($context['nombre_perfil'] ?? ''));
     $quien = $nombrePerfil !== '' ? "{$nombrePerfil} ({$waId})" : $waId;
 
-    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}" . aiBuildWhatsAppLinkLine($waId), $waId);
+    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}" . aiBuildWhatsAppLinkLine($waId, $context['telefono_resuelto'] ?? null), $waId);
 
     return ['ok' => true, 'message' => 'Un asesor humano continuara la conversacion en breve.'];
 }
@@ -3677,6 +3694,7 @@ function aiGenerarRespuestaParaConversacion(
                 'wa_id' => $waId,
                 'id_conversacion' => $idConversacion,
                 'nombre_perfil' => $conversacion['nombre_perfil'] ?? $perfilNombre,
+                'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null,
             ]
         );
 
@@ -3720,6 +3738,9 @@ function aiGenerarRespuestaParaConversacion(
         'id_conversacion' => $idConversacion,
         'nombre_perfil' => $conversacion['nombre_perfil'] ?? $perfilNombre,
         'id_cliente' => $conversacion['id_cliente'] ?? null,
+        // Telefono real detras de un LID, si scripts/resolver_lids_whatsapp.php ya lo
+        // resolvio -- ver aiBuildWhatsAppLinkLine(), usado por las alertas de Telegram.
+        'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null,
     ];
 
     $finalText = null;
@@ -3794,7 +3815,7 @@ function aiGenerarRespuestaParaConversacion(
                     "Alex tuvo un error tecnico usando la herramienta '{$functionName}'.\n"
                     . 'Cliente: ' . (string)($context['nombre_perfil'] ?? '') . "\n"
                     . 'Error: ' . $e->getMessage()
-                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? '')),
+                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''), $context['telefono_resuelto'] ?? null),
                     (string)($context['wa_id'] ?? '')
                 );
                 $toolResult = ['ok' => false, 'message' => 'Error interno al ejecutar la herramienta.'];

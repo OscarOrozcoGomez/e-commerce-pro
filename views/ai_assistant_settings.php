@@ -119,9 +119,7 @@ try {
         // telefono real (ver scripts/resolver_lids_whatsapp.php), el link de WhatsApp SI
         // puede armarse con ese numero -- antes de esto, un LID nunca tenia boton "Abrir
         // WhatsApp" porque no habia ningun telefono real que usar.
-        $digitsNacionales = aiWaIdToMxDigits((string)$conv['wa_id']) ?? (
-            preg_match('/^\d{10}$/', (string)($conv['telefono_resuelto'] ?? '')) ? (string)$conv['telefono_resuelto'] : null
-        );
+        $digitsNacionales = aiWaIdDigitsConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
         $conv['wa_link_phone'] = $digitsNacionales !== null ? waBuildBusinessLinkPhone($digitsNacionales) : '';
     }
     unset($conv);
@@ -258,6 +256,12 @@ include __DIR__ . '/includes/header.php';
                         <?php foreach ($conversaciones as $conv): ?>
                             <?php
                                 $convTelefono = aiWaIdToDisplayPhoneConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
+                                // Digitos nacionales para el boton "Abrir WhatsApp" -- el numero
+                                // real del wa_id si lo hay, si no el ya resuelto (ver
+                                // scripts/resolver_lids_whatsapp.php). Sin ninguno de los dos
+                                // (LID sin resolver todavia) no hay boton que mostrar.
+                                $convDigitsNacionales = aiWaIdDigitsConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
+                                $convLinkPhone = $convDigitsNacionales !== null ? waBuildBusinessLinkPhone($convDigitsNacionales) : '';
                                 $convNombre = trim((string)($conv['nombre_perfil'] ?? ''));
                                 // Linea principal: nombre de perfil de WhatsApp si lo tenemos; si no,
                                 // el telefono formateado; si es un LID sin nombre, un texto generico.
@@ -303,6 +307,9 @@ include __DIR__ . '/includes/header.php';
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
+                                <?php if ($convLinkPhone !== ''): ?>
+                                    <a href="https://wa.me/<?php echo esc($convLinkPhone); ?>" target="_blank" class="btn-small green darken-1 waves-effect waves-light whatsapp-business-link" data-wa-phone="<?php echo esc($convLinkPhone); ?>" style="margin-right: 6px;">Abrir WhatsApp</a>
+                                <?php endif; ?>
                                 <?php if ($conv['estado_bot'] !== 'activo'): ?>
                                     <button type="button" class="btn-small green darken-1 btn-reactivar-bot" data-id="<?php echo (int)$conv['id_conversacion']; ?>">Reactivar bot</button>
                                 <?php endif; ?>

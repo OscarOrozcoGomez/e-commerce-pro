@@ -289,7 +289,10 @@ function waResolverLidsATelefono(array $lids): array
         return [];
     }
 
-    $lids = array_values(array_unique(array_filter(array_map('strval', $lids), static fn(string $l): bool => $l !== '')));
+    $lids = array_values(array_unique(array_filter(
+        array_map(static fn($l): string => trim((string) $l), $lids),
+        static fn(string $l): bool => $l !== ''
+    )));
     if ($lids === []) {
         return [];
     }

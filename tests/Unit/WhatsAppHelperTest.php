@@ -146,6 +146,11 @@ final class WhatsAppHelperTest extends TestCase
 
     public function testResolverLidsATelefonoRegresaVacioSinLids(): void
     {
+        // Nota: '   ' (solo espacios) tambien regresa [] aqui, pero en este entorno de tests
+        // eso pasa porque WA_BRIDGE_RESOLVE_LID_URL no esta configurado (ver el siguiente
+        // test) -- esta aserción por si sola NO prueba que el trim()+filtro interno de
+        // waResolverLidsATelefono() de verdad descarta entradas de solo espacios antes de
+        // armar el payload; sirve como regresion de forma (nunca truena con entradas vacias).
         $this->assertSame([], waResolverLidsATelefono([]));
         $this->assertSame([], waResolverLidsATelefono(['', '   ']));
     }
