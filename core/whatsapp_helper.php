@@ -268,6 +268,77 @@ function waParseLabelsSyncPayload(array $payload): ?array
 }
 
 /**
+ * Pide al puente que resuelva un lote de LIDs (WhatsApp oculta el numero real de un
+ * contacto, ver core/ai_assistant.php::aiWaIdToDisplayPhoneConResuelto()) al telefono real,
+ * usando el mapeo que Baileys ya guarda localmente cada vez que decodifica un mensaje de ese
+ * contacto (el protocolo de WhatsApp incluye el numero real en el "sobre" del mensaje).
+ * Es una consulta 100% local del lado del puente (getPNsForLIDs() de Baileys solo lee cache
+ * + su almacen de sesion en disco) -- NUNCA hace una llamada de red a WhatsApp ni manda nada,
+ * asi que no existe riesgo de rafaga por usar esta funcion.
+ *
+ * $lids son los digitos numericos del LID (columna whatsapp_conversaciones.wa_id tal cual,
+ * sin el sufijo "@lid" -- el puente arma el JID completo).
+ *
+ * @param string[] $lids
+ * @return array<string,string> mapa lid => telefono (10 digitos nacionales); los LIDs que
+ *   Baileys no pudo resolver simplemente no aparecen en el resultado.
+ */
+function waResolverLidsATelefono(array $lids): array
+{
+    if (waIsTestMode()) {
+        return [];
+    }
+
+    $lids = array_values(array_unique(array_filter(
+        array_map(static fn($l): string => trim((string) $l), $lids),
+        static fn(string $l): bool => $l !== ''
+    )));
+    if ($lids === []) {
+        return [];
+    }
+
+    $url = getEnvVar('WA_BRIDGE_RESOLVE_LID_URL');
+    $token = getEnvVar('WA_WEBHOOK_TOKEN');
+    if ($url === null || $token === null) {
+        error_log('WARNING: WA_BRIDGE_RESOLVE_LID_URL/WA_WEBHOOK_TOKEN no configurados; no se pudo resolver LIDs.');
+        return [];
+    }
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'X-Webhook-Token: ' . $token,
+    ]);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['lids' => $lids], JSON_UNESCAPED_UNICODE));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    $response = curl_exec($ch);
+    $curlError = curl_error($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($response === false || $httpCode < 200 || $httpCode >= 300) {
+        error_log('WARNING: fallo al resolver LIDs con el puente. HTTP=' . $httpCode . ' cURL=' . $curlError . ' body=' . substr((string)$response, 0, 300));
+        return [];
+    }
+
+    $decoded = json_decode((string)$response, true);
+    $mapeo = is_array($decoded) && is_array($decoded['mapeo'] ?? null) ? $decoded['mapeo'] : [];
+
+    $resultado = [];
+    foreach ($mapeo as $lid => $telefono) {
+        if (is_string($telefono) && preg_match('/^\d{10}$/', $telefono)) {
+            $resultado[(string)$lid] = $telefono;
+        }
+    }
+
+    return $resultado;
+}
+
+/**
  * Parsea el lote que manda el puente al hacer POST a api/whatsapp/import_history.php con
  * el historial completo (evento messaging-history.set de Baileys, disparado UNA VEZ al
  * conectar): { "lote": "2026-08-21T10:00:00Z", "messages": [{"wa_id","nombre_perfil",

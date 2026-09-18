@@ -299,6 +299,10 @@ function preloadSecretSources(): void
             // Endpoint que expone el puente Node.js para relevar llamadas a DeepSeek -- el hosting
             // de PHP bloquea la salida directa a api.deepseek.com, el droplet si tiene salida libre.
             'WA_BRIDGE_DEEPSEEK_URL' => ['WA_BRIDGE_DEEPSEEK_URL'],
+            // Endpoint que expone el puente Node.js para resolver LIDs (WhatsApp oculta el
+            // numero real) al telefono real, usando el mapeo que Baileys ya guarda localmente
+            // -- ver scripts/resolver_lids_whatsapp.php. Nunca manda nada a WhatsApp, solo lee.
+            'WA_BRIDGE_RESOLVE_LID_URL' => ['WA_BRIDGE_RESOLVE_LID_URL'],
             'GTM_CONTAINER_ID' => ['GTM_CONTAINER_ID'],
             'GA4_MEASUREMENT_ID' => ['GA4_MEASUREMENT_ID'],
             'GA4_DIRECT_ENABLED' => ['GA4_DIRECT_ENABLED'],

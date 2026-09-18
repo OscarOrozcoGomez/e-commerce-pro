@@ -71,6 +71,33 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194'));
     }
 
+    public function testAiBuildWhatsAppLinkLineUsaElTelefonoResueltoParaUnLid(): void
+    {
+        // Caso real: 170 de 171 conversaciones son LID -- antes de esto, TODA alerta de
+        // Telegram sobre una de ellas se quedaba sin ningun link para abrir el chat, aunque
+        // scripts/resolver_lids_whatsapp.php ya hubiera logrado resolver el telefono real.
+        $linea = aiBuildWhatsAppLinkLine('275131343581194', '3221234567');
+
+        $this->assertStringContainsString('https://wa.me/523221234567', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLinePrefiereElNumeroRealSobreElResuelto(): void
+    {
+        // Si el wa_id YA es un telefono real, nunca debe usarse un telefono_resuelto que
+        // llegara por error/inconsistencia -- el numero real siempre gana.
+        $linea = aiBuildWhatsAppLinkLine('5213334040398', '3221234567');
+
+        $this->assertStringContainsString('https://wa.me/523334040398', $linea);
+        $this->assertStringNotContainsString('3221234567', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLineIgnoraUnTelefonoResueltoMalFormado(): void
+    {
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194', '12345'));
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194', null));
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194', ''));
+    }
+
     public function testAiExtractTelegramErrorDescriptionParsesRealTelegramErrorBody(): void
     {
         // Caso real: el bot nunca fue iniciado por el chat destino -- Telegram regresa
@@ -1550,6 +1577,71 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('+52 341 123 4567', aiWaIdToDisplayPhone('5213411234567')); // lada de 3 digitos
         $this->assertNull(aiWaIdToDisplayPhone('53236337742009'));   // LID
         $this->assertNull(aiWaIdToDisplayPhone('120363402368777906')); // LID
+    }
+
+    // --- aiWaIdToDisplayPhoneConResuelto() / aiFormatMxPhoneDigits(): telefono de un LID ya
+    // resuelto por scripts/resolver_lids_whatsapp.php ---
+
+    public function testFormatMxPhoneDigitsHandlesTwoAndThreeDigitLadas(): void
+    {
+        $this->assertSame('+52 33 3404 0398', aiFormatMxPhoneDigits('3334040398'));
+        $this->assertSame('+52 341 123 4567', aiFormatMxPhoneDigits('3411234567'));
+    }
+
+    // --- aiWaIdDigitsConResuelto(): fuente unica de la prioridad "numero real > resuelto",
+    // compartida por aiWaIdToDisplayPhoneConResuelto() y las vistas que arman el link de
+    // "Abrir WhatsApp" (antes cada una repetia la misma logica por su cuenta) ---
+
+    public function testWaIdDigitsConResueltoPrefiereElNumeroRealSobreElResuelto(): void
+    {
+        $this->assertSame('3334040398', aiWaIdDigitsConResuelto('5213334040398', '3221234567'));
+    }
+
+    public function testWaIdDigitsConResueltoUsaElResueltoParaUnLid(): void
+    {
+        $this->assertSame('3221234567', aiWaIdDigitsConResuelto('53236337742009', '3221234567'));
+    }
+
+    public function testWaIdDigitsConResueltoRegresaNullSinNingunDatoValido(): void
+    {
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', null));
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', ''));
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', '12345'));
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', 'abcdefghij'));
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoPrefiereElNumeroRealSobreElResuelto(): void
+    {
+        // Si el wa_id YA es un telefono real, nunca debe usarse telefono_resuelto (aunque
+        // venga uno, seria redundante/potencialmente inconsistente).
+        $this->assertSame(
+            '+52 33 3404 0398',
+            aiWaIdToDisplayPhoneConResuelto('5213334040398', '3221234567')
+        );
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoUsaElResueltoParaUnLid(): void
+    {
+        $this->assertSame(
+            '+52 322 123 4567',
+            aiWaIdToDisplayPhoneConResuelto('53236337742009', '3221234567')
+        );
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoRegresaNullSinNingunDato(): void
+    {
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', null));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', ''));
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoIgnoraUnResueltoMalFormado(): void
+    {
+        // Defensa en profundidad: telefono_resuelto deberia venir siempre en 10 digitos
+        // limpios (asi lo guarda el script), pero si algo mas escribiera basura ahi, nunca
+        // debe mostrarse como si fuera un telefono real.
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', '12345'));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', 'abcdefghij'));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', '52332212345678'));
     }
 
     public function testAiPhoneHasLocalLadaDistinguishesFromOtherJaliscoLadasStartingWithThree(): void
