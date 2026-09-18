@@ -61,42 +61,50 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
     }
 }
 
-// 2+3) Mensajes PROACTIVOS de Alex -- el cliente NO escribio primero. Dos origenes
-//      posibles: seguimiento de 24h (reenganchar a alguien que se quedo callado, ver
-//      aiFindConversationsNeedingFollowup()) o catch-up de horario (contestar a alguien
-//      que sigue esperando una respuesta desde fuera del horario de atencion, ver
-//      aiFindConversationsPendingRespuesta()).
-//
-// Decision del negocio (2026-09-14, tras el incidente 2026-09-13): jamas mas de UN
-// mensaje proactivo combinado por hora -- nunca "N por corrida" como en la version
-// anterior de este mismo mecanismo (esa fue, sin tope, la causa real del bloqueo de
-// WhatsApp). El catch-up tiene prioridad sobre el seguimiento (alguien esperando una
-// respuesta real pesa mas que un recordatorio); si no hay ninguno de los dos pendiente,
-// no se manda nada. Si el backlog no se alcanza a vaciar en el dia, sigue al dia
-// siguiente sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
+// 2) Catch-up de horario: contestar, con retraso, a alguien que YA escribio mientras Alex
+//    estaba callado por politica (fuera de horario, ver aiEstaEnHorarioAtencion()). No es
+//    contacto no solicitado -- por eso tiene su propio cupo (aiPuedeResponderCatchupAhora()),
+//    independiente del seguimiento de 24h (aclaracion del negocio, 2026-09-18: antes un
+//    cliente nuevo de madrugada podia esperar hasta 2 horas su primera respuesta si el cupo
+//    compartido ya lo habia usado un seguimiento). Cadencia propia de ~5 min entre cada uno
+//    (ver AI_CATCHUP_INTERVALO_MIN_MINUTOS) -- rapido para no dejar esperando al backlog de
+//    la noche, pero nunca instantaneo para todos a la vez.
 $retomadas = 0;
 $retomadasFallidas = 0;
 
-if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo)) {
+if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeResponderCatchupAhora($pdo)) {
     $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
-    $pendienteSeguimiento = $pendienteCatchup === null ? (aiFindConversationsNeedingFollowup($pdo)[0] ?? null) : null;
 
     if ($isDryRun) {
         if ($pendienteCatchup !== null) {
             $retomadas++;
-        } elseif ($pendienteSeguimiento !== null) {
-            $seguimientosEnviados++;
         }
     } elseif ($pendienteCatchup !== null) {
         $replyParts = aiRetomarConversacionPendiente($pdo, $pendienteCatchup);
         if (!empty($replyParts)) {
             $resultado = waSendOutboundMessage((string) $pendienteCatchup['wa_id'], $replyParts);
-            aiRegistrarEnvioProactivo($pdo);
+            aiRegistrarEnvioCatchup($pdo);
             if (!empty($resultado['ok'])) {
                 $retomadas++;
             } else {
                 $retomadasFallidas++;
             }
+        }
+    }
+}
+
+// 3) Seguimiento de 24h: Alex reenganchando SIN que el cliente haya escrito primero, para
+//    intentar rescatar una venta que se quedo a medias (ver aiFindConversationsNeedingFollowup()).
+//    Esto SI es contacto no solicitado -- se queda con el tope estricto de 1/hora (decision
+//    del negocio 2026-09-14, tras el incidente 2026-09-13) para no parecer una campaña
+//    automatizada. Si el backlog no se alcanza a vaciar en el dia, sigue al dia siguiente
+//    sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
+if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo)) {
+    $pendienteSeguimiento = aiFindConversationsNeedingFollowup($pdo)[0] ?? null;
+
+    if ($isDryRun) {
+        if ($pendienteSeguimiento !== null) {
+            $seguimientosEnviados++;
         }
     } elseif ($pendienteSeguimiento !== null) {
         $ok = aiSendFollowupMessage($pdo, $pendienteSeguimiento);

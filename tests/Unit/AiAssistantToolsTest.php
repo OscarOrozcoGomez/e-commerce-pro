@@ -1862,6 +1862,64 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotNull($this->pdo->query('SELECT ultimo_envio_proactivo_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
     }
 
+    // ------------------------------------------------------------------
+    // aiPuedeResponderCatchupAhora(): el catch-up de horario (contestar con retraso algo
+    // que el cliente YA escribio) tiene su propio cupo de ~5 min, sin el tope de 1/hora del
+    // seguimiento de 24h -- aclaracion del negocio 2026-09-18, ver el comentario junto a
+    // AI_CATCHUP_INTERVALO_MIN_MINUTOS en ai_assistant.php.
+    // ------------------------------------------------------------------
+
+    public function testPuedeResponderCatchupAhoraEsTrueLaPrimeraVezEnHorario(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraEsFalseFueraDeHorario(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 03:00:00')));
+        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 22:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraEsTrueApenasAbreElHorario(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 07:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraIgnoraElUltimoSeguimientoDe24h(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        // Un seguimiento de 24h se mando hace apenas un minuto -- eso NO debe bloquear el
+        // catch-up, son cupos independientes.
+        $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = '2026-09-14 11:59:00' WHERE id_config = 1");
+
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraBloqueaAntesDeQuePasenCincoMinutos(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_catchup_en = '2026-09-14 12:00:00' WHERE id_config = 1");
+
+        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:04:59')));
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:05:00')));
+    }
+
+    public function testRegistrarEnvioCatchupActualizaSuPropioTimestampSinTocarElDeSeguimiento(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        aiRegistrarEnvioCatchup($this->pdo);
+
+        $this->assertNotNull($this->pdo->query('SELECT ultimo_envio_catchup_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
+        $this->assertNull($this->pdo->query('SELECT ultimo_envio_proactivo_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
+    }
+
     public function testGenerarTextoSeguimientoUnicoUsaLaPlantillaFijaSiLaConversacionNoTieneHistorial(): void
     {
         // Conversacion recien creada, sin un solo mensaje -- no tiene caso gastar una
@@ -2956,7 +3014,8 @@ final class AiAssistantToolsTest extends TestCase
                 temperatura REAL NOT NULL DEFAULT 0.30,
                 prompt_sistema_override TEXT NULL,
                 api_key_variable TEXT NOT NULL DEFAULT "DEEPSEEK_AI_ASSISTANT",
-                ultimo_envio_proactivo_en TEXT NULL
+                ultimo_envio_proactivo_en TEXT NULL,
+                ultimo_envio_catchup_en TEXT NULL
             )'
         );
         $this->pdo->exec(

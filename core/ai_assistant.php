@@ -1060,28 +1060,35 @@ function aiEstaEnHorarioAtencion(?DateTimeImmutable $ahora = null): bool
     return $hora >= AI_HORARIO_ATENCION_HORA_INICIO && $hora < AI_HORARIO_ATENCION_HORA_FIN;
 }
 
-// Cadencia de mensajes PROACTIVOS de Alex -- los que el cliente NO disparo escribiendo
-// primero (seguimiento de 24h y catch-up de horario, ver whatsapp_followup_cron.php).
+// Cadencia del seguimiento de 24h -- Alex reenganchando SIN que el cliente haya escrito
+// primero, para intentar rescatar una venta que se quedo a medias. Esto SI es contacto no
+// solicitado (el cliente no esta esperando nada de nosotros en ese momento), por eso es lo
+// que de verdad parece "campaña" si se manda seguido -- se queda con el tope estricto.
 //
 // Incidente 2026-09-13: la primera corrida de la reactivacion automatica de 24h encontro
 // un backlog grande y disparo ~24 mensajes identicos a WhatsApp en el mismo segundo. Un
 // tope "por corrida" con pausas (lo que se probo primero) reduce el riesgo de rafaga
 // puntual, pero no el de VOLUMEN sostenido: con el cron corriendo cada 20 min, un backlog
 // grande podia seguir mandando su tope maximo corrida tras corrida durante horas. Decision
-// del negocio (2026-09-14): maximo UN mensaje proactivo por hora, combinando seguimiento y
-// catch-up (nunca los dos en la misma hora) -- si el backlog no se alcanza a vaciar en el
-// dia, sigue al dia siguiente sin problema. Con horario 7am-10pm eso da un techo natural de
-// ~15 mensajes proactivos maximo al dia, cadencia de alguien checando manualmente, no de un
-// bot.
+// del negocio (2026-09-14): maximo UN seguimiento de 24h por hora -- si el backlog no se
+// alcanza a vaciar en el dia, sigue al dia siguiente sin problema.
+//
+// Aclaracion del negocio (2026-09-18): este tope de 1/hora es SOLO para el seguimiento de
+// 24h. El catch-up de horario (aiPuedeResponderCatchupAhora(), mas abajo) es una respuesta
+// tardia a algo que el cliente YA escribio -- no es un contacto no solicitado, es contestar
+// con retraso porque Alex se queda callado de 10pm a 7am a proposito (ver
+// aiEstaEnHorarioAtencion()) para no parecer un bot respondiendo de madrugada. Antes ambos
+// tipos compartian este mismo tope de 1/hora, lo que dejaba a un segundo cliente nuevo que
+// escribio de madrugada esperando hasta 2 horas para su PRIMERA respuesta si alguien mas ya
+// habia usado el cupo de esa hora -- eso no protege de nada, solo retrasa gente nueva.
 const AI_PROACTIVO_INTERVALO_MIN_MINUTOS = 60;
 
 /**
- * True si Alex puede mandar un mensaje proactivo (seguimiento/catch-up) AHORA MISMO: hay
- * que estar en horario de atencion Y que haya pasado al menos AI_PROACTIVO_INTERVALO_MIN_MINUTOS
- * desde el ultimo mensaje proactivo real (de cualquiera de los dos tipos). Nunca se basa en
- * el reloj de la corrida del cron (que corre cada 20 min) sino en un timestamp persistido
- * en ai_asistente_config -- asi la cadencia de 1/hora se cumple sin importar cuantas veces
- * dispare el cron mientras tanto.
+ * True si Alex puede mandar el seguimiento de 24h AHORA MISMO: hay que estar en horario de
+ * atencion Y que haya pasado al menos AI_PROACTIVO_INTERVALO_MIN_MINUTOS desde el ultimo
+ * seguimiento de 24h real. Nunca se basa en el reloj de la corrida del cron (que corre cada
+ * 20 min) sino en un timestamp persistido en ai_asistente_config -- asi la cadencia de
+ * 1/hora se cumple sin importar cuantas veces dispare el cron mientras tanto.
  */
 function aiPuedeEnviarProactivoAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
 {
@@ -1106,12 +1113,65 @@ function aiPuedeEnviarProactivoAhora(PDO $pdo, ?DateTimeImmutable $ahora = null)
 }
 
 /**
- * Marca que Alex acaba de mandar un mensaje proactivo (seguimiento o catch-up), para que
- * aiPuedeEnviarProactivoAhora() bloquee el siguiente hasta que pase la hora completa.
+ * Marca que Alex acaba de mandar el seguimiento de 24h, para que aiPuedeEnviarProactivoAhora()
+ * bloquee el siguiente SEGUIMIENTO hasta que pase la hora completa. No se usa para catch-up
+ * (ver aiPuedeResponderCatchupAhora()) -- son cupos independientes.
  */
 function aiRegistrarEnvioProactivo(PDO $pdo): void
 {
     $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
+}
+
+// Cadencia del catch-up de horario -- contestar, con retraso, algo que el cliente YA
+// escribio mientras Alex estaba callado por politica (10pm-7am). No es contacto no
+// solicitado, asi que no necesita el tope de 1/hora del seguimiento de 24h, pero sigue
+// necesitando ALGUN espaciado -- nunca instantaneo -- para no contestar de golpe a todo el
+// backlog acumulado de la noche apenas abre el horario (eso SI seria un patron de rafaga,
+// aunque cada mensaje sea a un cliente distinto y con texto distinto). Decision del negocio
+// (2026-09-18): ~5 minutos entre cada catch-up es un ritmo creible de alguien checando la
+// bandeja de entrada en la manana, muy lejos del patron real del incidente de 2026-09-13
+// (~24 mensajes identicos en el mismo segundo).
+const AI_CATCHUP_INTERVALO_MIN_MINUTOS = 5;
+
+/**
+ * True si Alex puede contestar un catch-up de horario AHORA MISMO (ver
+ * aiFindConversationsPendingRespuesta()/aiRetomarConversacionPendiente()). Hay que estar en
+ * horario de atencion Y que hayan pasado al menos AI_CATCHUP_INTERVALO_MIN_MINUTOS desde el
+ * ultimo catch-up real -- timestamp propio (ultimo_envio_catchup_en), independiente del
+ * ultimo_envio_proactivo_en que usa el seguimiento de 24h (aiPuedeEnviarProactivoAhora()).
+ * Igual que ese, se basa en un timestamp persistido en ai_asistente_config, no en el reloj
+ * del cron, para que la cadencia se cumpla sin importar cada cuanto dispare el cron.
+ */
+function aiPuedeResponderCatchupAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
+{
+    if (!aiEstaEnHorarioAtencion($ahora)) {
+        return false;
+    }
+
+    $config = aiGetConfig($pdo);
+    $ultimo = trim((string)($config['ultimo_envio_catchup_en'] ?? ''));
+    if ($ultimo === '') {
+        return true;
+    }
+
+    $tsUltimo = strtotime($ultimo);
+    if ($tsUltimo === false) {
+        return true;
+    }
+
+    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
+
+    return ($tsAhora - $tsUltimo) >= (AI_CATCHUP_INTERVALO_MIN_MINUTOS * 60);
+}
+
+/**
+ * Marca que Alex acaba de contestar un catch-up de horario, para que
+ * aiPuedeResponderCatchupAhora() bloquee el siguiente hasta que pasen los 5 minutos. No se
+ * usa para el seguimiento de 24h (ver aiRegistrarEnvioProactivo()) -- son cupos independientes.
+ */
+function aiRegistrarEnvioCatchup(PDO $pdo): void
+{
+    $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_catchup_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
 }
 
 /**
