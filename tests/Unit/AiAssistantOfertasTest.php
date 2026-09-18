@@ -211,6 +211,98 @@ final class AiAssistantOfertasTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // aiSearchInventory() marca en_oferta/precio_normal cuando el producto SI esta en
+    // oferta -- sin esto Alex presentaba el precio ya rebajado como si fuera el precio de
+    // siempre cuando el cliente preguntaba por el producto directo (sin decir "oferta"),
+    // porque solo llamaba a consultar_inventario y nunca a consultar_ofertas por separado.
+    // Caso real reportado: "tienen Oregano Oil?" -> Alex solo dijo "Precio: $301.37" sin
+    // mencionar que ya traia descuento (normal $369).
+    // ------------------------------------------------------------------
+
+    public function testAiSearchInventoryMarcaEnOfertaYPrecioNormalCuandoElProductoEstaEnOferta(): void
+    {
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(60, 'Oregano Oil', 369.0, 200.0, 301.37);
+        $this->ponerEnOferta(60, $idOferta);
+        $this->seedInventario(60, 1, 4);
+
+        $resultados = aiSearchInventory($this->pdo, 'Oregano Oil');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame(301.37, $resultados[0]['precio']);
+        $this->assertTrue($resultados[0]['en_oferta']);
+        $this->assertSame(369.0, $resultados[0]['precio_normal']);
+    }
+
+    public function testAiSearchInventoryNoMarcaEnOfertaParaUnProductoFueraDeLaCategoria(): void
+    {
+        // Regresion: un producto que NUNCA estuvo en la categoria "Ofertas" no debe traer
+        // la llave en_oferta en absoluto (ni en false) -- comportamiento identico al de
+        // antes de este fix para el 99% del catalogo.
+        $this->seedProducto(61, 'Creatina Normal', 499.0, 200.0);
+        $this->seedInventario(61, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Creatina Normal');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('en_oferta', $resultados[0]);
+        $this->assertArrayNotHasKey('precio_normal', $resultados[0]);
+    }
+
+    public function testAiSearchInventoryNoMarcaEnOfertaSiElOverrideManualNoEsMenorAlPrecioNormal(): void
+    {
+        // Dato mal capturado (o precio_venta subido despues sin actualizar precio_oferta):
+        // el override manual quedo IGUAL o MAYOR al precio de siempre. Nunca debe decirle al
+        // cliente "esta en oferta, ahorras $0" (o un ahorro negativo).
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(63, 'Oferta Mal Capturada', 300.0, 100.0, 300.0);
+        $this->ponerEnOferta(63, $idOferta);
+        $this->seedInventario(63, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Oferta Mal Capturada');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('en_oferta', $resultados[0]);
+        $this->assertArrayNotHasKey('precio_normal', $resultados[0]);
+        $this->assertSame(300.0, $resultados[0]['precio']);
+    }
+
+    public function testAiSearchInventoryNoMarcaEnOfertaSiElCostoMas50SuperaElPrecioNormal(): void
+    {
+        // Mismo cuidado pero para el fallback automatico costo+$50 (sin override manual):
+        // un producto de margen delgado (precio_venta 140, costo 100) da costo+50=150, que ya
+        // es MAYOR al precio normal -- no es una oferta real.
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(64, 'Margen Delgado', 140.0, 100.0);
+        $this->ponerEnOferta(64, $idOferta);
+        $this->seedInventario(64, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Margen Delgado');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('en_oferta', $resultados[0]);
+        $this->assertSame(140.0, $resultados[0]['precio']);
+    }
+
+    public function testAiSearchInventoryUsaCostoMas50ComoPrecioNormalCuandoNoHayOverrideManual(): void
+    {
+        // Sin precio_oferta capturado a mano, ofertaPrecioEfectivo() cae a costo+$50 -- el
+        // precio_normal expuesto aqui debe seguir siendo precio_venta (el de siempre), no
+        // ese costo+$50 (que es el precio EN oferta, no el normal).
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(62, 'Sin Override', 300.0, 100.0);
+        $this->ponerEnOferta(62, $idOferta);
+        $this->seedInventario(62, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Sin Override');
+
+        $this->assertCount(1, $resultados);
+        $this->assertTrue($resultados[0]['en_oferta']);
+        $this->assertSame(300.0, $resultados[0]['precio_normal']);
+        $this->assertSame(150.0, $resultados[0]['precio']); // costo (100) + 50
+    }
+
+    // ------------------------------------------------------------------
     // aiStockVendible() / aiStockVendiblePorLotesBatch(): la misma regla de "no ofrecer
     // ni vender lo que ya caduco o no alcanza a consumirse a tiempo" aplicada a
     // consultar_inventario (aiSearchInventory) y agendar_venta (aiResolveOrderItems), no
