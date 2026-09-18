@@ -18,14 +18,9 @@ if (!hasPermission('ver_conversaciones_whatsapp') && !isAdmin()) {
 $pageTitle = 'Contactos de WhatsApp';
 $pdo = getPDO();
 
-/** Descifra un valor PII si viene cifrado; si no, lo regresa tal cual. */
-$wcDescifra = static function ($valor): string {
-    $valor = (string) $valor;
-    if ($valor !== '' && function_exists('piiIsEncryptedValue') && piiIsEncryptedValue($valor)) {
-        return (string) piiDecryptValue($valor);
-    }
-    return $valor;
-};
+// Descifrado de PII con manejo de fallas -- ver waDescifrarPii() en
+// core/whatsapp_contactos_utils.php.
+$wcDescifra = static fn($valor): string => waDescifrarPii($valor === null ? null : (string) $valor);
 
 $modoDetalle = isset($_GET['id']) && (int) $_GET['id'] > 0;
 
@@ -46,7 +41,8 @@ if ($modoDetalle) {
 
     $clienteNombrePlano = $wcDescifra($info['cliente_nombre_cifrado'] ?? '');
     $tituloContacto = waContactoNombre($info['nombre_perfil'] ?? '', $clienteNombrePlano);
-    $subtituloContacto = waContactoSubtitulo((string) $info['wa_id']);
+    $subtituloContacto = waContactoSubtitulo((string) $info['wa_id'], $info['telefono_resuelto'] ?? null);
+    $linkPhoneContacto = waWhatsAppLinkPhone((string) $info['wa_id'], $info['telefono_resuelto'] ?? null);
     $mensajes = waConversacionMensajes($pdo, $idConversacion);
     $tags = aiGetConversationTags($pdo, $idConversacion);
 
@@ -62,6 +58,9 @@ if ($modoDetalle) {
             <div class="card-content">
                 <p style="margin:0 0 6px;"><strong><?php echo esc($subtituloContacto); ?></strong>
                     <span class="chip <?php echo $info['estado_bot'] === 'activo' ? 'green lighten-4' : 'orange lighten-4'; ?>" style="margin-left:8px;"><?php echo esc((string) $info['estado_bot']); ?></span>
+                    <?php if ($linkPhoneContacto !== ''): ?>
+                        <a href="https://wa.me/<?php echo esc($linkPhoneContacto); ?>" target="_blank" class="btn-small green darken-1 waves-effect waves-light whatsapp-business-link" data-wa-phone="<?php echo esc($linkPhoneContacto); ?>" style="margin-left:8px;">Abrir WhatsApp</a>
+                    <?php endif; ?>
                 </p>
                 <?php if (!empty($info['id_cliente'])): ?>
                     <p style="margin:0 0 6px;"><a href="<?php echo esc(BASE_URL); ?>views/manage_customers.php?id=<?php echo (int) $info['id_cliente']; ?>">Ver ficha del cliente #<?php echo (int) $info['id_cliente']; ?></a></p>
@@ -246,7 +245,8 @@ include __DIR__ . '/includes/header.php';
                             $idc = (int) $fila['id_conversacion'];
                             $clienteNombrePlano = $wcDescifra($fila['cliente_nombre_cifrado'] ?? '');
                             $nombre = waContactoNombre($fila['nombre_perfil'] ?? '', $clienteNombrePlano);
-                            $subtitulo = waContactoSubtitulo((string) $fila['wa_id']);
+                            $subtitulo = waContactoSubtitulo((string) $fila['wa_id'], $fila['telefono_resuelto'] ?? null);
+                            $linkPhone = waWhatsAppLinkPhone((string) $fila['wa_id'], $fila['telefono_resuelto'] ?? null);
                             $desdeHora = date('H:i', strtotime((string) $fila['primer_mensaje']));
                             $hastaHora = date('H:i', strtotime((string) $fila['ultimo_mensaje']));
                             $rangoHoras = $desdeHora === $hastaHora ? $desdeHora : ($desdeHora . '–' . $hastaHora);
@@ -256,7 +256,12 @@ include __DIR__ . '/includes/header.php';
                             <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
                                 <div style="min-width:0;">
                                     <a href="<?php echo esc(BASE_URL); ?>views/whatsapp_contactos.php?id=<?php echo $idc; ?>" style="font-weight:600;"><?php echo esc($nombre); ?></a>
-                                    <div class="grey-text text-darken-1" style="font-size:12px;"><?php echo esc($subtitulo); ?></div>
+                                    <div class="grey-text text-darken-1" style="font-size:12px;">
+                                        <?php echo esc($subtitulo); ?>
+                                        <?php if ($linkPhone !== ''): ?>
+                                            <a href="https://wa.me/<?php echo esc($linkPhone); ?>" target="_blank" class="whatsapp-business-link" data-wa-phone="<?php echo esc($linkPhone); ?>" style="margin-left:6px;" title="Abrir WhatsApp"><i class="material-icons tiny green-text text-darken-1" style="vertical-align:middle;">open_in_new</i></a>
+                                        <?php endif; ?>
+                                    </div>
                                     <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
                                         <?php foreach ($tags as $tag): ?>
                                             <span class="chip <?php echo esc((string) $tag['color']); ?> lighten-4" style="margin:0; height:22px; line-height:22px; font-size:11px;"><?php echo esc((string) $tag['nombre']); ?></span>
