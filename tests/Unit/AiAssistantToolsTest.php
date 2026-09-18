@@ -671,14 +671,16 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertStringContainsString('"Be Life"', $prompt);
     }
 
-    public function testAiBuildSystemPromptDiceQueElNegocioEsSaludYBienestarNoBlife(): void
+    public function testAiBuildSystemPromptDiceQueElNegocioEsBellezaYBienestarNoBlife(): void
     {
         // Caso real: Alex se presento a un cliente como "Alejandra, de la tienda Blife",
         // haciendose pasar por la marca del proveedor en vez de decir el nombre real del
-        // negocio -- Blife es la marca de los productos que vendemos, no nuestro negocio.
+        // negocio (Belleza y Bienestar, ver el <title> de views/includes/header.php y el
+        // dominio bellezaybienestar.com.mx) -- Blife es la marca de los productos que
+        // vendemos, no nuestro negocio.
         $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
 
-        $this->assertStringContainsString('Salud y Bienestar', $prompt);
+        $this->assertStringContainsString('Belleza y Bienestar', $prompt);
         $this->assertStringContainsString('jamas digas "somos Blife"', $prompt);
     }
 
