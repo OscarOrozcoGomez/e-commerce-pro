@@ -2500,6 +2500,97 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertContains(AI_TAG_PREGUNTON, $names);
     }
 
+    // --- aiToolConfirmarZonaEntrega(): fuera de cobertura se marca ANTES de intentar
+    // agendar un pedido, no solo cuando el cliente ya llego a esa parte -- caso real
+    // reportado: un cliente foraneo (Puerto Vallarta) nunca se etiqueto porque nunca llego a
+    // pedir nada, asi que el seguimiento de 24h lo hubiera seguido intentando contactar. ---
+
+    public function testConfirmarZonaEntregaLocalNoEtiquetaYPermiteContinuar(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009030', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Guadalajara'], $context);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('local', $result['zona']);
+        $this->assertTrue($result['en_cobertura']);
+        $names = array_map(static fn(array $t) => $t['nombre'], aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion']));
+        $this->assertNotContains(AI_TAG_FUERA_COBERTURA, $names);
+    }
+
+    public function testConfirmarZonaEntregaForaneoNoEtiquetaPeroAvisaDelCargo(): void
+    {
+        // Colonia periferica conocida: SI es entregable (con cargo de $40), no es lo mismo
+        // que "sin cobertura" -- no debe etiquetarse como Fuera de Cobertura.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009031', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Fraccionamiento Chula Vista'], $context);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('foraneo', $result['zona']);
+        $this->assertTrue($result['en_cobertura']);
+        $this->assertStringContainsString('40', $result['message']);
+        $names = array_map(static fn(array $t) => $t['nombre'], aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion']));
+        $this->assertNotContains(AI_TAG_FUERA_COBERTURA, $names);
+    }
+
+    public function testConfirmarZonaEntregaIndeterminadaEtiquetaFueraDeCobertura(): void
+    {
+        // Caso real: Puerto Vallarta, mencionado en la conversacion normal, SIN que el
+        // cliente haya llegado a pedir nada todavia.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009032', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        $context = ['id_conversacion' => $idConversacion];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Puerto Vallarta, Jalisco'], $context);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('indeterminado', $result['zona']);
+        $this->assertFalse($result['en_cobertura']);
+        $names = array_map(static fn(array $t) => $t['nombre'], aiGetConversationTags($this->pdo, $idConversacion));
+        $this->assertContains(AI_TAG_FUERA_COBERTURA, $names);
+    }
+
+    public function testConfirmarZonaEntregaFueraDeCoberturaQuedaExcluidaDelSeguimientoProactivo(): void
+    {
+        // Verifica el efecto real que le importa al negocio: una vez etiquetada, el cron de
+        // seguimiento de 24h (aiFindConversationsNeedingFollowup) ya no debe volver a
+        // intentar contactar a este cliente.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009033', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Hola, quiero info');
+        aiAppendMessage(
+            $this->pdo,
+            $idConversacion,
+            'assistant',
+            'Claro, en que ciudad estas?',
+            null,
+            null,
+            null,
+            null,
+            true
+        );
+        $this->pdo->prepare("UPDATE whatsapp_mensajes SET creado_en = datetime('now', '-2 days') WHERE id_conversacion = ?")
+            ->execute([$idConversacion]);
+
+        aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Puerto Vallarta, Jalisco'], ['id_conversacion' => $idConversacion]);
+
+        $pendientes = array_map(static fn(array $c) => (int) $c['id_conversacion'], aiFindConversationsNeedingFollowup($this->pdo));
+        $this->assertNotContains($idConversacion, $pendientes);
+    }
+
+    public function testConfirmarZonaEntregaFallaGraciosamenteSinUbicacion(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009034', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => '   '], $context);
+
+        $this->assertFalse($result['ok']);
+    }
+
     public function testEtiquetarClienteRejectsUnknownTagWithoutCreatingIt(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009011', null);

@@ -250,10 +250,10 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertSame($plain, aiSanitizePlainTextForWhatsapp($plain));
     }
 
-    public function testToolDefinitionsExposeExactlyTheEightSpecFunctions(): void
+    public function testToolDefinitionsExposeExactlyTheNineSpecFunctions(): void
     {
         $tools = aiGetToolDefinitions();
-        $this->assertCount(8, $tools);
+        $this->assertCount(9, $tools);
 
         $names = array_map(static fn(array $t) => $t['function']['name'], $tools);
         $this->assertSame(
@@ -264,6 +264,7 @@ final class AiAssistantPromptTest extends TestCase
                 'enviar_plantilla',
                 'enviar_catalogo',
                 'consultar_ofertas',
+                'confirmar_zona_entrega',
                 'etiquetar_cliente',
                 'quitar_etiqueta_cliente',
             ],
@@ -291,10 +292,13 @@ final class AiAssistantPromptTest extends TestCase
         $ofertas = $tools[5]['function']['parameters'];
         $this->assertSame([], $ofertas['required']);
 
-        $etiquetar = $tools[6]['function']['parameters'];
+        $zonaEntrega = $tools[6]['function']['parameters'];
+        $this->assertSame(['ciudad_o_direccion'], $zonaEntrega['required']);
+
+        $etiquetar = $tools[7]['function']['parameters'];
         $this->assertSame(['nombre_etiqueta'], $etiquetar['required']);
 
-        $quitarEtiqueta = $tools[7]['function']['parameters'];
+        $quitarEtiqueta = $tools[8]['function']['parameters'];
         $this->assertSame(['nombre_etiqueta'], $quitarEtiqueta['required']);
     }
 
