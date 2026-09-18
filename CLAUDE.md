@@ -98,9 +98,9 @@ o a un cron/script que le mande algo a un cliente por WhatsApp debe verificar qu
 cumpliendo, y si se toca ese código, se tiene que volver a razonar explícitamente si sigue
 cumpliéndolas**:
 
-1. **Los mensajes PROACTIVOS de Alex (el cliente no escribió primero — seguimiento de 24h y
-   catch-up de horario) nunca pasan de UNO combinado por hora**, sin importar qué tan grande
-   sea el backlog ni cuántas veces corra el cron mientras tanto (`scripts/whatsapp_followup_cron.php`
+1. **El seguimiento de 24h de Alex (el cliente no escribió primero, es puro reenganche para
+   rescatar una venta a medias) nunca pasa de UNO por hora**, sin importar qué tan grande sea
+   el backlog ni cuántas veces corra el cron mientras tanto (`scripts/whatsapp_followup_cron.php`
    corre cada 20 min, pero solo manda algo si `aiPuedeEnviarProactivoAhora()` lo permite — ver
    `AI_PROACTIVO_INTERVALO_MIN_MINUTOS` en `ai_assistant.php`). Un backlog grande se vacía a lo
    largo de varios días si hace falta, nunca de un jalón ni sostenido hora tras hora. El texto
@@ -109,6 +109,23 @@ cumpliéndolas**:
    destinatarios es en sí mismo un patrón detectable, aunque vaya espaciado. Cualquier futura
    funcionalidad de "mensaje a varios clientes" (campañas/broadcast) debe pasar por esta misma
    disciplina: cadencia de horas, no de segundos, y texto variado.
+   El **catch-up de horario** (contestar con retraso algo que el cliente YA escribió mientras
+   Alex estaba callado a propósito de 10pm a 7am, ver `aiEstaEnHorarioAtencion()`) es un cupo
+   **aparte** desde 2026-09-18 (`aiPuedeResponderCatchupAhora()`/`aiRegistrarEnvioCatchup()`,
+   timestamp propio `ultimo_envio_catchup_en`), con su propia cadencia de ~5 minutos
+   (`AI_CATCHUP_INTERVALO_MIN_MINUTOS`) — no comparte el tope de 1/hora del seguimiento: no es
+   contacto no solicitado, y antes de separarlos un cliente nuevo de madrugada podía esperar
+   horas su primerísima respuesta si el cupo compartido ya lo había gastado un seguimiento.
+   Sigue sin riesgo de ráfaga: nunca instantáneo para todo el backlog de la noche a la vez,
+   siempre espaciado ~5 min entre cada cliente distinto, muy por debajo del patrón real del
+   incidente de 2026-09-13 (~24 mensajes idénticos en el mismo segundo). Para que este ritmo
+   de 5 min se note de verdad hace falta que el cron mismo corra seguido (ver el crontab del
+   VPS, `*/N * * * * ... whatsapp_followup_cron.php`) — si corre cada 20 min, el catch-up en
+   la práctica sigue limitado a como mucho 1 cada 20 min aunque el código ya permita 1 cada 5.
+   "Cupos independientes" es solo la cadencia de cada uno **entre corridas** — `whatsapp_followup_cron.php`
+   sigue mandando como máximo **un** mensaje real por corrida (si el catch-up tuvo algo que
+   contestar, el seguimiento de 24h espera a la siguiente corrida), para que abrir el horario
+   con ambos cupos libres a la vez nunca mande 2 mensajes reales en la misma ejecución.
 2. **Las respuestas de Alex en vivo (conversación normal) se mandan con un retraso humano
    deliberado** (60-120s aleatorios, ver `enviarReplyParts`/el delay antes de llamarla dentro
    de `messages.upsert` en `/opt/wa-bridge/app/index.js` — código del puente, vive en el VPS,
