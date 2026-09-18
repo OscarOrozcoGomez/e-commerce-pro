@@ -63,6 +63,18 @@ function waContactoSubtitulo(string $waId, ?string $telefonoResuelto = null): st
 }
 
 /**
+ * Numero listo para el link "https://wa.me/<esto>" de un contacto, o cadena vacia si no hay
+ * ningun telefono real disponible todavia (LID sin resolver). Mismo criterio que el boton
+ * "Abrir WhatsApp" de views/ai_assistant_settings.php: usa el numero real del wa_id si
+ * existe, si no cae al telefono_resuelto (ver aiWaIdDigitsConResuelto()).
+ */
+function waWhatsAppLinkPhone(string $waId, ?string $telefonoResuelto): string
+{
+    $digitsNacionales = aiWaIdDigitsConResuelto($waId, $telefonoResuelto);
+    return $digitsNacionales !== null ? waBuildBusinessLinkPhone($digitsNacionales) : '';
+}
+
+/**
  * Etiqueta legible del rol de un mensaje del historial.
  */
 function waRolEtiqueta(string $rol): string

@@ -59,6 +59,23 @@ final class WhatsAppContactosUtilsTest extends TestCase
         );
     }
 
+    // --- waWhatsAppLinkPhone(): numero para el boton "Abrir WhatsApp" (wa.me) ---
+
+    public function testWhatsAppLinkPhoneConNumeroReal(): void
+    {
+        $this->assertSame('523334040398', waWhatsAppLinkPhone('523334040398', null));
+    }
+
+    public function testWhatsAppLinkPhoneCaeAlTelefonoResueltoParaUnLid(): void
+    {
+        $this->assertSame('523221687282', waWhatsAppLinkPhone('208654024347887', '3221687282'));
+    }
+
+    public function testWhatsAppLinkPhoneVacioParaUnLidSinResolver(): void
+    {
+        $this->assertSame('', waWhatsAppLinkPhone('208654024347887', null));
+    }
+
     // --- waDescifrarPii(): nunca debe enseñar texto cifrado crudo en pantalla ---
 
     private function withPiiEncryptionKey(string $key, callable $fn): void
