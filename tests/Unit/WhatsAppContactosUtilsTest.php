@@ -33,6 +33,92 @@ final class WhatsAppContactosUtilsTest extends TestCase
         $this->assertSame('Sin numero (WhatsApp no lo comparte)', waContactoSubtitulo('208654024347887'));
     }
 
+    public function testContactoSubtituloCaeAlTelefonoResueltoParaUnLid(): void
+    {
+        // Caso real: 168 de 172 conversaciones son LID pero scripts/resolver_lids_whatsapp.php
+        // ya logro resolver el telefono real detras de la mayoria.
+        $this->assertSame(
+            '+52 322 168 7282',
+            waContactoSubtitulo('208654024347887', '3221687282')
+        );
+    }
+
+    public function testContactoSubtituloPrefiereElNumeroRealSobreElResuelto(): void
+    {
+        $this->assertSame(
+            '+52 33 3404 0398',
+            waContactoSubtitulo('523334040398', '3221687282')
+        );
+    }
+
+    public function testContactoSubtituloIgnoraUnTelefonoResueltoMalFormado(): void
+    {
+        $this->assertSame(
+            'Sin numero (WhatsApp no lo comparte)',
+            waContactoSubtitulo('208654024347887', '12345')
+        );
+    }
+
+    // --- waDescifrarPii(): nunca debe enseñar texto cifrado crudo en pantalla ---
+
+    private function withPiiEncryptionKey(string $key, callable $fn): void
+    {
+        $original = (string) (getenv('PII_ENCRYPTION_KEY') ?: '');
+        putenv('PII_ENCRYPTION_KEY=' . $key);
+        $_SERVER['PII_ENCRYPTION_KEY'] = $key;
+        $_ENV['PII_ENCRYPTION_KEY'] = $key;
+        try {
+            $fn();
+        } finally {
+            putenv('PII_ENCRYPTION_KEY=' . $original);
+            if ($original !== '') {
+                $_SERVER['PII_ENCRYPTION_KEY'] = $original;
+                $_ENV['PII_ENCRYPTION_KEY'] = $original;
+            } else {
+                unset($_SERVER['PII_ENCRYPTION_KEY'], $_ENV['PII_ENCRYPTION_KEY']);
+            }
+        }
+    }
+
+    public function testDescifrarPiiRegresaTextoPlanoSinCambios(): void
+    {
+        $this->assertSame('Guadalupe Gutierrez', waDescifrarPii('Guadalupe Gutierrez'));
+        $this->assertSame('', waDescifrarPii(''));
+        $this->assertSame('', waDescifrarPii(null));
+    }
+
+    public function testDescifrarPiiDescifraUnValorRealmenteCifrado(): void
+    {
+        $this->withPiiEncryptionKey('llave-de-prueba-1234567890', function (): void {
+            $cifrado = piiEncryptValue('Guadalupe Gutierrez');
+            $this->assertSame('Guadalupe Gutierrez', waDescifrarPii($cifrado));
+        });
+    }
+
+    public function testDescifrarPiiRegresaVacioCuandoElDescifradoFallaEnVezDeFugarElTextoCifrado(): void
+    {
+        // Caso real: un cliente (#248 en produccion) cuyo nombre quedo cifrado con una
+        // llave vieja (de antes de una rotacion) que ya nadie tiene -- piiDecryptValue()
+        // cae de vuelta al texto cifrado original cuando la llave actual no calza. Antes de
+        // este fix, el panel de "Contactos de WhatsApp" mostraba literalmente
+        // "ENCv1:AYHXrbe0XZWn/..." como si fuera el nombre del cliente.
+        $cifradoConOtraLlave = $this->cifrarConLlave('Nombre Que Ya No Se Puede Leer', 'llave-vieja-de-antes-de-rotar');
+
+        $this->withPiiEncryptionKey('llave-actual-despues-de-rotar', function () use ($cifradoConOtraLlave): void {
+            $this->assertSame('', waDescifrarPii($cifradoConOtraLlave));
+        });
+    }
+
+    private function cifrarConLlave(string $texto, string $llave): string
+    {
+        $cifrado = '';
+        $this->withPiiEncryptionKey($llave, function () use ($texto, &$cifrado): void {
+            $cifrado = (string) piiEncryptValue($texto);
+        });
+
+        return $cifrado;
+    }
+
     public function testRolEtiquetaYEsCliente(): void
     {
         $this->assertSame('Cliente', waRolEtiqueta('user'));

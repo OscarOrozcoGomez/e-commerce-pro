@@ -18,14 +18,9 @@ if (!hasPermission('ver_conversaciones_whatsapp') && !isAdmin()) {
 $pageTitle = 'Contactos de WhatsApp';
 $pdo = getPDO();
 
-/** Descifra un valor PII si viene cifrado; si no, lo regresa tal cual. */
-$wcDescifra = static function ($valor): string {
-    $valor = (string) $valor;
-    if ($valor !== '' && function_exists('piiIsEncryptedValue') && piiIsEncryptedValue($valor)) {
-        return (string) piiDecryptValue($valor);
-    }
-    return $valor;
-};
+// Descifrado de PII con manejo de fallas -- ver waDescifrarPii() en
+// core/whatsapp_contactos_utils.php.
+$wcDescifra = static fn($valor): string => waDescifrarPii($valor === null ? null : (string) $valor);
 
 $modoDetalle = isset($_GET['id']) && (int) $_GET['id'] > 0;
 
@@ -46,7 +41,7 @@ if ($modoDetalle) {
 
     $clienteNombrePlano = $wcDescifra($info['cliente_nombre_cifrado'] ?? '');
     $tituloContacto = waContactoNombre($info['nombre_perfil'] ?? '', $clienteNombrePlano);
-    $subtituloContacto = waContactoSubtitulo((string) $info['wa_id']);
+    $subtituloContacto = waContactoSubtitulo((string) $info['wa_id'], $info['telefono_resuelto'] ?? null);
     $mensajes = waConversacionMensajes($pdo, $idConversacion);
     $tags = aiGetConversationTags($pdo, $idConversacion);
 
@@ -246,7 +241,7 @@ include __DIR__ . '/includes/header.php';
                             $idc = (int) $fila['id_conversacion'];
                             $clienteNombrePlano = $wcDescifra($fila['cliente_nombre_cifrado'] ?? '');
                             $nombre = waContactoNombre($fila['nombre_perfil'] ?? '', $clienteNombrePlano);
-                            $subtitulo = waContactoSubtitulo((string) $fila['wa_id']);
+                            $subtitulo = waContactoSubtitulo((string) $fila['wa_id'], $fila['telefono_resuelto'] ?? null);
                             $desdeHora = date('H:i', strtotime((string) $fila['primer_mensaje']));
                             $hastaHora = date('H:i', strtotime((string) $fila['ultimo_mensaje']));
                             $rangoHoras = $desdeHora === $hastaHora ? $desdeHora : ($desdeHora . '–' . $hastaHora);
