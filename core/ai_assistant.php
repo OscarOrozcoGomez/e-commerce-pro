@@ -279,7 +279,7 @@ function aiBuildSystemPrompt(
     // Alex la lista real de cobertura (la misma que usa agendar_venta/deliveryZoneClassifyByText)
     // para que decline con claridad ANTES de cotizar nada, en vez de prometer con texto libre.
     $municipiosCobertura = implode(', ', array_map('ucwords', DELIVERY_ZONE_ZMG_MUNICIPIOS));
-    $lines[] = 'Cobertura real de entrega a domicilio (memoriza esta lista, es la unica que existe): ' . $municipiosCobertura . ', y algunas colonias del extremo sur/periferia de esos municipios (ahi puede aplicar el cargo de $40 "foraneo" que menciona la politica de envio, gratis con 2+ productos distintos). En cuanto el cliente te diga en que ciudad o municipio esta (o a donde seria el envio), compara contra esta lista. Si es cualquier OTRO lugar -- otra ciudad o municipio, AUNQUE siga siendo del estado de Jalisco (ej. Puerto Vallarta, Autlan de Navarro, Tepatitlan, Ciudad Guzman, Ocotlan, Lagos de Moreno, cualquier otro que no este en la lista) -- NUNCA le digas que si hacemos el envio, NUNCA le cotices el cargo de $40 ni la promocion de envio gratis con 2 productos: eso solo aplica dentro de la lista de cobertura. No hacemos envios por paqueteria a otras ciudades bajo ninguna circunstancia, sin importar que tan lejos este dispuesto a esperar o cuanto este dispuesto a pagar el cliente. En ese caso dile con calidez pero con claridad que por ahora no tenemos cobertura de entrega en su zona (sin prometer que se puede resolver ni dar un costo), y si el cliente insiste, llama a transferir_a_humano para que el equipo decida caso por caso -- nunca decidas tu ni dejes al cliente con la idea de que "tal vez si" mientras tanto.';
+    $lines[] = 'Cobertura real de entrega a domicilio: ' . $municipiosCobertura . ', y algunas colonias del extremo sur/periferia de esos municipios (ahi puede aplicar el cargo de $40 "foraneo" que menciona la politica de envio, gratis con 2+ productos distintos). En cuanto el cliente te diga en que ciudad, municipio o colonia esta (o a donde seria el envio) -- ANTES de seguir con precios, de cotizar el cargo foraneo o de agendar nada -- llama a confirmar_zona_entrega con ese texto. NUNCA decidas tu solo comparando de memoria contra la lista ni le digas al cliente que si hacemos el envio sin haber llamado a esa funcion primero: es la misma logica exacta que usa agendar_venta, y si la zona no esta en cobertura, la funcion ya deja la conversacion marcada para que el equipo no le vuelva a insistir despues -- no hay riesgo de "tal vez si" si sigues su resultado tal cual. No hacemos envios por paqueteria a otras ciudades bajo ninguna circunstancia, sin importar que tan lejos este dispuesto a esperar o cuanto este dispuesto a pagar el cliente. Si el cliente insiste despues de que la funcion diga que no hay cobertura, llama a transferir_a_humano para que el equipo decida caso por caso.';
 
     if (!empty($etiquetasDisponibles)) {
         $nombresEtiquetas = array_values(array_filter(
@@ -454,6 +454,20 @@ function aiGetToolDefinitions(): array
                         ],
                     ],
                     'required' => [],
+                ],
+            ],
+        ],
+        [
+            'type' => 'function',
+            'function' => [
+                'name' => 'confirmar_zona_entrega',
+                'description' => 'Confirma, con el MISMO criterio real que usa agendar_venta, si una ciudad/direccion esta dentro de la zona de entrega (Zona Metropolitana de Guadalajara y su periferia conocida). Llamala en cuanto el cliente te diga en que ciudad esta o a donde seria el envio -- ANTES de seguir con precios o de agendar nada -- en vez de decidirlo tu por tu cuenta comparando contra la lista de memoria. Si la zona no esta en cobertura, el sistema ya deja la conversacion marcada para que el equipo no vuelva a insistirle a este cliente mas adelante -- no necesitas hacer nada mas tu ademas de avisarle con calidez.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'ciudad_o_direccion' => ['type' => 'string', 'description' => 'Ciudad, municipio, colonia o direccion que dijo el cliente.'],
+                    ],
+                    'required' => ['ciudad_o_direccion'],
                 ],
             ],
         ],
@@ -2240,6 +2254,58 @@ function aiToolConsultarOfertas(PDO $pdo, array $args): array
 }
 
 /**
+ * Confirma la zona de entrega de una ciudad/direccion con el MISMO criterio deterministico
+ * que usa agendar_venta (deliveryZoneClassifyByText) -- nunca se le confia al LLM decidir
+ * por su cuenta si un lugar esta en cobertura, igual que nunca se le confia el precio o el
+ * stock. Antes de esta funcion, "fuera de cobertura" solo se detectaba y etiquetaba DENTRO
+ * de agendar_venta (cuando el cliente ya habia llegado a intentar un pedido) -- si el
+ * cliente mencionaba su ciudad en la conversacion normal y Alex decidia solo (en texto
+ * libre) que no habia cobertura, la conversacion se quedaba sin marcar y el seguimiento
+ * proactivo de 24h seguia intentando venderle algo que nunca se le puede entregar (ver
+ * aiFindConversationsNeedingFollowup(), que ya excluye por esta misma etiqueta).
+ *
+ * Solo 'indeterminado' (fuera de la ZMG y de la periferia conocida) cuenta como "sin
+ * cobertura" -- 'foraneo' (colonia periferica conocida) SI es entregable, con el cargo de
+ * $40 que ya describe la politica de envio.
+ */
+function aiToolConfirmarZonaEntrega(PDO $pdo, array $args, array $context): array
+{
+    $ubicacion = trim((string)($args['ciudad_o_direccion'] ?? ''));
+    if ($ubicacion === '') {
+        return ['ok' => false, 'message' => 'Falta la ciudad o la direccion de entrega para confirmar la zona.'];
+    }
+
+    $zona = deliveryZoneClassifyByText($ubicacion);
+
+    if ($zona === 'indeterminado') {
+        $idConversacion = (int)($context['id_conversacion'] ?? 0);
+        if ($idConversacion > 0) {
+            try {
+                aiAssignTag($pdo, $idConversacion, AI_TAG_FUERA_COBERTURA);
+            } catch (Throwable $e) {
+                error_log('WARNING: no se pudo asignar etiqueta "Fuera de Cobertura" (confirmar_zona_entrega): ' . $e->getMessage());
+            }
+        }
+
+        return [
+            'ok' => true,
+            'zona' => $zona,
+            'en_cobertura' => false,
+            'message' => 'Esta ubicacion NO esta en la zona de cobertura (Zona Metropolitana de Guadalajara y su periferia conocida). Dile al cliente con calidez pero con claridad que por ahora no tenemos cobertura de entrega ahi -- nunca le prometas que si se entrega ni le des un costo. Si el cliente insiste, llama a transferir_a_humano.',
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'zona' => $zona,
+        'en_cobertura' => true,
+        'message' => $zona === 'foraneo'
+            ? 'Esta ubicacion SI se puede entregar, pero aplica el cargo de $40 "foraneo" (gratis con 2 o mas productos distintos) -- puedes continuar normal con precios y el pedido.'
+            : 'Esta ubicacion esta dentro de la Zona Metropolitana de Guadalajara -- puedes continuar normal con precios y el pedido.',
+    ];
+}
+
+/**
  * Busca, dentro de $candidatos, la palabra mas parecida a $termino -- respaldo 100% en
  * codigo (sin gastar tokens de DeepSeek) para cuando un cliente escribe un producto o
  * marca con errores de dedo/fonetica (ej. "ashuangs" por "ashwagandha") y la busqueda
@@ -2999,6 +3065,8 @@ function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): arr
             return aiToolEnviarCatalogo($pdo);
         case 'consultar_ofertas':
             return aiToolConsultarOfertas($pdo, $args);
+        case 'confirmar_zona_entrega':
+            return aiToolConfirmarZonaEntrega($pdo, $args, $context);
         case 'etiquetar_cliente':
             return aiToolEtiquetarCliente($pdo, $args, $context);
         case 'quitar_etiqueta_cliente':
