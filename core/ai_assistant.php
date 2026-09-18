@@ -1084,6 +1084,30 @@ function aiEstaEnHorarioAtencion(?DateTimeImmutable $ahora = null): bool
 const AI_PROACTIVO_INTERVALO_MIN_MINUTOS = 60;
 
 /**
+ * Helper compartido por aiPuedeEnviarProactivoAhora() y aiPuedeResponderCatchupAhora():
+ * true si ya paso $intervaloMinutos desde el ultimo timestamp guardado en $ultimoEnvio (el
+ * valor de la columna correspondiente en ai_asistente_config, ya leido por el caller). Sin
+ * esto, un futuro fix a esta logica (ej. el manejo de $ultimo vacio o invalido) se podia
+ * aplicar a un cupo y olvidarse del otro, dejandolos divergir en silencio.
+ */
+function aiPasoElIntervaloDesdeUltimoEnvio(?string $ultimoEnvio, int $intervaloMinutos, ?DateTimeImmutable $ahora): bool
+{
+    $ultimo = trim((string)$ultimoEnvio);
+    if ($ultimo === '') {
+        return true;
+    }
+
+    $tsUltimo = strtotime($ultimo);
+    if ($tsUltimo === false) {
+        return true;
+    }
+
+    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
+
+    return ($tsAhora - $tsUltimo) >= ($intervaloMinutos * 60);
+}
+
+/**
  * True si Alex puede mandar el seguimiento de 24h AHORA MISMO: hay que estar en horario de
  * atencion Y que haya pasado al menos AI_PROACTIVO_INTERVALO_MIN_MINUTOS desde el ultimo
  * seguimiento de 24h real. Nunca se basa en el reloj de la corrida del cron (que corre cada
@@ -1097,19 +1121,12 @@ function aiPuedeEnviarProactivoAhora(PDO $pdo, ?DateTimeImmutable $ahora = null)
     }
 
     $config = aiGetConfig($pdo);
-    $ultimo = trim((string)($config['ultimo_envio_proactivo_en'] ?? ''));
-    if ($ultimo === '') {
-        return true;
-    }
 
-    $tsUltimo = strtotime($ultimo);
-    if ($tsUltimo === false) {
-        return true;
-    }
-
-    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
-
-    return ($tsAhora - $tsUltimo) >= (AI_PROACTIVO_INTERVALO_MIN_MINUTOS * 60);
+    return aiPasoElIntervaloDesdeUltimoEnvio(
+        $config['ultimo_envio_proactivo_en'] ?? null,
+        AI_PROACTIVO_INTERVALO_MIN_MINUTOS,
+        $ahora
+    );
 }
 
 /**
@@ -1149,19 +1166,12 @@ function aiPuedeResponderCatchupAhora(PDO $pdo, ?DateTimeImmutable $ahora = null
     }
 
     $config = aiGetConfig($pdo);
-    $ultimo = trim((string)($config['ultimo_envio_catchup_en'] ?? ''));
-    if ($ultimo === '') {
-        return true;
-    }
 
-    $tsUltimo = strtotime($ultimo);
-    if ($tsUltimo === false) {
-        return true;
-    }
-
-    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
-
-    return ($tsAhora - $tsUltimo) >= (AI_CATCHUP_INTERVALO_MIN_MINUTOS * 60);
+    return aiPasoElIntervaloDesdeUltimoEnvio(
+        $config['ultimo_envio_catchup_en'] ?? null,
+        AI_CATCHUP_INTERVALO_MIN_MINUTOS,
+        $ahora
+    );
 }
 
 /**

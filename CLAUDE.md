@@ -122,6 +122,10 @@ cumpliéndolas**:
    de 5 min se note de verdad hace falta que el cron mismo corra seguido (ver el crontab del
    VPS, `*/N * * * * ... whatsapp_followup_cron.php`) — si corre cada 20 min, el catch-up en
    la práctica sigue limitado a como mucho 1 cada 20 min aunque el código ya permita 1 cada 5.
+   "Cupos independientes" es solo la cadencia de cada uno **entre corridas** — `whatsapp_followup_cron.php`
+   sigue mandando como máximo **un** mensaje real por corrida (si el catch-up tuvo algo que
+   contestar, el seguimiento de 24h espera a la siguiente corrida), para que abrir el horario
+   con ambos cupos libres a la vez nunca mande 2 mensajes reales en la misma ejecución.
 2. **Las respuestas de Alex en vivo (conversación normal) se mandan con un retraso humano
    deliberado** (60-120s aleatorios, ver `enviarReplyParts`/el delay antes de llamarla dentro
    de `messages.upsert` en `/opt/wa-bridge/app/index.js` — código del puente, vive en el VPS,

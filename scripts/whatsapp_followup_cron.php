@@ -69,11 +69,24 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
 //    compartido ya lo habia usado un seguimiento). Cadencia propia de ~5 min entre cada uno
 //    (ver AI_CATCHUP_INTERVALO_MIN_MINUTOS) -- rapido para no dejar esperando al backlog de
 //    la noche, pero nunca instantaneo para todos a la vez.
+//
+// "Independiente" es solo la CADENCIA de cada uno entre corridas -- dentro de UNA misma
+// corrida se sigue mandando como maximo un mensaje real, igual que antes de separar los
+// cupos: si esta corrida ya intento un catch-up (haya tenido pendiente o no antes del envio),
+// el seguimiento de 24h se deja para la siguiente corrida en la que el catch-up no tenga
+// nada que hacer. Eso evita el caso donde, justo al abrir el horario, ambos cupos esten
+// libres a la vez y se manden 2 mensajes reales (a 2 clientes distintos) en la misma
+// ejecucion del script.
 $retomadas = 0;
 $retomadasFallidas = 0;
+$huboCatchupEnEstaCorrida = false;
 
 if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeResponderCatchupAhora($pdo)) {
     $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
+
+    if ($pendienteCatchup !== null) {
+        $huboCatchupEnEstaCorrida = true;
+    }
 
     if ($isDryRun) {
         if ($pendienteCatchup !== null) {
@@ -99,7 +112,7 @@ if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeResponderCatchupAhora($pdo)) 
 //    del negocio 2026-09-14, tras el incidente 2026-09-13) para no parecer una campaña
 //    automatizada. Si el backlog no se alcanza a vaciar en el dia, sigue al dia siguiente
 //    sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
-if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo)) {
+if (!$huboCatchupEnEstaCorrida && ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo))) {
     $pendienteSeguimiento = aiFindConversationsNeedingFollowup($pdo)[0] ?? null;
 
     if ($isDryRun) {
