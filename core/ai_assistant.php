@@ -195,6 +195,7 @@ function aiBuildSystemPrompt(
         $lines[] = 'Flujo de atencion:';
         $lines[] = '1. Saluda y da seguimiento a lo que el cliente ya pregunto antes en esta conversacion (tienes el historial completo).';
         $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. El catalogo tiene productos de varias categorias (vitaminas, minerales, suplementos, etc.) y muchos vienen en varias presentaciones/tamanos (por ejemplo 120, 240 o 500 capsulas) a precios distintos -- si consultar_inventario te regresa varias presentaciones del mismo producto, mencionalas todas para que el cliente elija la que le convenga, no asumas una sola. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
+        $lines[] = '2b. Si un producto que te regreso consultar_inventario trae "en_oferta": true, el precio que ya te dio ("precio") YA es el precio rebajado -- nunca lo presentes como si fuera el precio de siempre. Dile al cliente explicitamente que esta en oferta y cuanto ahorra comparando contra "precio_normal" (ej. "esta en oferta a $X, antes $Y"), aunque el cliente no haya preguntado por ofertas ni descuentos -- no depende de que llames a consultar_ofertas por separado para mencionarlo.';
         $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental/rendimiento_estimado que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla). Preséntalo bonito y facil de leer, con iconos por seccion (🌿 para ingredientes, 📊 para informacion nutrimental, y dentro de la tabla usa el icono que mejor represente cada nutriente: ⚡ energetico/calorias, 🥑 grasas, 🍞 carbohidratos, 💪 proteinas, 🧂 sodio, etc.), no como parrafo corrido ni como JSON. Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
         $lines[] = '3b. Si el producto es en capsulas y consultar_inventario te regreso rendimiento_estimado, mencionalo cuando el cliente pregunte cuanto le dura o le rinde, o al confirmar la compra de ese producto -- deja claro que esa es la dosis SUGERIDA por la marca, no una regla obligatoria. Si el cliente pregunta que pasa si toma menos o mas capsulas al dia de lo sugerido, respondele que es completamente su criterio, pero reitera la dosis sugerida por la marca y que el producto tiene fecha de caducidad -- nunca le prometas ni le garantices cuanto le va a rendir si decide tomar una dosis distinta a la sugerida.';
         $lines[] = '3c. Cuando platiques de ingredientes, beneficios, para que sirve o modo de uso de un producto (no en cada mensaje, solo cuando el tema salga), incluye de forma natural esta leyenda LEGAL tal cual, sin cambiarle ni una palabra: "' . AI_LEYENDA_NO_MEDICAMENTO . '"';
@@ -951,13 +952,29 @@ function aiConfirmarEnvioWhatsapp(PDO $pdo, string $waId, int $idMensaje): bool
     }
 
     if ((string)$conversacion['estado_bot'] !== 'activo') {
-        $pdo->prepare('UPDATE whatsapp_mensajes SET enviado_whatsapp = 0 WHERE id_mensaje = ?')
-            ->execute([$idMensaje]);
+        aiMarcarMensajeNoEnviado($pdo, $idMensaje);
 
         return false;
     }
 
     return true;
+}
+
+/**
+ * Marca un mensaje 'assistant' ya insertado como NO enviado a WhatsApp. Se usa cuando se
+ * decide (o no se puede confirmar) que un mensaje ya generado no debe/pudo mandarse -- ver
+ * aiConfirmarEnvioWhatsapp() arriba y el catch de api/whatsapp_confirmar_envio.php, que la
+ * llama de nuevo si la funcion de arriba truena a medias. Idempotente: llamarla varias veces
+ * sobre el mismo id_mensaje no tiene efecto adicional.
+ */
+function aiMarcarMensajeNoEnviado(PDO $pdo, int $idMensaje): void
+{
+    if ($idMensaje <= 0) {
+        return;
+    }
+
+    $pdo->prepare('UPDATE whatsapp_mensajes SET enviado_whatsapp = 0 WHERE id_mensaje = ?')
+        ->execute([$idMensaje]);
 }
 
 /* ---------------------------------------------------------------------
@@ -1321,7 +1338,12 @@ function aiSendFollowupMessage(PDO $pdo, array $conversacion): bool
     $texto = aiGenerarTextoSeguimientoUnico($pdo, $idConversacion, $config);
     $resultado = waSendOutboundMessage($waId, [['type' => 'text', 'text' => $texto]]);
 
-    aiAppendMessage($pdo, $idConversacion, 'assistant', $texto, null, null, null, null, true);
+    // enviado_whatsapp debe reflejar si de verdad salio, no darlo por hecho: si
+    // waSendOutboundMessage() fallo (puente caido, red), aiLoadConversationHistory() debe
+    // poder excluir este texto del historial (igual que ya hace con las respuestas
+    // suprimidas por aiConfirmarEnvioWhatsapp()) -- si no, Alex "recordaria" haber mandado
+    // un seguimiento que el cliente nunca recibio.
+    aiAppendMessage($pdo, $idConversacion, 'assistant', $texto, null, null, null, null, (bool)($resultado['ok'] ?? false));
     $pdo->prepare('UPDATE whatsapp_conversaciones SET seguimiento_enviado_en = CURRENT_TIMESTAMP WHERE id_conversacion = ?')
         ->execute([$idConversacion]);
 
@@ -1384,6 +1406,20 @@ function aiLoadConversationHistory(PDO $pdo, int $idConversacion, int $maxTurns 
     $messages = [];
     foreach ($rows as $row) {
         $rol = (string)$row['rol'];
+
+        // Respuesta final (texto, sin tool_calls) que se genero pero NUNCA llego a
+        // WhatsApp -- un humano tomo la conversacion mientras esperaba su turno de envio
+        // (ver aiConfirmarEnvioWhatsapp() y el re-chequeo de estado_bot en
+        // aiRunAssistantTurn()) y se marco enviado_whatsapp=0 despues de insertarse. El
+        // cliente jamas la vio, asi que Alex tampoco debe "recordar" haberla dicho: si se
+        // dejara en el historial, en el siguiente turno Alex asumiria que ya pregunto o
+        // informo algo (ej. la pregunta de cobertura por lada) que en realidad nunca salio,
+        // y no lo repetiria. No aplica a rondas intermedias de tool-calling (esas siempre
+        // tienen tool_calls_json y su enviado_whatsapp=0 es normal/esperado, nunca
+        // "se perdio en el camino").
+        if ($rol === 'assistant' && empty($row['tool_calls_json']) && (int)($row['enviado_whatsapp'] ?? 1) === 0) {
+            continue;
+        }
 
         if ($rol === 'assistant' && !empty($row['tool_calls_json'])) {
             $toolCalls = json_decode((string)$row['tool_calls_json'], true);
@@ -1862,6 +1898,27 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
             'precio' => $preciosOferta[$idProducto] ?? round((float)$row['precio_venta'], 2),
             'stock' => $stock,
         ];
+
+        // Si el producto SI esta en la categoria "Ofertas", consultar_inventario ya le pone
+        // el precio rebajado en 'precio' (arriba) -- pero sin esto Alex no tiene forma de
+        // saber que ese numero es un descuento y no el precio de siempre. Caso real: un
+        // cliente pregunto por un producto en oferta via consultar_inventario (no dijo
+        // "oferta"/"descuento") y Alex solo dijo "Precio: $301.37" como si fuera el precio
+        // normal, sin mencionar el ahorro -- nunca llamo a consultar_ofertas porque ya sentia
+        // que tenia una respuesta completa. Se agregan estas llaves aqui para que la
+        // mencione SIN depender de que el LLM decida llamar la otra herramienta ademas.
+        //
+        // Solo si el precio de oferta es de verdad MENOR al normal: un override manual mal
+        // capturado (precio_oferta >= precio_venta) o el costo+$50 automatico superando un
+        // precio_venta de margen delgado no deben hacer que Alex le diga al cliente "esta en
+        // oferta, ahorras $0" (o un ahorro negativo) -- mismo cuidado que ya aplica
+        // aiListarOfertasVigentes() con su 'ahorro' => max(0, ...).
+        $precioOfertaProducto = $preciosOferta[$idProducto] ?? null;
+        $precioVentaNormal = round((float)$row['precio_venta'], 2);
+        if ($precioOfertaProducto !== null && $precioOfertaProducto < $precioVentaNormal) {
+            $producto['en_oferta'] = true;
+            $producto['precio_normal'] = $precioVentaNormal;
+        }
 
         // Solo unos cuantos productos tienen esta ficha capturada todavia (ver
         // scripts/populate_product_benefits.php y la sincronizacion con B-Life) -- se omiten
@@ -2555,7 +2612,8 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             "No se pudo registrar un pedido con Alex (fallo tecnico).\n"
             . "Cliente: {$nombre}\n"
             . 'Error: ' . $e->getMessage()
-            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? '')),
+            (string)($context['wa_id'] ?? '')
         );
         return ['ok' => false, 'message' => 'No fue posible registrar el pedido, intentemos de nuevo en un momento.'];
     }
@@ -2566,7 +2624,8 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             "No se pudo registrar un pedido con Alex.\n"
             . "Cliente: {$nombre}\n"
             . "Motivo: {$motivoFallo}"
-            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+            . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? '')),
+            (string)($context['wa_id'] ?? '')
         );
         return ['ok' => false, 'message' => $motivoFallo];
     }
@@ -2648,7 +2707,8 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             . "Direccion: {$direccion}\n"
             . "Productos: {$listaItems}\n"
             . 'Confirma si se puede entregar ahi y que costo aplica -- Alex NO le prometio nada al cliente sobre el envio.'
-            . aiBuildWhatsAppLinkLine($waIdVenta)
+            . aiBuildWhatsAppLinkLine($waIdVenta),
+            $waIdVenta
         );
 
         if (!empty($context['id_conversacion'])) {
@@ -2685,7 +2745,8 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
         . "Productos: {$listaItems}"
         . ($cargoEnvio > 0 ? "\nIncluye cargo de envio foraneo: +\${$cargoEnvio} MXN" : '')
-        . aiBuildWhatsAppLinkLine($waIdVenta)
+        . aiBuildWhatsAppLinkLine($waIdVenta),
+        $waIdVenta
     );
 
     $mensajeRespuesta = 'Pedido registrado correctamente.';
@@ -2731,8 +2792,35 @@ function aiBuildWhatsAppLinkLine(string $waId): string
     return "\nAbrir chat: https://wa.me/{$linkPhone}";
 }
 
-function aiSendTelegramAlert(string $texto): void
+// Prefijo de los wa_id sinteticos que usa el playground local de pruebas
+// (api/alex_playground.php, solo disponible con IS_PRODUCTION=false). Tiene que ser SOLO
+// digitos: waParseBridgePayload() le quita cualquier caracter no numerico a sender_phone
+// (asi que un prefijo con letras, ej. "TESTLOCAL", desaparece antes de guardarse). "000" es
+// una lada que ningun numero mexicano real puede tener (los codigos de pais siempre
+// empiezan en 1-9), asi que un wa_id que arranca con "000" nunca puede coincidir con un
+// cliente real -- sirve para blindar efectos secundarios reales (alertas de Telegram) contra
+// una conversacion de prueba.
+const AI_PLAYGROUND_WA_PREFIX = '000';
+
+function aiEsConversacionDePrueba(string $waId): bool
 {
+    // Exige tambien el largo exacto que genera el playground (ver views/alex_playground.php:
+    // AI_PLAYGROUND_WA_PREFIX + 7 digitos = 10 en total). Un wa_id real de telefono siempre
+    // trae codigo de pais (12-13 digitos) y un LID de privacidad de WhatsApp trae 14-15 --
+    // ninguno de los dos puede medir exactamente 10, asi que exigir el largo evita que un LID
+    // que por azar empiece en "000" se confunda con una conversacion de prueba y silencie una
+    // alerta real (ver aiSendTelegramAlert()).
+    return strlen($waId) === 10 && strpos($waId, AI_PLAYGROUND_WA_PREFIX) === 0;
+}
+
+function aiSendTelegramAlert(string $texto, ?string $waId = null): void
+{
+    // Una conversacion del playground local nunca debe generar una alerta real al
+    // Telegram del negocio -- el wa_id sintetico lo delata sin ambiguedad.
+    if ($waId !== null && aiEsConversacionDePrueba($waId)) {
+        return;
+    }
+
     $enabledRaw = strtolower((string)(getEnvVar('TELEGRAM_NOTIFICATIONS_ENABLED', '1') ?? '1'));
     if (!in_array($enabledRaw, ['1', 'true', 'yes', 'on'], true)) {
         return;
@@ -2802,7 +2890,7 @@ function aiToolTransferirHumano(PDO $pdo, array $args, array $context): array
     $nombrePerfil = trim((string)($context['nombre_perfil'] ?? ''));
     $quien = $nombrePerfil !== '' ? "{$nombrePerfil} ({$waId})" : $waId;
 
-    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}" . aiBuildWhatsAppLinkLine($waId));
+    aiSendTelegramAlert("Cliente de WhatsApp {$quien} solicita atencion humana.\nMotivo: {$motivo}" . aiBuildWhatsAppLinkLine($waId), $waId);
 
     return ['ok' => true, 'message' => 'Un asesor humano continuara la conversacion en breve.'];
 }
@@ -3606,7 +3694,8 @@ function aiGenerarRespuestaParaConversacion(
                     "Alex tuvo un error tecnico usando la herramienta '{$functionName}'.\n"
                     . 'Cliente: ' . (string)($context['nombre_perfil'] ?? '') . "\n"
                     . 'Error: ' . $e->getMessage()
-                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? ''))
+                    . aiBuildWhatsAppLinkLine((string)($context['wa_id'] ?? '')),
+                    (string)($context['wa_id'] ?? '')
                 );
                 $toolResult = ['ok' => false, 'message' => 'Error interno al ejecutar la herramienta.'];
             }

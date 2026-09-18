@@ -39,6 +39,30 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('', aiBuildWhatsAppLinkLine('12345'));
     }
 
+    // --- aiEsConversacionDePrueba() / aiSendTelegramAlert(): playground local (TESTLOCAL) ---
+
+    public function testEsConversacionDePruebaReconoceElPrefijoDelPlayground(): void
+    {
+        $this->assertTrue(aiEsConversacionDePrueba(AI_PLAYGROUND_WA_PREFIX . '1234567'));
+        $this->assertTrue(aiEsConversacionDePrueba('0001234567'));
+    }
+
+    public function testEsConversacionDePruebaRechazaNumerosReales(): void
+    {
+        // Ningun numero real de WhatsApp (siempre con codigo de pais, nunca arranca en "0")
+        // debe poder confundirse con una conversacion de prueba.
+        $this->assertFalse(aiEsConversacionDePrueba('5213334040398'));
+        $this->assertFalse(aiEsConversacionDePrueba(''));
+    }
+
+    public function testSendTelegramAlertNoTronaConWaIdDePruebaAunSinCredencialesReales(): void
+    {
+        // Regresion de forma: nunca debe lanzar, con o sin wa_id, con o sin TELEGRAM_* configurado.
+        aiSendTelegramAlert('Texto de prueba', AI_PLAYGROUND_WA_PREFIX . '1234567');
+        aiSendTelegramAlert('Texto de prueba');
+        $this->addToAssertionCount(1); // llegar aqui sin excepcion es la aserción real
+    }
+
     public function testAiBuildWhatsAppLinkLineReturnsEmptyForLidIdentifiers(): void
     {
         // aiWaIdToMxDigits() valida el patron exacto 52(1)?+10 digitos -- un LID de WhatsApp
@@ -1067,6 +1091,56 @@ final class AiAssistantToolsTest extends TestCase
         ]));
     }
 
+    public function testLoadConversationHistoryOmiteRespuestaFinalQueNuncaSeEnvio(): void
+    {
+        // Caso real (2026-09-17): un asesor escribio a mano mientras el puente todavia
+        // esperaba su delay de 60-120s (ver aiConfirmarEnvioWhatsapp()); esa respuesta
+        // quedo guardada con enviado_whatsapp=0 pero el cliente JAMAS la vio. Si el
+        // historial se la sigue mandando a DeepSeek, Alex "recuerda" haber preguntado
+        // algo (ej. la ciudad para confirmar cobertura) que en realidad nunca salio, y no
+        // lo vuelve a preguntar en el siguiente turno.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000100', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Hola, quiero info');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'Antes que nada, en que ciudad estas?', null, null, null, null, false);
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Tienen magnesio?');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'Si, tenemos varias opciones.', null, null, null, null, true);
+
+        $history = aiLoadConversationHistory($this->pdo, $idConversacion);
+
+        $this->assertCount(3, $history);
+        $contenidos = array_column($history, 'content');
+        $this->assertNotContains('Antes que nada, en que ciudad estas?', $contenidos);
+        $this->assertContains('Hola, quiero info', $contenidos);
+        $this->assertContains('Tienen magnesio?', $contenidos);
+        $this->assertContains('Si, tenemos varias opciones.', $contenidos);
+    }
+
+    public function testLoadConversationHistoryConservaRondasDeToolCallsAunqueNoEsten_Enviado_Whatsapp(): void
+    {
+        // Regresion: una ronda intermedia de tool-calling (el LLM pidiendo llamar a una
+        // funcion) SIEMPRE tiene enviado_whatsapp=0 -- no es texto que se le manda al
+        // cliente, es conversacion interna con DeepSeek. El filtro de arriba NO debe
+        // tocar estas filas, solo las respuestas finales (sin tool_calls) que se
+        // suprimieron.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000101', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Tienen omega 3?');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', null, [
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'consultar_inventario', 'arguments' => '{"busqueda_texto":"omega 3"}']],
+        ]);
+        aiAppendMessage($this->pdo, $idConversacion, 'tool', '{"ok":true,"productos":[]}', null, 'call_1', 'consultar_inventario');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'No tenemos existencia por ahora.', null, null, null, null, true);
+
+        $history = aiLoadConversationHistory($this->pdo, $idConversacion);
+
+        $this->assertCount(4, $history);
+        $this->assertSame('assistant', $history[1]['role']);
+        $this->assertArrayHasKey('tool_calls', $history[1]);
+    }
+
     public function testAiLoadConversationHistoryNeverStartsWithAnOrphanedToolMessage(): void
     {
         // Reproduce el incidente real (panel de diagnostico, deepseek_conexion HTTP 400):
@@ -1609,7 +1683,12 @@ final class AiAssistantToolsTest extends TestCase
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020008', null);
 
         // WA_BRIDGE_SEND_URL no esta configurado en el entorno de tests, asi que el envio
-        // real falla (ok:false), pero el mensaje se debe seguir guardando y marcando.
+        // real falla (ok:false) -- el mensaje se sigue guardando (para que quede registro de
+        // lo que se intento mandar) y la conversacion se marca "esperando respuesta" igual,
+        // pero enviado_whatsapp debe reflejar la falla real, NUNCA true (regresion: antes de
+        // este fix quedaba marcado como enviado sin importar si en realidad salio o no, asi
+        // que Alex "recordaria" un seguimiento que el cliente jamas recibio -- ver
+        // aiLoadConversationHistory()).
         $ok = aiSendFollowupMessage($this->pdo, $conversacion);
         $this->assertFalse($ok);
 
@@ -1618,7 +1697,26 @@ final class AiAssistantToolsTest extends TestCase
 
         $mensaje = $this->pdo->query('SELECT rol, enviado_whatsapp FROM whatsapp_mensajes ORDER BY id_mensaje DESC LIMIT 1')->fetch();
         $this->assertSame('assistant', $mensaje['rol']);
-        $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+        $this->assertSame(0, (int) $mensaje['enviado_whatsapp']);
+    }
+
+    public function testSendFollowupMessageMarcaEnviadoWhatsappCuandoElEnvioSiFunciona(): void
+    {
+        // Complemento del test anterior: si waSendOutboundMessage() SI tiene exito
+        // (AI_ASSISTANT_TEST_MODE simula un envio ok), enviado_whatsapp debe quedar en 1 --
+        // el fix no debe volverse "siempre false", solo debe dejar de mentir.
+        $original = getenv('AI_ASSISTANT_TEST_MODE');
+        putenv('AI_ASSISTANT_TEST_MODE=1');
+        try {
+            $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020009', null);
+            $ok = aiSendFollowupMessage($this->pdo, $conversacion);
+            $this->assertTrue($ok);
+
+            $mensaje = $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes ORDER BY id_mensaje DESC LIMIT 1')->fetch();
+            $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+        } finally {
+            putenv($original === false ? 'AI_ASSISTANT_TEST_MODE' : 'AI_ASSISTANT_TEST_MODE=' . $original);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -2077,6 +2175,53 @@ final class AiAssistantToolsTest extends TestCase
         $idMensajeUsuario = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'user', 'Hola, tienen omega 3?');
 
         $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080008', $idMensajeUsuario));
+    }
+
+    // --- aiMarcarMensajeNoEnviado(): helper compartido por aiConfirmarEnvioWhatsapp() y el
+    // catch de api/whatsapp_confirmar_envio.php cuando la funcion de arriba truena a medias ---
+
+    public function testMarcarMensajeNoEnviadoApagaElFlag(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500090001', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Texto', null, null, null, null, true);
+
+        aiMarcarMensajeNoEnviado($this->pdo, $idMensaje);
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+    }
+
+    public function testMarcarMensajeNoEnviadoEsIdempotenteYSeguraConIdsInvalidos(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500090002', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Texto', null, null, null, null, true);
+
+        aiMarcarMensajeNoEnviado($this->pdo, $idMensaje);
+        aiMarcarMensajeNoEnviado($this->pdo, $idMensaje); // segunda vez, no debe tronar
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+
+        // ids invalidos: no deben tronar ni afectar nada (defensa en profundidad, aunque el
+        // llamador ya deberia haber validado esto).
+        aiMarcarMensajeNoEnviado($this->pdo, 0);
+        aiMarcarMensajeNoEnviado($this->pdo, -1);
+        $this->addToAssertionCount(2);
+    }
+
+    // --- aiEsConversacionDePrueba(): el prefijo del playground nunca debe confundirse con
+    // un identificador real de WhatsApp (telefono con codigo de pais o LID de privacidad) ---
+
+    public function testEsConversacionDePruebaExigeElLargoExactoDelPlayground(): void
+    {
+        // El playground siempre genera exactamente 10 digitos (prefijo "000" + 7 mas, ver
+        // views/alex_playground.php). Un LID real de WhatsApp (14-15 digitos) que por azar
+        // empezara en "000" NO debe confundirse con una conversacion de prueba -- eso
+        // silenciaria una alerta real de Telegram (ver aiSendTelegramAlert()).
+        $this->assertTrue(aiEsConversacionDePrueba('0001234567')); // 10 digitos, valido
+        $this->assertFalse(aiEsConversacionDePrueba('00012345678901')); // 14 digitos, tipo LID
+        $this->assertFalse(aiEsConversacionDePrueba('000123')); // muy corto
+        $this->assertFalse(aiEsConversacionDePrueba('5213334040398')); // numero real normal
     }
 
     // --- aiFindConversationsPendingRespuesta(): edge cases adicionales ---

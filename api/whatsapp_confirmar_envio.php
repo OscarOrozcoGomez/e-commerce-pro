@@ -67,6 +67,18 @@ try {
     // asesor ya esta viendo la conversacion); uno que se manda encima de un asesor en vivo
     // durante una falla no se puede deshacer y es justo el patron que puso la cuenta de
     // WhatsApp en revision el 2026-09-13 (ver CLAUDE.md).
+    //
+    // Se intenta ademas marcar el mensaje como no enviado (best-effort, ya estamos en el
+    // catch de un error): si aiConfirmarEnvioWhatsapp() truena DESPUES de validar el mensaje
+    // pero antes de decidir, el insert optimista original lo dejo en enviado_whatsapp=1 --
+    // sin este ajuste, aiLoadConversationHistory() no lo distinguiria de un mensaje que si
+    // se mando, y Alex "recordaria" haber dicho algo que el puente nunca llego a enviar.
+    try {
+        aiMarcarMensajeNoEnviado(getPDO(), $inbound['id_mensaje']);
+    } catch (Throwable $e2) {
+        error_log('ERROR adicional marcando no-enviado tras fallo de whatsapp_confirmar_envio: ' . $e2->getMessage());
+    }
+
     http_response_code(200);
     echo json_encode(['success' => true, 'enviar' => false]);
 }

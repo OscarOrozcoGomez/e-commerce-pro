@@ -53,6 +53,20 @@ final class OfertaPricingTest extends TestCase
         $this->assertSame(85.5, ofertaPrecioEfectivo(499.0, 200.0, '85.5', true));
     }
 
+    public function testEnOfertaNuncaCobraMasQueElPrecioDeVentaNormal(): void
+    {
+        // Dato mal capturado: el override manual quedo IGUAL o MAYOR al precio de venta
+        // (ej. se les olvido bajarlo, o el precio de venta subio despues sin actualizarlo).
+        // Nunca debe cobrarsele de mas al cliente por estar "en oferta".
+        $this->assertSame(300.0, ofertaPrecioEfectivo(300.0, 100.0, 300.0, true));
+        $this->assertSame(300.0, ofertaPrecioEfectivo(300.0, 100.0, 450.0, true));
+
+        // Mismo cuidado para el fallback automatico costo+$50: un producto de margen
+        // delgado (precio_venta 140, costo 100) da costo+50=150, que ya supera el precio de
+        // venta normal -- no debe aplicarse tal cual.
+        $this->assertSame(140.0, ofertaPrecioEfectivo(140.0, 100.0, null, true));
+    }
+
     // ------------------------------------------------------------------
     // Expresiones SQL: no deben introducir placeholders
     // ------------------------------------------------------------------
@@ -77,6 +91,9 @@ final class OfertaPricingTest extends TestCase
         $this->assertStringContainsString('NULLIF(p.precio_oferta, 0)', $expr);
         $this->assertStringContainsString('GREATEST(p.precio_costo, 0) + 50', $expr);
         $this->assertStringContainsString('ELSE p.precio_venta END', $expr);
+        // Nunca cobrar mas por "estar en oferta" que el precio de venta normal (misma regla
+        // que ofertaPrecioEfectivo()) -- ver testEnOfertaNuncaCobraMasQueElPrecioDeVentaNormal.
+        $this->assertStringContainsString('LEAST(p.precio_venta,', $expr);
         $this->assertStringNotContainsString('?', $expr);
     }
 
