@@ -571,12 +571,44 @@ function aiWaIdToDisplayPhone(string $waId): ?string
         return null;
     }
 
+    return aiFormatMxPhoneDigits($digits);
+}
+
+/**
+ * Formatea 10 digitos nacionales mexicanos como "+52 33 3404 0398". Separada de
+ * aiWaIdToDisplayPhone() para poder formatear tambien un telefono que NO vino del wa_id --
+ * ver aiWaIdToDisplayPhoneConResuelto().
+ */
+function aiFormatMxPhoneDigits(string $digits): string
+{
     // Ladas de 2 digitos (Guadalajara 33, CDMX 55, Monterrey 81) vs 3 digitos.
     if (in_array(substr($digits, 0, 2), ['33', '55', '81'], true)) {
         return '+52 ' . substr($digits, 0, 2) . ' ' . substr($digits, 2, 4) . ' ' . substr($digits, 6, 4);
     }
 
     return '+52 ' . substr($digits, 0, 3) . ' ' . substr($digits, 3, 3) . ' ' . substr($digits, 6, 4);
+}
+
+/**
+ * Igual que aiWaIdToDisplayPhone(), pero cuando el wa_id es un LID (WhatsApp oculta el
+ * numero real, el caso de la gran mayoria de conversaciones -- ver scripts/
+ * resolver_lids_whatsapp.php) cae al telefono que ese script ya haya logrado resolver y
+ * guardado en whatsapp_conversaciones.telefono_resuelto. El numero derivado del wa_id
+ * (cuando SI es un telefono real) siempre tiene prioridad sobre el resuelto.
+ */
+function aiWaIdToDisplayPhoneConResuelto(string $waId, ?string $telefonoResuelto): ?string
+{
+    $directo = aiWaIdToDisplayPhone($waId);
+    if ($directo !== null) {
+        return $directo;
+    }
+
+    $resuelto = trim((string) ($telefonoResuelto ?? ''));
+    if (!preg_match('/^\d{10}$/', $resuelto)) {
+        return null;
+    }
+
+    return aiFormatMxPhoneDigits($resuelto);
 }
 
 /**

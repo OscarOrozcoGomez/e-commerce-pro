@@ -79,7 +79,7 @@ $pendientesCount = 0;
 $allTags = [];
 try {
     $conversaciones = $pdo->query(
-        'SELECT id_conversacion, wa_id, nombre_perfil, estado_bot, motivo_transferencia, ultimo_mensaje_en
+        'SELECT id_conversacion, wa_id, telefono_resuelto, nombre_perfil, estado_bot, motivo_transferencia, ultimo_mensaje_en
          FROM whatsapp_conversaciones
          ORDER BY ultimo_mensaje_en DESC
          LIMIT 50'
@@ -105,7 +105,7 @@ try {
 $conversacionesSeguimiento = [];
 try {
     $conversacionesSeguimiento = $pdo->query(
-        'SELECT id_conversacion, wa_id, nombre_perfil, estado_bot, seguimiento_enviado_en
+        'SELECT id_conversacion, wa_id, telefono_resuelto, nombre_perfil, estado_bot, seguimiento_enviado_en
          FROM whatsapp_conversaciones
          WHERE seguimiento_enviado_en IS NOT NULL
          ORDER BY seguimiento_enviado_en DESC
@@ -115,7 +115,13 @@ try {
     foreach ($conversacionesSeguimiento as &$conv) {
         $conv['tags'] = aiGetConversationTags($pdo, (int)$conv['id_conversacion']);
         $conv['contesto'] = aiCustomerRepliedAfterFollowup($pdo, (int)$conv['id_conversacion']);
-        $digitsNacionales = aiWaIdToMxDigits((string)$conv['wa_id']);
+        // Si el wa_id es un LID (WhatsApp oculta el numero real) pero ya se resolvio el
+        // telefono real (ver scripts/resolver_lids_whatsapp.php), el link de WhatsApp SI
+        // puede armarse con ese numero -- antes de esto, un LID nunca tenia boton "Abrir
+        // WhatsApp" porque no habia ningun telefono real que usar.
+        $digitsNacionales = aiWaIdToMxDigits((string)$conv['wa_id']) ?? (
+            preg_match('/^\d{10}$/', (string)($conv['telefono_resuelto'] ?? '')) ? (string)$conv['telefono_resuelto'] : null
+        );
         $conv['wa_link_phone'] = $digitsNacionales !== null ? waBuildBusinessLinkPhone($digitsNacionales) : '';
     }
     unset($conv);
@@ -251,7 +257,7 @@ include __DIR__ . '/includes/header.php';
                     <?php else: ?>
                         <?php foreach ($conversaciones as $conv): ?>
                             <?php
-                                $convTelefono = aiWaIdToDisplayPhone((string)$conv['wa_id']);
+                                $convTelefono = aiWaIdToDisplayPhoneConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
                                 $convNombre = trim((string)($conv['nombre_perfil'] ?? ''));
                                 // Linea principal: nombre de perfil de WhatsApp si lo tenemos; si no,
                                 // el telefono formateado; si es un LID sin nombre, un texto generico.
@@ -336,7 +342,7 @@ include __DIR__ . '/includes/header.php';
                             <tbody>
                                 <?php foreach ($conversacionesSeguimiento as $conv): ?>
                                     <?php
-                                        $stTelefono = aiWaIdToDisplayPhone((string)$conv['wa_id']);
+                                        $stTelefono = aiWaIdToDisplayPhoneConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
                                         $stNombre = trim((string)($conv['nombre_perfil'] ?? ''));
                                         $stTitulo = $stNombre !== '' ? $stNombre : ($stTelefono ?? 'Contacto de WhatsApp');
                                     ?>

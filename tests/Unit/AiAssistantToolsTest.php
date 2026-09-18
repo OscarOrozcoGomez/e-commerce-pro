@@ -1552,6 +1552,49 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNull(aiWaIdToDisplayPhone('120363402368777906')); // LID
     }
 
+    // --- aiWaIdToDisplayPhoneConResuelto() / aiFormatMxPhoneDigits(): telefono de un LID ya
+    // resuelto por scripts/resolver_lids_whatsapp.php ---
+
+    public function testFormatMxPhoneDigitsHandlesTwoAndThreeDigitLadas(): void
+    {
+        $this->assertSame('+52 33 3404 0398', aiFormatMxPhoneDigits('3334040398'));
+        $this->assertSame('+52 341 123 4567', aiFormatMxPhoneDigits('3411234567'));
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoPrefiereElNumeroRealSobreElResuelto(): void
+    {
+        // Si el wa_id YA es un telefono real, nunca debe usarse telefono_resuelto (aunque
+        // venga uno, seria redundante/potencialmente inconsistente).
+        $this->assertSame(
+            '+52 33 3404 0398',
+            aiWaIdToDisplayPhoneConResuelto('5213334040398', '3221234567')
+        );
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoUsaElResueltoParaUnLid(): void
+    {
+        $this->assertSame(
+            '+52 322 123 4567',
+            aiWaIdToDisplayPhoneConResuelto('53236337742009', '3221234567')
+        );
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoRegresaNullSinNingunDato(): void
+    {
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', null));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', ''));
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoIgnoraUnResueltoMalFormado(): void
+    {
+        // Defensa en profundidad: telefono_resuelto deberia venir siempre en 10 digitos
+        // limpios (asi lo guarda el script), pero si algo mas escribiera basura ahi, nunca
+        // debe mostrarse como si fuera un telefono real.
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', '12345'));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', 'abcdefghij'));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', '52332212345678'));
+    }
+
     public function testAiPhoneHasLocalLadaDistinguishesFromOtherJaliscoLadasStartingWithThree(): void
     {
         // Caso real: un pedido se agendo para Villa Purificacion, Jalisco (fuera de la
