@@ -498,6 +498,8 @@ try {
 
         $idPedido = (int)$pdo->lastInsertId();
         $auditNotes = [];
+        $auditDescuentos = [];
+        $auditPreciosDistintos = [];
 
         foreach ($productos as $producto) {
             $stmtProducto = $pdo->prepare('SELECT nombre, COALESCE(precio_venta, 0) AS precio_venta, COALESCE(precio_costo, 0) AS precio_costo, precio_oferta FROM productos WHERE id_producto = ? LIMIT 1');
@@ -524,6 +526,12 @@ try {
             $nombreProducto = trim((string)($productoDb['nombre'] ?? ('Producto #' . $producto['id_producto'])));
 
             if (abs($precioCatalogo - (float)$producto['precio_unitario']) > 0.009) {
+                $auditPreciosDistintos[] = [
+                    'producto' => '#' . (int)$producto['id_producto'] . ' ' . $nombreProducto,
+                    'cantidad' => (int)$producto['cantidad'],
+                    'precio_catalogo' => $precioCatalogo,
+                    'precio_capturado' => (float)$producto['precio_unitario'],
+                ];
                 $auditNotes[] = sprintf(
                     '%s x%d: precio catálogo $%.2f, precio capturado $%.2f',
                     $nombreProducto,
@@ -533,6 +541,12 @@ try {
                 );
             }
             if ($descuentoLinea > 0) {
+                $auditDescuentos[] = [
+                    'producto' => '#' . (int)$producto['id_producto'] . ' ' . $nombreProducto,
+                    'cantidad' => (int)$producto['cantidad'],
+                    'descuento' => $descuentoLinea,
+                    'porcentaje' => $porcentajeDescuento,
+                ];
                 $auditNotes[] = sprintf(
                     '%s x%d: descuento manual $%.2f',
                     $nombreProducto,
@@ -600,7 +614,36 @@ try {
             'pedidos',
             $idPedido,
             ($esVentaSucursal ? "Venta en sucursal registrada: " : "Pedido agendado: ") . "$numeroPedido. Total: $total"
+                . ' | ' . count($productos) . ' producto(s), subtotal ' . $subtotal . ', descuento ' . $descuentoTotal . ', envío ' . $costoEnvioVenta
+                . ' | cliente #' . (int)$idCliente,
+            null,
+            ['numero_pedido' => $numeroPedido, 'id_cliente' => (int)$idCliente, 'subtotal' => $subtotal, 'descuento_total' => $descuentoTotal, 'costo_envio' => $costoEnvioVenta, 'total' => $total, 'sin_inventario' => (bool)$ventaSinInventario]
         );
+        // Descuentos manuales y precios distintos al catalogo: es donde mas se puede "regalar"
+        // dinero sin querer o queriendo. Cada uno queda como evento propio para poder filtrarlo.
+        if (!empty($auditDescuentos)) {
+            logAudit(
+                'VENTA_DESCUENTO_MANUAL',
+                'pedidos',
+                $idPedido,
+                "Pedido $numeroPedido | descuento manual total $" . number_format($descuentoTotal, 2) . ': '
+                    . implode('; ', array_map(static fn(array $d): string => $d['producto'] . ' x' . $d['cantidad'] . ' -$' . number_format((float)$d['descuento'], 2), $auditDescuentos)),
+                null,
+                ['lineas' => $auditDescuentos, 'descuento_total' => $descuentoTotal],
+                ['severidad' => 'alerta']
+            );
+        }
+        if (!empty($auditPreciosDistintos)) {
+            logAudit(
+                'VENTA_PRECIO_DISTINTO_CATALOGO',
+                'pedidos',
+                $idPedido,
+                "Pedido $numeroPedido | " . implode('; ', array_map(static fn(array $d): string => $d['producto'] . ' x' . $d['cantidad'] . ': catálogo $' . number_format((float)$d['precio_catalogo'], 2) . ' -> cobrado $' . number_format((float)$d['precio_capturado'], 2), $auditPreciosDistintos)),
+                null,
+                ['lineas' => $auditPreciosDistintos],
+                ['severidad' => 'alerta']
+            );
+        }
         if ($ventaSinInventario) {
             logAudit('PEDIDO_SIN_AFECTAR_INVENTARIO', 'pedidos', $idPedido, "Pedido $numeroPedido creado sin afectar inventario por usuario ID {$usuario['id_usuario']}.");
         }

@@ -24,6 +24,17 @@ try {
         isAdmin()
     );
 
+    // Auditoria: quien descargo el reporte de ventas (contiene datos de clientes y montos).
+    logAudit(
+        'EXPORTACION_DATOS',
+        'exportaciones',
+        null,
+        'Reporte de ventas PDF del ' . $fecha_inicio . ' al ' . $fecha_fin . ' (' . count($ventas) . ' venta(s))',
+        null,
+        ['formato' => 'pdf', 'fecha_inicio' => $fecha_inicio, 'fecha_fin' => $fecha_fin, 'filas' => count($ventas)],
+        ['severidad' => 'alerta']
+    );
+
     $totalVentas = 0.0;
     foreach ($ventas as $venta) {
         $totalVentas += (float)($venta['total'] ?? 0);

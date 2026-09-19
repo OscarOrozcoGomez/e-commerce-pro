@@ -62,6 +62,22 @@ try {
     $stmtFinal->execute([$idOrden]);
 
     $pdo->commit();
+
+    $auditRecibidos = [];
+    foreach ($_POST as $key => $value) {
+        if (strpos($key, 'recibido_') === 0 && intval($value) > 0) {
+            $auditRecibidos[] = '#' . intval(str_replace('recibido_', '', $key)) . ' x' . intval($value);
+        }
+    }
+    logAudit(
+        'ORDEN_COMPRA_RECIBIDA',
+        'ordenes_compra',
+        $idOrden,
+        'Orden ' . ($orden['referencia'] ?? ('#' . $idOrden)) . ' recibida: ' . implode(', ', array_slice($auditRecibidos, 0, 20)),
+        ['estado' => 'enviada'],
+        ['estado' => 'recibida', 'productos_recibidos' => $auditRecibidos],
+        ['severidad' => 'aviso']
+    );
     echo json_encode(['success' => true]);
 
 } catch (Exception $e) {

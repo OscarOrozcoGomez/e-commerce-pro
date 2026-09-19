@@ -70,7 +70,7 @@ try {
             $targetUserId = (int)$existingUser['id_usuario'];
             $pdo->prepare("UPDATE usuarios SET nombre = ?, email = ?, contrasena = ?, id_rol = ?, id_almacen = ?, estado = 'activo', intentos_fallidos = 0, bloqueado_hasta = NULL, es_superadmin = 0 WHERE id_usuario = ?")
                 ->execute([$nombre, $email, $passwordHash, $id_rol, $id_almacen, $targetUserId]);
-            logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email");
+            logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email | rol: $rolNombre | sucursal: " . ($id_almacen ?: 'ninguna'), null, ['estado' => 'activo', 'rol' => $rolNombre, 'id_almacen' => $id_almacen], ['severidad' => 'alerta']);
             echo json_encode(['success' => true, 'message' => 'Cuenta existente reactivada y actualizada']);
         } else {
             $sql = "INSERT INTO usuarios (nombre, email, contrasena, id_rol, id_almacen, estado) 
@@ -78,7 +78,7 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$nombre, $email, $passwordHash, $id_rol, $id_almacen]);
             
-            logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email");
+            logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email | nombre: $nombre | rol: $rolNombre | sucursal: " . ($id_almacen ?: 'ninguna'), null, ['nombre' => $nombre, 'email' => auditEnmascararPii('email', $email), 'rol' => $rolNombre, 'id_almacen' => $id_almacen], ['severidad' => 'alerta']);
             echo json_encode(['success' => true, 'message' => 'Usuario creado']);
         }
     } 
@@ -107,7 +107,7 @@ try {
         $stmt = $pdo->prepare("UPDATE usuarios SET estado = ? WHERE id_usuario = ?");
         $stmt->execute([$nuevo_estado, $id]);
         
-        logAudit('USUARIO_ESTADO_CAMBIADO', 'usuarios', $id, "Nuevo estado: $nuevo_estado");
+        logAudit('USUARIO_ESTADO_CAMBIADO', 'usuarios', $id, auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id) . " ({$targetUser['rol']}) | estado: $estado_actual -> $nuevo_estado", ['estado' => $estado_actual], ['estado' => $nuevo_estado], ['severidad' => $nuevo_estado === 'inactivo' ? 'alerta' : 'aviso']);
         echo json_encode(['success' => true, 'message' => 'Estado actualizado']);
     }
     elseif ($accion === 'desbloquear') {
@@ -125,7 +125,7 @@ try {
         $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
             ->execute([$id]);
             
-        logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, "Desbloqueo manual");
+        logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id) . " ({$targetUser['rol']}) | desbloqueo manual");
         echo json_encode(['success' => true, 'message' => 'Usuario desbloqueado']);
     }
     else {

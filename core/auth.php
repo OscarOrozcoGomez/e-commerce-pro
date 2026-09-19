@@ -10,6 +10,8 @@ require_once __DIR__ . '/lote_caducidad_utils.php';
 require_once __DIR__ . '/attribution.php';
 require_once __DIR__ . '/ventas_features.php';
 require_once __DIR__ . '/referrals.php';
+require_once __DIR__ . '/audit_utils.php';
+require_once __DIR__ . '/audit_snapshots.php';
 
 /**
  * Claves de permiso que HOY se comprueban de verdad en el codigo
@@ -82,7 +84,7 @@ function isLoginDegradedModeEnabled(): bool
 /**
  * Cola de auditoria de contingencia (JSONL) cuando la BD esta lenta/no disponible.
  */
-function logAuditFallback(string $accion, string $tabla, ?int $id_registro, string $detalles): void
+function logAuditFallback(string $accion, string $tabla, ?int $id_registro, string $detalles, array $extra = []): void
 {
     try {
         $path = __DIR__ . '/../audit_fallback.log';
@@ -95,7 +97,7 @@ function logAuditFallback(string $accion, string $tabla, ?int $id_registro, stri
             'id_usuario' => $_SESSION['usuario']['id_usuario'] ?? null,
             'ip' => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
             'ua' => $_SERVER['HTTP_USER_AGENT'] ?? '',
-        ];
+        ] + $extra;
         @file_put_contents($path, json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
     } catch (Throwable $e) {
         // Nunca romper flujo de negocio por auditoria.
@@ -103,12 +105,68 @@ function logAuditFallback(string $accion, string $tabla, ?int $id_registro, stri
 }
 
 /**
- * Registra una acción en el log de auditoría.
+ * Cuantas filas de auditoria especificas se han registrado en esta peticion. El registro
+ * generico de peticiones (auditRegistrarPeticion) lo consulta para no duplicar: solo deja
+ * su fila cuando el endpoint NO registro nada por su cuenta.
  */
-function logAudit(string $accion, string $tabla, ?int $id_registro, string $detalles): void
+function auditEventosEnPeticion(bool $incrementar = false): int
 {
+    static $total = 0;
+    if ($incrementar) {
+        $total++;
+    }
+    return $total;
+}
+
+/**
+ * Registra una acción en el log de auditoría.
+ *
+ * Los cuatro primeros parametros son los de siempre (compatibilidad con todas las
+ * llamadas existentes). Los nuevos son opcionales:
+ *
+ * @param array<string,mixed>|null $antes    Datos antes del cambio (solo campos relevantes).
+ * @param array<string,mixed>|null $despues  Datos despues del cambio.
+ * @param array<string,mixed>      $opciones severidad ('info'|'aviso'|'alerta'), y para forzar el
+ *                                           actor cuando aun no hay sesion (login fallido):
+ *                                           id_usuario, usuario_nombre, usuario_rol.
+ *
+ * Nunca lanza: una falla de auditoria no debe romper el flujo de negocio. La actividad
+ * de la persona (nombre, rol, IP, dispositivo, sesion, URL) se toma de la peticion actual.
+ */
+function logAudit(
+    string $accion,
+    string $tabla,
+    ?int $id_registro,
+    string $detalles,
+    ?array $antes = null,
+    ?array $despues = null,
+    array $opciones = []
+): void {
+    try {
+        auditEventosEnPeticion(true);
+
+        $accion = mb_substr($accion, 0, AUDIT_MAX_ACCION);
+        $tabla = mb_substr($tabla, 0, AUDIT_MAX_TABLA);
+        $detalles = mb_substr($detalles, 0, AUDIT_MAX_DETALLES);
+        $ctx = auditContextoActual($opciones);
+        $severidad = auditNormalizarSeveridad($opciones['severidad'] ?? null, $accion);
+        $jsonAntes = auditJsonCompacto($antes);
+        $jsonDespues = auditJsonCompacto($despues);
+    } catch (Throwable $e) {
+        error_log('Error preparando auditoría: ' . $e->getMessage());
+        return;
+    }
+
     if (isLoginDegradedModeEnabled()) {
-        logAuditFallback($accion, $tabla, $id_registro, $detalles);
+        logAuditFallback($accion, $tabla, $id_registro, $detalles, [
+            'id_usuario' => $ctx['id_usuario'],
+            'usuario_nombre' => $ctx['usuario_nombre'],
+            'usuario_rol' => $ctx['usuario_rol'],
+            'url' => $ctx['url'],
+            'severidad' => $severidad,
+            'datos_antes' => $jsonAntes,
+            'datos_despues' => $jsonDespues,
+        ]);
         return;
     }
 
@@ -119,20 +177,214 @@ function logAudit(string $accion, string $tabla, ?int $id_registro, string $deta
         } catch (Throwable $e) {
             // Seguir aunque no se pueda ajustar timeout.
         }
-        $stmt = $pdo->prepare("INSERT INTO logs_auditoria (id_usuario, accion, tabla_afectada, id_registro, detalles, ip_address) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([
-            $_SESSION['usuario']['id_usuario'] ?? null,
-            $accion,
-            $tabla,
-            $id_registro,
-            $detalles,
-            $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'
-        ]);
+
+        try {
+            $stmt = $pdo->prepare(
+                'INSERT INTO logs_auditoria
+                    (id_usuario, accion, tabla_afectada, id_registro, detalles, ip_address,
+                     usuario_nombre, usuario_rol, id_almacen, sesion_hash, user_agent, url, metodo,
+                     origen, severidad, datos_antes, datos_despues)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $ctx['id_usuario'],
+                $accion,
+                $tabla,
+                $id_registro,
+                $detalles,
+                $ctx['ip'],
+                $ctx['usuario_nombre'] !== null ? mb_substr((string) $ctx['usuario_nombre'], 0, 150) : null,
+                $ctx['usuario_rol'] !== null ? mb_substr((string) $ctx['usuario_rol'], 0, 50) : null,
+                $ctx['id_almacen'],
+                $ctx['sesion_hash'],
+                $ctx['user_agent'] !== '' ? $ctx['user_agent'] : null,
+                $ctx['url'] !== '' ? $ctx['url'] : null,
+                $ctx['metodo'] !== '' ? $ctx['metodo'] : null,
+                mb_substr((string) $ctx['origen'], 0, 12),
+                $severidad,
+                $jsonAntes,
+                $jsonDespues,
+            ]);
+        } catch (PDOException $e) {
+            // 42S22 = columna desconocida: el deploy ya subio el codigo pero la migracion
+            // 20260919_000001 aun no corre. Se registra en el formato anterior (sin perder el
+            // evento) y el resumen de cambios ya viaja dentro de "detalles".
+            if ($e->getCode() !== '42S22') {
+                throw $e;
+            }
+            $stmt = $pdo->prepare('INSERT INTO logs_auditoria (id_usuario, accion, tabla_afectada, id_registro, detalles, ip_address) VALUES (?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$ctx['id_usuario'], $accion, $tabla, $id_registro, $detalles, $ctx['ip']]);
+        }
     } catch (Throwable $e) {
         // En producción, podrías loguear esto a un archivo para no detener el flujo
         error_log("Error en auditoría: " . $e->getMessage());
     }
 }
+
+/**
+ * Registra un cambio comparando el registro ANTES y DESPUES. Guarda solo los campos que
+ * cambiaron (con PII enmascarada) y un resumen legible en "detalles".
+ *
+ * Si no hubo ningun cambio real no escribe nada y devuelve false: guardar en un
+ * formulario sin tocar nada no es un movimiento.
+ *
+ * @param array<string,mixed> $antes
+ * @param array<string,mixed> $despues
+ * @param string[]            $campos   Lista blanca de campos a comparar (vacio = los comunes).
+ * @param array<string,mixed> $opciones Igual que logAudit(); ademas 'contexto' (texto que antecede
+ *                                      al resumen, ej. el nombre del producto).
+ */
+function logAuditCambios(
+    string $accion,
+    string $tabla,
+    ?int $id_registro,
+    array $antes,
+    array $despues,
+    array $campos = [],
+    array $opciones = []
+): bool {
+    try {
+        $diff = auditDiff($antes, $despues, $campos);
+    } catch (Throwable $e) {
+        error_log('Error calculando diff de auditoría: ' . $e->getMessage());
+        return false;
+    }
+
+    if ($diff['despues'] === [] && $diff['antes'] === []) {
+        return false;
+    }
+
+    $contexto = trim((string) ($opciones['contexto'] ?? ''));
+    $resumen = auditResumenCambios($diff['antes'], $diff['despues']);
+    logAudit(
+        $accion,
+        $tabla,
+        $id_registro,
+        ($contexto !== '' ? $contexto . ' | ' : '') . $resumen,
+        $diff['antes'],
+        $diff['despues'],
+        $opciones
+    );
+    return true;
+}
+
+/**
+ * Registra un acceso denegado (alguien intento entrar a algo sin permiso). Severidad alerta.
+ */
+function auditAccesoDenegado(string $recurso): void
+{
+    logAudit(
+        'ACCESO_DENEGADO',
+        'permisos',
+        null,
+        'Intentó acceder sin permiso: ' . $recurso,
+        null,
+        null,
+        ['severidad' => 'alerta']
+    );
+}
+
+/**
+ * Red de seguridad: registra las peticiones que MODIFICAN datos (POST/PUT/PATCH/DELETE) hechas
+ * con sesion iniciada, cuando el endpoint no dejo su propio registro detallado. Asi ninguna
+ * operacion queda sin rastro aunque se agregue un endpoint nuevo y se olvide instrumentarlo.
+ *
+ * Se llama una vez al cargar auth.php; el registro real ocurre al terminar la peticion
+ * (shutdown), ya con la respuesta enviada, para no agregar latencia al usuario.
+ */
+function auditIniciarRegistroPeticiones(): void
+{
+    static $iniciado = false;
+    if ($iniciado || PHP_SAPI === 'cli') {
+        return;
+    }
+
+    $metodo = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if (!in_array($metodo, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+        return;
+    }
+    if (auditEndpointSinRegistro((string) ($_SERVER['SCRIPT_NAME'] ?? ''))) {
+        return;
+    }
+
+    $iniciado = true;
+    register_shutdown_function('auditRegistrarPeticionMutante');
+}
+
+function auditRegistrarPeticionMutante(): void
+{
+    try {
+        if (!isAuthenticated() || auditEventosEnPeticion() > 0) {
+            return;
+        }
+
+        // Con PHP-FPM la respuesta ya se puede entregar al usuario: el INSERT de auditoria corre
+        // despues y no le agrega latencia. (En mod_php de XAMPP la funcion no existe; no pasa nada.)
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
+        }
+
+        $datos = [];
+        if (!empty($_POST) && is_array($_POST)) {
+            $datos = $_POST;
+        }
+        if ($datos === []) {
+            // Endpoints JSON: el cuerpo llega en php://input (tope de 64 KB para no cargar subidas grandes).
+            $crudo = @file_get_contents('php://input', false, null, 0, 65536);
+            if (is_string($crudo) && $crudo !== '') {
+                $decodificado = json_decode($crudo, true);
+                if (is_array($decodificado)) {
+                    $datos = $decodificado;
+                }
+            }
+        }
+
+        // La accion puede venir en el cuerpo o en la query string (products_manager.php?action=save).
+        $accionPeticion = '';
+        foreach ([$datos, $_GET] as $origenDatos) {
+            foreach (['accion', 'action', 'op', 'operacion'] as $clave) {
+                if (isset($origenDatos[$clave]) && is_scalar($origenDatos[$clave])) {
+                    $accionPeticion = trim((string) $origenDatos[$clave]);
+                    break 2;
+                }
+            }
+        }
+        // Consultas que viajan por POST (listar, buscar, obtener...) no son movimientos.
+        if ($accionPeticion !== '' && auditAccionEsLectura($accionPeticion)) {
+            return;
+        }
+        // Un POST vacio (formulario sin campos, ping) tampoco.
+        if ($datos === [] && $accionPeticion === '' && empty($_FILES)) {
+            return;
+        }
+
+        $ruta = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+        $estado = (int) http_response_code();
+
+        $payload = auditSanitizarPayload($datos);
+        // El token CSRF y demas secretos ya salen como [oculto]; se quitan por ruido.
+        unset($payload['csrf_token'], $payload['_csrf'], $payload['csrf']);
+        if (!empty($_FILES) && is_array($_FILES)) {
+            $payload['_archivos'] = array_keys($_FILES);
+        }
+
+        logAudit(
+            'PETICION_ESCRITURA',
+            'http',
+            null,
+            strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'POST')) . ' ' . $ruta
+                . ($accionPeticion !== '' ? ' · acción=' . mb_substr($accionPeticion, 0, 60) : '')
+                . ($estado >= 400 ? ' · HTTP ' . $estado : ''),
+            null,
+            $payload,
+            ['severidad' => $estado >= 400 ? 'aviso' : 'info']
+        );
+    } catch (Throwable $e) {
+        error_log('Error en registro de peticiones: ' . $e->getMessage());
+    }
+}
+
+auditIniciarRegistroPeticiones();
 
 function getCsrfToken(): string
 {
@@ -546,6 +798,11 @@ function requirePermission(string $permiso, string $redirectUrl = ''): void
     }
 
     if (!hasPermission($permiso)) {
+        // Alguien con sesion intento entrar a algo que no le corresponde: se deja rastro
+        // (un visitante sin sesion no cuenta; ese caso lo cubre requireAuth).
+        if (isAuthenticated()) {
+            auditAccesoDenegado("permiso '{$permiso}' en " . (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH));
+        }
         if ($redirectUrl === '') {
             $redirectUrl = BASE_URL . 'index.php';
         }
@@ -684,6 +941,10 @@ function verifyStaffLoginOtp(string $code, ?string &$errorMessage = null): bool
         $usado = $nuevos >= 5 ? 1 : 0;
         $pdo->prepare("UPDATE staff_login_otp SET intentos = ?, usado = ? WHERE id_otp = ?")
             ->execute([$nuevos, $usado, $record['id_otp']]);
+        logAudit('LOGIN_OTP_FALLIDO', 'usuarios', $idUsuario, 'Código de verificación incorrecto (intento ' . $nuevos . ' de 5)', null, null, [
+            'id_usuario' => $idUsuario,
+            'severidad' => 'alerta',
+        ]);
         $errorMessage = $usado
             ? 'Demasiados intentos fallidos. Pide un código nuevo.'
             : 'Código incorrecto. Te quedan ' . (5 - $nuevos) . ' intento(s).';
@@ -773,6 +1034,20 @@ function authenticate(string $loginIdentifier, string $password, ?string &$chall
 
     if (!$user) {
         error_log("DEBUG LOGIN: Usuario no encontrado o inactivo en la BD para: " . $loginIdentifier);
+        // Sin usuario no hay id_registro: el identificador intentado (enmascarado: puede ser
+        // un telefono o un correo) queda en detalles para poder ver intentos contra cuentas
+        // que no existen (adivinar usuarios).
+        logAudit(
+            'LOGIN_FALLIDO',
+            'usuarios',
+            null,
+            'Cuenta inexistente o inactiva: ' . (strpos($loginIdentifier, '@') !== false
+                ? auditEnmascararPii('email', $loginIdentifier)
+                : auditEnmascararPii('telefono', $loginIdentifier)),
+            null,
+            null,
+            ['id_usuario' => null, 'severidad' => 'alerta']
+        );
         return false;
     }
 
@@ -789,6 +1064,12 @@ function authenticate(string $loginIdentifier, string $password, ?string &$chall
     if ($user['intentos_fallidos'] >= 5 && $user['bloqueado_hasta'] && strtotime($user['bloqueado_hasta']) > time()) {
         $minutosRestantes = ceil((strtotime($user['bloqueado_hasta']) - time()) / 60);
         error_log("DEBUG LOGIN: Cuenta bloqueada para el ID: " . $user['id_usuario']);
+        logAudit('LOGIN_FALLIDO', 'usuarios', (int) $user['id_usuario'], 'Intento de acceso con la cuenta bloqueada (' . $minutosRestantes . ' min restantes)', null, null, [
+            'id_usuario' => (int) $user['id_usuario'],
+            'usuario_nombre' => (string) $user['nombre'],
+            'usuario_rol' => (string) $user['rol'],
+            'severidad' => 'alerta',
+        ]);
         throw new Exception("Cuenta bloqueada temporalmente por seguridad debido a demasiados intentos fallidos. Inténtalo de nuevo en $minutosRestantes minuto(s).");
     }
 
@@ -832,6 +1113,13 @@ function authenticate(string $loginIdentifier, string $password, ?string &$chall
     // FALLO: Incrementamos el contador de intentos
     $nuevosIntentos = (int)$user['intentos_fallidos'] + 1;
     $nuevaFechaBloqueo = null;
+
+    logAudit('LOGIN_FALLIDO', 'usuarios', (int) $user['id_usuario'], 'Contraseña incorrecta (intento ' . $nuevosIntentos . ' de 5)', null, null, [
+        'id_usuario' => (int) $user['id_usuario'],
+        'usuario_nombre' => (string) $user['nombre'],
+        'usuario_rol' => (string) $user['rol'],
+        'severidad' => $nuevosIntentos >= 3 ? 'alerta' : 'aviso',
+    ]);
 
     if ($nuevosIntentos >= 5) {
         // Bloqueamos la cuenta por 15 minutos
@@ -883,6 +1171,11 @@ function logout(): void
         exit;
     }
 
+    // Antes de vaciar la sesion: quien cerro sesion (con sesion ya vacia el log quedaria anonimo).
+    if (isAuthenticated()) {
+        logAudit('LOGOUT', 'usuarios', (int) ($_SESSION['usuario']['id_usuario'] ?? 0) ?: null, 'Cerró sesión');
+    }
+
     // Limpiar los datos de sesión en memoria
     $_SESSION = [];
     // Destruir la cookie de sesión en el navegador
@@ -908,8 +1201,23 @@ function generatePasswordResetToken(string $email, bool $bienvenida = false): bo
     $stmt->execute([':email' => $email]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$user) {
+        logAudit('PASSWORD_RESET_SOLICITADO', 'usuarios', null, 'Solicitud de recuperación para una cuenta inexistente o inactiva: ' . auditEnmascararPii('email', $email), null, null, [
+            'id_usuario' => null,
+            'severidad' => 'aviso',
+        ]);
         return false;
     }
+    logAudit(
+        'PASSWORD_RESET_SOLICITADO',
+        'usuarios',
+        (int) $user['id_usuario'],
+        $bienvenida ? 'Código de activación de cuenta de staff enviado' : 'Código de recuperación de contraseña solicitado',
+        null,
+        null,
+        // La solicitud la hace quien olvido su contrasena (sin sesion): el actor es la propia cuenta,
+        // salvo que un admin la dispare (bienvenida), donde el actor real es el de la sesion.
+        $bienvenida ? [] : ['id_usuario' => (int) $user['id_usuario']]
+    );
 
     // Evita reenviar/renovar el código en ráfaga (spam y ventana extra para adivinarlo).
     $stmtExisting = $pdo->prepare('SELECT created_at FROM password_resets WHERE email = :email AND usado = 0 AND expires_at >= NOW() ORDER BY id_password_reset DESC LIMIT 1');
@@ -985,6 +1293,10 @@ function resetPasswordWithToken(string $email, string $token, string $newPasswor
 
     if (!hash_equals((string)$record['token_hash'], hash('sha256', $token))) {
         $nuevosIntentos = (int)$record['intentos_fallidos'] + 1;
+        logAudit('PASSWORD_RESET_FALLIDO', 'usuarios', null, 'Código de recuperación incorrecto para ' . auditEnmascararPii('email', (string) $record['email']) . ' (intento ' . $nuevosIntentos . ' de 5)', null, null, [
+            'id_usuario' => null,
+            'severidad' => 'alerta',
+        ]);
         if ($nuevosIntentos >= 5) {
             $pdo->prepare('UPDATE password_resets SET usado = 1, intentos_fallidos = ? WHERE id_password_reset = ?')
                 ->execute([$nuevosIntentos, $record['id_password_reset']]);
@@ -1025,6 +1337,14 @@ function resetPasswordWithToken(string $email, string $token, string $newPasswor
         $stmt->execute([':id' => $record['id_password_reset']]);
 
         $pdo->commit();
+
+        $stmtId = $pdo->prepare('SELECT id_usuario FROM usuarios WHERE email = :email LIMIT 1');
+        $stmtId->execute([':email' => $record['email']]);
+        $idUsuarioReset = (int) $stmtId->fetchColumn();
+        logAudit('PASSWORD_RESET_COMPLETADO', 'usuarios', $idUsuarioReset ?: null, 'Contraseña restablecida con código de recuperación', null, null, [
+            'id_usuario' => $idUsuarioReset ?: null,
+            'severidad' => 'alerta',
+        ]);
         return true;
     } catch (Throwable $e) {
         $pdo->rollBack();

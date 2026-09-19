@@ -33,11 +33,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
         if ($error === '' && $_POST['accion'] === 'guardar') {
             try {
+                $auditBlogAntes = $id > 0 ? auditSnapshotFila($pdo, 'blogs', 'id_blog', $id, ['titulo', 'slug', 'estado', 'extracto', 'contenido']) : [];
                 $res = dbSaveBlog([
                     'id' => $id, 'id_usuario' => $usuario_id, 'titulo' => $titulo,
                     'slug' => $slug, 'extracto' => $extracto, 'contenido' => $contenido, 'estado' => $estado
                 ]);
                 if ($res) {
+                    // Auditoria: el texto largo (extracto/contenido) se guarda como "N car. #hash".
+                    $auditBlogDespues = auditCompactarTextosLargos(['titulo' => $titulo, 'slug' => $slug, 'estado' => $estado, 'extracto' => $extracto, 'contenido' => $contenido]);
+                    if ($id > 0 && $auditBlogAntes !== []) {
+                        logAuditCambios('BLOG_GUARDADO', 'blogs', $id, $auditBlogAntes, $auditBlogDespues, [], ['contexto' => 'Blog "' . $titulo . '"']);
+                    } else {
+                        logAudit('BLOG_GUARDADO', 'blogs', $id > 0 ? $id : null, 'Artículo de blog "' . $titulo . '" (' . $estado . ') publicado/creado', null, ['titulo' => $titulo, 'slug' => $slug, 'estado' => $estado]);
+                    }
                     $success = 'Operacion exitosa.';
                 } else {
                     $error = 'Error al guardar.';
@@ -50,7 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
             }
         } elseif ($_POST['accion'] === 'eliminar') {
+            $auditTituloBlog = auditNombreRegistro($pdo, 'blogs', 'id_blog', 'titulo', $id);
             $pdo->prepare("DELETE FROM blogs WHERE id_blog = ?")->execute([$id]); // Solo para simplificar el ejemplo
+            logAudit('BLOG_ELIMINADO', 'blogs', $id, 'Artículo "' . $auditTituloBlog . '" eliminado', null, null, ['severidad' => 'alerta']);
             $success = 'Artículo eliminado.';
         }
     }

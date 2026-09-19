@@ -244,6 +244,13 @@ try {
                 ->execute([$id_cliente, $msgLabel]);
         }
 
+        logAudit(
+            'SOPORTE_CHAT_ASIGNADO',
+            'mensajes_soporte',
+            $id_cliente,
+            ($action === 'start' ? 'Chat de soporte iniciado' : 'Chat de soporte cerrado') . ' con ' . auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id_cliente) . ($soyStaff ? '' : ' (por el propio cliente)')
+        );
+
         echo json_encode(['success' => true]);
 
     } elseif ($action === 'transfer') {
@@ -287,6 +294,14 @@ try {
             ->execute([$id_cliente, $msgTransfer]);
 
         $pdo->commit();
+        logAudit(
+            'SOPORTE_CHAT_ASIGNADO',
+            'mensajes_soporte',
+            $id_cliente,
+            'Chat de ' . auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id_cliente) . ' transferido a ' . $nombreDestino,
+            ['asignado_a' => $asignadoActual],
+            ['asignado_a' => $id_destino]
+        );
         echo json_encode(['success' => true]);
 
     } elseif ($action === 'get_staff') {

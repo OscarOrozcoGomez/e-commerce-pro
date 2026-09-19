@@ -126,7 +126,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         $pdo->prepare("UPDATE usuarios SET nombre = ?, email = ?, contrasena = ?, id_rol = ?, id_almacen = ?, estado = 'activo', intentos_fallidos = 0, bloqueado_hasta = NULL, es_superadmin = 0 WHERE id_usuario = ?")
                             ->execute([$nombre, $email, $password, $id_rol, $id_almacen, $targetUserId]);
                         $pdo->commit();
-                        logAudit('USUARIO_REACTIVADO', 'usuarios', $targetUserId, "Email: $email" . ($invitar ? ' (invitación enviada)' : ''));
+                        logAudit(
+                            'USUARIO_REACTIVADO',
+                            'usuarios',
+                            $targetUserId,
+                            "Email: $email | rol: " . (string)$rolNombre . ' | sucursal: ' . ($id_almacen ?: 'ninguna') . ($invitar ? ' (invitación enviada)' : ''),
+                            ['estado' => $existingUser['estado'] ?? null, 'rol' => $existingUser['rol'] ?? null, 'id_almacen' => $existingUser['id_almacen'] ?? null],
+                            ['estado' => 'activo', 'rol' => (string)$rolNombre, 'id_almacen' => $id_almacen],
+                            ['severidad' => 'alerta']
+                        );
                         $success = 'Cuenta existente reactivada y actualizada correctamente.';
                     } catch (Throwable $e) {
                         $pdo->rollBack();
@@ -143,7 +151,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         ':id_rol' => $id_rol,
                         ':id_almacen' => $id_almacen,
                     ]);
-                    logAudit('USUARIO_CREADO', 'usuarios', (int)$pdo->lastInsertId(), "Email: $email" . ($invitar ? ' (invitación enviada)' : ''));
+                    logAudit(
+                        'USUARIO_CREADO',
+                        'usuarios',
+                        (int)$pdo->lastInsertId(),
+                        "Email: $email | nombre: $nombre | rol: " . (string)$rolNombre . ' | sucursal: ' . ($id_almacen ?: 'ninguna') . ($invitar ? ' (invitación enviada)' : ''),
+                        null,
+                        ['nombre' => $nombre, 'email' => auditEnmascararPii('email', $email), 'rol' => (string)$rolNombre, 'id_almacen' => $id_almacen],
+                        ['severidad' => 'alerta']
+                    );
                     $success = 'Usuario creado correctamente.';
                 }
 
@@ -179,9 +195,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
             }
 
+            $auditAntes = auditSnapshotUsuario($pdo, $id);
             $stmt = $pdo->prepare("UPDATE usuarios SET estado = ? WHERE id_usuario = ?");
             $stmt->execute([$nuevo_estado, $id]);
-            logAudit('USUARIO_ESTADO_CAMBIADO', 'usuarios', $id, "Nuevo estado: $nuevo_estado");
+            logAudit(
+                'USUARIO_ESTADO_CAMBIADO',
+                'usuarios',
+                $id,
+                (string)($auditAntes['nombre'] ?? ('Usuario #' . $id)) . " ({$targetUser['rol']}) | estado: " . (string)($auditAntes['estado'] ?? '?') . " -> $nuevo_estado",
+                ['estado' => $auditAntes['estado'] ?? null],
+                ['estado' => $nuevo_estado],
+                ['severidad' => $nuevo_estado === 'inactivo' ? 'alerta' : 'aviso']
+            );
             $success = 'Estado de usuario actualizado.';
         } elseif ($accion === 'desbloquear') {
             $id = intval($_POST['id_usuario']);
@@ -196,7 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             }
 
             $pdo->prepare("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")->execute([$id]);
-            logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, "Cuenta desbloqueada manualmente por admin");
+            logAudit('USUARIO_DESBLOQUEADO', 'usuarios', $id, auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id) . " ({$targetUser['rol']}) | cuenta desbloqueada manualmente");
             $success = 'Usuario desbloqueado correctamente.';
         } elseif ($accion === 'eliminar_usuario') {
             $id = intval($_POST['id_usuario'] ?? 0);
@@ -214,12 +239,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 throw new Exception('No tienes permisos para eliminar esta cuenta de usuario.');
             }
 
+            $auditAntes = auditSnapshotUsuario($pdo, $id);
             $pdo->beginTransaction();
             try {
                 $pdo->prepare("DELETE FROM vendedor_liquidaciones WHERE id_vendedor = ?")->execute([$id]);
                 $pdo->prepare("DELETE FROM usuarios WHERE id_usuario = ?")->execute([$id]);
                 $pdo->commit();
-                logAudit('USUARIO_ELIMINADO', 'usuarios', $id, 'Eliminación manual por admin');
+                logAudit(
+                    'USUARIO_ELIMINADO',
+                    'usuarios',
+                    $id,
+                    'Eliminación manual: ' . (string)($auditAntes['nombre'] ?? ('#' . $id)) . " ({$targetUser['rol']})",
+                    auditDiff($auditAntes, [], array_keys($auditAntes))['antes'],
+                    null,
+                    ['severidad' => 'alerta']
+                );
                 $success = 'Usuario eliminado correctamente.';
             } catch (Throwable $e) {
                 $pdo->rollBack();
@@ -249,7 +283,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $pdo->prepare("UPDATE usuarios SET contrasena = ?, intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")
                     ->execute([$tempHash, $id]);
 
-                logAudit('USUARIO_PASSWORD_RESETEADA', 'usuarios', $id, 'Reset manual de contraseña para staff');
+                // La contraseña temporal NUNCA se guarda en el log; solo quién la reseteó y a quién.
+                logAudit(
+                    'USUARIO_PASSWORD_RESETEADA',
+                    'usuarios',
+                    $id,
+                    'Reset manual de contraseña para ' . auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id) . " ({$targetUser['rol']})",
+                    null,
+                    null,
+                    ['severidad' => 'alerta']
+                );
                 $target = $emailUsuario !== '' ? $emailUsuario : ('usuario #' . $id);
                 $success = 'Contraseña temporal generada para ' . $target . ': ' . $tempPassword;
             } catch (Throwable $e) {
@@ -326,6 +369,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
                 $todos = $pdo->query("SELECT id_permiso FROM permisos WHERE estado = 'activo'")->fetchAll(PDO::FETCH_COLUMN);
 
+                // Auditoria: excepciones de permisos ANTES de cambiarlas (clave => efecto).
+                $auditExcepciones = static function (PDO $pdo, int $idUsuario): array {
+                    try {
+                        $st = $pdo->prepare('SELECT p.clave, up.efecto FROM usuario_permisos up JOIN permisos p ON p.id_permiso = up.id_permiso WHERE up.id_usuario = ? ORDER BY p.clave');
+                        $st->execute([$idUsuario]);
+                        $mapa = [];
+                        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
+                            $mapa[(string)$f['clave']] = (string)$f['efecto'];
+                        }
+                        return $mapa;
+                    } catch (Throwable $e) {
+                        return [];
+                    }
+                };
+                $auditExcepcionesAntes = $auditExcepciones($pdo, $id);
+
                 $pdo->beginTransaction();
                 $del = $pdo->prepare("DELETE FROM usuario_permisos WHERE id_usuario = ? AND id_permiso = ?");
                 $ins = $pdo->prepare("INSERT INTO usuario_permisos (id_usuario, id_permiso, efecto, nota, expira_en, asignado_por)
@@ -356,8 +415,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
                 $pdo->commit();
 
+                // Detalle exacto: que permiso se concedio/quito (antes solo quedaban los conteos).
+                $auditExcepcionesDespues = $auditExcepciones($pdo, $id);
+                $auditConcedidos = array_keys(array_filter($auditExcepcionesDespues, static fn($e, $k) => $e === 'conceder' && ($auditExcepcionesAntes[$k] ?? null) !== 'conceder', ARRAY_FILTER_USE_BOTH));
+                $auditDenegados = array_keys(array_filter($auditExcepcionesDespues, static fn($e, $k) => $e === 'denegar' && ($auditExcepcionesAntes[$k] ?? null) !== 'denegar', ARRAY_FILTER_USE_BOTH));
+                $auditRevertidos = array_keys(array_diff_key($auditExcepcionesAntes, $auditExcepcionesDespues));
                 logAudit('USUARIO_PERMISOS_ACTUALIZADOS', 'usuario_permisos', $id,
-                    "conceder={$nConceder} denegar={$nDenegar} con_caducidad={$nConCaducidad} | nota: {$nota}");
+                    auditNombreRegistro($pdo, 'usuarios', 'id_usuario', 'nombre', $id) . " ({$targetUser['rol']}) | conceder={$nConceder} denegar={$nDenegar} con_caducidad={$nConCaducidad}"
+                    . ($auditConcedidos ? ' | +' . implode(', +', $auditConcedidos) : '')
+                    . ($auditDenegados ? ' | −' . implode(', −', $auditDenegados) : '')
+                    . ($auditRevertidos ? ' | vuelven al rol: ' . implode(', ', $auditRevertidos) : '')
+                    . " | nota: {$nota}",
+                    $auditExcepcionesAntes,
+                    $auditExcepcionesDespues,
+                    ['severidad' => 'alerta']
+                );
                 $success = 'Permisos del usuario actualizados. El cambio aplica en menos de 1 minuto.';
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {

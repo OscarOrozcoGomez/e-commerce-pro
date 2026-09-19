@@ -83,6 +83,15 @@ try {
         clienteScopeAlmacenParaNuevo(getCurrentAlmacenId()),
     ]);
     $nuevoClienteId = (int)$pdo->lastInsertId();
+    $auditDespues = auditSnapshotCliente($pdo, $nuevoClienteId);
+    logAudit(
+        'CLIENTE_CREADO',
+        'clientes',
+        $nuevoClienteId,
+        'Cliente "' . $nombre . '" creado desde el POS',
+        null,
+        auditDiff([], $auditDespues, array_keys($auditDespues))['despues']
+    );
 
     echo json_encode([
         'success' => true,
