@@ -4,6 +4,16 @@ require_once __DIR__ . '/../core/auth.php';
 
 header('Content-Type: application/json');
 
+// Este endpoint modifica precio, costo e imagenes de un producto y NO verificaba sesion
+// (cualquiera con la URL podia cambiar precios sin dejar rastro). Mismo permiso que
+// api/products_manager.php.
+refreshSessionPermissions();
+if (!isAuthenticated() || !hasPermission('gestionar_productos')) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No autorizado']);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['success' => false, 'error' => 'Método no permitido']);
@@ -87,6 +97,7 @@ if (isset($_FILES['galeria_nuevas'])) {
 $pdo = getPDO();
 
 try {
+    $auditAntes = auditSnapshotProducto($pdo, $id_producto);
     $pdo->beginTransaction();
 
     // Actualizar tabla principal (1 imagen)
@@ -112,8 +123,18 @@ try {
 
     $pdo->commit();
 
+    logAuditCambios(
+        'PRODUCTO_EDITADO',
+        'productos',
+        $id_producto,
+        $auditAntes,
+        auditSnapshotProducto($pdo, $id_producto),
+        ['nombre', 'sku', 'precio_venta', 'precio_costo'],
+        ['contexto' => (string)($auditAntes['nombre'] ?? ('Producto #' . $id_producto)) . ' (editor rápido)', 'severidad' => 'alerta']
+    );
+
     echo json_encode([
-        'success' => true, 
+        'success' => true,
         'message' => 'Producto actualizado. Total de imágenes procesadas: ' . (1 + count($galeria_final))
     ]);
 

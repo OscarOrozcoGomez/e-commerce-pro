@@ -40,6 +40,15 @@ try {
         exit;
     }
 
+    logAudit(
+        'ORDEN_COMPRA_POSPUESTOS',
+        'purchase_order_postponed_items',
+        null,
+        $affected . ' producto(s) pospuesto(s) para el siguiente pedido',
+        null,
+        ['items' => auditSanitizarPayload(array_slice(array_values($items), 0, 30))]
+    );
+
     echo json_encode([
         'success' => true,
         'message' => 'Producto pospuesto para el siguiente pedido',

@@ -46,6 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
         }
 
         try {
+            // Auditoria: config de Alex antes/despues (los textos largos como "N car. #hash").
+            $auditConfigAntes = auditCompactarTextosLargos((array) aiGetConfig($pdo));
             $stmt = $pdo->prepare(
                 'INSERT INTO ai_asistente_config
                     (id_config, activo, nombre_persona, tono_instrucciones, promocion_vigente_texto, politica_envio_texto, politica_pago_texto, ubicacion_texto, mensaje_bienvenida, modelo_llm, temperatura, prompt_sistema_override, api_key_variable)
@@ -65,6 +67,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
                     api_key_variable = VALUES(api_key_variable)'
             );
             $stmt->execute([$activo, $nombrePersona, $tono, $promo, $envio, $pago, $ubicacion, $bienvenida, $modelo, $temperatura, $promptOverride, $apiKeyVariable]);
+            logAuditCambios(
+                'AI_ASISTENTE_CONFIG_CAMBIADA',
+                'ai_asistente_config',
+                1,
+                $auditConfigAntes,
+                auditCompactarTextosLargos([
+                    'activo' => $activo, 'nombre_persona' => $nombrePersona, 'tono_instrucciones' => $tono,
+                    'promocion_vigente_texto' => $promo, 'politica_envio_texto' => $envio, 'politica_pago_texto' => $pago,
+                    'ubicacion_texto' => $ubicacion, 'mensaje_bienvenida' => $bienvenida, 'modelo_llm' => $modelo,
+                    'temperatura' => $temperatura, 'prompt_sistema_override' => $promptOverride,
+                ]),
+                ['activo', 'nombre_persona', 'tono_instrucciones', 'promocion_vigente_texto', 'politica_envio_texto', 'politica_pago_texto', 'ubicacion_texto', 'mensaje_bienvenida', 'modelo_llm', 'temperatura', 'prompt_sistema_override'],
+                ['contexto' => 'Configuración de Alex', 'severidad' => 'alerta']
+            );
             $success = 'Configuracion del asistente actualizada.';
         } catch (Throwable $e) {
             $error = 'Error al guardar la configuracion: ' . $e->getMessage();

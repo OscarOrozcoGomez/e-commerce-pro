@@ -34,6 +34,16 @@ try {
         exit;
     }
 
+    logAudit(
+        'ENTRADA_INVENTARIO',
+        'inventario_almacen',
+        null,
+        'Entrada por lote: ' . $processed . ' producto(s) procesado(s)',
+        null,
+        ['items' => auditSanitizarPayload(array_slice(array_values((array) $data['items']), 0, 30))],
+        ['severidad' => 'aviso']
+    );
+
     echo json_encode(['success' => true, 'message' => 'Inventario actualizado correctamente']);
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();

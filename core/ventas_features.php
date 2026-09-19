@@ -59,6 +59,15 @@ function ventasFeatureSave(PDO $pdo, string $featureKey, bool $activo, array $co
         throw new InvalidArgumentException('Feature de ventas desconocida: ' . $featureKey);
     }
 
+    // Auditoria: activar/desactivar una iniciativa de ventas cambia el comportamiento del POS.
+    $auditAntes = [];
+    try {
+        $todasAntes = ventasFeaturesGetAll($pdo);
+        $auditAntes = ['activo' => !empty($todasAntes[$featureKey]['activo']) ? 1 : 0, 'config' => $todasAntes[$featureKey]['config'] ?? []];
+    } catch (Throwable $e) {
+        $auditAntes = [];
+    }
+
     $stmt = $pdo->prepare(
         'INSERT INTO ventas_features_config (feature_key, activo, config_json)
          VALUES (:feature_key, :activo, :config_json)
@@ -69,4 +78,19 @@ function ventasFeatureSave(PDO $pdo, string $featureKey, bool $activo, array $co
         ':activo' => $activo ? 1 : 0,
         ':config_json' => empty($config) ? null : json_encode($config),
     ]);
+
+    if (function_exists('logAudit')) {
+        $auditDespues = ['activo' => $activo ? 1 : 0, 'config' => $config];
+        if ($auditAntes !== $auditDespues) {
+            logAudit(
+                'VENTAS_FEATURES_CONFIG',
+                'ventas_features_config',
+                null,
+                'Iniciativa "' . $featureKey . '": ' . (($auditAntes['activo'] ?? null) === null ? 'nueva' : (!empty($auditAntes['activo']) ? 'activa' : 'inactiva')) . ' -> ' . ($activo ? 'activa' : 'inactiva'),
+                $auditAntes !== [] ? $auditAntes : null,
+                $auditDespues,
+                ['severidad' => 'aviso']
+            );
+        }
+    }
 }

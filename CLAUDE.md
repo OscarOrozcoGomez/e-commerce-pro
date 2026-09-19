@@ -147,6 +147,17 @@ wa-bridge`, `/opt/wa-bridge/app/index.js`).
 - `tests/bootstrap.php` hace `require_once` manual de ~30 librerías de `core/`. **Si añades una lib de `core/` que un test necesita, agrégala a `bootstrap.php`** o el test no la verá.
 - Los tests que tocan DB usan PDO en memoria / datos sembrados en el propio test, no una DB real.
 
+## Auditoría (quién hizo qué)
+
+Toda operación que **modifique datos** (precios, ofertas, inventario, clientes, usuarios, permisos, configuración…) debe dejar rastro en `logs_auditoria`; se consulta en `views/activity_logs.php` (pestaña "Movimientos").
+
+- `logAudit($accion, $tabla, $id, $detalles, $antes, $despues, $opciones)` en `core/auth.php`. Toma solo el usuario, rol, IP, dispositivo, sesión y URL de la petición. Los 4 primeros parámetros son los de siempre; `$antes`/`$despues` son arrays con los campos que cambiaron.
+- Para cambios sobre un registro usa **`logAuditCambios()`** con "fotos" antes/después (`auditSnapshotProducto/Cliente/Direccion/Usuario/Almacen`, `auditSnapshotFila` en `core/audit_snapshots.php`): calcula el diff, no escribe nada si no hubo cambio real y enmascara PII (teléfono/correo/dirección) y oculta secretos. **Nunca** metas contraseñas, tokens ni PII en claro en `$detalles`, `$antes` o `$despues` (los arrays pasados a `logAudit` directo NO se enmascaran; los de `auditDiff` sí).
+- Registra **después** del commit, nunca dentro de la transacción de negocio. `logAudit` no lanza excepciones.
+- Cada acción nueva (constante en MAYÚSCULAS, ≤ 50 caracteres) va en `auditMapaEtiquetasAccion()` de `core/audit_utils.php` con su nombre legible; `tests/Unit/AuditUtilsTest.php` falla si falta.
+- Red de seguridad: `auditIniciarRegistroPeticiones()` registra como `PETICION_ESCRITURA` cualquier POST/PUT/DELETE con sesión que no haya registrado nada propio (payload sin secretos). Endpoints que no deben entrar (sondeos, chat, login) van en `AUDIT_ENDPOINTS_SIN_REGISTRO`.
+- Las columnas nuevas de `logs_auditoria` las agrega `20260919_000001_*`; `logAudit` y la vista toleran que aún no existan (deploy en curso).
+
 ## Convenciones
 
 - `declare(strict_types=1);` en todos los archivos.

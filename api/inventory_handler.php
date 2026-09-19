@@ -61,6 +61,19 @@ try {
             }
         }
 
+        logAudit(
+            'ENTRADA_INVENTARIO',
+            'inventario_almacen',
+            $id_producto,
+            trim('#' . $id_producto . ' ' . auditNombreRegistro($pdo, 'productos', 'id_producto', 'nombre', $id_producto))
+                . ' | +' . $cantidad . ' u. en "' . auditNombreRegistro($pdo, 'almacenes', 'id_almacen', 'nombre', $almacenId) . '"'
+                . ($codigoLote !== '' ? ' | lote ' . $codigoLote . ($fechaCaducidad !== '' ? ' cad. ' . $fechaCaducidad : '') : '')
+                . ' | ' . mb_substr($observacion, 0, 200),
+            null,
+            ['id_almacen' => $almacenId, 'cantidad' => $cantidad, 'codigo_lote' => $codigoLote ?: null, 'fecha_caducidad' => $fechaCaducidad ?: null],
+            ['severidad' => 'aviso']
+        );
+
         echo json_encode(['success' => true, 'message' => 'Stock actualizado correctamente' . $avisoLote]);
     } else {
         throw new Exception("Acción no permitida");
