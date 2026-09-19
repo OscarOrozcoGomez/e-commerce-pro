@@ -21,17 +21,13 @@ $pdo = getPDO();
  *    dispositivo, con el valor de antes y de despues. Es la que responde "yo no fui".
  *  - "navegacion": visitas y clics (logs_actividad), lo que ya existia.
  */
-$vista = ($_GET['vista'] ?? 'movimientos') === 'navegacion' ? 'navegacion' : 'movimientos';
-
-$filtro_usuario = isset($_GET['usuario']) ? intval($_GET['usuario']) : 0;
-$fecha_inicio = $_GET['fecha_inicio'] ?? '';
-$fecha_fin = $_GET['fecha_fin'] ?? '';
-if ($fecha_inicio !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $fecha_inicio)) {
-    $fecha_inicio = '';
-}
-if ($fecha_fin !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $fecha_fin)) {
-    $fecha_fin = '';
-}
+// Todo lo que llega en la URL se sanea en un solo lugar (probado en tests/Unit/AuditFiltrosTest.php):
+// arreglos (?accion[]=x), fechas imposibles, textos enormes y numeros desbordados caen a su valor por defecto.
+$filtros = auditFiltrosDesdeGet($_GET);
+$vista = $filtros['vista'];
+$filtro_usuario = $filtros['usuario'];
+$fecha_inicio = $filtros['fecha_inicio'];
+$fecha_fin = $filtros['fecha_fin'];
 
 // Lista de usuarios para el filtro (compartida por las dos vistas).
 $usuarios = $pdo->query("SELECT id_usuario, nombre, email FROM usuarios ORDER BY nombre")->fetchAll();
@@ -58,13 +54,13 @@ $filtro_registro = 0;
 $errorMovimientos = '';
 
 if ($vista === 'movimientos') {
-    $filtro_accion = preg_match('/^[A-Za-z0-9_]{1,50}$/', (string) ($_GET['accion'] ?? '')) ? (string) $_GET['accion'] : '';
-    $filtro_modulo = preg_match('/^[A-Za-z0-9_]{1,50}$/', (string) ($_GET['modulo'] ?? '')) ? (string) $_GET['modulo'] : '';
-    $filtro_severidad = in_array($_GET['severidad'] ?? '', AUDIT_SEVERIDADES, true) ? (string) $_GET['severidad'] : '';
-    $filtro_q = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 100);
-    $filtro_tabla = preg_match('/^[A-Za-z0-9_]{1,50}$/', (string) ($_GET['tabla'] ?? '')) ? (string) $_GET['tabla'] : '';
-    $filtro_registro = max(0, (int) ($_GET['registro'] ?? 0));
-    $pagina = max(1, (int) ($_GET['pagina'] ?? 1));
+    $filtro_accion = $filtros['accion'];
+    $filtro_modulo = $filtros['modulo'];
+    $filtro_severidad = $filtros['severidad'];
+    $filtro_q = $filtros['q'];
+    $filtro_tabla = $filtros['tabla'];
+    $filtro_registro = $filtros['registro'];
+    $pagina = $filtros['pagina'];
 
     try {
         // Las columnas nuevas (migracion 20260919_000001) pueden no existir todavia mientras
@@ -251,10 +247,11 @@ $renderCambios = static function (?string $jsonAntes, ?string $jsonDespues): str
 };
 
 /** Enlace que conserva los filtros actuales y cambia solo lo indicado. */
-$urlCon = static function (array $cambios) {
-    $q = array_merge($_GET, $cambios);
+$urlCon = static function (array $cambios) use ($filtros) {
+    // Se parte de los filtros YA saneados (no de $_GET crudo) y se omiten los valores por defecto.
+    $q = array_merge($filtros, $cambios);
     foreach ($q as $k => $v) {
-        if ($v === '' || $v === null) {
+        if ($v === '' || $v === null || $v === 0 || $v === '0' || ($k === 'pagina' && (int) $v === 1)) {
             unset($q[$k]);
         }
     }
@@ -271,13 +268,13 @@ $filtro_plataforma = '';
 $filtro_origen = '';
 
 if ($vista === 'navegacion') {
-    $filtro_tipo = isset($_GET['tipo']) ? $_GET['tipo'] : '';
-    $filtro_plataforma = $_GET['plataforma'] ?? '';
+    $filtro_tipo = $filtros['tipo'];
+    $filtro_plataforma = $filtros['plataforma'];
     // Origen: 'interno' = actividad del personal (admin/encargado/vendedor/repartidor)
     // navegando el sistema; 'externo' = visitantes anonimos y clientes. El log guarda
     // las dos; este filtro solo cambia lo que se lista. Los reportes de marketing
     // (Trafico y Campanas, Comportamiento en el Sitio) siempre miden solo 'externo'.
-    $filtro_origen = $_GET['origen'] ?? '';
+    $filtro_origen = $filtros['origen'];
 
     // Plataformas presentes en los datos, para poblar el filtro sin hardcodear valores.
     $plataformas = $pdo->query("SELECT DISTINCT plataforma FROM logs_actividad WHERE plataforma IS NOT NULL AND plataforma != '' ORDER BY plataforma")->fetchAll(PDO::FETCH_COLUMN);

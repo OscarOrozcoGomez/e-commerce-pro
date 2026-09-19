@@ -209,7 +209,13 @@ function logAudit(
             // 42S22 = columna desconocida: el deploy ya subio el codigo pero la migracion
             // 20260919_000001 aun no corre. Se registra en el formato anterior (sin perder el
             // evento) y el resumen de cambios ya viaja dentro de "detalles".
-            if ($e->getCode() !== '42S22') {
+            // El codigo SQLSTATE lo da MySQL/MariaDB; el texto cubre otros drivers (SQLite en pruebas).
+            $mensajeError = strtolower($e->getMessage());
+            if (
+                $e->getCode() !== '42S22'
+                && strpos($mensajeError, 'no column named') === false
+                && strpos($mensajeError, 'unknown column') === false
+            ) {
                 throw $e;
             }
             $stmt = $pdo->prepare('INSERT INTO logs_auditoria (id_usuario, accion, tabla_afectada, id_registro, detalles, ip_address) VALUES (?, ?, ?, ?, ?, ?)');

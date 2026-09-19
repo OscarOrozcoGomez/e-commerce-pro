@@ -65,7 +65,6 @@ const AUDIT_ENDPOINTS_SIN_REGISTRO = [
     'forgot_password.php',
     'register.php',
     'complete_account.php',
-    'logout.php',
 ];
 
 /**
@@ -195,6 +194,10 @@ function auditNormalizarParaComparar($valor): string
         return (string) $valor;
     }
     if (is_float($valor)) {
+        if (!is_finite($valor)) {
+            // number_format(-INF) devuelve "inf": se distingue el signo a mano.
+            return is_nan($valor) ? 'nan' : ($valor > 0 ? 'inf' : '-inf');
+        }
         return rtrim(rtrim(number_format($valor, 4, '.', ''), '0'), '.');
     }
     if (is_array($valor) || is_object($valor)) {
@@ -204,7 +207,9 @@ function auditNormalizarParaComparar($valor): string
     $texto = trim((string) $valor);
     // "10" == "10.00" (precios). Un valor con cero a la izquierda ("0012345": SKU, codigo de
     // barras) es un identificador, no un numero: se compara como texto para no perder un cambio real.
-    if ($texto !== '' && is_numeric($texto) && !preg_match('/^-?0\d/', $texto)) {
+    // Tampoco se convierte a float si tiene mas de 15 digitos: perderia precision y dos identificadores
+    // distintos (17 digitos) parecerian iguales.
+    if ($texto !== '' && is_numeric($texto) && !preg_match('/^-?0\d/', $texto) && strlen(preg_replace('/\D/', '', $texto)) <= 15) {
         return rtrim(rtrim(number_format((float) $texto, 4, '.', ''), '0'), '.');
     }
     return $texto;
@@ -362,8 +367,14 @@ function auditAccionEsLectura(string $accion): bool
  */
 function auditEndpointSinRegistro(string $rutaOScript): bool
 {
-    $base = strtolower(basename((string) parse_url($rutaOScript, PHP_URL_PATH)));
-    return in_array($base, AUDIT_ENDPOINTS_SIN_REGISTRO, true);
+    $ruta = (string) parse_url($rutaOScript, PHP_URL_PATH);
+    // El script real es el PRIMER segmento .php de la ruta. Lo que venga despues es PATH_INFO: con
+    // '/api/products_manager.php/log_activity.php' el ultimo segmento NO es el script que corre, y no
+    // debe servir para escapar del registro.
+    if (!preg_match('#([^/]+\.php)(?=/|$)#i', $ruta, $m)) {
+        return false;
+    }
+    return in_array(strtolower($m[1]), AUDIT_ENDPOINTS_SIN_REGISTRO, true);
 }
 
 /**
@@ -373,7 +384,7 @@ function auditSeveridadPorDefecto(string $accion): string
 {
     $a = strtoupper($accion);
 
-    if (preg_match('/(ELIMIN|BORRAD|BORRAR|DENEGAD|BLOQUEO|FALLID|DESACTIV|CANCELAD|SUPERADMIN|EXPORT|PASSWORD|CONTRASENA|PERMISO|ROL_|RETIRAD|DESCARTAD|NO_ENTREGADO|SIN_EVIDENCIA|SIN_AFECTAR)/', $a)) {
+    if (preg_match('/(ELIMIN|BORRAD|BORRAR|DENEGAD|BLOQUEO|FALLID|DESACTIV|CANCELA|SUPERADMIN|EXPORT|PASSWORD|CONTRASENA|PERMISO|ROL_|RETIRAD|DESCARTAD|NO_ENTREGADO|SIN_EVIDENCIA|SIN_AFECTAR)/', $a)) {
         return 'alerta';
     }
     if (preg_match('/(PRODUCTO|PRECIO|OFERTA|DESCUENTO|AJUST|STOCK|LOTE|INVENTARIO|CATEGORIA|CLIENTE|USUARIO|SUCURSAL|ALMACEN|TRANSFER|ORDEN|LIBERAD|REASIGN|FECHA|CARGO)/', $a)) {
@@ -543,7 +554,7 @@ function auditEtiquetaAccion(string $accion): string
         return $mapa[strtoupper($accion)];
     }
 
-    $texto = strtolower(str_replace('_', ' ', $accion));
+    $texto = strtolower(str_replace('_', ' ', trim($accion)));
     return $texto === '' ? '(sin acción)' : mb_strtoupper(mb_substr($texto, 0, 1)) . mb_substr($texto, 1);
 }
 
@@ -667,4 +678,84 @@ function auditResumirUserAgent(?string $ua): string
     }
 
     return $navegador . ' · ' . $sistema;
+}
+
+/**
+ * Filtros de la pantalla de Logs de Actividad, saneados. Todo lo que llegue raro (arreglos en la
+ * query string como ?accion[]=x, fechas imposibles, textos enormes, caracteres de control, numeros
+ * desbordados) cae al valor por defecto en vez de tronar la consulta o filtrar de mas.
+ *
+ * @param array<string,mixed> $get Normalmente $_GET.
+ * @return array{vista:string,usuario:int,fecha_inicio:string,fecha_fin:string,accion:string,modulo:string,severidad:string,q:string,tabla:string,registro:int,pagina:int,tipo:string,origen:string,plataforma:string}
+ */
+function auditFiltrosDesdeGet(array $get): array
+{
+    $texto = static function ($valor, int $max): string {
+        if (!is_scalar($valor)) {
+            return '';
+        }
+        // Los caracteres de control (incluido NUL y saltos de linea) no tienen lugar en un filtro.
+        $limpio = preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string) $valor);
+        return is_string($limpio) ? mb_substr(trim($limpio), 0, $max) : '';
+    };
+    $identificador = static function ($valor) use ($texto): string {
+        $t = $texto($valor, 60);
+        return preg_match('/^[A-Za-z0-9_]{1,50}$/D', $t) ? $t : '';
+    };
+    $entero = static function ($valor, int $min, int $max, int $defecto): int {
+        if (!is_scalar($valor) || is_bool($valor)) {
+            return $defecto;
+        }
+        $t = trim((string) $valor);
+        if (!preg_match('/^-?\d{1,18}$/D', $t)) {
+            return $defecto;
+        }
+        $n = (int) $t;
+        return ($n < $min || $n > $max) ? $defecto : $n;
+    };
+    $fecha = static function ($valor): string {
+        if (!is_string($valor) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D', $valor, $m)) {
+            return '';
+        }
+        $anio = (int) $m[1];
+        return ($anio >= 2000 && $anio <= 2100 && checkdate((int) $m[2], (int) $m[3], $anio)) ? $valor : '';
+    };
+
+    $usuario = $entero($get['usuario'] ?? null, -1, 2147483647, 0);
+    $usuario = $usuario < -1 ? 0 : $usuario;
+
+    $inicio = $fecha($get['fecha_inicio'] ?? null);
+    $fin = $fecha($get['fecha_fin'] ?? null);
+    if ($inicio !== '' && $fin !== '' && $inicio > $fin) {
+        // "Desde" posterior a "Hasta": casi seguro se capturaron al reves; no dejar la pantalla vacia sin explicacion.
+        [$inicio, $fin] = [$fin, $inicio];
+    }
+
+    // Una pagina absurda se acota (el OFFSET de SQL no debe desbordar); una no numerica vuelve a la 1.
+    $paginaCruda = $get['pagina'] ?? null;
+    $pagina = 1;
+    if (is_scalar($paginaCruda) && !is_bool($paginaCruda) && preg_match('/^\d{1,30}$/D', trim((string) $paginaCruda))) {
+        $pagina = (int) min(100000, max(1, (float) trim((string) $paginaCruda)));
+    }
+
+    $tipo = $texto($get['tipo'] ?? null, 10);
+    $origen = $texto($get['origen'] ?? null, 10);
+    $severidad = $texto($get['severidad'] ?? null, 10);
+
+    return [
+        'vista' => (is_string($get['vista'] ?? null) && $get['vista'] === 'navegacion') ? 'navegacion' : 'movimientos',
+        'usuario' => $usuario,
+        'fecha_inicio' => $inicio,
+        'fecha_fin' => $fin,
+        'accion' => $identificador($get['accion'] ?? null),
+        'modulo' => $identificador($get['modulo'] ?? null),
+        'severidad' => in_array($severidad, AUDIT_SEVERIDADES, true) ? $severidad : '',
+        'q' => $texto($get['q'] ?? null, 100),
+        'tabla' => $identificador($get['tabla'] ?? null),
+        'registro' => $entero($get['registro'] ?? null, 0, 2147483647, 0),
+        'pagina' => $pagina,
+        'tipo' => in_array($tipo, ['visit', 'click'], true) ? $tipo : '',
+        'origen' => in_array($origen, ['interno', 'externo'], true) ? $origen : '',
+        'plataforma' => $texto($get['plataforma'] ?? null, 100),
+    ];
 }
