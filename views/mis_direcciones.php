@@ -47,6 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
                 $pdo->prepare("INSERT INTO cliente_direcciones (id_cliente, alias, direccion, maps_link) VALUES (?, ?, ?, ?)")
                     ->execute([$idCliente, $aliasStore, $direccionStore, $mapsStore]);
+                $auditIdDir = (int)$pdo->lastInsertId();
+                $auditDirDespues = auditSnapshotDireccion($pdo, $auditIdDir);
+                logAudit('CLIENTE_DIRECCION_PROPIA', 'cliente_direcciones', $auditIdDir ?: null, 'El cliente agregó una dirección (' . $alias . ')', null, auditDiff([], $auditDirDespues, array_keys($auditDirDespues))['despues']);
                 $success = 'Dirección guardada.';
             } elseif ($accion === 'editar') {
                 $id_dir = (int)$_POST['id_direccion'];
@@ -60,13 +63,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $direccionStore = function_exists('piiEncryptValue') ? piiEncryptValue($direccion) : $direccion;
                 $mapsStore = ($maps_link !== '' && function_exists('piiEncryptValue')) ? piiEncryptValue($maps_link) : $maps_link;
 
+                $auditDirAntes = auditSnapshotDireccion($pdo, $id_dir);
                 $pdo->prepare("UPDATE cliente_direcciones SET alias = ?, direccion = ?, maps_link = ? WHERE id_direccion = ? AND id_cliente = ?")
                     ->execute([$aliasStore, $direccionStore, $mapsStore, $id_dir, $idCliente]);
+                logAuditCambios('CLIENTE_DIRECCION_PROPIA', 'cliente_direcciones', $id_dir, $auditDirAntes, auditSnapshotDireccion($pdo, $id_dir), [], ['contexto' => 'El cliente editó una dirección']);
                 $success = 'Dirección actualizada correctamente.';
             } elseif ($accion === 'eliminar') {
                 $id_dir = (int)$_POST['id_direccion'];
+                $auditDirAntes = auditSnapshotDireccion($pdo, $id_dir);
                 $pdo->prepare("DELETE FROM cliente_direcciones WHERE id_direccion = ? AND id_cliente = ?")
                     ->execute([$id_dir, $idCliente]);
+                logAudit('CLIENTE_DIRECCION_PROPIA', 'cliente_direcciones', $id_dir, 'El cliente eliminó una dirección (' . ($auditDirAntes['alias'] ?? '#' . $id_dir) . ')', auditDiff($auditDirAntes, [], array_keys($auditDirAntes))['antes'], null, ['severidad' => 'aviso']);
                 $success = 'Dirección eliminada.';
             } elseif ($accion === 'set_default') {
                 $id_dir = (int)$_POST['id_direccion'];
@@ -74,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $pdo->prepare("UPDATE cliente_direcciones SET es_default = 0 WHERE id_cliente = ?")->execute([$idCliente]);
                 $pdo->prepare("UPDATE cliente_direcciones SET es_default = 1 WHERE id_direccion = ? AND id_cliente = ?")->execute([$id_dir, $idCliente]);
                 $pdo->commit();
+                logAudit('CLIENTE_DIRECCION_PROPIA', 'cliente_direcciones', $id_dir, 'El cliente cambió su dirección predeterminada (#' . $id_dir . ')');
                 $success = 'Dirección predeterminada actualizada.';
             } elseif ($accion === 'actualizar_telefono') {
                 $telefonoRaw = trim((string)($_POST['telefono_contacto'] ?? ''));
@@ -88,7 +96,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 
                 $telefonoFormateado = formatearTelefonoMxDesdeDigitos($digits);
                 $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefonoFormateado) : $telefonoFormateado;
+                $auditTelefonoAntes = (string)($_SESSION['usuario']['telefono_cliente'] ?? '');
                 $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ?")->execute([$telefonoStore, $idCliente]);
+                logAudit(
+                    'CLIENTE_TELEFONO_CAMBIADO',
+                    'clientes',
+                    (int)$idCliente,
+                    'El cliente cambió su teléfono de contacto: ' . auditEnmascararPii('telefono', $auditTelefonoAntes) . ' -> ' . auditEnmascararPii('telefono', $telefonoFormateado),
+                    ['telefono' => auditEnmascararPii('telefono', $auditTelefonoAntes)],
+                    ['telefono' => auditEnmascararPii('telefono', $telefonoFormateado)],
+                    ['severidad' => 'aviso']
+                );
                 $_SESSION['usuario']['telefono_cliente'] = $telefonoFormateado;
                 $telefonoClienteActual = $telefonoFormateado;
                 $success = 'Teléfono de contacto actualizado correctamente.';

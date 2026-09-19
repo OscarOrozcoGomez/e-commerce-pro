@@ -74,6 +74,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $sqlInsert = 'INSERT INTO almacenes (' . implode(', ', $insertColumns) . ') VALUES (' . implode(', ', $placeholders) . ')';
                 $stmt = $pdo->prepare($sqlInsert);
                 $stmt->execute($insertParams);
+                $auditIdNuevo = (int)$pdo->lastInsertId();
+                $auditDespues = auditSnapshotAlmacen($pdo, $auditIdNuevo);
+                logAudit(
+                    'SUCURSAL_CREADA',
+                    'almacenes',
+                    $auditIdNuevo ?: null,
+                    "Sucursal '$nombre' creada",
+                    null,
+                    auditDiff([], $auditDespues, array_keys($auditDespues))['despues'],
+                    ['severidad' => 'aviso']
+                );
                 $success = "Sucursal '$nombre' creada correctamente.";
             } catch (PDOException $e) {
                 $error = "Error al crear sucursal: " . $e->getMessage();
@@ -99,8 +110,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         $params[':telefono'] = $telefono !== '' ? $telefono : null;
                     }
 
+                    $auditAntes = auditSnapshotAlmacen($pdo, $idAlmacen);
                     $stmt = $pdo->prepare('UPDATE almacenes SET ' . implode(', ', $setParts) . ' WHERE id_almacen = :id_almacen');
                     $stmt->execute($params);
+                    logAuditCambios(
+                        'SUCURSAL_EDITADA',
+                        'almacenes',
+                        $idAlmacen,
+                        $auditAntes,
+                        auditSnapshotAlmacen($pdo, $idAlmacen),
+                        [],
+                        ['contexto' => (string)($auditAntes['nombre'] ?? ('Sucursal #' . $idAlmacen)), 'severidad' => 'aviso']
+                    );
                     $success = 'Sucursal actualizada correctamente.';
                 } catch (PDOException $e) {
                     $error = 'Error al actualizar sucursal: ' . $e->getMessage();
@@ -112,8 +133,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             } else {
                 $nuevoEstado = ($_POST['nuevo_estado'] ?? '') === 'inactivo' ? 'inactivo' : 'activo';
                 try {
+                    $auditAntes = auditSnapshotAlmacen($pdo, $idAlmacen);
                     $stmt = $pdo->prepare("UPDATE almacenes SET estado = ? WHERE id_almacen = ?");
                     $stmt->execute([$nuevoEstado, $idAlmacen]);
+                    logAudit(
+                        'SUCURSAL_ESTADO_CAMBIADO',
+                        'almacenes',
+                        $idAlmacen,
+                        (string)($auditAntes['nombre'] ?? ('Sucursal #' . $idAlmacen)) . ' | estado: ' . (string)($auditAntes['estado'] ?? '?') . ' -> ' . $nuevoEstado,
+                        ['estado' => $auditAntes['estado'] ?? null],
+                        ['estado' => $nuevoEstado],
+                        ['severidad' => $nuevoEstado === 'inactivo' ? 'alerta' : 'aviso']
+                    );
                     $success = 'Estado de sucursal actualizado.';
                 } catch (PDOException $e) {
                     $error = 'Error al cambiar estado: ' . $e->getMessage();
@@ -153,6 +184,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                       activo = VALUES(activo),
                       descuento_por_piezas_json = VALUES(descuento_por_piezas_json)");
                 $stmt->execute([$activo, $descuentoPorPiezasJson]);
+                logAudit(
+                    'SUCURSAL_INCENTIVO_CAMBIADO',
+                    'sucursal_incentivos',
+                    1,
+                    'Incentivo de sucursal ' . ($activo ? 'activo' : 'inactivo') . ' | descuento por piezas: ' . $descuentoPorPiezasJson,
+                    null,
+                    ['activo' => $activo, 'descuento_por_piezas' => $descuentoPorPiezasMap],
+                    ['severidad' => 'alerta']
+                );
                 $success = 'Configuración de incentivo para sucursal actualizada.';
             } catch (Throwable $e) {
                 $error = 'Error al guardar incentivo: ' . $e->getMessage();

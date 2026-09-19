@@ -209,6 +209,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     throw new Exception('No puedes quitar "gestionar_usuarios" de tu propio rol: quedarías sin acceso a esta pantalla y no hay ningún administrador activo para restaurarlo.');
                 }
 
+                // Auditoria: claves de permiso del rol ANTES del cambio (para mostrar cuales se agregaron/quitaron).
+                $auditClavesRol = static function (PDO $pdo, int $idRol): array {
+                    try {
+                        $st = $pdo->prepare('SELECT p.clave FROM rol_permisos rp JOIN permisos p ON p.id_permiso = rp.id_permiso WHERE rp.id_rol = ? ORDER BY p.clave');
+                        $st->execute([$idRol]);
+                        return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
+                    } catch (Throwable $e) {
+                        return [];
+                    }
+                };
+                $auditClavesAntes = $auditClavesRol($pdo, $idRol);
+                $auditNombreAntes = (string) $rol['nombre'];
+
                 $pdo->beginTransaction();
                 if (!$esSistema && $nombreNuevo !== '' && $nombreNuevo !== $rol['nombre']) {
                     if (!preg_match('/^[a-z0-9_]{2,50}$/', $nombreNuevo)) {
@@ -236,7 +249,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     }
                 }
                 $pdo->commit();
-                logAudit('ROL_ACTUALIZADO', 'roles', $idRol, count($permisosIds) . ' permisos asignados');
+                $auditClavesDespues = $auditClavesRol($pdo, $idRol);
+                $auditAgregadas = array_values(array_diff($auditClavesDespues, $auditClavesAntes));
+                $auditQuitadas = array_values(array_diff($auditClavesAntes, $auditClavesDespues));
+                logAudit(
+                    'ROL_ACTUALIZADO',
+                    'roles',
+                    $idRol,
+                    'Rol "' . $auditNombreAntes . '": ' . count($permisosIds) . ' permisos asignados'
+                        . ($auditAgregadas ? ' | +' . implode(', +', $auditAgregadas) : '')
+                        . ($auditQuitadas ? ' | −' . implode(', −', $auditQuitadas) : '')
+                        . (!$auditAgregadas && !$auditQuitadas ? ' | sin cambios en permisos' : ''),
+                    ['permisos' => $auditClavesAntes],
+                    ['permisos' => $auditClavesDespues],
+                    ['severidad' => 'alerta']
+                );
                 $success = 'Rol actualizado. Los usuarios verán el cambio en menos de 1 minuto.';
                 $selRol = $idRol;
             } elseif ($accion === 'eliminar_rol') {

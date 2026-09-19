@@ -153,6 +153,19 @@ if ($result['success'] && isAuthenticated() && !empty($data['cliente']['telefono
 
 if ($result['success']) {
     guardarDireccionCheckoutSiAplica($data);
+
+    // Auditoria: pedido hecho desde el catalogo web (con sesion de cliente o como invitado).
+    logAudit(
+        'PEDIDO_WEB_CREADO',
+        'pedidos',
+        isset($result['id_pedido']) ? (int)$result['id_pedido'] : null,
+        'Pedido web ' . (string)($result['pedido'] ?? '') . ' | ' . count((array)$data['items']) . ' producto(s) | '
+            . (isAuthenticated() ? 'cliente con cuenta' : 'invitado')
+            . ' | contacto: ' . auditEnmascararPii('telefono', (string)($data['cliente']['telefono'] ?? '')),
+        null,
+        ['pedido' => (string)($result['pedido'] ?? ''), 'productos' => count((array)$data['items']), 'con_cuenta' => isAuthenticated()],
+        ['severidad' => 'info']
+    );
 }
 
 if ($result['success']) {

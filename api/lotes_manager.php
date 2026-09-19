@@ -86,6 +86,7 @@ $accion = (string) ($data['accion'] ?? '');
 try {
     switch ($accion) {
         case 'guardar':
+            $auditAntes = auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', (int) ($data['id_lote'] ?? 0), AUDIT_CAMPOS_LOTE);
             $id = loteGuardar($pdo, [
                 'id_lote' => (int) ($data['id_lote'] ?? 0),
                 'id_producto' => (int) ($data['id_producto'] ?? 0),
@@ -97,27 +98,75 @@ try {
                 'costo_unitario' => $data['costo_unitario'] ?? null,
                 'notas' => $data['notas'] ?? null,
             ], $userId);
-            logAudit('LOTE_GUARDADO', 'lotes_inventario', $id, 'Lote ' . ($data['codigo_lote'] ?? ''));
+            $auditDespues = auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', $id, AUDIT_CAMPOS_LOTE);
+            if ($auditAntes === []) {
+                logAudit(
+                    'LOTE_GUARDADO',
+                    'lotes_inventario',
+                    $id,
+                    'Lote nuevo ' . ($data['codigo_lote'] ?? '') . ' | cantidad ' . ($auditDespues['cantidad_restante'] ?? '?') . ', caduca ' . ($auditDespues['fecha_caducidad'] ?? '?'),
+                    null,
+                    auditDiff([], $auditDespues, array_keys($auditDespues))['despues']
+                );
+            } else {
+                logAuditCambios('LOTE_GUARDADO', 'lotes_inventario', $id, $auditAntes, $auditDespues, [], [
+                    'contexto' => 'Lote ' . ($auditDespues['codigo_lote'] ?? ''),
+                ]);
+            }
             echo json_encode(['success' => true, 'message' => 'Lote guardado', 'id_lote' => $id]);
             break;
 
         case 'ajustar':
-            loteAjustarCantidad($pdo, (int) ($data['id_lote'] ?? 0), (int) ($data['cantidad'] ?? 0), $userId);
+            $auditIdLote = (int) ($data['id_lote'] ?? 0);
+            $auditAntes = auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', $auditIdLote, AUDIT_CAMPOS_LOTE);
+            loteAjustarCantidad($pdo, $auditIdLote, (int) ($data['cantidad'] ?? 0), $userId);
+            logAuditCambios(
+                'LOTE_AJUSTADO',
+                'lotes_inventario',
+                $auditIdLote,
+                $auditAntes,
+                auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', $auditIdLote, AUDIT_CAMPOS_LOTE),
+                ['cantidad_restante', 'estado'],
+                ['contexto' => 'Lote ' . ($auditAntes['codigo_lote'] ?? ('#' . $auditIdLote)) . ' (ajuste manual de cantidad)', 'severidad' => 'alerta']
+            );
             echo json_encode(['success' => true, 'message' => 'Cantidad ajustada']);
             break;
 
         case 'cambiar_estado':
-            loteCambiarEstado($pdo, (int) ($data['id_lote'] ?? 0), (string) ($data['estado'] ?? ''), $userId);
+            $auditIdLote = (int) ($data['id_lote'] ?? 0);
+            $auditAntes = auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', $auditIdLote, AUDIT_CAMPOS_LOTE);
+            loteCambiarEstado($pdo, $auditIdLote, (string) ($data['estado'] ?? ''), $userId);
+            logAuditCambios(
+                'LOTE_ESTADO_CAMBIADO',
+                'lotes_inventario',
+                $auditIdLote,
+                $auditAntes,
+                auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', $auditIdLote, AUDIT_CAMPOS_LOTE),
+                ['estado'],
+                ['contexto' => 'Lote ' . ($auditAntes['codigo_lote'] ?? ('#' . $auditIdLote)), 'severidad' => 'alerta']
+            );
             echo json_encode(['success' => true, 'message' => 'Estado actualizado']);
             break;
 
         case 'marcar_atendida':
+            $auditIdLote = (int) ($data['id_lote'] ?? 0);
+            $auditAntes = auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', $auditIdLote, AUDIT_CAMPOS_LOTE);
             loteMarcarAtendida(
                 $pdo,
-                (int) ($data['id_lote'] ?? 0),
+                $auditIdLote,
                 !empty($data['en_oferta']),
                 $data['notas'] ?? null,
                 $userId
+            );
+            logAudit(
+                'LOTE_ATENDIDO',
+                'lotes_inventario',
+                $auditIdLote,
+                'Lote ' . ($auditAntes['codigo_lote'] ?? ('#' . $auditIdLote)) . ' marcado como atendido'
+                    . (!empty($data['en_oferta']) ? ' y declarado EN OFERTA (solo marca el lote; no cambia precio ni categoría)' : ' (solo revisado, sin oferta)'),
+                ['alerta_atendida' => $auditAntes['alerta_atendida'] ?? null, 'en_oferta' => $auditAntes['en_oferta'] ?? null],
+                ['alerta_atendida' => 1, 'en_oferta' => !empty($data['en_oferta']) ? 1 : 0],
+                ['severidad' => !empty($data['en_oferta']) ? 'alerta' : 'aviso']
             );
             echo json_encode(['success' => true, 'message' => 'Alerta marcada como atendida']);
             break;
@@ -133,7 +182,20 @@ try {
                 'PRODUCTO_EN_OFERTA',
                 'productos',
                 (int) ($data['id_producto'] ?? 0),
-                'Precio de oferta $' . number_format($res['precio_oferta'], 2) . ' - ' . $res['nombre']
+                $res['nombre'] . ' | precio de oferta $' . number_format($res['precio_oferta'], 2)
+                    . ' (costo $' . number_format($res['precio_costo'], 2) . ', venta normal $' . number_format($res['precio_venta'], 2) . ')'
+                    . ($res['ya_estaba'] ? ' | ya estaba en la categoría Ofertas' : ' | se agregó a la categoría Ofertas')
+                    . ($res['precio_fijado'] ? ' | se fijó el precio de oferta' : ' | conservó el precio de oferta que ya tenía')
+                    . ((int) ($data['id_lote'] ?? 0) > 0 ? ' | desde el lote #' . (int) $data['id_lote'] : ''),
+                null,
+                [
+                    'precio_oferta' => $res['precio_oferta'],
+                    'precio_venta' => $res['precio_venta'],
+                    'precio_costo' => $res['precio_costo'],
+                    'categoria_oferta_agregada' => !$res['ya_estaba'],
+                    'precio_oferta_fijado' => $res['precio_fijado'],
+                ],
+                ['severidad' => 'alerta']
             );
             $msg = $res['ya_estaba']
                 ? 'Ya estaba en Ofertas. Precio de oferta: $' . number_format($res['precio_oferta'], 2)
@@ -142,8 +204,17 @@ try {
             break;
 
         case 'eliminar':
+            $auditAntes = auditSnapshotFila($pdo, 'lotes_inventario', 'id_lote', (int) ($data['id_lote'] ?? 0), AUDIT_CAMPOS_LOTE);
             loteEliminar($pdo, (int) ($data['id_lote'] ?? 0));
-            logAudit('LOTE_ELIMINADO', 'lotes_inventario', (int) ($data['id_lote'] ?? 0), 'Lote eliminado');
+            logAudit(
+                'LOTE_ELIMINADO',
+                'lotes_inventario',
+                (int) ($data['id_lote'] ?? 0),
+                'Lote ' . ($auditAntes['codigo_lote'] ?? '') . ' eliminado (quedaban ' . ($auditAntes['cantidad_restante'] ?? '?') . ' u., caducidad ' . ($auditAntes['fecha_caducidad'] ?? '?') . ')',
+                auditDiff($auditAntes, [], array_keys($auditAntes))['antes'],
+                null,
+                ['severidad' => 'alerta']
+            );
             echo json_encode(['success' => true, 'message' => 'Lote eliminado']);
             break;
 

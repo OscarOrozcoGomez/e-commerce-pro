@@ -149,22 +149,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
             }
 
-            if ($accion === 'activar') {
+            if ($accion === 'activar' || $accion === 'desactivar') {
+                $nuevoEstadoCliente = $accion === 'activar' ? 'activo' : 'inactivo';
+                $auditAntes = auditSnapshotCliente($pdo, $idCliente);
                 if ($idUsuario > 0) {
-                    $pdo->prepare("UPDATE usuarios SET estado = 'activo' WHERE id_usuario = ?")->execute([$idUsuario]);
+                    $pdo->prepare("UPDATE usuarios SET estado = ? WHERE id_usuario = ?")->execute([$nuevoEstadoCliente, $idUsuario]);
                 }
                 if ($idCliente > 0) {
-                    $pdo->prepare("UPDATE clientes SET estado = 'activo' WHERE id_cliente = ?")->execute([$idCliente]);
+                    $pdo->prepare("UPDATE clientes SET estado = ? WHERE id_cliente = ?")->execute([$nuevoEstadoCliente, $idCliente]);
                 }
-                $success = 'Cliente activado.';
-            } elseif ($accion === 'desactivar') {
-                if ($idUsuario > 0) {
-                    $pdo->prepare("UPDATE usuarios SET estado = 'inactivo' WHERE id_usuario = ?")->execute([$idUsuario]);
-                }
-                if ($idCliente > 0) {
-                    $pdo->prepare("UPDATE clientes SET estado = 'inactivo' WHERE id_cliente = ?")->execute([$idCliente]);
-                }
-                $success = 'Cliente bloqueado.';
+                logAudit(
+                    'CLIENTE_ESTADO_CAMBIADO',
+                    'clientes',
+                    $idCliente > 0 ? $idCliente : null,
+                    ($auditAntes['nombre'] ?? ('Cliente #' . $idCliente)) . ' | estado: ' . ($auditAntes['estado'] ?? '?') . ' -> ' . $nuevoEstadoCliente
+                        . ($idUsuario > 0 ? ' (también su cuenta web #' . $idUsuario . ')' : ''),
+                    ['estado' => $auditAntes['estado'] ?? null],
+                    ['estado' => $nuevoEstadoCliente],
+                    ['severidad' => $accion === 'desactivar' ? 'alerta' : 'aviso']
+                );
+                $success = $accion === 'activar' ? 'Cliente activado.' : 'Cliente bloqueado.';
             } elseif ($accion === 'eliminar_cliente') {
                 if ($idCliente <= 0) {
                     throw new Exception('Cliente invalido para eliminar.');
@@ -178,6 +182,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $idUsuarioVinculado = (int)($clienteDelete['id_usuario'] ?? 0);
+                // Auditoria: foto completa ANTES de borrar (despues ya no hay a quien preguntarle).
+                $auditAntes = auditSnapshotCliente($pdo, $idCliente);
+                $auditDirecciones = 0;
+                try {
+                    $stmtAuditDir = $pdo->prepare('SELECT COUNT(*) FROM cliente_direcciones WHERE id_cliente = ?');
+                    $stmtAuditDir->execute([$idCliente]);
+                    $auditDirecciones = (int)$stmtAuditDir->fetchColumn();
+                } catch (Throwable $auditErr) {
+                    $auditDirecciones = 0;
+                }
                 $pdo->beginTransaction();
                 try {
                     if ($idUsuarioVinculado > 0) {
@@ -194,6 +208,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $nombreEliminado = $safeDisplayValue((string)($clienteDelete['nombre'] ?? ''), 'Cliente');
+                logAudit(
+                    'CLIENTE_ELIMINADO',
+                    'clientes',
+                    $idCliente,
+                    'Cliente "' . $nombreEliminado . '" eliminado con ' . $auditDirecciones . ' dirección(es)'
+                        . ($idUsuarioVinculado > 0 ? '; cuenta web #' . $idUsuarioVinculado . ' desactivada y desvinculada' : ''),
+                    auditDiff($auditAntes, [], array_keys($auditAntes))['antes'],
+                    null,
+                    ['severidad' => 'alerta']
+                );
                 $success = 'Cliente eliminado correctamente: ' . $nombreEliminado . '. La cuenta web vinculada fue desactivada y desconectada.';
             } elseif ($accion === 'crear_cliente') {
                 $nombre = trim((string)($_POST['nombre'] ?? ''));
@@ -240,6 +264,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $pdo->commit();
+                $auditDespues = auditSnapshotCliente($pdo, $nuevoClienteId);
+                logAudit(
+                    'CLIENTE_CREADO',
+                    'clientes',
+                    $nuevoClienteId,
+                    'Cliente "' . $nombre . '" creado manualmente' . ($direccion !== '' ? ' con dirección' : ' sin dirección'),
+                    null,
+                    auditDiff([], $auditDespues, array_keys($auditDespues))['despues']
+                );
                 $success = 'Cliente creado correctamente.';
             } elseif ($accion === 'editar_cliente') {
                 $nombre = trim((string)($_POST['nombre'] ?? ''));
@@ -259,6 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     throw new Exception('El correo capturado no es valido.');
                 }
 
+                $auditAntes = auditSnapshotCliente($pdo, $idCliente);
                 $stmtUpdate = $pdo->prepare('UPDATE clientes SET nombre = ?, email = ?, telefono = ? WHERE id_cliente = ?');
                 $stmtUpdate->execute([
                     $storeValue($nombre),
@@ -266,6 +300,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     $storeValue($telefonoNormalizado),
                     $idCliente,
                 ]);
+                // Teléfono/correo salen enmascarados (ver audit_utils.php): se sabe QUE campo cambió, no el dato.
+                logAuditCambios(
+                    'CLIENTE_EDITADO',
+                    'clientes',
+                    $idCliente,
+                    $auditAntes,
+                    auditSnapshotCliente($pdo, $idCliente),
+                    ['nombre', 'email', 'telefono'],
+                    ['contexto' => (string)($auditAntes['nombre'] ?? ('Cliente #' . $idCliente)), 'severidad' => 'aviso']
+                );
                 $success = 'Cliente actualizado correctamente.';
             } elseif ($accion === 'agregar_direccion' || $accion === 'editar_direccion') {
                 if (!$hasClienteDireccionesTable) {
@@ -288,6 +332,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     throw new Exception(direccionAliasErrorLimite());
                 }
 
+                $auditDirAntes = $accion === 'editar_direccion' ? auditSnapshotDireccion($pdo, $idDireccion) : [];
+                $auditNombreCliente = auditNombreCliente($pdo, $idCliente);
                 $pdo->beginTransaction();
                 if ($setDefault) {
                     $pdo->prepare('UPDATE cliente_direcciones SET es_default = 0 WHERE id_cliente = ?')->execute([$idCliente]);
@@ -312,6 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                         $coords['lat'] ?? null,
                         $coords['lng'] ?? null,
                     ]);
+                    $idDireccion = (int)$pdo->lastInsertId();
                 } else {
                     if ($idDireccion <= 0) {
                         throw new Exception('Direccion invalida para editar.');
@@ -338,6 +385,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 }
 
                 $pdo->commit();
+
+                $auditDirDespues = auditSnapshotDireccion($pdo, $idDireccion);
+                if ($accion === 'agregar_direccion') {
+                    logAudit(
+                        'CLIENTE_DIRECCION_CREADA',
+                        'cliente_direcciones',
+                        $idDireccion ?: null,
+                        'Cliente "' . $auditNombreCliente . '" | dirección agregada (' . ($auditDirDespues['alias'] ?? '') . ')',
+                        null,
+                        auditDiff([], $auditDirDespues, array_keys($auditDirDespues))['despues']
+                    );
+                } else {
+                    logAuditCambios(
+                        'CLIENTE_DIRECCION_EDITADA',
+                        'cliente_direcciones',
+                        $idDireccion,
+                        $auditDirAntes,
+                        $auditDirDespues,
+                        [],
+                        ['contexto' => 'Cliente "' . $auditNombreCliente . '"', 'severidad' => 'aviso']
+                    );
+                }
                 $success = $accion === 'agregar_direccion' ? 'Direccion agregada correctamente.' : 'Direccion actualizada correctamente.';
             } elseif ($accion === 'set_default_direccion') {
                 $idDireccion = (int)($_POST['id_direccion'] ?? 0);
@@ -348,12 +417,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $pdo->prepare('UPDATE cliente_direcciones SET es_default = 0 WHERE id_cliente = ?')->execute([$idCliente]);
                 $pdo->prepare('UPDATE cliente_direcciones SET es_default = 1 WHERE id_direccion = ? AND id_cliente = ?')->execute([$idDireccion, $idCliente]);
                 $pdo->commit();
+                logAudit(
+                    'CLIENTE_DIRECCION_PREDETERMINADA',
+                    'cliente_direcciones',
+                    $idDireccion,
+                    'Cliente "' . auditNombreCliente($pdo, $idCliente) . '" | dirección #' . $idDireccion . ' ahora es la predeterminada'
+                );
                 $success = 'Direccion predeterminada actualizada.';
             } elseif ($accion === 'eliminar_direccion') {
                 $idDireccion = (int)($_POST['id_direccion'] ?? 0);
                 if (!$hasClienteDireccionesTable || $idCliente <= 0 || $idDireccion <= 0) {
                     throw new Exception('No se pudo eliminar la direccion.');
                 }
+                $auditDirAntes = auditSnapshotDireccion($pdo, $idDireccion);
                 $pdo->beginTransaction();
                 $stmtWasDefault = $pdo->prepare('SELECT es_default FROM cliente_direcciones WHERE id_direccion = ? AND id_cliente = ? LIMIT 1');
                 $stmtWasDefault->execute([$idDireccion, $idCliente]);
@@ -363,6 +439,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     $pdo->prepare('UPDATE cliente_direcciones SET es_default = 1 WHERE id_cliente = ? ORDER BY id_direccion ASC LIMIT 1')->execute([$idCliente]);
                 }
                 $pdo->commit();
+                logAudit(
+                    'CLIENTE_DIRECCION_ELIMINADA',
+                    'cliente_direcciones',
+                    $idDireccion,
+                    'Cliente "' . auditNombreCliente($pdo, $idCliente) . '" | dirección eliminada (' . ($auditDirAntes['alias'] ?? '#' . $idDireccion) . ')',
+                    auditDiff($auditDirAntes, [], array_keys($auditDirAntes))['antes'],
+                    null,
+                    ['severidad' => 'alerta']
+                );
                 $success = 'Direccion eliminada.';
             } elseif ($accion === 'marcar_direccion_confirmada') {
                 $idDireccion = (int)($_POST['id_direccion'] ?? 0);
@@ -374,6 +459,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if (!$resultadoConfirmar['success']) {
                     throw new Exception($resultadoConfirmar['message']);
                 }
+                logAudit(
+                    'CLIENTE_DIRECCION_CONFIRMADA',
+                    'cliente_direcciones',
+                    $idDireccion > 0 ? $idDireccion : null,
+                    'Cliente "' . auditNombreCliente($pdo, $idCliente) . '" | dirección #' . $idDireccion . ' marcada como confirmada por el cliente (a mano)'
+                );
                 $success = $resultadoConfirmar['message'];
             } elseif ($accion === 'guardar_horario_direccion') {
                 if (!$hasClienteDireccionesTable) {
@@ -413,10 +504,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     $existingHorarioId = $existingHorarioId;
                 }
 
+                // Auditoria del horario: son datos operativos (no PII), se guardan tal cual.
+                $auditHorarioNuevo = ['dia_semana' => $diaSemana, 'hora_inicio' => $horaInicio, 'hora_fin' => $horaFin, 'activo' => $activo, 'nota' => $nota !== '' ? $nota : null];
+                $auditHorarioAntes = [];
+                if ($existingHorarioId > 0) {
+                    try {
+                        $stmtAuditHor = $pdo->prepare('SELECT dia_semana, hora_inicio, hora_fin, activo, nota FROM cliente_horarios_entrega WHERE id_horario = ? AND id_cliente = ? LIMIT 1');
+                        $stmtAuditHor->execute([$existingHorarioId, $idCliente]);
+                        $auditHorarioAntes = $stmtAuditHor->fetch(PDO::FETCH_ASSOC) ?: [];
+                    } catch (Throwable $auditErr) {
+                        $auditHorarioAntes = [];
+                    }
+                }
+
                 if ($existingHorarioId > 0) {
                     $pdo->prepare('UPDATE cliente_horarios_entrega SET dia_semana = ?, hora_inicio = ?, hora_fin = ?, activo = ?, nota = ? WHERE id_horario = ? AND id_cliente = ?')
                         ->execute([$diaSemana, $horaInicio, $horaFin, $activo, $nota !== '' ? $nota : null, $existingHorarioId, $idCliente]);
                     $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? AND id_horario <> ?')->execute([$idCliente, $idDireccion, $existingHorarioId]);
+                    logAuditCambios(
+                        'CLIENTE_HORARIO_CAMBIADO',
+                        'cliente_horarios_entrega',
+                        $existingHorarioId,
+                        $auditHorarioAntes,
+                        $auditHorarioNuevo,
+                        [],
+                        ['contexto' => 'Cliente "' . auditNombreCliente($pdo, $idCliente) . '"']
+                    );
                     $success = 'Horario de entrega actualizado.';
                 } else {
                     $pdo->beginTransaction();
@@ -425,6 +538,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     $lastInsertedId = (int)$pdo->lastInsertId();
                     $pdo->prepare('DELETE FROM cliente_horarios_entrega WHERE id_cliente = ? AND id_direccion = ? AND id_horario <> ?')->execute([$idCliente, $idDireccion, $lastInsertedId]);
                     $pdo->commit();
+                    logAudit(
+                        'CLIENTE_HORARIO_CAMBIADO',
+                        'cliente_horarios_entrega',
+                        $lastInsertedId,
+                        'Cliente "' . auditNombreCliente($pdo, $idCliente) . '" | horario nuevo: ' . $diaSemana . ' ' . $horaInicio . '-' . $horaFin,
+                        null,
+                        $auditHorarioNuevo
+                    );
                     $success = 'Horario de entrega guardado.';
                 }
             }

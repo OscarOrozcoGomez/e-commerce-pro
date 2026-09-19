@@ -295,6 +295,22 @@ try {
             $precioOferta = isset($data['precio_oferta']) && trim((string)$data['precio_oferta']) !== ''
                 ? round(max(0.0, (float)$data['precio_oferta']), 2) : null;
 
+            // Auditoria: foto del producto y de sus categorias ANTES de tocar nada, para poder
+            // decir despues que campo cambio (precio, oferta, estado...) y quien lo hizo.
+            $esProductoNuevo = $id <= 0;
+            $auditAntes = $esProductoNuevo ? [] : auditSnapshotProducto($pdo, $id);
+            $auditCategoriasAntes = $esProductoNuevo ? [] : auditCategoriasDeProducto($pdo, $id);
+            $auditImagenesAntes = null;
+            if (!$esProductoNuevo) {
+                try {
+                    $stmtImgAntes = $pdo->prepare('SELECT ruta_archivo FROM producto_imagenes WHERE id_producto = ? ORDER BY orden ASC');
+                    $stmtImgAntes->execute([$id]);
+                    $auditImagenesAntes = $stmtImgAntes->fetchAll(PDO::FETCH_COLUMN);
+                } catch (Throwable $auditErr) {
+                    $auditImagenesAntes = null;
+                }
+            }
+
             if ($id > 0) {
                 // EDITAR
                 $sql = "UPDATE productos SET `nombre` = :nombre, `nombre_variante` = :nombre_variante, `nombre_corto` = :nombre_corto, `sku` = :sku, `codigo_barras` = :codigo_barras,
@@ -351,6 +367,30 @@ try {
                     ':estado' => $estado
                 ]);
                 $id = (int)$pdo->lastInsertId();
+            }
+
+            // Auditoria del alta/edicion: solo lo que cambio (precios, oferta, estado...).
+            $auditDespues = auditSnapshotProducto($pdo, $id);
+            $auditNombreProducto = (string)($auditDespues['nombre'] ?? ($data['nombre'] ?? ''));
+            if ($esProductoNuevo) {
+                logAudit(
+                    'PRODUCTO_CREADO',
+                    'productos',
+                    $id,
+                    $auditNombreProducto . ' | precio venta $' . number_format((float)($auditDespues['precio_venta'] ?? 0), 2)
+                        . ', costo $' . number_format((float)($auditDespues['precio_costo'] ?? 0), 2),
+                    null,
+                    auditDiff([], $auditDespues, array_keys($auditDespues))['despues']
+                );
+            } else {
+                logAuditCambios('PRODUCTO_EDITADO', 'productos', $id, $auditAntes, $auditDespues, [], [
+                    'contexto' => $auditNombreProducto,
+                    // Tocar precios u oferta es lo delicado; el resto de la ficha es informativo.
+                    'severidad' => (function () use ($auditAntes, $auditDespues): string {
+                        $d = auditDiff($auditAntes, $auditDespues, ['precio_costo', 'precio_venta', 'precio_comparacion', 'precio_oferta', 'estado']);
+                        return $d['despues'] !== [] ? 'alerta' : 'aviso';
+                    })(),
+                ]);
             }
 
             // PROCESAR IMÁGENES (Combinación de locales y remotas de B-Life)
@@ -587,8 +627,28 @@ try {
                 }
             }
 
+            // Imagenes: solo se registra que cambiaron (rutas antes/despues), no los archivos.
+            if (($hasLocal || $hasRemote || $hasOrden) && $auditImagenesAntes !== null) {
+                $auditImagenesDespues = $pdo->prepare('SELECT ruta_archivo FROM producto_imagenes WHERE id_producto = ? ORDER BY orden ASC');
+                $auditImagenesDespues->execute([$id]);
+                $rutasDespues = $auditImagenesDespues->fetchAll(PDO::FETCH_COLUMN);
+                if ($rutasDespues !== $auditImagenesAntes) {
+                    logAudit(
+                        'PRODUCTO_IMAGENES_CAMBIADAS',
+                        'productos',
+                        $id,
+                        $auditNombreProducto . ' | imágenes: ' . count($auditImagenesAntes) . ' -> ' . count($rutasDespues),
+                        ['imagenes' => $auditImagenesAntes],
+                        ['imagenes' => $rutasDespues]
+                    );
+                }
+            }
+
             dbSetProductCategories($id, $data['categorias'] ?? []);
-            
+            // Categorias agregadas/quitadas (incluida "Oferta": es una de las formas de poner un
+            // producto en oferta y hasta hoy no dejaba rastro).
+            auditRegistrarCambioCategorias($id, $auditNombreProducto, $auditCategoriasAntes, auditCategoriasDeProducto($pdo, $id));
+
             // El inventario_almacen SOLO se escribe si el usuario editó a propósito los campos
             // de stock de la ficha (stock_touched=1). Antes esto corría en cada guardado, así
             // que cambiar el nombre/foto/precio de un producto reescribía cantidad_actual,
@@ -603,14 +663,30 @@ try {
                     $nuevoMax = max(0, (int)($data['stock_maximo'] ?? 5));
 
                     // Existencias previas en ese almacén, para el registro de auditoría.
-                    $stmtPrev = $pdo->prepare("SELECT cantidad_actual FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?");
+                    $stmtPrev = $pdo->prepare("SELECT cantidad_actual, stock_minimo, stock_maximo FROM inventario_almacen WHERE id_producto = ? AND id_almacen = ?");
                     $stmtPrev->execute([$id, $id_alm]);
-                    $prevRaw = $stmtPrev->fetchColumn();
+                    $prevFila = $stmtPrev->fetch(PDO::FETCH_ASSOC);
+                    $prevRaw = is_array($prevFila) ? $prevFila['cantidad_actual'] : false;
                     $cantidadPrevia = ($prevRaw === false) ? null : (int)$prevRaw;
 
                     $stmtInv = $pdo->prepare("INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual, stock_minimo, stock_maximo)
                                               VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad_actual = VALUES(cantidad_actual), stock_minimo = VALUES(stock_minimo), stock_maximo = VALUES(stock_maximo)");
                     $stmtInv->execute([$id, $id_alm, $nuevaCantidad, $nuevoMin, $nuevoMax]);
+
+                    // Auditoria: existencias y umbrales del almacen (antes -> despues).
+                    logAuditCambios(
+                        'PRODUCTO_STOCK_AJUSTADO',
+                        'inventario_almacen',
+                        $id,
+                        [
+                            'cantidad_actual' => $cantidadPrevia,
+                            'stock_minimo' => is_array($prevFila) ? $prevFila['stock_minimo'] : null,
+                            'stock_maximo' => is_array($prevFila) ? $prevFila['stock_maximo'] : null,
+                        ],
+                        ['cantidad_actual' => $nuevaCantidad, 'stock_minimo' => $nuevoMin, 'stock_maximo' => $nuevoMax],
+                        [],
+                        ['contexto' => $auditNombreProducto . ' (almacén #' . $id_alm . ')', 'severidad' => 'alerta']
+                    );
 
                     // Auditoría: dejar rastro del ajuste manual de existencias. Si la tabla de
                     // movimientos falla, no se rompe el guardado del producto.
@@ -636,12 +712,23 @@ try {
         } 
         elseif ($action === 'delete') {
             $id = (int)$data['id_producto'];
+            $auditAntes = auditSnapshotProducto($pdo, $id);
             $pdo->prepare("UPDATE productos SET estado = 'inactivo' WHERE id_producto = ?")->execute([$id]);
+            logAudit(
+                'PRODUCTO_ELIMINADO',
+                'productos',
+                $id,
+                (string)($auditAntes['nombre'] ?? ('Producto #' . $id)) . ' | estado: ' . (string)($auditAntes['estado'] ?? '?') . ' -> inactivo',
+                ['estado' => $auditAntes['estado'] ?? null],
+                ['estado' => 'inactivo'],
+                ['severidad' => 'alerta']
+            );
             echo json_encode(['success' => true, 'message' => 'Producto eliminado']);
         }
         elseif ($action === 'add_category') {
             $nombre = trim($data['nuevo_nombre_cat'] ?? '');
             if (dbCreateCategory($nombre)) {
+                logAudit('CATEGORIA_CREADA', 'categorias', null, 'Categoría: ' . $nombre);
                 echo json_encode(['success' => true, 'message' => 'Categoría creada']);
             } else {
                 throw new Exception("Error al crear categoría");
@@ -699,6 +786,7 @@ try {
                 $stmtCheck = $pdo->prepare("SELECT 1 FROM producto_categorias WHERE id_producto = ? AND id_categoria = ?");
                 $stmtInsert = $pdo->prepare("INSERT INTO producto_categorias (id_producto, id_categoria) VALUES (?, ?)");
                 $agregados = 0;
+                $auditIdsAgregados = [];
                 foreach ($productosIds as $pid) {
                     $stmtCheck->execute([$pid, $idCategoria]);
                     if ($stmtCheck->fetchColumn()) {
@@ -706,6 +794,7 @@ try {
                     }
                     $stmtInsert->execute([$pid, $idCategoria]);
                     $agregados++;
+                    $auditIdsAgregados[] = $pid;
                 }
                 $pdo->commit();
             } catch (Throwable $e) {
@@ -716,11 +805,31 @@ try {
             }
 
             if (function_exists('logAudit')) {
+                // Que categoria y a CUALES productos (id + nombre): antes solo quedaba "#id a N productos"
+                // y no se podia saber que producto habia recibido la categoria (p. ej. "Oferta").
+                $auditNombreCategoria = (string)(auditNombresCategorias($pdo, [$idCategoria])[$idCategoria] ?? ('#' . $idCategoria));
+                $auditNombresProductos = [];
+                if (!empty($auditIdsAgregados)) {
+                    $stmtNomProd = $pdo->prepare('SELECT id_producto, nombre FROM productos WHERE id_producto IN (' . implode(',', array_fill(0, count($auditIdsAgregados), '?')) . ')');
+                    $stmtNomProd->execute($auditIdsAgregados);
+                    foreach ($stmtNomProd->fetchAll(PDO::FETCH_ASSOC) as $filaNom) {
+                        $auditNombresProductos[(int)$filaNom['id_producto']] = (string)$filaNom['nombre'];
+                    }
+                }
+                $auditEsOferta = in_array(mb_strtolower($auditNombreCategoria), ['oferta', 'ofertas'], true);
+                $auditListaProductos = [];
+                foreach ($auditIdsAgregados as $pidAudit) {
+                    $auditListaProductos[] = '#' . $pidAudit . ' ' . ($auditNombresProductos[$pidAudit] ?? '');
+                }
                 logAudit(
                     'CATEGORIA_ASIGNADA_MASIVA',
                     'producto_categorias',
                     $idCategoria,
-                    'Categoria #' . $idCategoria . ' asignada a ' . $agregados . ' de ' . count($productosIds) . ' productos seleccionados por ' . (string)($usuario['nombre'] ?? 'usuario')
+                    'Categoría "' . $auditNombreCategoria . '" asignada a ' . $agregados . ' de ' . count($productosIds) . ' productos'
+                        . ($auditEsOferta ? ' (OFERTA)' : '') . ': ' . implode(', ', $auditListaProductos),
+                    null,
+                    ['categoria' => $auditNombreCategoria, 'productos' => $auditListaProductos],
+                    ['severidad' => $auditEsOferta ? 'alerta' : 'aviso']
                 );
             }
 

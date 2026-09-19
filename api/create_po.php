@@ -49,6 +49,15 @@ try {
     $stmtUpdate->execute([$totalEstimado, $idOrden]);
 
     $pdo->commit();
+
+    logAudit(
+        'ORDEN_COMPRA_CREADA',
+        'ordenes_compra',
+        (int) $idOrden,
+        'Orden ' . $referencia . ' creada | total estimado $' . number_format((float) $totalEstimado, 2),
+        null,
+        ['referencia' => $referencia, 'total_estimado' => round((float) $totalEstimado, 2), 'id_almacen' => $idAlmacen]
+    );
     echo json_encode(['success' => true, 'id' => $idOrden, 'referencia' => $referencia]);
 
 } catch (Exception $e) {

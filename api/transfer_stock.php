@@ -54,6 +54,32 @@ try {
 
     $resultado = stockTransferExecuteBatch(getPDO(), $idOrigen, $idDestino, $items, $userId, $observacion);
 
+    // Auditoria: que se movio, de que almacen a cual (con nombres, no solo ids).
+    $auditPdo = getPDO();
+    $auditLineas = [];
+    foreach ($items as $itemAudit) {
+        $idProdAudit = (int) ($itemAudit['id_producto'] ?? 0);
+        $auditLineas[] = trim('#' . $idProdAudit . ' ' . auditNombreRegistro($auditPdo, 'productos', 'id_producto', 'nombre', $idProdAudit))
+            . ' x' . (int) ($itemAudit['cantidad'] ?? 0);
+    }
+    $auditOrigenNombre = auditNombreRegistro($auditPdo, 'almacenes', 'id_almacen', 'nombre', $idOrigen);
+    $auditDestinoNombre = auditNombreRegistro($auditPdo, 'almacenes', 'id_almacen', 'nombre', $idDestino);
+    logAudit(
+        'TRANSFERENCIA_STOCK',
+        'inventario_almacen',
+        null,
+        'De "' . $auditOrigenNombre . '" a "' . $auditDestinoNombre . '": ' . implode(', ', array_slice($auditLineas, 0, 12))
+            . (count($auditLineas) > 12 ? ', ...' : '') . ($observacion !== '' ? ' | obs: ' . mb_substr($observacion, 0, 200) : ''),
+        null,
+        [
+            'origen' => $auditOrigenNombre,
+            'destino' => $auditDestinoNombre,
+            'productos' => $auditLineas,
+            'unidades_totales' => $resultado['unidades_totales'] ?? null,
+        ],
+        ['severidad' => 'aviso']
+    );
+
     $mensaje = sprintf(
         '%d producto(s) transferido(s) (%d unidad(es) en total).',
         $resultado['lineas'],

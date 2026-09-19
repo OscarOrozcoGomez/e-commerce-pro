@@ -22,6 +22,17 @@ try {
         isAdmin()
     );
 
+    // Auditoria: quien descargo el reporte de ventas (contiene datos de clientes y montos).
+    logAudit(
+        'EXPORTACION_DATOS',
+        'exportaciones',
+        null,
+        'Reporte de ventas CSV del ' . $fecha_inicio . ' al ' . $fecha_fin . ' (' . count($ventas) . ' venta(s))',
+        null,
+        ['formato' => 'csv', 'fecha_inicio' => $fecha_inicio, 'fecha_fin' => $fecha_fin, 'filas' => count($ventas)],
+        ['severidad' => 'alerta']
+    );
+
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=reporte_ventas_' . $fecha_inicio . '_a_' . $fecha_fin . '.csv');
     

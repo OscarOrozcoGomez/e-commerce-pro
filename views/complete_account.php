@@ -103,6 +103,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
                     $pdo->commit();
 
+                    logAudit(
+                        'CUENTA_ACTIVADA',
+                        'usuarios',
+                        $newUserId,
+                        'El cliente #' . $clienteId . ' creó su cuenta web (usuario #' . $newUserId . ')',
+                        null,
+                        ['id_cliente' => $clienteId, 'email' => auditEnmascararPii('email', (string)$email)],
+                        ['id_usuario' => $newUserId, 'usuario_nombre' => (string)$nombre, 'usuario_rol' => 'cliente']
+                    );
+
                     unset($_SESSION['account_completion']);
                     $_SESSION['session_notice'] = 'Cuenta completada con éxito. Ya puedes iniciar sesión.';
                     if (session_status() === PHP_SESSION_ACTIVE) {

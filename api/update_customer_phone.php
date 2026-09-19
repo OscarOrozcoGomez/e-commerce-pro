@@ -78,8 +78,19 @@ try {
         throw new Exception('Ese cliente pertenece a otra sucursal.');
     }
 
+    $auditAntes = auditSnapshotCliente($pdo, $idCliente);
     $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?')
         ->execute([$storeValue($telefonoNormalizado), $idCliente]);
+    // Teléfono enmascarado (últimos 4 dígitos): se sabe que cambió y quién lo cambió, sin volcar el dato.
+    logAuditCambios(
+        'CLIENTE_TELEFONO_CAMBIADO',
+        'clientes',
+        $idCliente,
+        $auditAntes,
+        ['telefono' => $telefonoNormalizado],
+        ['telefono'],
+        ['contexto' => 'Cliente "' . (string)($auditAntes['nombre'] ?? ('#' . $idCliente)) . '"', 'severidad' => 'aviso']
+    );
 
     echo json_encode([
         'success' => true,
