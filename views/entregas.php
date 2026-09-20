@@ -8,11 +8,14 @@ require_once __DIR__ . '/../core/entrega_item_utils.php';
 require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+require_once __DIR__ . '/../core/catalogo_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
 
 $pageTitle = 'Entregas Asignadas';
+// "Ver fachada" (Street View) solo se ofrece si hay API key de Google Maps configurada.
+$fachadaMapsDisponible = defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== '';
 $pdo = getPDO();
 $clientesFrecuentesIds = clienteFrecuenteGetIds($pdo);
 $usuario = $_SESSION['usuario'];
@@ -517,7 +520,9 @@ try {
     if (!empty($entregas)) {
         $idsPedidos = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $entregas)));
         $placeholders = implode(',', array_fill(0, count($idsPedidos), '?'));
-        $sqlDetalles = "SELECT dp.id_pedido, dp.id_detalle, dp.cantidad, dp.estado_entrega, dp.motivo_rechazo, p.nombre, p.nombre_variante
+        $sqlDetalles = "SELECT dp.id_pedido, dp.id_detalle, dp.id_producto, dp.cantidad, dp.precio_original, dp.precio_unitario, dp.subtotal,
+                               dp.estado_entrega, dp.motivo_rechazo, p.nombre, p.nombre_variante,
+                               COALESCE(NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) AS imagen_producto
                         FROM detalle_pedidos dp
                         JOIN productos p ON dp.id_producto = p.id_producto
                         WHERE dp.id_pedido IN ($placeholders)
@@ -817,6 +822,21 @@ include __DIR__ . '/includes/header.php';
                     $prioridadLabel = $prioridadTextos[$prioridadPedido] ?? 'Normal';
                     $prioridadClass = $prioridadClases[$prioridadPedido] ?? 'grey';
                     $tieneCoordenadas = ($ent['latitud'] !== null && $ent['longitud'] !== null);
+
+                    // Coordenadas para "Ver fachada" (Street View): las del pedido o, si no las trae,
+                    // las del link de Google Maps guardado (.../search/?api=1&query=lat,lng o .../@lat,lng).
+                    $fachadaLat = null;
+                    $fachadaLng = null;
+                    if ($tieneCoordenadas && is_numeric($ent['latitud']) && is_numeric($ent['longitud'])
+                        && ((float)$ent['latitud'] !== 0.0 || (float)$ent['longitud'] !== 0.0)) {
+                        $fachadaLat = (float)$ent['latitud'];
+                        $fachadaLng = (float)$ent['longitud'];
+                    } elseif ($clienteMapas !== ''
+                        && preg_match('/(?:[?&]query=|@)(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/', $clienteMapas, $mCoords)) {
+                        $fachadaLat = (float)$mCoords[1];
+                        $fachadaLng = (float)$mCoords[2];
+                    }
+                    $puedeVerFachada = $fachadaLat !== null && $fachadaLng !== null && $fachadaMapsDisponible;
                 ?>
                 <div class="col s12 m6" data-pedido-id="<?php echo (int)$ent['id_pedido']; ?>">
                     <div class="card hoverable border-delivery">
@@ -898,6 +918,17 @@ include __DIR__ . '/includes/header.php';
                                        style="width:100%; text-align:center;">
                                         <i class="material-icons left">navigation</i> Abrir Navegacion
                                     </a>
+                                    <?php if ($puedeVerFachada): ?>
+                                        <button type="button"
+                                                class="btn waves-effect waves-light teal darken-1 btn-ver-fachada"
+                                                style="width:100%; margin-top:8px;"
+                                                data-lat="<?php echo esc((string)$fachadaLat); ?>"
+                                                data-lng="<?php echo esc((string)$fachadaLng); ?>"
+                                                data-direccion="<?php echo esc($clienteDir); ?>"
+                                                data-navegar="<?php echo esc($mapsUrl); ?>">
+                                            <i class="material-icons left">streetview</i> Ver fachada
+                                        </button>
+                                    <?php endif; ?>
                                 </div>
                             <?php else: ?>
                                 <p class="grey-text" style="font-size:0.85rem; margin-top:8px;">
@@ -921,11 +952,29 @@ include __DIR__ . '/includes/header.php';
                                             $estadoEntregaItem = (string)($d['estado_entrega'] ?? 'entregado');
                                             $idDetalleItem = (int)($d['id_detalle'] ?? 0);
                                             $esUltimoItemTarjeta = $indexItemTarjeta === array_key_last($itemsPedidoTarjeta);
+                                            // Foto y precio de cada producto: el repartidor confirma que lleva el correcto y
+                                            // cuanto cuesta cada cosa (por si el cliente pregunta o rechaza una).
+                                            $cantidadItem = max(1, (int)($d['cantidad'] ?? 1));
+                                            $precioUnitarioItem = (float)($d['precio_unitario'] ?? 0);
+                                            $subtotalItem = isset($d['subtotal']) && $d['subtotal'] !== null ? (float)$d['subtotal'] : $precioUnitarioItem * $cantidadItem;
+                                            $precioOriginalItem = (float)($d['precio_original'] ?? 0);
+                                            $itemConDescuento = $precioUnitarioItem > 0 && $precioOriginalItem > $precioUnitarioItem + 0.004;
+                                            $imagenItemSrc = catalogResolveCardImageSrc((string)($d['imagen_producto'] ?? ''), (int)($d['id_producto'] ?? 0));
                                         ?>
                                         <li style="padding:8px 0;<?php echo $esUltimoItemTarjeta ? '' : ' border-bottom:1px solid #e0e0e0;'; ?>">
                                             <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 10px;">
-                                                <span style="flex:1 1 160px; min-width:0;<?php echo $estadoEntregaItem === 'rechazado' ? ' text-decoration: line-through; color:#9e9e9e;' : ''; ?>">
-                                                    <?php echo (int)$d['cantidad']; ?>x <?php echo esc($pName); ?>
+                                                <img src="<?php echo esc($imagenItemSrc); ?>" alt="<?php echo esc($pName); ?>" loading="lazy" class="entrega-item-img<?php echo $estadoEntregaItem === 'rechazado' ? ' is-rechazado' : ''; ?><?php echo $imagenItemSrc === getDefaultProductImageUrl() ? ' sin-foto' : ''; ?>" data-caption="<?php echo esc($pName); ?>" role="button" tabindex="0" title="Ver foto grande" onerror="entregaImgFallback(this)">
+                                                <span style="flex:1 1 130px; min-width:0;<?php echo $estadoEntregaItem === 'rechazado' ? ' text-decoration: line-through; color:#9e9e9e;' : ''; ?>">
+                                                    <?php echo $cantidadItem; ?>x <?php echo esc($pName); ?>
+                                                    <span class="entrega-item-precio">
+                                                        <strong>$<?php echo number_format($subtotalItem, 2); ?></strong>
+                                                        <?php if ($cantidadItem > 1 && $precioUnitarioItem > 0): ?>
+                                                            <span class="grey-text">(<?php echo $cantidadItem; ?> &times; $<?php echo number_format($precioUnitarioItem, 2); ?> c/u)</span>
+                                                        <?php endif; ?>
+                                                        <?php if ($itemConDescuento): ?>
+                                                            <span class="grey-text"><s>$<?php echo number_format($precioOriginalItem * $cantidadItem, 2); ?></s></span>
+                                                        <?php endif; ?>
+                                                    </span>
                                                 </span>
                                                 <?php if ($estadoEntregaItem === 'rechazado'): ?>
                                                     <span class="new badge red" data-badge-caption="" style="margin:0; flex-shrink:0;">No entregado</span>
@@ -2530,7 +2579,287 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <?php endif; ?>
 
+<script>
+// Foto del producto que no cargo (archivo faltante en el servidor): se cambia por el placeholder.
+window.entregaImgFallback = function (img) {
+    img.onerror = null;
+    img.classList.add('sin-foto'); // el placeholder no se agranda
+    img.src = <?php echo json_encode(getDefaultProductImageUrl()); ?>;
+};
+</script>
+
+<!-- Foto del producto en grande: se abre al tocar la miniatura de una tarjeta de entrega. -->
+<div id="entrega-lightbox" class="entrega-lightbox" role="dialog" aria-modal="true" aria-label="Foto del producto" hidden>
+    <button type="button" class="entrega-lightbox-cerrar" aria-label="Cerrar foto"><i class="material-icons">close</i></button>
+    <figure class="entrega-lightbox-figura">
+        <img id="entrega-lightbox-img" src="" alt="">
+        <figcaption id="entrega-lightbox-titulo"></figcaption>
+    </figure>
+</div>
+<script>
+(function () {
+    const caja = document.getElementById('entrega-lightbox');
+    const imagen = document.getElementById('entrega-lightbox-img');
+    const titulo = document.getElementById('entrega-lightbox-titulo');
+    if (!caja || !imagen) return;
+    let abierta = false;
+    let conHistorial = false;
+
+    function abrir(miniatura) {
+        if (abierta || miniatura.classList.contains('sin-foto')) return;
+        imagen.src = miniatura.currentSrc || miniatura.src;
+        imagen.alt = miniatura.alt || '';
+        titulo.textContent = miniatura.getAttribute('data-caption') || '';
+        caja.hidden = false;
+        document.body.style.overflow = 'hidden'; // que la pagina de atras no se mueva mientras se ve la foto
+        abierta = true;
+        // El boton "atras" del celular cierra la foto en vez de salirse de la pagina de entregas.
+        try {
+            history.pushState({ entregaLightbox: true }, '');
+            conHistorial = true;
+        } catch (error) {
+            conHistorial = false;
+        }
+    }
+
+    function cerrar(desdeHistorial) {
+        if (!abierta) return;
+        abierta = false;
+        caja.hidden = true;
+        imagen.src = '';
+        document.body.style.overflow = '';
+        if (conHistorial && !desdeHistorial) history.back();
+        conHistorial = false;
+    }
+
+    document.addEventListener('click', function (event) {
+        const miniatura = event.target.closest('.entrega-item-img');
+        if (miniatura) {
+            abrir(miniatura);
+            return;
+        }
+        // Un toque en cualquier parte de la capa (fondo, boton X o la propia foto) cierra.
+        if (abierta && event.target.closest('#entrega-lightbox')) cerrar(false);
+    });
+    document.addEventListener('keydown', function (event) {
+        if (abierta && event.key === 'Escape') {
+            cerrar(false);
+            return;
+        }
+        const miniatura = event.target.closest ? event.target.closest('.entrega-item-img') : null;
+        if (miniatura && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            abrir(miniatura);
+        }
+    });
+    window.addEventListener('popstate', function () {
+        if (abierta) cerrar(true);
+    });
+})();
+</script>
+
+<?php if ($fachadaMapsDisponible): ?>
+<!-- "Ver fachada": Street View de la casa + mapa pequeno, en una hoja inferior. Google Maps se
+     carga solo la primera vez que se toca el boton (no en cada visita a la lista). -->
+<div id="modal-fachada" class="modal bottom-sheet">
+    <div class="modal-content">
+        <h6 style="margin-top:0;"><i class="material-icons left">streetview</i> Fachada</h6>
+        <p id="fachada-direccion" class="grey-text text-darken-1" style="margin:0 0 10px;"></p>
+        <div class="fachada-visor">
+            <div class="fachada-streetview-cell">
+                <div id="fachada-streetview" class="fachada-streetview"></div>
+                <div id="fachada-msg" class="fachada-msg grey-text text-darken-1">Buscando vista de la calle...</div>
+                <!-- Solo en pantallas tactiles: evita que el dedo quede atrapado en el panorama al hacer scroll -->
+                <button type="button" id="fachada-shield" class="fachada-shield" aria-label="Activar la vista de la calle"><span>Toca para explorar</span></button>
+            </div>
+            <div id="fachada-mapa" class="fachada-mapa"></div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect btn-flat">Cerrar</a>
+        <a href="#!" id="fachada-navegar" target="_blank" rel="noopener" class="waves-effect waves-light btn blue darken-2">
+            <i class="material-icons left">navigation</i> Abrir navegacion
+        </a>
+    </div>
+</div>
+<script>
+(function () {
+    let mapsPromise = null;
+    let mapa = null;
+    let marcador = null;
+    let panorama = null;
+    let streetViewService = null;
+    let consultaActual = 0;
+
+    function cargarGoogleMaps() {
+        if (window.google && window.google.maps) return Promise.resolve();
+        if (mapsPromise) return mapsPromise;
+        mapsPromise = new Promise(function (resolve, reject) {
+            window.__fachadaMapsListo = resolve;
+            const script = document.createElement('script');
+            script.src = 'https://maps.googleapis.com/maps/api/js?key=<?php echo rawurlencode((string)GOOGLE_MAPS_API_KEY); ?>&callback=__fachadaMapsListo';
+            script.async = true;
+            script.onerror = function () { mapsPromise = null; reject(new Error('maps')); };
+            document.head.appendChild(script);
+        });
+        return mapsPromise;
+    }
+
+    // Rumbo (0-360) para que la camara mire desde la calle hacia la casa.
+    function rumbo(desde, hacia) {
+        const rad = function (g) { return g * Math.PI / 180; };
+        const dLng = rad(hacia.lng - desde.lng);
+        const y = Math.sin(dLng) * Math.cos(rad(hacia.lat));
+        const x = Math.cos(rad(desde.lat)) * Math.sin(rad(hacia.lat)) - Math.sin(rad(desde.lat)) * Math.cos(rad(hacia.lat)) * Math.cos(dLng);
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    function mostrarMensaje(texto) {
+        const msg = document.getElementById('fachada-msg');
+        if (!msg) return;
+        msg.textContent = texto;
+        msg.classList.remove('is-hidden');
+    }
+
+    function dibujarFachada(coords) {
+        const mapaEl = document.getElementById('fachada-mapa');
+        const svEl = document.getElementById('fachada-streetview');
+        const msg = document.getElementById('fachada-msg');
+        if (!mapaEl || !svEl || !msg) return;
+
+        if (!mapa) {
+            mapa = new google.maps.Map(mapaEl, { center: coords, zoom: 16, disableDefaultUI: true, zoomControl: true });
+            marcador = new google.maps.Marker({ map: mapa, position: coords });
+        } else {
+            mapa.setCenter(coords);
+            mapa.setZoom(16);
+            marcador.setPosition(coords);
+        }
+        google.maps.event.trigger(mapa, 'resize');
+        mapa.setCenter(coords);
+
+        const consulta = ++consultaActual;
+        if (!streetViewService) streetViewService = new google.maps.StreetViewService();
+        streetViewService.getPanorama({
+            location: coords,
+            radius: 60, // metros a la redonda: el pin cae en la casa y el panorama esta sobre la calle
+            source: google.maps.StreetViewSource.OUTDOOR,
+        }, function (data, status) {
+            if (consulta !== consultaActual) return; // llego tarde: ya se abrio otra entrega
+            if (status !== google.maps.StreetViewStatus.OK || !data || !data.location || !data.location.latLng) {
+                mostrarMensaje('Google no tiene vista de la calle para este punto. Usa el mapa.');
+                return;
+            }
+            if (!panorama) {
+                panorama = new google.maps.StreetViewPanorama(svEl, {
+                    addressControl: false,
+                    linksControl: false,
+                    panControl: false,
+                    enableCloseButton: false,
+                    fullscreenControl: true,
+                    zoomControl: true,
+                });
+            }
+            const desde = { lat: data.location.latLng.lat(), lng: data.location.latLng.lng() };
+            panorama.setPano(data.location.pano);
+            panorama.setPov({ heading: rumbo(desde, coords), pitch: 5 });
+            panorama.setVisible(true);
+            msg.classList.add('is-hidden');
+            setTimeout(function () { google.maps.event.trigger(panorama, 'resize'); }, 80);
+        });
+    }
+
+    async function abrirFachada(boton) {
+        const modalEl = document.getElementById('modal-fachada');
+        if (!modalEl || typeof M === 'undefined' || !M.Modal) return;
+        const lat = parseFloat(boton.getAttribute('data-lat'));
+        const lng = parseFloat(boton.getAttribute('data-lng'));
+        if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+        document.getElementById('fachada-direccion').textContent = boton.getAttribute('data-direccion') || '';
+        const navegar = document.getElementById('fachada-navegar');
+        navegar.setAttribute('href', boton.getAttribute('data-navegar') || '#');
+        navegar.style.display = boton.getAttribute('data-navegar') ? '' : 'none';
+        document.getElementById('fachada-shield').classList.remove('is-hidden'); // tactil: vuelve a tapar el panorama
+        mostrarMensaje('Buscando vista de la calle...');
+
+        (M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: true })).open();
+
+        try {
+            await cargarGoogleMaps();
+        } catch (error) {
+            mostrarMensaje('No se pudo cargar Google Maps. Revisa tu conexion e intenta de nuevo.');
+            return;
+        }
+        // Se espera a que termine la animacion de apertura: con el modal aun sin tamano, el mapa y el
+        // panorama se crean con 0 de alto.
+        setTimeout(function () { dibujarFachada({ lat: lat, lng: lng }); }, 320);
+    }
+
+    document.addEventListener('click', function (event) {
+        const boton = event.target.closest('.btn-ver-fachada');
+        if (boton) {
+            abrirFachada(boton);
+            return;
+        }
+        // Un toque en la capa transparente activa el panorama (ver estilos: solo en pantallas tactiles).
+        if (event.target.closest('#fachada-shield')) {
+            document.getElementById('fachada-shield').classList.add('is-hidden');
+        }
+    });
+})();
+</script>
+<?php endif; ?>
+
 <style>
+    /* Foto y precio de cada producto en la tarjeta de entrega */
+    .entrega-item-img {
+        width: 56px;
+        height: 56px;
+        flex: 0 0 56px;
+        object-fit: contain;
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        cursor: zoom-in;
+    }
+    .entrega-item-img.is-rechazado { opacity: 0.4; }
+    .entrega-item-img.sin-foto { cursor: default; }
+
+    /* Foto grande: capa a pantalla completa por encima de los modales de Materialize (z-index ~1003)
+       y de los avisos (10000). Compatible con celular: usa 100dvh (la barra del navegador no la
+       recorta), respeta la muesca/barra inferior y el boton de cerrar mide 48 px. */
+    .entrega-lightbox { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10060; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.9); padding: calc(env(safe-area-inset-top, 0px) + 56px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px); box-sizing: border-box; cursor: zoom-out; }
+    .entrega-lightbox[hidden] { display: none; }
+    .entrega-lightbox-figura { margin: 0; display: flex; flex-direction: column; align-items: center; max-width: 100%; max-height: 100%; }
+    .entrega-lightbox-figura img { display: block; max-width: 100%; max-height: calc(100vh - 150px); max-height: calc(100dvh - 150px); object-fit: contain; background: #fff; border-radius: 8px; padding: 8px; box-sizing: border-box; }
+    .entrega-lightbox-figura figcaption { margin-top: 10px; max-width: 100%; color: #fff; font-size: 0.95rem; text-align: center; overflow-wrap: anywhere; }
+    .entrega-lightbox-cerrar { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 6px); right: 8px; width: 48px; height: 48px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.18); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .btn-ver-fachada { height: 44px; line-height: 44px; }
+    .entrega-item-precio { display: block; margin-top: 2px; font-size: 0.9rem; text-decoration: none; }
+
+    /* "Ver fachada": Street View arriba (lo que sirve para reconocer la casa) y mapa pequeno debajo;
+       en pantallas anchas van lado a lado. */
+    #modal-fachada.bottom-sheet { max-height: 92%; }
+    .fachada-visor { display: flex; flex-direction: column; gap: 8px; }
+    .fachada-streetview-cell { position: relative; height: 42vh; min-height: 220px; border-radius: 4px; border: 1px solid #ddd; overflow: hidden; }
+    .fachada-streetview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+    .fachada-msg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: #f5f5f5; font-size: 0.9rem; z-index: 1; }
+    .fachada-msg.is-hidden { display: none; }
+    .fachada-mapa { height: 150px; border-radius: 4px; border: 1px solid #ddd; }
+    /* En tactil el panorama captura el arrastre del dedo y traba el scroll: se tapa con una capa
+       transparente hasta que se toca "Toca para explorar". */
+    .fachada-shield { display: none; position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; width: 100%; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; align-items: flex-end; justify-content: center; }
+    .fachada-shield span { margin-bottom: 10px; padding: 6px 14px; border-radius: 16px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.85rem; }
+    @media (hover: none) and (pointer: coarse) {
+        .fachada-shield { display: flex; }
+        .fachada-shield.is-hidden { display: none; }
+    }
+    @media (min-width: 601px) {
+        .fachada-visor { flex-direction: row; }
+        .fachada-streetview-cell, .fachada-mapa { flex: 1 1 0; min-width: 0; height: 320px; }
+    }
+
     .border-delivery {
         border-top: 5px solid #3f51b5;
     }

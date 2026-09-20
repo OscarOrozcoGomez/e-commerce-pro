@@ -31,6 +31,40 @@ function direccionAliasErrorLimite(): string
 }
 
 /**
+ * Resuelve lat/lng de un domicilio a partir de su link de Google Maps o, si eso falla,
+ * geocodificando el texto. El buscador de direcciones (Places Autocomplete) ya arma un
+ * maps_link con coordenadas crudas (.../maps/search/?api=1&query=lat,lng), asi que en ese
+ * caso se resuelve al instante y sin red.
+ *
+ * Compartida por views/manage_customers.php y api/create_customer.php. Quien la llame debe
+ * haber cargado core/delivery_route_utils.php (y core/config.php para getMapsApiKey).
+ *
+ * @return array{lat: float, lng: float}|null
+ */
+function clienteResolverCoordsDireccion(string $mapsLink, string $direccion): ?array
+{
+    static $apiKey = null;
+    if ($apiKey === null) {
+        $apiKey = getMapsApiKey(false);
+    }
+
+    $mapsLink = trim($mapsLink);
+    if ($mapsLink !== '') {
+        $coords = deliveryExtractCoordinatesFromMapsUrl($mapsLink);
+        if ($coords !== null) {
+            return $coords;
+        }
+        $coords = obtenerCoordenadasDesdeUrl($mapsLink, $apiKey);
+        if ($coords !== null) {
+            return $coords;
+        }
+    }
+
+    $direccion = trim($direccion);
+    return $direccion !== '' ? deliveryGeocodeAddress($direccion, $apiKey) : null;
+}
+
+/**
  * Marca una direccion de cliente como confirmada por el cliente (p.ej. via WhatsApp),
  * dejando registro de cuando y quien del staff la confirmo. Se usa junto con el boton
  * "Enviar por WhatsApp para confirmar" en views/manage_customers.php: el cliente responde

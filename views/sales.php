@@ -236,6 +236,27 @@ include __DIR__ . '/includes/header.php';
                 <input type="email" id="nuevo-cliente-email" name="email">
                 <label for="nuevo-cliente-email">Email (opcional)</label>
             </div>
+            <div class="nuevo-cliente-domicilio">
+                <strong>Domicilio <span class="grey-text" style="font-weight:normal;">(opcional)</span></strong>
+                <p class="grey-text" style="margin:4px 0 0;">Agregalo ahora para no tener que ir a Administrar Clientes.</p>
+                <?php if (defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== ''): ?>
+                <div class="input-field" style="margin-top:14px;">
+                    <i class="material-icons prefix blue-text">search</i>
+                    <input type="text" id="nuevo-cliente-dir-buscar" autocomplete="off" placeholder="Escribe la calle y numero...">
+                    <span class="helper-text">Selecciona una opcion sugerida para mayor precision</span>
+                </div>
+                <?php endif; ?>
+                <div class="input-field">
+                    <input type="text" id="nuevo-cliente-dir-alias" maxlength="50" placeholder="Ej: Casa, Trabajo, Mama">
+                    <label for="nuevo-cliente-dir-alias">Alias del domicilio</label>
+                </div>
+                <div class="input-field">
+                    <textarea id="nuevo-cliente-direccion" class="materialize-textarea"></textarea>
+                    <label for="nuevo-cliente-direccion">Direccion exacta (incluye numero de casa)</label>
+                </div>
+                <input type="hidden" id="nuevo-cliente-maps-link" value="">
+                <p id="nuevo-cliente-maps-status" class="grey-text" style="margin:-6px 0 8px;">Sin ubicacion en mapa seleccionada aun.</p>
+            </div>
             <div id="nuevo-cliente-error" class="red-text" style="display:none; margin-top:-8px; margin-bottom:12px;"></div>
         </form>
     </div>
@@ -408,7 +429,16 @@ include __DIR__ . '/includes/header.php';
 
                         <div class="row delivery-only-row">
                             <div class="col s12">
-                                <div class="sales-map-preview z-depth-1" style="height: 180px; width: 100%; border-radius: 4px; display: none; border: 1px solid #ddd;"></div>
+                                <!-- Mapa (izquierda) y vista de la calle / fachada de Google Street View (derecha) -->
+                                <div class="sales-map-row">
+                                    <div class="sales-map-preview z-depth-1"></div>
+                                    <div class="sales-streetview-cell z-depth-1">
+                                        <div class="sales-streetview-preview"></div>
+                                        <div class="sales-streetview-msg grey-text text-darken-1">Buscando vista de la calle...</div>
+                                        <!-- Solo en pantallas tactiles: evita que el dedo quede atrapado en el panorama al hacer scroll -->
+                                        <button type="button" class="sales-streetview-shield" aria-label="Activar la vista de la calle"><span>Toca para explorar</span></button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -492,6 +522,33 @@ include __DIR__ . '/includes/header.php';
 </template>
 
 <style>
+    /* Sugerencias de Google Places: por encima de los modales de Materialize (z-index ~1003) */
+    .pac-container { z-index: 3000 !important; }
+    .nuevo-cliente-domicilio { margin-top: 8px; padding-top: 12px; border-top: 1px solid #e0e0e0; }
+    /* Mapa + Street View: mitad y mitad; en movil se apilan para que cada uno tenga ancho util */
+    .sales-map-row { display: none; gap: 8px; }
+    .sales-map-row.is-visible { display: flex; }
+    .sales-map-preview,
+    .sales-streetview-cell { flex: 1 1 0; min-width: 0; height: 180px; border-radius: 4px; border: 1px solid #ddd; overflow: hidden; position: relative; }
+    .sales-streetview-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+    .sales-streetview-msg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: #f5f5f5; font-size: 0.85rem; }
+    .sales-streetview-msg.is-hidden { display: none; }
+    /* En tactil el panorama captura el arrastre del dedo y traba el scroll de la pagina: se tapa con
+       una capa transparente hasta que se toca "Toca para explorar". */
+    .sales-streetview-shield { display: none; position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; width: 100%; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; align-items: flex-end; justify-content: center; }
+    .sales-streetview-shield span { margin-bottom: 10px; padding: 6px 14px; border-radius: 16px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.85rem; }
+    @media (hover: none) and (pointer: coarse) {
+        .sales-streetview-shield { display: flex; }
+        .sales-streetview-shield.is-hidden { display: none; }
+    }
+    @media (max-width: 600px) {
+        .sales-map-row.is-visible { flex-direction: column; }
+        .sales-map-preview, .sales-streetview-cell { flex: none; width: 100%; }
+    }
+    /* Con el domicilio el modal es alto: en movil se aprovecha casi toda la pantalla y hace scroll */
+    @media (max-width: 600px) {
+        #modal-nuevo-cliente { width: 94% !important; max-height: 92% !important; top: 4% !important; }
+    }
     .sales-toolbar { flex-wrap: wrap; gap: 8px; }
     .sales-warehouse-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
     .sales-warehouse-name { white-space: nowrap; }
@@ -1184,9 +1241,66 @@ include __DIR__ . '/includes/header.php';
             errorBox.textContent = '';
         }
 
+        resetNuevoClienteDomicilio();
+
         modalInstance.open();
         M.updateTextFields();
         setTimeout(() => document.getElementById('nuevo-cliente-nombre')?.focus(), 200);
+        // Google crea la lista de sugerencias mal posicionada si el campo aun esta oculto
+        // (Materialize anima la apertura), asi que se espera a que el modal termine de abrir.
+        setTimeout(() => intentarIniciarAutocompleteNuevoCliente(20), 400);
+    }
+
+    function resetNuevoClienteDomicilio() {
+        const status = document.getElementById('nuevo-cliente-maps-status');
+        if (status) {
+            status.textContent = 'Sin ubicacion en mapa seleccionada aun.';
+            status.classList.remove('green-text');
+        }
+        const mapsLink = document.getElementById('nuevo-cliente-maps-link');
+        if (mapsLink) mapsLink.value = '';
+        const direccion = document.getElementById('nuevo-cliente-direccion');
+        if (direccion) M.textareaAutoResize(direccion);
+    }
+
+    let autocompleteNuevoClienteListo = false;
+
+    // Buscador de direccion (Google Places) del modal "Nuevo cliente". Al elegir una sugerencia
+    // llena la direccion exacta y guarda el link con las coordenadas, igual que Administrar Clientes.
+    function intentarIniciarAutocompleteNuevoCliente(intentosRestantes) {
+        if (autocompleteNuevoClienteListo) return;
+        const input = document.getElementById('nuevo-cliente-dir-buscar');
+        if (!input) return; // sin API key de Google no se dibuja el buscador; queda la captura manual
+        if (typeof google === 'undefined' || !google.maps || !google.maps.places) {
+            if (intentosRestantes > 0) setTimeout(() => intentarIniciarAutocompleteNuevoCliente(intentosRestantes - 1), 250);
+            return;
+        }
+
+        const autocomplete = new google.maps.places.Autocomplete(input, {
+            types: ['address'],
+            componentRestrictions: { country: 'mx' },
+        });
+        autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (!place || !place.geometry) return;
+
+            const direccion = document.getElementById('nuevo-cliente-direccion');
+            const mapsLink = document.getElementById('nuevo-cliente-maps-link');
+            const status = document.getElementById('nuevo-cliente-maps-status');
+            if (direccion) {
+                direccion.value = place.formatted_address || direccion.value;
+                M.textareaAutoResize(direccion);
+            }
+            if (mapsLink) {
+                mapsLink.value = `https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat()},${place.geometry.location.lng()}`;
+            }
+            if (status) {
+                status.textContent = 'Ubicacion en mapa capturada correctamente.';
+                status.classList.add('green-text');
+            }
+            M.updateTextFields();
+        });
+        autocompleteNuevoClienteListo = true;
     }
 
     async function guardarNuevoCliente() {
@@ -1228,6 +1342,11 @@ include __DIR__ . '/includes/header.php';
         formData.append('nombre', nombre);
         formData.append('telefono', telefonoInput?.value || '');
         formData.append('email', emailInput?.value || '');
+        // Domicilio opcional: el servidor lo guarda como direccion predeterminada del cliente nuevo.
+        const direccionNueva = (document.getElementById('nuevo-cliente-direccion')?.value || '').trim();
+        formData.append('direccion', direccionNueva);
+        formData.append('direccion_alias', (document.getElementById('nuevo-cliente-dir-alias')?.value || '').trim());
+        formData.append('maps_link', direccionNueva !== '' ? (document.getElementById('nuevo-cliente-maps-link')?.value || '') : '');
 
         try {
             const response = await fetch('<?php echo BASE_URL; ?>api/create_customer.php', { method: 'POST', body: formData });
@@ -1257,7 +1376,10 @@ include __DIR__ . '/includes/header.php';
                 M.updateTextFields();
             }
 
-            M.toast({ html: 'Cliente creado y seleccionado.', classes: 'green darken-1' });
+            M.toast({
+                html: direccionNueva !== '' ? 'Cliente creado con su domicilio y seleccionado.' : 'Cliente creado y seleccionado.',
+                classes: 'green darken-1',
+            });
         } catch (err) {
             if (errorBox) {
                 errorBox.textContent = err.message || 'No se pudo crear el cliente.';
@@ -1493,18 +1615,88 @@ include __DIR__ . '/includes/header.php';
         return null;
     }
 
+    // Rumbo (0-360) para que la camara del Street View mire desde la calle hacia la casa.
+    function headingEntrePuntos(desde, hacia) {
+        const rad = (grados) => grados * Math.PI / 180;
+        const dLng = rad(hacia.lng - desde.lng);
+        const y = Math.sin(dLng) * Math.cos(rad(hacia.lat));
+        const x = Math.cos(rad(desde.lat)) * Math.sin(rad(hacia.lat)) - Math.sin(rad(desde.lat)) * Math.cos(rad(hacia.lat)) * Math.cos(dLng);
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    // Vista real de la calle/fachada (Google Street View) del punto del domicilio. Se consulta solo
+    // cuando cambian las coordenadas: updateDeliveryMapLink corre con cada tecla que se escribe en
+    // la direccion y cada consulta de Street View se factura.
+    function updateSalesStreetView(context, coords) {
+        const svEl = context.querySelector('.sales-streetview-preview');
+        const msgEl = context.querySelector('.sales-streetview-msg');
+        if (!svEl || !msgEl || typeof google === 'undefined' || !google.maps) return;
+
+        const key = coords.lat + ',' + coords.lng;
+        if (context.__salesStreetViewKey === key) {
+            if (context.__salesPanorama) google.maps.event.trigger(context.__salesPanorama, 'resize');
+            return;
+        }
+        context.__salesStreetViewKey = key;
+        // Domicilio nuevo: en tactil se vuelve a tapar el panorama para no atrapar el scroll.
+        context.querySelector('.sales-streetview-shield')?.classList.remove('is-hidden');
+        const consulta =(context.__salesStreetViewQuery || 0) + 1;
+        context.__salesStreetViewQuery = consulta;
+
+        const mostrarMensaje = (texto) => {
+            msgEl.textContent = texto;
+            msgEl.classList.remove('is-hidden');
+        };
+        mostrarMensaje('Buscando vista de la calle...');
+
+        if (!context.__salesStreetViewService) context.__salesStreetViewService = new google.maps.StreetViewService();
+        context.__salesStreetViewService.getPanorama({
+            location: coords,
+            radius: 60, // metros a la redonda: el pin cae en la casa y el panorama esta sobre la calle
+            source: google.maps.StreetViewSource.OUTDOOR,
+        }, (data, status) => {
+            if (consulta !== context.__salesStreetViewQuery) return; // llego tarde: ya se pidio otro punto
+            if (status !== google.maps.StreetViewStatus.OK || !data || !data.location || !data.location.latLng) {
+                mostrarMensaje('Google no tiene vista de la calle para este punto.');
+                return;
+            }
+
+            if (!context.__salesPanorama) {
+                context.__salesPanorama = new google.maps.StreetViewPanorama(svEl, {
+                    addressControl: false,
+                    linksControl: false,
+                    panControl: false,
+                    enableCloseButton: false,
+                    fullscreenControl: true,
+                    zoomControl: true,
+                });
+            }
+            const panorama = context.__salesPanorama;
+            const desde = { lat: data.location.latLng.lat(), lng: data.location.latLng.lng() };
+            panorama.setPano(data.location.pano);
+            panorama.setPov({ heading: headingEntrePuntos(desde, coords), pitch: 5 });
+            panorama.setVisible(true);
+            msgEl.classList.add('is-hidden');
+            setTimeout(() => google.maps.event.trigger(panorama, 'resize'), 80);
+        });
+    }
+
     function updateSalesMapPreviewFromMapsLink(context, mapsLink) {
         if (!context) return;
         const mapEl = context.querySelector('.sales-map-preview');
-        if (!mapEl) return;
+        const rowEl = context.querySelector('.sales-map-row');
+        if (!mapEl || !rowEl) return;
 
         const coords = parseCoordsFromMapsLink(mapsLink);
         if (!coords) {
-            mapEl.style.display = 'none';
+            rowEl.classList.remove('is-visible');
             return;
         }
 
         if (typeof google === 'undefined' || !google.maps) return;
+
+        // La fila se muestra antes de crear el mapa y el panorama: con display:none miden 0 de alto.
+        rowEl.classList.add('is-visible');
 
         if (!context.__salesMapInstance) {
             context.__salesMapInstance = new google.maps.Map(mapEl, {
@@ -1520,13 +1712,22 @@ include __DIR__ . '/includes/header.php';
             if (context.__salesMapMarker) context.__salesMapMarker.setPosition(coords);
         }
 
-        mapEl.style.display = 'block';
         setTimeout(() => {
             if (context.__salesMapInstance && typeof google !== 'undefined' && google.maps && google.maps.event) {
                 google.maps.event.trigger(context.__salesMapInstance, 'resize');
+                context.__salesMapInstance.setCenter(coords);
             }
         }, 80);
+
+        updateSalesStreetView(context, coords);
     }
+
+    // Un toque en la capa transparente activa el panorama (la fila vive dentro de un <template>
+    // que se clona por pestana, por eso el listener es delegado).
+    document.addEventListener('click', (event) => {
+        const shield = event.target.closest('.sales-streetview-shield');
+        if (shield) shield.classList.add('is-hidden');
+    });
 
     function initAutocompleteSales() {
         googlePlacesReadySales = typeof google !== 'undefined' && !!google.maps;
@@ -1765,10 +1966,50 @@ include __DIR__ . '/includes/header.php';
         ventaContainers.addEventListener('input', scheduleSalesDraftSave);
         ventaContainers.addEventListener('change', scheduleSalesDraftSave);
 
-        if (!restoreSalesDrafts()) {
+        const hayBorradores = restoreSalesDrafts();
+        if (!hayBorradores) {
             nuevaVenta();
         }
+        preseleccionarClienteDesdeUrl(hayBorradores);
     });
+
+    // Llegar con ?id_cliente=NN (p.ej. desde Administrar Clientes, justo despues de crear un cliente y
+    // elegir "agendar venta") abre la venta con ese cliente ya seleccionado, con su telefono y su
+    // domicilio predeterminado. Si ya habia pestanas de venta en curso NO se tocan: se abre una nueva.
+    function preseleccionarClienteDesdeUrl(hayBorradores) {
+        const idPreset = parseInt(new URLSearchParams(window.location.search).get('id_cliente') || '0', 10) || 0;
+        if (idPreset <= 0) return;
+
+        // Se limpia la URL: al recargar la pagina no debe abrir otra pestana con el mismo cliente.
+        try {
+            window.history.replaceState(null, '', window.location.pathname);
+        } catch (err) {
+            // Sin History API la pestana extra al recargar es el unico costo.
+        }
+
+        const cliente = clientesActivos.find((c) => (parseInt(c.id_cliente, 10) || 0) === idPreset);
+        if (!cliente) {
+            M.toast({ html: 'No se encontro al cliente para la venta (revisa que este activo y sea de tu sucursal).', classes: 'orange darken-2' });
+            return;
+        }
+
+        if (hayBorradores) nuevaVenta();
+        const idTab = 'v' + tabCount;
+        const context = document.getElementById('venta-' + idTab);
+        if (!context) return;
+
+        setSelectedCustomer(context, {
+            id_cliente: idPreset,
+            nombre: String(cliente.nombre || ''),
+            telefono: String(cliente.telefono || ''),
+            direccion: String(cliente.direccion || ''),
+            maps_link: String(cliente.maps_link || ''),
+            direcciones: Array.isArray(cliente.direcciones) ? cliente.direcciones : [],
+        });
+        actualizarTituloTab(idTab, String(cliente.nombre || ''));
+        M.updateTextFields();
+        scheduleSalesDraftSave();
+    }
 
     function nuevaVenta(draftTab = null) {
         let id = '';
@@ -2517,7 +2758,7 @@ include __DIR__ . '/includes/header.php';
 </script>
 
 <?php if (defined('GOOGLE_MAPS_API_KEY') && GOOGLE_MAPS_API_KEY !== ''): ?>
-<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&callback=initAutocompleteSales" async defer></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=places&callback=initAutocompleteSales" async defer></script>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
