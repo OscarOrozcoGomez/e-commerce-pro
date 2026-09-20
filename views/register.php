@@ -91,8 +91,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'El formato del correo electrónico no es válido.';
         } elseif (!isLikelyDeliverableEmail($email)) {
             $error = 'No pudimos validar el dominio del correo. Usa un correo real y verificable.';
-        } elseif ($telefonoNormalizado === null) {
-            $error = 'Si capturas teléfono, debe tener 10 dígitos con formato (331) - 863 - 5185.';
+        } elseif ($telefonoNormalizado === null || $telefonoNormalizado === '') {
+            $error = 'El teléfono es obligatorio: debe tener 10 dígitos con formato (331) - 863 - 5185.';
         } elseif ($password !== $confirm_password) {
             $error = 'Las contraseñas no coinciden.';
         } elseif (!isPasswordSecure($password)) {
@@ -216,8 +216,8 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             <div class="input-field">
                                 <i class="material-icons prefix">phone</i>
-                                <input id="telefono" name="telefono" type="tel" value="<?php echo esc($telefono ?? ''); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
-                                <label for="telefono">Teléfono de contacto (opcional)</label>
+                                <input id="telefono" name="telefono" type="tel" required value="<?php echo esc($telefono ?? ''); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
+                                <label for="telefono">Teléfono de contacto</label>
                                 <span id="telefono-feedback" class="helper-inline-feedback"></span>
                             </div>
                             <div class="input-field">

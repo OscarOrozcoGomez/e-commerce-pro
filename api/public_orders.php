@@ -106,6 +106,12 @@ if (isAuthenticated()) {
 
 $telefonoMatch = null;
 $telefonoEntrada = trim((string)($data['cliente']['telefono'] ?? ''));
+// El telefono es obligatorio tambien en el servidor (el formulario lo marca `required`, pero un POST
+// directo lo omitia): la ruta de entrega y los avisos por WhatsApp dependen de el.
+if (preg_replace('/\D+/', '', $telefonoEntrada) === '') {
+    echo json_encode(['success' => false, 'message' => 'El telefono de contacto es obligatorio.']);
+    exit;
+}
 if ($telefonoEntrada !== '') {
     try {
         $pdo = getPDO();

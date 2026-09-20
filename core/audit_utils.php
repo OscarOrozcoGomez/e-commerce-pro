@@ -466,6 +466,7 @@ function auditMapaEtiquetasAccion(): array
         'CLIENTE_DIRECCION_PREDETERMINADA' => 'Dirección predeterminada cambiada',
         'CLIENTE_HORARIO_CAMBIADO' => 'Horario de entrega de cliente cambiado',
         'CLIENTE_TELEFONO_CAMBIADO' => 'Teléfono de cliente cambiado',
+        'PEDIDO_TELEFONO_SINCRONIZADO' => 'Teléfono de entrega del pedido actualizado al del cliente',
         'CLIENTE_PERFIL_EDITADO' => 'El cliente editó su perfil',
         'CLIENTE_DIRECCION_PROPIA' => 'El cliente cambió sus direcciones',
         'CUENTA_CLIENTE_REGISTRADA' => 'Cuenta de cliente registrada',

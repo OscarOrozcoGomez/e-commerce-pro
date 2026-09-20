@@ -230,7 +230,7 @@ include __DIR__ . '/includes/header.php';
                 <label for="nuevo-cliente-nombre">Nombre completo</label>
             </div>
             <div class="input-field">
-                <input type="tel" id="nuevo-cliente-telefono" name="telefono" maxlength="19" inputmode="numeric" autocomplete="tel-national" placeholder="Ej: (331) - 863 - 5185">
+                <input type="tel" id="nuevo-cliente-telefono" name="telefono" required maxlength="19" inputmode="numeric" autocomplete="tel-national" placeholder="Ej: (331) - 863 - 5185">
                 <label for="nuevo-cliente-telefono">Telefono</label>
             </div>
             <div class="input-field">
@@ -1205,6 +1205,16 @@ include __DIR__ . '/includes/header.php';
                 errorBox.style.display = 'block';
             }
             nombreInput?.focus();
+            return;
+        }
+
+        // Un cliente nunca se da de alta sin telefono (10 digitos); el servidor tambien lo valida.
+        if (((telefonoInput?.value || '').replace(/\D+/g, '')).length !== 10) {
+            if (errorBox) {
+                errorBox.textContent = 'El telefono es obligatorio y debe tener 10 digitos.';
+                errorBox.style.display = 'block';
+            }
+            telefonoInput?.focus();
             return;
         }
 
