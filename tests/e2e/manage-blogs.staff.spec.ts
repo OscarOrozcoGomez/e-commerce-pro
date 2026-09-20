@@ -64,9 +64,11 @@ test.describe('Gestionar Blogs (manage_blogs.php)', () => {
     await expect(page.getByText('Operacion exitosa.')).toBeVisible();
 
     const filaOriginal = page.locator('table.striped tr').filter({ hasText: tituloOriginal });
-    await filaOriginal.locator('button.blue').click();
-
-    await expect(page.locator('#form-title')).toHaveText('Editando Artículo');
+    // Bajo carga el clic puede caer antes de que la página termine de recargarse tras guardar: se reintenta.
+    await expect(async () => {
+      await filaOriginal.locator('button.blue').click();
+      await expect(page.locator('#form-title')).toHaveText('Editando Artículo', { timeout: 3000 });
+    }).toPass({ timeout: 20000 });
     await expect(page.locator('#titulo')).toHaveValue(tituloOriginal);
 
     const tituloEditado = `${tituloOriginal} (editado)`;

@@ -15,6 +15,15 @@ async function agregarLineaTransferencia(page: Page, nombreProducto: string, can
   await page.getByRole('button', { name: 'Agregar' }).click();
 }
 
+// La sucursal de destino real se llama "Papeleria Liz" en unas BD y "Papelería Liz" (con acento) en
+// otras -- el nombre lo teclea el negocio, no lo controla la semilla. Se toma el texto EXACTO de la
+// opcion del <select> en vez de fijar una grafia.
+async function elegirSucursalPapeleria(page: Page): Promise<void> {
+  const opcion = page.locator('#id_destino option', { hasText: /Papeler[ií]a Liz/i }).first();
+  const label = ((await opcion.textContent()) ?? '').trim();
+  await page.locator('#id_destino').selectOption({ label });
+}
+
 test.describe('Transferencia entre Almacenes (transfer_stock.php)', () => {
   test('un encargado no puede acceder a transferencias entre almacenes', async ({ page }) => {
     await loginAsStaff(page, 'encargado');
@@ -33,7 +42,7 @@ test.describe('Transferencia entre Almacenes (transfer_stock.php)', () => {
     await page.goto('views/transfer_stock.php');
 
     await page.locator('#id_origen').selectOption({ label: 'Almacén Central' });
-    await page.locator('#id_destino').selectOption({ label: 'Papelería Liz' });
+    await elegirSucursalPapeleria(page);
     await agregarLineaTransferencia(page, E2E_PRODUCT_NAME, 5);
     await expect(page.locator('#lineas-body tr.linea')).toHaveCount(1);
     await expect(page.getByRole('button', { name: /EJECUTAR TRANSFERENCIA/ })).toBeEnabled();
@@ -61,7 +70,7 @@ test.describe('Transferencia entre Almacenes (transfer_stock.php)', () => {
 
     // Stock=1 en Almacen Central (ver scripts/seed_e2e_test_data.php); se piden 5.
     await page.locator('#id_origen').selectOption({ label: 'Almacén Central' });
-    await page.locator('#id_destino').selectOption({ label: 'Papelería Liz' });
+    await elegirSucursalPapeleria(page);
     await agregarLineaTransferencia(page, E2E_LOW_STOCK_PRODUCT_NAME, 5);
 
     await page.getByRole('button', { name: /EJECUTAR TRANSFERENCIA/ }).click();

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { loginAsStaff, E2E_PRODUCT_NAME, E2E_SALES_CLIENTE_NOMBRE } from './helpers';
+import { capturarRespuestaVenta, loginAsStaff, E2E_PRODUCT_NAME, E2E_SALES_CLIENTE_NOMBRE } from './helpers';
 
 // reservations.php ("Mis Apartados") lista los pedidos agendados por el usuario staff QUE
 // TIENE LA SESION ABIERTA (p.id_usuario = usuario actual) que siguen pendientes de pago --
@@ -32,15 +32,10 @@ test.describe('Mis Apartados (reservations.php)', () => {
     await item.click();
     await expect(form.locator('.producto-item')).toHaveCount(1);
 
-    let numeroPedido = '';
-    await page.route('**/api/ventas.php', async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      numeroPedido = body?.numero_pedido ?? '';
-      await route.fulfill({ response });
-    });
+    const venta = await capturarRespuestaVenta(page);
     await form.getByRole('button', { name: 'Agendar Pedido' }).click();
-    await expect.poll(() => numeroPedido).not.toBe('');
+    await expect.poll(() => venta.resultado?.numero_pedido ?? '').not.toBe('');
+    const numeroPedido = venta.resultado!.numero_pedido as string;
 
     await page.goto('views/reservations.php');
     const fila = page.locator('table.striped tr').filter({ hasText: numeroPedido });

@@ -30,6 +30,9 @@ $staffAccounts = [
     // Cuenta aparte del admin de arriba para poder probar ambos casos (admin normal bloqueado,
     // superadmin permitido) sin pisarse.
     ['rol' => 'admin', 'nombre' => 'Playwright E2E Superadmin', 'email' => 'e2e-superadmin@playwright.test', 'almacen' => 'ninguno', 'es_superadmin' => 1],
+    // Encargado (NO admin) al que se le concede SOLO el permiso 'ver_auditoria' por override individual (ver
+    // abajo): prueba que la vista de Movimientos abre por permiso y no solo por ser admin.
+    ['rol' => 'encargado', 'nombre' => 'Playwright E2E Auditor', 'email' => 'e2e-auditor@playwright.test', 'almacen' => 'default'],
 ];
 
 $pdo = getPDO();
@@ -95,6 +98,38 @@ try {
         ]);
 
         echo "Seed OK: {$cuenta['rol']} -> {$cuenta['email']} (id_rol={$idRol}, id_almacen=" . ($idAlmacenCuenta ?? 'NULL') . ($esSuperadmin ? ', superadmin' : '') . ")\n";
+    }
+
+    // Permisos que las cuentas de prueba NO deben tener, sin importar como este configurado el rol
+    // real en la BD donde se corre (p.ej. una BD local donde alguien le dio "transferir_stock" al
+    // rol encargado desde Roles y Permisos). Un override individual 'denegar' (usuario_permisos, gana
+    // sobre el rol: ver mergeEffectivePermissions en core/auth.php) fija el caso sin tocar el rol.
+    // transfer-stock.staff.spec.ts prueba que un encargado NORMAL no puede transferir entre almacenes
+    // (las migraciones no le dan ese permiso a proposito, ver 20260907_130000).
+    $denegaciones = [
+        ['e2e-encargado@playwright.test', 'transferir_stock', 'denegar'],
+        ['e2e-encargado-pickup@playwright.test', 'transferir_stock', 'denegar'],
+        // ...y el caso inverso: una cuenta que SI debe tenerlo aunque su rol no lo traiga.
+        ['e2e-auditor@playwright.test', 'ver_auditoria', 'conceder'],
+        // El encargado normal NO debe abrir Movimientos (el rol encargado no lo trae; se fija por si alguien se lo dio).
+        ['e2e-encargado@playwright.test', 'ver_auditoria', 'denegar'],
+    ];
+    foreach ($denegaciones as [$emailDeny, $claveDeny, $efectoDeny]) {
+        $stmtIds = $pdo->prepare(
+            'SELECT (SELECT id_usuario FROM usuarios WHERE email = :email) AS id_usuario,
+                    (SELECT id_permiso FROM permisos WHERE clave = :clave) AS id_permiso'
+        );
+        $stmtIds->execute(['email' => $emailDeny, 'clave' => $claveDeny]);
+        $ids = $stmtIds->fetch(PDO::FETCH_ASSOC) ?: [];
+        if (empty($ids['id_usuario']) || empty($ids['id_permiso'])) {
+            throw new RuntimeException("No se pudo fijar la denegacion de '{$claveDeny}' para {$emailDeny} (falta el usuario o el permiso).");
+        }
+        $pdo->prepare('DELETE FROM usuario_permisos WHERE id_usuario = :u AND id_permiso = :p')
+            ->execute(['u' => $ids['id_usuario'], 'p' => $ids['id_permiso']]);
+        $pdo->prepare(
+            'INSERT INTO usuario_permisos (id_usuario, id_permiso, efecto, nota) VALUES (:u, :p, :efecto, "E2E Playwright: caso fijo, ver seed_e2e_staff_accounts.php")'
+        )->execute(['u' => $ids['id_usuario'], 'p' => $ids['id_permiso'], 'efecto' => $efectoDeny]);
+        echo "Seed OK: {$emailDeny} -> {$efectoDeny} {$claveDeny} (override individual)\n";
     }
 
     $pdo->commit();

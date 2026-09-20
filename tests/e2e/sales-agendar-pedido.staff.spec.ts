@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { loginAsStaff, E2E_PRODUCT_NAME, E2E_SALES_CLIENTE_NOMBRE } from './helpers';
+import { capturarRespuestaVenta, loginAsStaff, E2E_PRODUCT_NAME, E2E_SALES_CLIENTE_NOMBRE } from './helpers';
 
 // views/sales.php es el "POS" interno (agendar pedido) que usan vendedor/encargado/admin.
 // A diferencia del checkout público, solo permite elegir un cliente YA existente -por
@@ -33,19 +33,14 @@ test.describe('Vendedor: agendar pedido (sales.php)', () => {
     // abierto, sales.php hace location.reload() casi de inmediato después de
     // mostrarlo (incluso antes de que el body de la response siga disponible),
     // así que interceptamos la request para leer el JSON real de la API.
-    let ventaResult: { success?: boolean } | null = null;
-    await page.route('**/api/ventas.php', async (route) => {
-      const response = await route.fetch();
-      ventaResult = await response.json();
-      await route.fulfill({ response });
-    });
+    const venta = await capturarRespuestaVenta(page);
 
     // Un vendedor no tiene 'asignar_entregas' (puedeAgendarDomicilio=false), asi que
     // sales.php lo deja fijo en modo "En sucursal (mostrador)" -- el boton dice "Registrar
     // Venta", no "Agendar Pedido" (ese texto es solo para quien puede elegir Domicilio).
     await form.getByRole('button', { name: 'Registrar Venta' }).click();
-    await expect.poll(() => ventaResult).not.toBeNull();
-    expect(ventaResult!.success).toBe(true);
+    await expect.poll(() => venta.resultado).not.toBeNull();
+    expect(venta.resultado!.success).toBe(true);
   });
 
   test('un vendedor puede registrar una venta de mostrador sin seleccionar un cliente existente', async ({ page }) => {
@@ -63,15 +58,10 @@ test.describe('Vendedor: agendar pedido (sales.php)', () => {
     // procesarVenta() salta a proposito los guardrails de cliente/telefono/direccion --
     // "el cliente esta presente: si no se elige, el servidor la guarda como venta de
     // mostrador sin cliente". No hace falta seleccionar ni capturar nada de eso.
-    let ventaResult: { success?: boolean } | null = null;
-    await page.route('**/api/ventas.php', async (route) => {
-      const response = await route.fetch();
-      ventaResult = await response.json();
-      await route.fulfill({ response });
-    });
+    const venta = await capturarRespuestaVenta(page);
 
     await form.getByRole('button', { name: 'Registrar Venta' }).click();
-    await expect.poll(() => ventaResult).not.toBeNull();
-    expect(ventaResult!.success).toBe(true);
+    await expect.poll(() => venta.resultado).not.toBeNull();
+    expect(venta.resultado!.success).toBe(true);
   });
 });

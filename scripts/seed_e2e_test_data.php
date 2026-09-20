@@ -501,6 +501,10 @@ try {
     }
     echo 'Seed OK: ' . E2E_PRODUCTO_INCOMPLETO_NOMBRE . " -> id_producto={$idProductoIncompleto} (sin precio/sku/codigo_barras/inventario)\n";
 
+    // id_almacen: el alcance por sucursal (cliente_scope_utils.php, PR #148) deja a un
+    // encargado/vendedor ver SOLO los clientes de su sucursal; un cliente con id_almacen NULL
+    // (como los registros del sitio web) es solo para admin. Sin esto, en una BD recien
+    // sembrada sales.php nunca resolvia a este cliente para el encargado/vendedor de pruebas.
     // La tabla clientes no tiene una llave unica sobre nombre, asi que la
     // idempotencia se resuelve buscando primero en vez de ON DUPLICATE KEY.
     $stmt = $pdo->prepare('SELECT id_cliente FROM clientes WHERE nombre = :nombre LIMIT 1');
@@ -509,16 +513,17 @@ try {
 
     if ($idCliente <= 0) {
         $stmt = $pdo->prepare(
-            'INSERT INTO clientes (nombre, telefono, estado) VALUES (:nombre, :telefono, "activo")'
+            'INSERT INTO clientes (nombre, telefono, estado, id_almacen) VALUES (:nombre, :telefono, "activo", :id_almacen)'
         );
         $stmt->execute([
             'nombre' => E2E_SALES_CLIENTE_NOMBRE,
             'telefono' => E2E_SALES_CLIENTE_TELEFONO,
+            'id_almacen' => $idAlmacen,
         ]);
         $idCliente = (int) $pdo->lastInsertId();
     } else {
-        $stmt = $pdo->prepare('UPDATE clientes SET telefono = :telefono, estado = "activo" WHERE id_cliente = :id_cliente');
-        $stmt->execute(['telefono' => E2E_SALES_CLIENTE_TELEFONO, 'id_cliente' => $idCliente]);
+        $stmt = $pdo->prepare('UPDATE clientes SET telefono = :telefono, estado = "activo", id_almacen = :id_almacen WHERE id_cliente = :id_cliente');
+        $stmt->execute(['telefono' => E2E_SALES_CLIENTE_TELEFONO, 'id_almacen' => $idAlmacen, 'id_cliente' => $idCliente]);
     }
 
     $stmt = $pdo->prepare('SELECT id_direccion FROM cliente_direcciones WHERE id_cliente = :id_cliente LIMIT 1');

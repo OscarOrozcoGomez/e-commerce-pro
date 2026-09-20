@@ -23,6 +23,20 @@ export const E2E_PO_CANCEL_PRODUCT_NAME = 'Playwright E2E PO Cancel Product';
 // Sin precio_venta/precio_costo/sku/codigo_barras ni fila en inventario_almacen a
 // proposito, para views/productos_incompletos.php.
 export const E2E_PRODUCTO_INCOMPLETO_NOMBRE = 'Playwright E2E Producto Incompleto';
+// Direccion de texto que se escribe en el checkout a domicilio. La ZONA de envio NO se decide por este
+// texto en las pruebas: se fija con coordenadas via fijarUbicacionEntrega() (ver abajo).
+export const E2E_DIRECCION_ENTREGA = "Av. Vallarta 1500, Guadalajara, Jal.";
+
+// Coordenadas de prueba respecto a la sucursal (core/delivery_zone_utils.php: 20.605,-103.240; radio local
+// 18 km, foraneo hasta 40 km, mas lejos = indeterminado). Se mandan como maps_link "query=lat,lng", que
+// el servidor parsea SIN llamada HTTP (obtenerCoordenadasDesdeUrl). Sin esto, api/delivery_zone_quote.php
+// y dbCreatePublicOrder geocodifican el TEXTO con Google en el servidor (Geocoding API real, con costo, y
+// con un resultado que puede cambiar) -- y las coordenadas mandan sobre el texto.
+export const E2E_UBICACION_ENTREGA = {
+  local: { lat: 20.605, lng: -103.24 },
+  foranea: { lat: 20.405, lng: -103.24 },
+  indeterminada: { lat: 20.105, lng: -103.24 },
+} as const;
 // Uso exclusivo del import de "Pedido de mayoreo (B Life)" en views/purchase_orders.php
 // (pestaña "Cargar Pedido"). precio_costo=10.00 fijo -- ver scripts/seed_e2e_test_data.php.
 export const E2E_MAYOREO_PRODUCT_NAME = 'Playwright E2E Mayoreo Product';
@@ -84,6 +98,9 @@ export const E2E_STAFF_EMAILS = {
   // (que es admin normal, sin ese flag). Necesario para el catalogo de permisos en
   // views/roles_permisos.php.
   superadmin: 'e2e-superadmin@playwright.test',
+  // Encargado con override individual 'conceder ver_auditoria' (scripts/seed_e2e_staff_accounts.php): abre
+  // Logs de Actividad > Movimientos sin ser admin.
+  auditor: 'e2e-auditor@playwright.test',
 } as const;
 
 /**
@@ -157,29 +174,66 @@ export async function addSeededProductToCart(page: Page): Promise<void> {
  * api/delivery_zone_quote.php) que hay que confirmar ("De acuerdo, confirmar") antes de que
  * el pedido se registre -- ver el bloque `if (tipoEntregaSeleccionada === 'Domicilio')` en
  * views/cart.php. Es condicional (solo aparece si costo_envio > 0), así que no falla si no
- * aparece: la dirección fija 'Calle Falsa 123, Colonia Centro' que usan los specs sí cae
- * fuera de la periferia en este ambiente, pero no hay que asumirlo en todos los casos.
+ * aparece. Con la zona por defecto de los helpers ('local') NO aparece; solo con zona 'foranea'
+ * (ver fijarUbicacionEntrega). Se conserva la tolerancia por si un spec pide zona foránea.
  */
 export async function confirmDomicilioZoneFeeIfPresent(page: Page): Promise<void> {
   const confirmar = page.getByRole('button', { name: 'De acuerdo, confirmar' });
   try {
-    await confirmar.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmar.waitFor({ state: 'visible', timeout: 3000 });
     await confirmar.click();
   } catch {
     // No aplicó cargo de envío foráneo (dirección dentro de la periferia) -- seguir.
   }
 }
 
+/**
+ * Captura el JSON de la venta REAL que manda sales.php a api/ventas.php.
+ *
+ * procesarVenta() (views/sales.php) hace DOS POST a ese endpoint por cada cobro: primero una consulta
+ * previa `modo=plan_lotes` (verificacion FEFO de lotes: si hay algo que verificar abre el modal
+ * "Verifica el lote antes de cobrar") y luego la venta de verdad. Interceptar sin distinguirlas
+ * captura la respuesta equivocada (la del plan) y, ademas, compite con el location.reload() que la
+ * pagina hace al terminar. Aqui el plan pasa tal cual y solo se lee/reenvia la venta real.
+ */
+export async function capturarRespuestaVenta(page: Page): Promise<{ resultado: { success?: boolean; message?: string; numero_pedido?: string } | null }> {
+  const captura: { resultado: { success?: boolean; message?: string; numero_pedido?: string } | null } = { resultado: null };
+  await page.route('**/api/ventas.php', async (route) => {
+    const cuerpo = route.request().postData() ?? '';
+    if (cuerpo.includes('plan_lotes')) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    captura.resultado = await response.json();
+    await route.fulfill({ response });
+  });
+  return captura;
+}
+
+/**
+ * Fija la ubicacion de entrega del checkout por coordenadas (campo oculto #maps_link) para que la zona y
+ * el cargo de envio sean deterministas. Debe llamarse DESPUES de escribir la direccion: cart.php limpia
+ * ese campo cuando el cliente edita la direccion a mano.
+ */
+export async function fijarUbicacionEntrega(page: Page, zona: keyof typeof E2E_UBICACION_ENTREGA): Promise<void> {
+  const { lat, lng } = E2E_UBICACION_ENTREGA[zona];
+  await page.locator('#maps_link').evaluate((el, link) => {
+    (el as HTMLInputElement).value = link;
+  }, `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
+}
+
 /** Llena y envía el formulario de checkout por Domicilio con los datos dados. */
 export async function submitDomicilioCheckoutForm(
   page: Page,
-  overrides: { nombre?: string; telefono?: string; direccion?: string } = {}
+  overrides: { nombre?: string; telefono?: string; direccion?: string; zona?: keyof typeof E2E_UBICACION_ENTREGA } = {}
 ): Promise<void> {
   await page.goto('views/cart.php');
   await page.locator('#tipo_entrega').selectOption('Domicilio');
   await page.locator('#nombre').fill(overrides.nombre ?? 'Playwright QA');
   await page.locator('#telefono').fill(overrides.telefono ?? '3311234567');
-  await page.locator('#direccion').fill(overrides.direccion ?? 'Calle Falsa 123, Colonia Centro');
+  await page.locator('#direccion').fill(overrides.direccion ?? E2E_DIRECCION_ENTREGA);
+  await fijarUbicacionEntrega(page, overrides.zona ?? 'local');
   await page.getByRole('button', { name: 'Confirmar Pedido' }).click();
   await confirmDomicilioZoneFeeIfPresent(page);
 }

@@ -48,7 +48,7 @@ test.describe('Liberar Stock Apartado (cleanup_reservations.php)', () => {
     await loginAsStaff(page, 'encargado');
     await page.goto('views/cleanup_reservations.php?apply_threshold=0');
 
-    const fila = page.locator('table tbody tr').filter({ hasText: String(idPedido) });
+    const fila = page.locator('table tbody tr').filter({ hasText: new RegExp(`#${idPedido}(?!\d)`) });
     await expect(fila).toBeVisible();
     await expect(fila).toContainText(E2E_PRODUCT_NAME);
     await expect(fila).toContainText(E2E_CLEANUP_PRODUCT_NAME);
@@ -64,7 +64,7 @@ test.describe('Liberar Stock Apartado (cleanup_reservations.php)', () => {
     await expect(page.getByText(/Se libero 1 unidad\(es\) del producto seleccionado\./)).toBeVisible();
 
     // El pedido sigue vivo (solo se liberó 1 de 2 renglones) con el producto restante.
-    const filaTrasParcial = page.locator('table tbody tr').filter({ hasText: String(idPedido) });
+    const filaTrasParcial = page.locator('table tbody tr').filter({ hasText: new RegExp(`#${idPedido}(?!\d)`) });
     await expect(filaTrasParcial).toBeVisible();
     await expect(filaTrasParcial).not.toContainText(E2E_PRODUCT_NAME);
     await expect(filaTrasParcial).toContainText(E2E_CLEANUP_PRODUCT_NAME);
@@ -74,7 +74,7 @@ test.describe('Liberar Stock Apartado (cleanup_reservations.php)', () => {
     await page.getByRole('button', { name: 'Liberar seleccionados' }).click();
     await expect(page.getByText(/Se liberaron 1 pedidos pendientes\/apartados\./)).toBeVisible();
 
-    await expect(page.locator('table tbody tr').filter({ hasText: String(idPedido) })).toHaveCount(0);
+    await expect(page.locator('table tbody tr').filter({ hasText: new RegExp(`#${idPedido}(?!\d)`) })).toHaveCount(0);
   });
 
   test('con el umbral por defecto (horas), un pedido recién creado no aparece; con "Sin filtro" sí', async ({ page }) => {
@@ -82,10 +82,10 @@ test.describe('Liberar Stock Apartado (cleanup_reservations.php)', () => {
 
     await loginAsStaff(page, 'admin');
     await page.goto('views/cleanup_reservations.php');
-    await expect(page.locator('table tbody tr').filter({ hasText: String(idPedido) })).toHaveCount(0);
+    await expect(page.locator('table tbody tr').filter({ hasText: new RegExp(`#${idPedido}(?!\d)`) })).toHaveCount(0);
 
     await page.getByRole('link', { name: 'Sin filtro' }).click();
     await expect(page).toHaveURL(/apply_threshold=0/);
-    await expect(page.locator('table tbody tr').filter({ hasText: String(idPedido) })).toBeVisible();
+    await expect(page.locator('table tbody tr').filter({ hasText: new RegExp(`#${idPedido}(?!\d)`) })).toBeVisible();
   });
 });
