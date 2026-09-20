@@ -88,8 +88,15 @@ include __DIR__ . '/views/includes/header.php';
         position: relative;
         z-index: 2;
     }
-    .main-img-viewer:hover img {
-        transform: scale(2.5);
+    /* El zoom por hover solo aplica con mouse: en pantallas tactiles un toque en
+       las flechas deja :hover "pegado" y la imagen se quedaba ampliada 2.5x. */
+    @media (hover: hover) and (pointer: fine) {
+        .main-img-viewer:hover img {
+            transform: scale(2.5);
+        }
+    }
+    @media (hover: none), (pointer: coarse) {
+        .main-img-viewer { cursor: default; }
     }
 
     /* Navigation Arrows */
@@ -112,7 +119,9 @@ include __DIR__ . '/views/includes/header.php';
         transition: 0.3s;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    .nav-arrow:hover { background: #1a237e; color: white; transform: translateY(-50%) scale(1.1); }
+    @media (hover: hover) and (pointer: fine) {
+        .nav-arrow:hover { background: #1a237e; color: white; transform: translateY(-50%) scale(1.1); }
+    }
     .nav-arrow.prev { left: 15px; }
     .nav-arrow.next { right: 15px; }
 
