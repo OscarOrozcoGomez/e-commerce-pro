@@ -97,6 +97,21 @@ export async function registerAndLogin(page: Page): Promise<{ nombre: string; em
   return cliente;
 }
 
+/**
+ * Tras crear un cliente en Administrar Clientes, la pagina recarga y (con permiso de ventas) abre la oferta
+ * "Cliente creado ... ¿agendarle una venta ahora?" (#modal-venta-tras-crear, commit cfcc8d3). Su overlay tapa
+ * TODA la pagina: hay que cerrarla ("Ahora no") antes de tocar la fila del cliente. Espera al load porque el modal
+ * esta al final del documento y aun no existe cuando la tabla ya se ve.
+ */
+export async function cerrarOfertaVentaSiAparece(page: Page): Promise<void> {
+  await page.waitForLoadState('load');
+  const oferta = page.locator('#modal-venta-tras-crear');
+  if ((await oferta.count()) === 0) return;
+  await expect(oferta).toBeVisible();
+  await oferta.getByRole('link', { name: 'Ahora no' }).click();
+  await expect(oferta).toBeHidden();
+}
+
 // Debe coincidir con scripts/seed_e2e_staff_accounts.php
 export const E2E_STAFF_PASSWORD = 'E2eStaff!2026';
 export const E2E_STAFF_EMAILS = {
@@ -116,6 +131,9 @@ export const E2E_STAFF_EMAILS = {
   auditor: 'e2e-auditor@playwright.test',
   // Vendedor exclusivo de permisos-en-vivo.staff.spec.ts (se le cambian permisos a media sesion).
   permisosVivo: 'e2e-permisos-vivo@playwright.test',
+  // Encargados con un permiso menos por override individual (ver scripts/seed_e2e_staff_accounts.php).
+  encargadoSinVentas: 'e2e-encargado-sin-ventas@playwright.test',
+  encargadoSinAgendar: 'e2e-encargado-sin-agendar@playwright.test',
 } as const;
 
 /**

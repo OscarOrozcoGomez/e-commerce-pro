@@ -37,6 +37,11 @@ $staffAccounts = [
     // sesion (scripts/e2e_permiso_override.php). No se comparte con otros specs porque corren en paralelo y
     // se contaminarian entre si; abajo se le borran los overrides que haya dejado una corrida interrumpida.
     ['rol' => 'vendedor', 'nombre' => 'Playwright E2E Permisos En Vivo', 'email' => 'e2e-permisos-vivo@playwright.test', 'almacen' => 'default'],
+    // Encargados con UN permiso de menos (override 'denegar', abajo) para probar lo que depende de ese permiso en
+    // Administrar Clientes: sin realizar_ventas no se ofrece "agendar venta" tras crear un cliente; sin asignar_entregas
+    // la oferta dice "registrar" en vez de "agendar" (puede_agendar).
+    ['rol' => 'encargado', 'nombre' => 'Playwright E2E Encargado Sin Ventas', 'email' => 'e2e-encargado-sin-ventas@playwright.test', 'almacen' => 'default'],
+    ['rol' => 'encargado', 'nombre' => 'Playwright E2E Encargado Sin Agendar', 'email' => 'e2e-encargado-sin-agendar@playwright.test', 'almacen' => 'default'],
 ];
 
 $pdo = getPDO();
@@ -115,6 +120,8 @@ try {
         ['e2e-encargado-pickup@playwright.test', 'transferir_stock', 'denegar'],
         // ...y el caso inverso: una cuenta que SI debe tenerlo aunque su rol no lo traiga.
         ['e2e-auditor@playwright.test', 'ver_auditoria', 'conceder'],
+        ['e2e-encargado-sin-ventas@playwright.test', 'realizar_ventas', 'denegar'],
+        ['e2e-encargado-sin-agendar@playwright.test', 'asignar_entregas', 'denegar'],
         // El encargado normal NO debe abrir Movimientos (el rol encargado no lo trae; se fija por si alguien se lo dio).
         ['e2e-encargado@playwright.test', 'ver_auditoria', 'denegar'],
     ];

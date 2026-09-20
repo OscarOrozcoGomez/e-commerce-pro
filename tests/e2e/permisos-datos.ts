@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
+import { correrPhp } from './db-utils';
 
 // Datos compartidos por permisos-matriz / permisos-baseline / permisos-en-vivo (.staff.spec.ts).
 //
@@ -122,7 +120,9 @@ export const ENDPOINTS: Endpoint[] = [
   { ruta: 'api/update_thresholds.php', anyOf: ['inventario'] },
   { ruta: 'api/users_handler.php', anyOf: ['gestionar_usuarios'] },
   { ruta: 'api/vendor_settlement.php', anyOf: ['declarar_liquidacion'] },
-  { ruta: 'api/ventas.php', anyOf: ['asignar_entregas', 'realizar_ventas', 'vender_sin_inventario'] },
+  // Solo realizar_ventas abre el endpoint (api/ventas.php:23); asignar_entregas y vender_sin_inventario se leen DENTRO para
+  // decidir que modos/stock permite, pero no dan acceso por si solos.
+  { ruta: 'api/ventas.php', anyOf: ['realizar_ventas'] },
 ];
 
 // Descargas de reportes: sin permiso redirigen (302) al dashboard; con permiso responden 200.
@@ -150,19 +150,6 @@ export const CLAVES_SOLO_ADMIN = [
   'ajustar_inventario_producto',
   'crear_categorias',
 ];
-
-function resolverPhp(): string {
-  if (process.env.PHP_BIN) return process.env.PHP_BIN;
-  const xampp = 'C:\\xampp\\php\\php.exe';
-  return existsSync(xampp) ? xampp : 'php';
-}
-
-function correrPhp(script: string, args: string[] = []): string {
-  return execFileSync(resolverPhp(), [path.join('scripts', script), ...args], {
-    cwd: path.resolve(__dirname, '..', '..'),
-    encoding: 'utf8',
-  });
-}
 
 /** Foto de los permisos reales en la BD (rol + overrides) de las cuentas E2E. */
 export function leerPermisosBD(): PermisosBD {

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { loginAsStaff, registerAndLogin, telefonoUnico } from './helpers';
+import { cerrarOfertaVentaSiAparece, loginAsStaff, registerAndLogin, telefonoUnico } from './helpers';
 
 // Auditoría completa (PR #201): views/activity_logs.php > pestaña "Movimientos" (logs_auditoria) responde
 // "quién hizo qué, cuándo y desde dónde, con el valor de antes y de después". Este spec prueba la cadena
@@ -115,8 +115,9 @@ test.describe('Auditoría: Movimientos (activity_logs.php)', () => {
     await page.goto('views/manage_customers.php');
 
     const nombre = `Playwright Cliente Auditoria ${Date.now()}`;
-    const telefonoViejo = '3312345678';
-    const telefonoNuevo = '3319876543';
+    // Unicos por corrida: los telefonos ya no se pueden repetir entre clientes (un fijo chocaria con otro cliente).
+    const telefonoViejo = telefonoUnico();
+    const telefonoNuevo = telefonoUnico();
     const correoViejo = `pii.viejo+${Date.now()}@example.com`;
     const correoNuevo = `pii.nuevo+${Date.now()}@example.com`;
 
@@ -127,6 +128,7 @@ test.describe('Auditoría: Movimientos (activity_logs.php)', () => {
     await modalCrear.locator('input[name="email"]').fill(correoViejo);
     await modalCrear.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
+    await cerrarOfertaVentaSiAparece(page);
 
     const filaCliente = page.locator('.manage-customers-table-wrap tr').filter({ hasText: nombre });
     const modalEditar = page.locator('.modal.open').filter({ hasText: 'Editar cliente' });
@@ -138,8 +140,10 @@ test.describe('Auditoría: Movimientos (activity_logs.php)', () => {
     }).toPass({ timeout: 40000 });
     await modalEditar.locator('input[name="telefono"]').fill(telefonoNuevo);
     await modalEditar.locator('input[name="email"]').fill(correoNuevo);
+    // El envio es por fetch y el servidor devuelve la pagina completa (cientos de clientes en esta BD): puede tardar
+    // varios segundos antes de que aparezca el aviso, con el boton deshabilitado mientras tanto.
     await modalEditar.getByRole('button', { name: 'Guardar cambios' }).click();
-    await expect(page.getByText('Cliente actualizado correctamente.')).toBeVisible();
+    await expect(page.getByText('Cliente actualizado correctamente.')).toBeVisible({ timeout: 30000 });
 
     await abrirMovimientos(page, { q: nombre });
     const editado = fila(page, 'Cliente editado');
@@ -148,8 +152,8 @@ test.describe('Auditoría: Movimientos (activity_logs.php)', () => {
 
     // Teléfono: ******<últimos 4>. Correo: <1a letra>***@dominio.
     const filaTel = editado.locator('table.mov-cambios tbody tr').filter({ hasText: 'telefono' });
-    await expect(filaTel.locator('td.antes')).toHaveText('******5678');
-    await expect(filaTel.locator('td.despues')).toHaveText('******6543');
+    await expect(filaTel.locator('td.antes')).toHaveText(`******${telefonoViejo.slice(-4)}`);
+    await expect(filaTel.locator('td.despues')).toHaveText(`******${telefonoNuevo.slice(-4)}`);
     const filaMail = editado.locator('table.mov-cambios tbody tr').filter({ hasText: 'email' });
     await expect(filaMail.locator('td.antes')).toHaveText('p***@example.com');
     await expect(filaMail.locator('td.despues')).toHaveText('p***@example.com');

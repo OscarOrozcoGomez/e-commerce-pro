@@ -41,6 +41,8 @@ const PERSONAS_STAFF: Persona[] = [
   personaStaff('vendedor', 'vendedor'),
   personaStaff('repartidor', 'repartidor'),
   personaStaff('auditor', 'auditor (encargado + ver_auditoria)'),
+  personaStaff('encargadoSinVentas', 'encargado sin realizar_ventas'),
+  personaStaff('encargadoSinAgendar', 'encargado sin asignar_entregas'),
 ];
 
 /** Bloqueado = redireccion / 401 / 403, o el mensaje de "no autorizado" que devuelven los endpoints JSON. */

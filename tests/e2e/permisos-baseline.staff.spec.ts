@@ -104,6 +104,18 @@ test.describe('Línea base de las cuentas de prueba (overrides individuales)', (
     expect(cuenta('encargado').overrides).toContain('denegar:transferir_stock');
   });
 
+  test('encargados con un permiso menos: pierden SOLO ese permiso y conservan el resto de su rol', () => {
+    const sinVentas = cuenta('encargadoSinVentas');
+    expect(sinVentas.efectivos).not.toContain('realizar_ventas');
+    expect(sinVentas.efectivos).toContain('gestionar_clientes');
+    expect(sinVentas.overrides).toEqual(['denegar:realizar_ventas']);
+
+    const sinAgendar = cuenta('encargadoSinAgendar');
+    expect(sinAgendar.efectivos).not.toContain('asignar_entregas');
+    expect(sinAgendar.efectivos).toContain('realizar_ventas');
+    expect(sinAgendar.overrides).toEqual(['denegar:asignar_entregas']);
+  });
+
   test('el vendedor y el repartidor de prueba no arrastran overrides que falseen la línea base', () => {
     expect(cuenta('vendedor').overrides).toEqual([]);
     expect(cuenta('repartidor').overrides).toEqual([]);

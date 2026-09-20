@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { loginAsStaff, telefonoUnico } from './helpers';
+import { cerrarOfertaVentaSiAparece, loginAsStaff, telefonoUnico } from './helpers';
 
 test.describe('Admin: alta de cliente (walk-in)', () => {
   test('crear un cliente nuevo desde el modal lo muestra en la tabla', async ({ page }) => {
@@ -11,7 +11,7 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     const nombre = `Playwright Cliente Admin ${Date.now()}`;
     const modal = page.locator('#modal-crear-cliente');
     await modal.locator('input[name="nombre"]').fill(nombre);
-    await modal.locator('input[name="telefono"]').fill('3312345678');
+    await modal.locator('input[name="telefono"]').fill(telefonoUnico());
 
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
 
@@ -19,6 +19,7 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     // renderizarla (500+ filas en esta BD local); bajo carga concurrente pesada
     // puede tardar más que el timeout default.
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
+    await cerrarOfertaVentaSiAparece(page);
   });
 
   test('editar un cliente existente actualiza su nombre y telefono', async ({ page }) => {
@@ -29,9 +30,10 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await page.getByRole('link', { name: 'Nuevo cliente' }).click();
     const modalCrear = page.locator('#modal-crear-cliente');
     await modalCrear.locator('input[name="nombre"]').fill(nombreOriginal);
-    await modalCrear.locator('input[name="telefono"]').fill('3312345678');
+    await modalCrear.locator('input[name="telefono"]').fill(telefonoUnico());
     await modalCrear.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombreOriginal })).toBeVisible({ timeout: 20000 });
+    await cerrarOfertaVentaSiAparece(page);
 
     const fila = page.locator('.manage-customers-table-wrap tr').filter({ hasText: nombreOriginal });
     await fila.getByTitle('Editar cliente').click();
@@ -42,10 +44,12 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     // termine de abrir; el timeout default a veces se queda corto bajo carga concurrente.
     await expect(modalEditar).toBeVisible({ timeout: 15000 });
     await modalEditar.locator('input[name="nombre"]').fill(nombreEditado);
-    await modalEditar.locator('input[name="telefono"]').fill('3319876543');
+    await modalEditar.locator('input[name="telefono"]').fill(telefonoUnico());
     await modalEditar.getByRole('button', { name: 'Guardar cambios' }).click();
 
-    await expect(page.getByText('Cliente actualizado correctamente.')).toBeVisible();
+    // El envio es por fetch y el servidor devuelve la pagina completa (cientos de clientes en esta BD): puede tardar
+    // varios segundos antes de que aparezca el aviso, con el boton deshabilitado mientras tanto.
+    await expect(page.getByText('Cliente actualizado correctamente.')).toBeVisible({ timeout: 30000 });
     await expect(page.locator('.manage-customers-table-wrap').getByText(nombreEditado)).toBeVisible();
   });
 
@@ -61,6 +65,7 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await modal.locator('input[name="telefono"]').fill(telefonoUnico());
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
+    await cerrarOfertaVentaSiAparece(page);
 
     let fila = page.locator('.manage-customers-table-wrap tr').filter({ hasText: nombre });
     await expect(fila.locator('td.manage-customers-badge-cell').last().locator('.badge')).toHaveText('ACTIVO');
@@ -88,10 +93,13 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await modal.locator('input[name="telefono"]').fill(telefonoUnico());
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
+    await cerrarOfertaVentaSiAparece(page);
 
     const fila = page.locator('.manage-customers-table-wrap tr').filter({ hasText: nombre });
-    page.once('dialog', (dialog) => dialog.accept());
+    // Desde el commit cfcc8d3 la confirmacion es un modal propio (#modal-confirmar-accion), no el confirm() nativo.
     await fila.getByTitle('Eliminar cliente').click();
+    await expect(page.locator('#confirmar-accion-titulo')).toHaveText('¿Eliminar este cliente?');
+    await page.locator('#confirmar-accion-aceptar').click();
 
     await expect(page.getByText(/Cliente eliminado correctamente/)).toBeVisible();
     await expect(page.locator('.manage-customers-table-wrap').getByText(nombre)).toHaveCount(0);
@@ -109,6 +117,7 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await modal.locator('input[name="telefono"]').fill(telefonoUnico());
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
+    await cerrarOfertaVentaSiAparece(page);
 
     // Esta BD local ya trae 700+ clientes (reales + acumulados de tests). Bajo carga
     // paralela pesada, el listener 'input' del buscador puede no estar enganchado
