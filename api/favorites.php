@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/api_security_utils.php';
 
 header('Content-Type: application/json');
 
@@ -49,6 +50,11 @@ function favoritesCount(PDO $pdo, int $userId): int
 ensureFavoritesTable($pdo);
 
 $method = $_SERVER['REQUEST_METHOD'];
+
+// Escrituras con sesion: exigen token CSRF (cabecera X-CSRF-Token o campo csrf_token).
+if (apiMetodoEsEscritura($method)) {
+    apiRequerirCsrf();
+}
 
 try {
     if ($method === 'GET') {

@@ -1,10 +1,14 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/api_security_utils.php';
 require_once __DIR__ . '/../core/product_display_utils.php';
 require_once __DIR__ . '/../core/oferta_pricing.php';
 
 header('Content-Type: application/json');
+
+// Publico: limite de consultas por minuto y por IP.
+apiLimitarPeticiones('product_detail', 240);
 
 if (!isset($_GET['id'])) {
     http_response_code(400);

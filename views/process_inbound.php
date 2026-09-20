@@ -52,6 +52,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <form id="form-process-inbound">
+                    <?php echo csrfInput(); ?>
                         <input type="hidden" name="id_orden_compra" value="<?php echo $idOrden; ?>">
                         <table class="striped">
                             <thead>

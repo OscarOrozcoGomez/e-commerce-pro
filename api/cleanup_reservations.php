@@ -3,11 +3,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/api_security_utils.php';
 
 header('Content-Type: application/json');
 
 // Permite ejecución local sin sesión para cron/manual en localhost
-$isLocalCron = (!isAuthenticated() && ($_SERVER['REMOTE_ADDR'] ?? '') === '127.0.0.1');
+// Solo cuenta como cron local una conexion directa desde 127.0.0.1 SIN cabeceras de proxy (ver apiEsCronLocal()).
+$isLocalCron = apiEsCronLocal($_SERVER, isAuthenticated());
 if (!$isLocalCron) {
     // Antes usaba requireAuth(), que sin sesion redirige a login.php en vez de
     // devolver JSON -- rompia el fetch() que espera JSON siempre.
@@ -164,6 +166,11 @@ try {
     $payload = json_decode((string)file_get_contents('php://input'), true);
     if (!is_array($payload)) {
         $payload = [];
+    }
+
+    // La llamada del cron local (sin sesion) no lleva token; toda escritura con sesion si.
+    if (!$isLocalCron) {
+        apiRequerirCsrf($payload);
     }
 
     $expiryHours = resolveThresholdHours($payload['threshold_hours'] ?? ($_GET['threshold_hours'] ?? null), $defaultExpiryHours);

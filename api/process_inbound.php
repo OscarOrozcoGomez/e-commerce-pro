@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/api_security_utils.php';
 
 header('Content-Type: application/json');
 
@@ -11,6 +12,10 @@ if (!isAuthenticated() || (!hasPermission('inventario') && !isAdmin() && !isEnca
     echo json_encode(['success' => false, 'error' => 'No autorizado']);
     exit;
 }
+
+// Actualiza inventario: solo POST y con token CSRF (el formulario lo manda en el campo csrf_token).
+apiRequerirMetodo('POST');
+apiRequerirCsrf();
 
 $pdo = getPDO();
 $idOrden = intval($_POST['id_orden_compra'] ?? 0);

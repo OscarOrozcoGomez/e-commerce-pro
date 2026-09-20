@@ -111,7 +111,7 @@ async function removeFromFavorites(productId) {
     try {
         const response = await fetch(FAVORITES_API_URL_PAGE, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': FAVORITES_CSRF_TOKEN },
             body: JSON.stringify({
                 action: 'remove',
                 id_producto: productId

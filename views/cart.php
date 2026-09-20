@@ -1046,6 +1046,7 @@ include __DIR__ . '/includes/header.php';
         btn.textContent = 'Procesando...';
 
         const formData = {
+            csrf_token: <?php echo json_encode(getCsrfToken()); ?>,
             tipo_entrega: document.getElementById('tipo_entrega').value,
             cliente: {
                 nombre: document.getElementById('nombre').value,
