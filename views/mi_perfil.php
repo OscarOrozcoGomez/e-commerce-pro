@@ -96,6 +96,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Ese teléfono ya está asociado a otra cuenta.');
                 }
 
+                // Auditoria: el propio cliente edito su perfil. "Antes" sale de la sesion (lo ultimo
+                // que la persona tenia); solo se comparan digitos del telefono para no marcar un
+                // cambio falso por formato.
+                $auditSoloDigitos = static fn($v): string => (string)preg_replace('/\D+/', '', (string)$v);
+                $auditPerfilAntes = [
+                    'nombre' => (string)($_SESSION['usuario']['nombre'] ?? ''),
+                    'email' => (string)($_SESSION['usuario']['email'] ?? ''),
+                    'telefono' => $auditSoloDigitos($_SESSION['usuario']['telefono_cliente'] ?? ''),
+                ];
+
                 $pdo->beginTransaction();
 
                 $stmtUser = $pdo->prepare('UPDATE usuarios SET nombre = :nombre, email = :email WHERE id_usuario = :id');
@@ -152,6 +162,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->commit();
+
+                logAuditCambios(
+                    'CLIENTE_PERFIL_EDITADO',
+                    'usuarios',
+                    $userId,
+                    $auditPerfilAntes,
+                    ['nombre' => $nombre, 'email' => $email, 'telefono' => $auditSoloDigitos($telefono)],
+                    ['nombre', 'email', 'telefono'],
+                    ['contexto' => 'El cliente editó su perfil']
+                );
 
                 $_SESSION['usuario']['nombre'] = $nombre;
                 $_SESSION['usuario']['email'] = $email;

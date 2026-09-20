@@ -13,6 +13,26 @@ declare(strict_types=1);
 require_once __DIR__ . '/ai_assistant.php';
 
 /**
+ * Descifra un valor PII si viene cifrado; si no, lo regresa tal cual. Si el descifrado
+ * FALLA (piiDecryptValue() cae de vuelta al texto cifrado original cuando la llave no
+ * coincide -- ej. un registro cifrado con una llave vieja de antes de una rotacion, nunca
+ * re-cifrado despues), regresa cadena vacia en vez del texto cifrado crudo: nunca hay que
+ * ensenarle "ENCv1:..." a un asesor en pantalla, eso no le dice nada util y se ve como un
+ * bug. waContactoNombre() ya sabe caer al nombre de perfil de WhatsApp o a un generico
+ * cuando el nombre de cliente llega vacio.
+ */
+function waDescifrarPii(?string $valor): string
+{
+    $valor = (string) $valor;
+    if ($valor === '' || !function_exists('piiIsEncryptedValue') || !piiIsEncryptedValue($valor)) {
+        return $valor;
+    }
+    $descifrado = (string) piiDecryptValue($valor);
+
+    return piiIsEncryptedValue($descifrado) ? '' : $descifrado;
+}
+
+/**
  * Nombre a mostrar para un contacto: primero el nombre de cliente ya ligado (si lo hay),
  * si no el nombre de perfil de WhatsApp, y si no hay ninguno un texto generico.
  * Recibe valores YA en claro (el caller descifra el nombre del cliente).
@@ -31,13 +51,27 @@ function waContactoNombre(?string $nombrePerfil, ?string $clienteNombre): string
 }
 
 /**
- * Subtitulo de un contacto: el telefono formateado, o el aviso de que WhatsApp no
- * comparte el numero (conversaciones "LID").
+ * Subtitulo de un contacto: el telefono formateado (el real del wa_id, o el ya resuelto
+ * por scripts/resolver_lids_whatsapp.php cuando el wa_id es un LID -- ver
+ * aiWaIdToDisplayPhoneConResuelto()), o el aviso de que WhatsApp no comparte el numero
+ * (LID sin resolver todavia).
  */
-function waContactoSubtitulo(string $waId): string
+function waContactoSubtitulo(string $waId, ?string $telefonoResuelto = null): string
 {
-    $telefono = aiWaIdToDisplayPhone($waId);
+    $telefono = aiWaIdToDisplayPhoneConResuelto($waId, $telefonoResuelto);
     return $telefono ?? 'Sin numero (WhatsApp no lo comparte)';
+}
+
+/**
+ * Numero listo para el link "https://wa.me/<esto>" de un contacto, o cadena vacia si no hay
+ * ningun telefono real disponible todavia (LID sin resolver). Mismo criterio que el boton
+ * "Abrir WhatsApp" de views/ai_assistant_settings.php: usa el numero real del wa_id si
+ * existe, si no cae al telefono_resuelto (ver aiWaIdDigitsConResuelto()).
+ */
+function waWhatsAppLinkPhone(string $waId, ?string $telefonoResuelto): string
+{
+    $digitsNacionales = aiWaIdDigitsConResuelto($waId, $telefonoResuelto);
+    return $digitsNacionales !== null ? waBuildBusinessLinkPhone($digitsNacionales) : '';
 }
 
 /**
@@ -120,6 +154,7 @@ function waContactosPorDia(PDO $pdo, string $desde, string $hasta, string $q = '
                 DATE(m.creado_en)   AS dia,
                 c.id_conversacion,
                 c.wa_id,
+                c.telefono_resuelto,
                 c.nombre_perfil,
                 c.id_cliente,
                 c.estado_bot,
@@ -143,16 +178,20 @@ function waContactosPorDia(PDO $pdo, string $desde, string $hasta, string $q = '
     if ($q !== '') {
         $digits = preg_replace('/\D+/', '', $q) ?? '';
         if ($digits !== '') {
-            $sql .= ' AND (c.nombre_perfil LIKE :q OR c.wa_id LIKE :qd)';
+            // c.telefono_resuelto entra a la busqueda para que un numero real (resuelto de
+            // un LID por scripts/resolver_lids_whatsapp.php) tambien encuentre la
+            // conversacion, no solo wa_id (que para un LID nunca contiene el telefono real).
+            $sql .= ' AND (c.nombre_perfil LIKE :q OR c.wa_id LIKE :qd OR c.telefono_resuelto LIKE :qt)';
             $params[':q'] = '%' . $q . '%';
             $params[':qd'] = '%' . $digits . '%';
+            $params[':qt'] = '%' . $digits . '%';
         } else {
             $sql .= ' AND c.nombre_perfil LIKE :q';
             $params[':q'] = '%' . $q . '%';
         }
     }
 
-    $sql .= " GROUP BY dia, c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente,
+    $sql .= " GROUP BY dia, c.id_conversacion, c.wa_id, c.telefono_resuelto, c.nombre_perfil, c.id_cliente,
                        c.estado_bot, c.motivo_transferencia, cl.nombre
               ORDER BY dia DESC, primer_mensaje ASC
               LIMIT " . max(1, min(5000, $limite));
@@ -188,7 +227,7 @@ function waConversacionInfo(PDO $pdo, int $idConversacion): ?array
         return null;
     }
     $stmt = $pdo->prepare(
-        'SELECT c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente, c.estado_bot,
+        'SELECT c.id_conversacion, c.wa_id, c.telefono_resuelto, c.nombre_perfil, c.id_cliente, c.estado_bot,
                 c.motivo_transferencia, c.creado_en, c.ultimo_mensaje_en, cl.nombre AS cliente_nombre_cifrado
          FROM whatsapp_conversaciones c
          LEFT JOIN clientes cl ON cl.id_cliente = c.id_cliente

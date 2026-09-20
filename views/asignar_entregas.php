@@ -52,6 +52,46 @@ $safeDecryptValue = static function (?string $value, string $fallback = ''): str
 $formatDiaLabel = static fn (?string $fecha): string => deliveryFormatDiaLabel($fecha);
 $diaKey = static fn (?string $fecha): string => deliveryDiaKey($fecha);
 
+// Fragmento SQL (sobre `pedidos`, sin alias) que deja pasar solo pedidos a domicilio. Lo usan
+// las acciones de escritura de esta pantalla para no depender de que la interfaz oculte lo demas.
+$condicionEntregaDomicilio = static function (PDO $pdo): string {
+    $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
+    $stmtMeta->execute();
+    $hasPedidosTipoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
+
+    $stmtMetaPickup = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
+    $stmtMetaPickup->execute();
+    $hasPickupNotificacionesTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
+    // Un pedido con notificacion pickup es SIEMPRE de recoger en sucursal (se crea
+    // exclusivamente para ese flujo), sin importar si tipo_entrega/observaciones estan
+    // mal etiquetados. Esta verificacion es a prueba de datos historicos inconsistentes.
+    $notPickupClause = $hasPickupNotificacionesTable
+        ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = pedidos.id_pedido)"
+        : '';
+
+    if ($hasPedidosTipoEntrega) {
+        return " AND (
+                    tipo_entrega = 'Domicilio'
+                    OR ((tipo_entrega IS NULL OR TRIM(tipo_entrega) = '') AND observaciones LIKE '%ENTREGA: Domicilio%')
+                ){$notPickupClause}";
+    }
+    return " AND observaciones LIKE '%ENTREGA: Domicilio%'{$notPickupClause}";
+};
+
+// Pedido a domicilio con repartidor cuya entrega aun no se confirma (ni se cancelo): el unico
+// caso en que se puede reprogramar el dia o cambiar de repartidor. Null si no cumple.
+$cargarPedidoAsignadoEditable = static function (PDO $pdo, int $idPedido) use ($condicionEntregaDomicilio): ?array {
+    $stmt = $pdo->prepare(
+        "SELECT estado, id_repartidor, fecha_entrega_programada
+         FROM pedidos
+         WHERE id_pedido = :pedido
+           AND id_repartidor IS NOT NULL
+           AND estado IN ('pendiente_pago','pagado','en_reparto')" . $condicionEntregaDomicilio($pdo)
+    );
+    $stmt->execute([':pedido' => $idPedido]);
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+};
+
 // Procesar asignación
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -71,37 +111,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                 }
                 // El repartidor cobra al momento de entregar, no se requiere pago previo
                 if ($error === '') {
-                $hasPedidosTipoEntrega = false;
-                $stmtMeta = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' AND COLUMN_NAME = 'tipo_entrega'");
-                $stmtMeta->execute();
-                $hasPedidosTipoEntrega = ((int)$stmtMeta->fetchColumn()) > 0;
-
-                $stmtMetaPickup = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pickup_notificaciones'");
-                $stmtMetaPickup->execute();
-                $hasPickupNotificacionesTable = ((int)$stmtMetaPickup->fetchColumn()) > 0;
-                // Un pedido con notificacion pickup es SIEMPRE de recoger en sucursal (se crea
-                // exclusivamente para ese flujo), sin importar si tipo_entrega/observaciones estan
-                // mal etiquetados. Esta verificacion es a prueba de datos historicos inconsistentes.
-                $notPickupClause = $hasPickupNotificacionesTable
-                    ? " AND NOT EXISTS (SELECT 1 FROM pickup_notificaciones pn WHERE pn.id_pedido = pedidos.id_pedido)"
-                    : '';
-
-                if ($hasPedidosTipoEntrega) {
-                    $sqlUpdate = "UPDATE pedidos
-                                  SET id_repartidor = :rep, fecha_entrega_programada = :fecha
-                                  WHERE id_pedido = :pedido
-                                    AND estado IN ('pendiente_pago','pagado')
-                                                                        AND (
-                                                                                tipo_entrega = 'Domicilio'
-                                                                                OR ((tipo_entrega IS NULL OR TRIM(tipo_entrega) = '') AND observaciones LIKE '%ENTREGA: Domicilio%')
-                                                                        ){$notPickupClause}";
-                } else {
-                    $sqlUpdate = "UPDATE pedidos
-                                  SET id_repartidor = :rep, fecha_entrega_programada = :fecha
-                                  WHERE id_pedido = :pedido
-                                    AND estado IN ('pendiente_pago','pagado')
-                                    AND observaciones LIKE '%ENTREGA: Domicilio%'{$notPickupClause}";
-                }
+                $sqlUpdate = "UPDATE pedidos
+                              SET id_repartidor = :rep, fecha_entrega_programada = :fecha
+                              WHERE id_pedido = :pedido
+                                AND estado IN ('pendiente_pago','pagado')" . $condicionEntregaDomicilio($pdo);
 
                 $stmt = $pdo->prepare($sqlUpdate);
                 $stmt->execute([
@@ -115,6 +128,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
                 } else {
                     $error = 'No se pudo asignar. Verifica que el pedido no esté ya en reparto o entregado.';
                 }
+                }
+            } elseif ($accion === 'cambiar_fecha_entrega') {
+                $fechaValidation = deliveryValidateFechaEntregaAsignacion(trim((string)($_POST['fecha_entrega'] ?? '')));
+                $pedidoEditable = $fechaValidation['valid'] ? $cargarPedidoAsignadoEditable($pdo, $id_pedido) : null;
+                if (!$fechaValidation['valid']) {
+                    $error = (string)$fechaValidation['error'];
+                } elseif ($pedidoEditable === null) {
+                    // Entregado o cancelado conserva su fecha como registro historico.
+                    $error = 'No se pudo cambiar la fecha. Verifica que el pedido sea a domicilio, tenga repartidor y aún no esté entregado ni cancelado.';
+                } else {
+                    // fecha_entrega_programada es DATETIME: se cambia solo el dia y se conserva la hora.
+                    $fechaAnterior = (string)($pedidoEditable['fecha_entrega_programada'] ?? '');
+                    $horaAnterior = strlen($fechaAnterior) >= 19 ? substr($fechaAnterior, 11, 8) : '00:00:00';
+                    $fechaNueva = substr((string)$fechaValidation['fecha'], 0, 10) . ' ' . $horaAnterior;
+                    if ($fechaNueva === $fechaAnterior) {
+                        $success = 'La fecha de entrega ya era esa.';
+                    } else {
+                        $stmtFecha = $pdo->prepare(
+                            "UPDATE pedidos
+                             SET fecha_entrega_programada = :fecha
+                             WHERE id_pedido = :pedido
+                               AND id_repartidor IS NOT NULL
+                               AND estado IN ('pendiente_pago','pagado','en_reparto')" . $condicionEntregaDomicilio($pdo)
+                        );
+                        $stmtFecha->execute([':fecha' => $fechaNueva, ':pedido' => $id_pedido]);
+                        if ($stmtFecha->rowCount() > 0) {
+                            logAudit('PEDIDO_FECHA_ENTREGA_CAMBIADA', 'pedidos', $id_pedido, 'Fecha de entrega cambiada de ' . ($fechaAnterior !== '' ? $fechaAnterior : 'sin fecha') . ' a ' . $fechaNueva);
+                            $success = 'Fecha de entrega actualizada.';
+                        } else {
+                            $error = 'No se pudo cambiar la fecha. El pedido cambió de estado mientras tanto; recarga la página.';
+                        }
+                    }
+                }
+            } elseif ($accion === 'cambiar_repartidor') {
+                $idRepartidorNuevo = intval($_POST['id_repartidor'] ?? 0);
+                $stmtRepValido = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE id_usuario = ? AND estado = 'activo' AND id_rol = (SELECT id_rol FROM roles WHERE nombre = 'repartidor')");
+                $stmtRepValido->execute([$idRepartidorNuevo]);
+                if (((int)$stmtRepValido->fetchColumn()) === 0) {
+                    $error = 'Selecciona un repartidor activo.';
+                } elseif (($pedidoEditable = $cargarPedidoAsignadoEditable($pdo, $id_pedido)) === null) {
+                    $error = 'No se pudo cambiar el repartidor. Verifica que el pedido sea a domicilio, tenga repartidor y aún no esté entregado ni cancelado.';
+                } elseif ((int)$pedidoEditable['id_repartidor'] === $idRepartidorNuevo) {
+                    $success = 'El pedido ya estaba asignado a ese repartidor.';
+                } else {
+                    $idRepartidorAnterior = (int)$pedidoEditable['id_repartidor'];
+                    $stmtReasignar = $pdo->prepare(
+                        "UPDATE pedidos
+                         SET id_repartidor = :nuevo
+                         WHERE id_pedido = :pedido
+                           AND id_repartidor = :anterior
+                           AND estado IN ('pendiente_pago','pagado','en_reparto')" . $condicionEntregaDomicilio($pdo)
+                    );
+                    $stmtReasignar->execute([':nuevo' => $idRepartidorNuevo, ':pedido' => $id_pedido, ':anterior' => $idRepartidorAnterior]);
+                    if ($stmtReasignar->rowCount() > 0) {
+                        // Se registra como PEDIDO_ASIGNADO para que "Asignó:" en la tarjeta refleje a
+                        // quien hizo el cambio (toma la fila mas reciente de esta accion por pedido).
+                        logAudit('PEDIDO_ASIGNADO', 'pedidos', $id_pedido, "Pedido reasignado del repartidor ID: $idRepartidorAnterior al repartidor ID: $idRepartidorNuevo");
+                        $success = 'Repartidor actualizado.';
+                    } else {
+                        $error = 'No se pudo cambiar el repartidor. El pedido cambió mientras tanto; recarga la página.';
+                    }
                 }
             } elseif ($accion === 'convertir_sucursal') {
                 $pdo->beginTransaction();
@@ -241,7 +315,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id_pedido'])) {
         // solo porque estuvo en segundo plano) reenvie el mismo POST y dispare el aviso
         // "Confirm Form Resubmission". El resultado viaja por sesion (flash) y se conserva
         // la pestana activa (Por Asignar / Asignadas) segun que accion se acaba de hacer.
-        $tabsDeAsignadas = ['agregar_producto_pedido', 'quitar_producto_pedido', 'cancelar_pedido_completo'];
+        $tabsDeAsignadas = ['agregar_producto_pedido', 'quitar_producto_pedido', 'cancelar_pedido_completo', 'cambiar_fecha_entrega', 'cambiar_repartidor'];
         $_SESSION['asignar_entregas_flash'] = [
             'error' => $error,
             'success' => $success,
@@ -425,7 +499,7 @@ include __DIR__ . '/includes/header.php';
     <?php if ($error): ?>
         <div id="modal-error-asignacion" class="modal">
             <div class="modal-content">
-                <h5><i class="material-icons left red-text text-darken-2">error</i>No se pudo asignar el pedido</h5>
+                <h5><i class="material-icons left red-text text-darken-2">error</i>No se pudo completar la acción</h5>
                 <p><?php echo esc($error); ?></p>
             </div>
             <div class="modal-footer">
@@ -566,6 +640,10 @@ include __DIR__ . '/includes/header.php';
                                     // Cancelar el pedido completo (a diferencia de editar productos) no aplica a uno
                                     // ya entregado: eso seria una devolucion, no una entrega que no se realizo.
                                     $puedeCancelarAsignado = in_array($estadoPa, ['pendiente_pago', 'pagado', 'en_reparto'], true);
+                                    // Reprogramar el dia o cambiar de repartidor aplica en los mismos estados:
+                                    // mientras la entrega no se confirme.
+                                    $puedeReprogramarAsignado = $puedeCancelarAsignado;
+                                    $fechaActualPa = substr((string)($pa['fecha_entrega_programada'] ?? ''), 0, 10);
                                     $itemsPa = $detallesPorPedidoAsignado[(int)$pa['id_pedido']] ?? [];
                                     $entregadosRestantesPa = count(array_filter($itemsPa, static fn($it) => (string)($it['estado_entrega'] ?? 'entregado') === 'entregado'));
                                     $diaAsignada = $diaKey($pa['fecha_entrega_programada'] ?? '');
@@ -604,6 +682,46 @@ include __DIR__ . '/includes/header.php';
                                             </div>
                                             <?php endif; ?>
                                             <div class="assign-delivery-total">$<?php echo number_format((float)$pa['total'], 2); ?></div>
+
+                                            <?php if ($puedeReprogramarAsignado): ?>
+                                                <?php
+                                                    // En camino: el repartidor ya salio con el pedido, se pide confirmacion.
+                                                    $confirmEnCaminoPa = $estadoPa === 'en_reparto'
+                                                        ? ' onsubmit="return confirm(\'Este pedido ya está en camino con el repartidor. ¿Seguro que quieres modificarlo?\');"'
+                                                        : '';
+                                                ?>
+                                                <form method="POST" class="assign-change-form"<?php echo $confirmEnCaminoPa; ?>>
+                                                    <?php echo csrfInput(); ?>
+                                                    <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
+                                                    <input type="hidden" name="accion" value="cambiar_fecha_entrega">
+                                                    <label class="assign-delivery-label" for="fecha-asignada-<?php echo (int)$pa['id_pedido']; ?>" style="margin-top:0;">Día de entrega</label>
+                                                    <div style="display:flex; gap:8px; align-items:center;">
+                                                        <input type="date" id="fecha-asignada-<?php echo (int)$pa['id_pedido']; ?>" name="fecha_entrega" class="assign-delivery-date" value="<?php echo esc($fechaActualPa); ?>" required style="flex:1; min-width:0;">
+                                                        <button type="submit" class="btn-small indigo waves-effect waves-light" style="height:44px;" title="Guardar nueva fecha">
+                                                            <i class="material-icons">event_available</i>
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                                <form method="POST" class="assign-change-form"<?php echo $confirmEnCaminoPa; ?>>
+                                                    <?php echo csrfInput(); ?>
+                                                    <input type="hidden" name="id_pedido" value="<?php echo (int)$pa['id_pedido']; ?>">
+                                                    <input type="hidden" name="accion" value="cambiar_repartidor">
+                                                    <label class="assign-delivery-label" for="repartidor-asignado-<?php echo (int)$pa['id_pedido']; ?>" style="margin-top:0;">Repartidor</label>
+                                                    <div style="display:flex; gap:8px; align-items:center;">
+                                                        <select id="repartidor-asignado-<?php echo (int)$pa['id_pedido']; ?>" name="id_repartidor" required class="browser-default assign-delivery-select" style="flex:1; min-width:0;">
+                                                            <?php if (!in_array((int)$pa['id_repartidor'], array_map('intval', array_column($repartidores, 'id_usuario')), true)): ?>
+                                                                <option value="" selected><?php echo esc((string)($pa['repartidor_nombre'] ?? 'Sin repartidor')); ?> (inactivo)</option>
+                                                            <?php endif; ?>
+                                                            <?php foreach ($repartidores as $r): ?>
+                                                                <option value="<?php echo (int)$r['id_usuario']; ?>"<?php echo (int)$r['id_usuario'] === (int)$pa['id_repartidor'] ? ' selected' : ''; ?>><?php echo esc($r['nombre']); ?></option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                        <button type="submit" class="btn-small indigo waves-effect waves-light" style="height:44px;" title="Guardar repartidor">
+                                                            <i class="material-icons">how_to_reg</i>
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            <?php endif; ?>
 
                                             <div class="assign-products-list">
                                                 <?php if (empty($itemsPa)): ?>
@@ -823,6 +941,7 @@ include __DIR__ . '/includes/header.php';
         margin: 6px 0 14px;
     }
     .assign-delivery-form { margin-top: auto; }
+    .assign-change-form { margin: 0 0 12px; }
     .assign-delivery-label {
         display: block;
         font-size: 0.8rem;

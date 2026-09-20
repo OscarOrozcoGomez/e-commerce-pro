@@ -169,12 +169,18 @@ final class DeliveryZoneUtilsTest extends TestCase
         $this->assertSame('local', deliveryZoneClassifyByText('TLAJOMULCO DE ZUÑIGA'));
     }
 
-    public function testClassifyByTextForaneoForJaliscoOutsideZmg(): void
+    public function testClassifyByTextNeverAssumesForaneoForOtherJaliscoCities(): void
     {
-        $this->assertSame('foraneo', deliveryZoneClassifyByText('Nicolas Bravo 221, CP 48900, Villa Purificacion, Jalisco'));
-        $this->assertSame('foraneo', deliveryZoneClassifyByText('Autlan de Navarro, Jalisco'));
-        $this->assertSame('foraneo', deliveryZoneClassifyByText('Puerto Vallarta, Jalisco'));
-        $this->assertSame('foraneo', deliveryZoneClassifyByText('Tepatitlan de Morelos, Jalisco'));
+        // Incidente real (2026-09-16): Alex le coti20... err, cotizo el cargo "foraneo" de
+        // $40 a clientes de Autlan de Navarro (~170 km) y Puerto Vallarta (~180 km) como si
+        // fueran entregables solo porque el texto decia "Jalisco". El negocio NO entrega
+        // fuera de la ZMG/periferia ni hace envios por paqueteria a otras ciudades, asi que
+        // mencionar el estado ya NO basta para asumir "foraneo" (=entregable con cargo):
+        // debe quedar 'indeterminado' para que un humano decida (ver aiToolAgendarVenta).
+        $this->assertSame('indeterminado', deliveryZoneClassifyByText('Nicolas Bravo 221, CP 48900, Villa Purificacion, Jalisco'));
+        $this->assertSame('indeterminado', deliveryZoneClassifyByText('Autlan de Navarro, Jalisco'));
+        $this->assertSame('indeterminado', deliveryZoneClassifyByText('Puerto Vallarta, Jalisco'));
+        $this->assertSame('indeterminado', deliveryZoneClassifyByText('Tepatitlan de Morelos, Jalisco'));
     }
 
     /**
@@ -203,14 +209,24 @@ final class DeliveryZoneUtilsTest extends TestCase
             'Arvento, Tlajomulco'
         ));
 
-        // Coordenadas en el Zocalo de CDMX pero el texto dice "Guadalajara Centro" -> foraneo.
-        $this->assertSame('foraneo', deliveryZoneClassify(19.4326, -99.1332, 'Guadalajara Centro, Jalisco'));
+        // Coordenadas en el Zocalo de CDMX (~460 km) pero el texto dice "Guadalajara Centro"
+        // -> manda la geometria igual, y esta tan lejos que ni "foraneo" (entregable con
+        // cargo) es: 'indeterminado', nunca se asume que se puede entregar.
+        $this->assertSame('indeterminado', deliveryZoneClassify(19.4326, -99.1332, 'Guadalajara Centro, Jalisco'));
     }
 
     public function testClassifyByRadiusNearVsFar(): void
     {
         $this->assertSame('local', deliveryZoneClassify(20.5000, -103.2400, '')); // ~11-12 km
         $this->assertSame('foraneo', deliveryZoneClassify(20.3600, -103.2400, '')); // ~27 km
+    }
+
+    public function testClassifyByRadiusBeyondMaxForaneoIsIndeterminado(): void
+    {
+        // Mas alla de DELIVERY_ZONE_MAX_FORANEO_RADIUS_KM (40 km) ya no se asume "foraneo"
+        // (=entregable con cargo de $40) por mas validas que sean las coordenadas -- el
+        // negocio no entrega a otras ciudades. Puerto Vallarta real (~180 km).
+        $this->assertSame('indeterminado', deliveryZoneClassify(20.6534, -105.2253, ''));
     }
 
     public function testClassifyFallsBackToTextWhenCoordsInvalid(): void
@@ -284,7 +300,9 @@ final class DeliveryZoneUtilsTest extends TestCase
 
     public function testResolveForOrderChargesDomicilioForaneoWithOneProduct(): void
     {
-        $r = deliveryZoneResolveForOrder(19.4326, -99.1332, 'CDMX', 'Domicilio', 1);
+        // ~27 km de la sucursal: dentro de la periferia real con cargo (no del otro lado
+        // del pais como el viejo caso de CDMX, que ya no cuenta como "foraneo" entregable).
+        $r = deliveryZoneResolveForOrder(20.3600, -103.2400, 'Periferia sur', 'Domicilio', 1);
         $this->assertSame('foraneo', $r['zona']);
         $this->assertSame(40.00, $r['costo_envio']);
         $this->assertSame(1, $r['productos_distintos']);
@@ -292,8 +310,17 @@ final class DeliveryZoneUtilsTest extends TestCase
 
     public function testResolveForOrderFreeShippingWithTwoOrMoreProducts(): void
     {
-        $r = deliveryZoneResolveForOrder(19.4326, -99.1332, 'CDMX', 'Domicilio', 2);
+        $r = deliveryZoneResolveForOrder(20.3600, -103.2400, 'Periferia sur', 'Domicilio', 2);
         $this->assertSame('foraneo', $r['zona']);
+        $this->assertSame(0.0, $r['costo_envio']);
+    }
+
+    public function testResolveForOrderDomicilioTooFarToBeForaneoStaysIndeterminado(): void
+    {
+        // CDMX (~460 km): ni con coordenadas validas se asume entregable. Nunca se cobra un
+        // cargo foraneo (ni se promete envio) para una ciudad fuera de cobertura real.
+        $r = deliveryZoneResolveForOrder(19.4326, -99.1332, 'CDMX', 'Domicilio', 1);
+        $this->assertSame('indeterminado', $r['zona']);
         $this->assertSame(0.0, $r['costo_envio']);
     }
 
@@ -331,7 +358,7 @@ final class DeliveryZoneUtilsTest extends TestCase
         $this->assertSame(0.0, aiCalcularCargoEnvio('local', 1));
 
         $this->assertSame('local', aiClasificarZonaEntrega('Zapopan, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
         $this->assertSame('indeterminado', aiClasificarZonaEntrega(''));
 
         // Cambio de comportamiento INTENCIONAL vs. la version vieja: "Arvento, Tlajomulco"

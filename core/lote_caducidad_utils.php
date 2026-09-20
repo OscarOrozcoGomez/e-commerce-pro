@@ -475,7 +475,10 @@ function loteFetchProyecciones(PDO $pdo, array $filtros = []): array
         $where[] = 'l.id_producto IN (' . implode(',', $ph) . ')';
     }
     if (!empty($filtros['id_almacen'])) {
-        $where[] = 'l.id_almacen = :id_almacen';
+        // Igual que loteClausulaFEFO(): un lote sin almacen asignado (captura vieja,
+        // ver loteFetchDescuadres()) cuenta como respaldo de cualquier almacen, no
+        // se excluye del filtro.
+        $where[] = '(l.id_almacen = :id_almacen OR l.id_almacen IS NULL)';
         $params[':id_almacen'] = (int) $filtros['id_almacen'];
     }
     if (isset($filtros['categoria']) && trim((string) $filtros['categoria']) !== '') {
@@ -674,8 +677,13 @@ function loteReconciliacionStock(PDO $pdo, array $idsProducto): array
  *                      stock del sistema quedo sin actualizar.
  *
  * @param array{id_almacen?:int, q?:string, tipo?:string} $filtros
- *   id_almacen restringe AMBOS lados a ese almacen (los lotes con almacen NULL
- *   quedan fuera en ese modo).
+ *   id_almacen restringe el lado del sistema (inventario_almacen) a ese
+ *   almacen. Del lado de los lotes, un id_almacen filtrado cuenta los lotes
+ *   de ESE almacen mas los que no tienen almacen asignado (id_almacen NULL,
+ *   captura vieja anterior a que el formulario lo mandara) -- mismo criterio
+ *   de "respaldo" que ya usa loteClausulaFEFO() al vender. Sin esto, un lote
+ *   NULL nunca aparece bajo ningun almacen y el producto se marca "faltante"
+ *   aunque si tenga lotes.
  * @return array<int,array{
  *   id_producto:int, producto_nombre:string, producto_sku:string,
  *   producto_categoria:?string, stock_sistema:int, stock_lotes:int,
@@ -711,7 +719,7 @@ function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
                FROM lotes_inventario WHERE estado IN ('activo','caducado')";
     $pLot = [];
     if ($idAlmacen !== null) {
-        $sqlLot .= ' AND id_almacen = :a';
+        $sqlLot .= ' AND (id_almacen = :a OR id_almacen IS NULL)';
         $pLot[':a'] = $idAlmacen;
     }
     $sqlLot .= ' GROUP BY id_producto';
@@ -735,9 +743,11 @@ function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
     }
     $tieneEstado = loteColumnaExiste($pdo, 'productos', 'estado');
     $tieneCategoria = loteColumnaExiste($pdo, 'productos', 'categoria');
+    $tieneRequiereLote = loteColumnaExiste($pdo, 'productos', 'requiere_lote');
     $sqlProd = 'SELECT p.id_producto, p.nombre, ' . loteSkuExpr($pdo) . ' AS sku'
         . ($tieneCategoria ? ', p.categoria' : ", '' AS categoria")
         . ($tieneEstado ? ', p.estado' : ", 'activo' AS estado")
+        . ($tieneRequiereLote ? ', p.requiere_lote' : ', 1 AS requiere_lote')
         . ' FROM productos p WHERE p.id_producto IN (' . implode(',', $ph) . ')';
     $st = $pdo->prepare($sqlProd);
     $st->execute($pProd);
@@ -753,6 +763,11 @@ function loteFetchDescuadres(PDO $pdo, array $filtros = []): array
     foreach ($ids as $id) {
         $prod = $prods[$id] ?? null;
         if ($prod === null || (string) ($prod['estado'] ?? 'activo') === 'archivado') {
+            continue;
+        }
+        // Productos que no caducan (pastilleros, accesorios...) no participan del
+        // cuadre lote-vs-stock: no tiene caso pedirles lote.
+        if ((int) ($prod['requiere_lote'] ?? 1) === 0) {
             continue;
         }
         $s = $sistema[$id] ?? 0;
@@ -942,6 +957,53 @@ function loteGuardar(PDO $pdo, array $datos, int $userId, bool $validarContraSto
         ]);
 
         return $idLote;
+    }
+
+    // El (id_producto, codigo_lote) ya existe? uq_lote_producto_codigo lo
+    // rechazaria con un error opaco de BD. Si ese lote esta agotado (se vendio
+    // por completo) es la reposicion normal de la misma remesa/codigo: se
+    // reactiva y se le suma la cantidad, igual que loteRegistrarEntrada. Si
+    // sigue activo/caducado/retirado es un duplicado real y se avisa claro.
+    $stmtExistente = $pdo->prepare(
+        'SELECT id_lote, estado FROM lotes_inventario WHERE id_producto = :p AND codigo_lote = :c LIMIT 1'
+    );
+    $stmtExistente->execute([':p' => $n['id_producto'], ':c' => $n['codigo_lote']]);
+    $existente = $stmtExistente->fetch(PDO::FETCH_ASSOC);
+
+    if ($existente && $existente['estado'] !== 'agotado') {
+        throw new InvalidArgumentException(sprintf(
+            'Ya existe un lote con el codigo "%s" para este producto (estado: %s). '
+            . 'Ajusta la cantidad de ese lote en vez de crear uno nuevo, o usa un codigo distinto.',
+            $n['codigo_lote'],
+            $existente['estado']
+        ));
+    }
+
+    if ($existente) {
+        $idExistente = (int) $existente['id_lote'];
+        $upd = $pdo->prepare(
+            "UPDATE lotes_inventario
+             SET id_almacen = :id_almacen,
+                 fecha_caducidad = :fecha, caducidad_aproximada = :aprox,
+                 cantidad_inicial = cantidad_inicial + :inc_ini,
+                 cantidad_restante = cantidad_restante + :inc_rest,
+                 costo_unitario = :costo, notas_seguimiento = :notas,
+                 id_usuario_seguimiento = :uid, estado = 'activo'
+             WHERE id_lote = :id"
+        );
+        $upd->execute([
+            ':id_almacen' => $n['id_almacen'],
+            ':fecha' => $n['fecha_caducidad'],
+            ':aprox' => $n['caducidad_aproximada'],
+            ':inc_ini' => $n['cantidad'],
+            ':inc_rest' => $n['cantidad'],
+            ':costo' => $n['costo_unitario'],
+            ':notas' => $n['notas'],
+            ':uid' => $userId,
+            ':id' => $idExistente,
+        ]);
+
+        return $idExistente;
     }
 
     $stmt = $pdo->prepare(

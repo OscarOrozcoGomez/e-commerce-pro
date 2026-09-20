@@ -443,10 +443,39 @@ final class LoteCaducidadUtilsTest extends TestCase
             'id_producto' => 1, 'codigo_lote' => 'DUP1', 'fecha_caducidad' => $this->enDias(90), 'cantidad' => 10,
         ], 1);
 
-        $this->expectException(PDOException::class);
+        // El primer lote sigue 'activo': es un duplicado real, se rechaza con
+        // un mensaje claro (antes tronaba con el PDOException opaco de la
+        // restriccion unica uq_lote_producto_codigo).
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Ya existe un lote con el codigo "DUP1"');
         loteGuardar($this->pdo, [
             'id_producto' => 1, 'codigo_lote' => 'DUP1', 'fecha_caducidad' => $this->enDias(60), 'cantidad' => 5,
         ], 1);
+    }
+
+    public function testGuardarReactivaLoteAgotadoConMismoCodigoYSumaCantidad(): void
+    {
+        $this->seedProducto(1, 'Reponer');
+        $id = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'AGOT1', 'fecha_caducidad' => $this->enDias(90), 'cantidad' => 10,
+        ], 1);
+        loteAjustarCantidad($this->pdo, $id, 0, 1);
+        $row = $this->pdo->query("SELECT estado FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('agotado', $row['estado']);
+
+        // Llega mas mercancia con el mismo codigo de lote (caso real: el codigo
+        // impreso en la caja no cambia entre remesas). No debe tronar por el
+        // duplicado -- debe reactivar el mismo lote y sumar cantidad.
+        $idReactivado = loteGuardar($this->pdo, [
+            'id_producto' => 1, 'codigo_lote' => 'AGOT1', 'fecha_caducidad' => $this->enDias(120), 'cantidad' => 15,
+        ], 1);
+
+        $this->assertSame($id, $idReactivado, 'reactiva el mismo lote, no crea uno nuevo');
+        $row = $this->pdo->query("SELECT estado, cantidad_inicial, cantidad_restante, fecha_caducidad FROM lotes_inventario WHERE id_lote = $id")->fetch();
+        $this->assertSame('activo', $row['estado']);
+        $this->assertSame(25, (int) $row['cantidad_inicial'], 'inicial acumula historico: 10 + 15');
+        $this->assertSame(15, (int) $row['cantidad_restante'], 'restante parte de 0 (agotado) + 15 nuevas');
+        $this->assertSame($this->enDias(120), $row['fecha_caducidad']);
     }
 
     /**
@@ -618,6 +647,7 @@ final class LoteCaducidadUtilsTest extends TestCase
             id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, sku TEXT NULL,
             codigo_barras TEXT NULL, categoria TEXT NULL, unidad TEXT NULL,
             capsulas_por_envase INTEGER NULL, porcion_capsulas INTEGER NULL,
+            requiere_lote INTEGER NOT NULL DEFAULT 1,
             estado TEXT NOT NULL DEFAULT 'activo'
         )");
         $this->pdo->exec("CREATE TABLE inventario_almacen (
@@ -1591,6 +1621,52 @@ final class LoteCaducidadUtilsTest extends TestCase
 
         // Matriz sigue cuadrando.
         $this->assertSame([], loteFetchDescuadres($this->pdo, ['id_almacen' => 1]));
+    }
+
+    public function testDescuadreIgnoraProductosQueNoRequierenLote(): void
+    {
+        // Ej. pastilleros/accesorios: tienen stock pero nunca se les va a
+        // registrar un lote a proposito, no tiene caso marcarlos "faltante".
+        $this->seedProducto(1, 'Pastillero');
+        $this->pdo->exec("UPDATE productos SET requiere_lote = 0 WHERE id_producto = 1");
+        $this->seedInventario(1, 1, 20); // sistema 20, lotes 0 -> se ignora
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo));
+    }
+
+    public function testDescuadreFiltroPorAlmacenCuentaLotesSinAlmacenAsignadoComoRespaldo(): void
+    {
+        // Caso real: lotes capturados antes de que el formulario mandara
+        // id_almacen (alta masiva 2026-09-09) quedaron con id_almacen NULL.
+        // Al filtrar Descuadres por un almacen especifico deben seguir
+        // contando -- mismo criterio de "respaldo" que loteClausulaFEFO()
+        // usa al vender -- si no, un producto con lotes de sobra se marca
+        // "faltante" solo porque nadie les puso almacen.
+        $this->seedProducto(1, 'Omega sin almacen en lote');
+        $this->seedInventario(1, 1, 12);
+        $this->seedLote(1, 'L1', $this->enDias(120), 2, null);
+        $this->seedLote(1, 'L2', $this->enDias(120), 10, null);
+
+        $this->assertSame([], loteFetchDescuadres($this->pdo), 'global cuadra 12 = 12');
+        $this->assertSame(
+            [],
+            loteFetchDescuadres($this->pdo, ['id_almacen' => 1]),
+            'los lotes sin almacen cuentan como respaldo del almacen filtrado'
+        );
+    }
+
+    public function testFetchProyeccionesFiltroAlmacenIncluyeLotesSinAlmacenAsignado(): void
+    {
+        $this->seedAlmacen(2, 'Sucursal');
+        $this->seedProducto(1, 'Sin almacen en lote');
+        $this->seedLote(1, 'L1', $this->enDias(90), 5, null);
+
+        // El filtro de almacen en la vista de Caducidades no debe ocultar un
+        // lote viejo sin id_almacen asignado -- mismo criterio que Descuadres.
+        $lotes1 = loteFetchProyecciones($this->pdo, ['id_almacen' => 1])['lotes'];
+        $this->assertCount(1, $lotes1);
+        $lotes2 = loteFetchProyecciones($this->pdo, ['id_almacen' => 2])['lotes'];
+        $this->assertCount(1, $lotes2);
     }
 
     public function testResumenSeveridadIncluyeConteoDeDescuadres(): void

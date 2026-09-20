@@ -46,6 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
         }
 
         try {
+            // Auditoria: config de Alex antes/despues (los textos largos como "N car. #hash").
+            $auditConfigAntes = auditCompactarTextosLargos((array) aiGetConfig($pdo));
             $stmt = $pdo->prepare(
                 'INSERT INTO ai_asistente_config
                     (id_config, activo, nombre_persona, tono_instrucciones, promocion_vigente_texto, politica_envio_texto, politica_pago_texto, ubicacion_texto, mensaje_bienvenida, modelo_llm, temperatura, prompt_sistema_override, api_key_variable)
@@ -65,6 +67,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guard
                     api_key_variable = VALUES(api_key_variable)'
             );
             $stmt->execute([$activo, $nombrePersona, $tono, $promo, $envio, $pago, $ubicacion, $bienvenida, $modelo, $temperatura, $promptOverride, $apiKeyVariable]);
+            logAuditCambios(
+                'AI_ASISTENTE_CONFIG_CAMBIADA',
+                'ai_asistente_config',
+                1,
+                $auditConfigAntes,
+                auditCompactarTextosLargos([
+                    'activo' => $activo, 'nombre_persona' => $nombrePersona, 'tono_instrucciones' => $tono,
+                    'promocion_vigente_texto' => $promo, 'politica_envio_texto' => $envio, 'politica_pago_texto' => $pago,
+                    'ubicacion_texto' => $ubicacion, 'mensaje_bienvenida' => $bienvenida, 'modelo_llm' => $modelo,
+                    'temperatura' => $temperatura, 'prompt_sistema_override' => $promptOverride,
+                ]),
+                ['activo', 'nombre_persona', 'tono_instrucciones', 'promocion_vigente_texto', 'politica_envio_texto', 'politica_pago_texto', 'ubicacion_texto', 'mensaje_bienvenida', 'modelo_llm', 'temperatura', 'prompt_sistema_override'],
+                ['contexto' => 'Configuración de Alex', 'severidad' => 'alerta']
+            );
             $success = 'Configuracion del asistente actualizada.';
         } catch (Throwable $e) {
             $error = 'Error al guardar la configuracion: ' . $e->getMessage();
@@ -79,7 +95,7 @@ $pendientesCount = 0;
 $allTags = [];
 try {
     $conversaciones = $pdo->query(
-        'SELECT id_conversacion, wa_id, nombre_perfil, estado_bot, motivo_transferencia, ultimo_mensaje_en
+        'SELECT id_conversacion, wa_id, telefono_resuelto, nombre_perfil, estado_bot, motivo_transferencia, ultimo_mensaje_en
          FROM whatsapp_conversaciones
          ORDER BY ultimo_mensaje_en DESC
          LIMIT 50'
@@ -105,7 +121,7 @@ try {
 $conversacionesSeguimiento = [];
 try {
     $conversacionesSeguimiento = $pdo->query(
-        'SELECT id_conversacion, wa_id, nombre_perfil, estado_bot, seguimiento_enviado_en
+        'SELECT id_conversacion, wa_id, telefono_resuelto, nombre_perfil, estado_bot, seguimiento_enviado_en
          FROM whatsapp_conversaciones
          WHERE seguimiento_enviado_en IS NOT NULL
          ORDER BY seguimiento_enviado_en DESC
@@ -115,7 +131,11 @@ try {
     foreach ($conversacionesSeguimiento as &$conv) {
         $conv['tags'] = aiGetConversationTags($pdo, (int)$conv['id_conversacion']);
         $conv['contesto'] = aiCustomerRepliedAfterFollowup($pdo, (int)$conv['id_conversacion']);
-        $digitsNacionales = aiWaIdToMxDigits((string)$conv['wa_id']);
+        // Si el wa_id es un LID (WhatsApp oculta el numero real) pero ya se resolvio el
+        // telefono real (ver scripts/resolver_lids_whatsapp.php), el link de WhatsApp SI
+        // puede armarse con ese numero -- antes de esto, un LID nunca tenia boton "Abrir
+        // WhatsApp" porque no habia ningun telefono real que usar.
+        $digitsNacionales = aiWaIdDigitsConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
         $conv['wa_link_phone'] = $digitsNacionales !== null ? waBuildBusinessLinkPhone($digitsNacionales) : '';
     }
     unset($conv);
@@ -251,7 +271,13 @@ include __DIR__ . '/includes/header.php';
                     <?php else: ?>
                         <?php foreach ($conversaciones as $conv): ?>
                             <?php
-                                $convTelefono = aiWaIdToDisplayPhone((string)$conv['wa_id']);
+                                $convTelefono = aiWaIdToDisplayPhoneConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
+                                // Digitos nacionales para el boton "Abrir WhatsApp" -- el numero
+                                // real del wa_id si lo hay, si no el ya resuelto (ver
+                                // scripts/resolver_lids_whatsapp.php). Sin ninguno de los dos
+                                // (LID sin resolver todavia) no hay boton que mostrar.
+                                $convDigitsNacionales = aiWaIdDigitsConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
+                                $convLinkPhone = $convDigitsNacionales !== null ? waBuildBusinessLinkPhone($convDigitsNacionales) : '';
                                 $convNombre = trim((string)($conv['nombre_perfil'] ?? ''));
                                 // Linea principal: nombre de perfil de WhatsApp si lo tenemos; si no,
                                 // el telefono formateado; si es un LID sin nombre, un texto generico.
@@ -297,6 +323,9 @@ include __DIR__ . '/includes/header.php';
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
+                                <?php if ($convLinkPhone !== ''): ?>
+                                    <a href="https://wa.me/<?php echo esc($convLinkPhone); ?>" target="_blank" class="btn-small green darken-1 waves-effect waves-light whatsapp-business-link" data-wa-phone="<?php echo esc($convLinkPhone); ?>" style="margin-right: 6px;">Abrir WhatsApp</a>
+                                <?php endif; ?>
                                 <?php if ($conv['estado_bot'] !== 'activo'): ?>
                                     <button type="button" class="btn-small green darken-1 btn-reactivar-bot" data-id="<?php echo (int)$conv['id_conversacion']; ?>">Reactivar bot</button>
                                 <?php endif; ?>
@@ -336,7 +365,7 @@ include __DIR__ . '/includes/header.php';
                             <tbody>
                                 <?php foreach ($conversacionesSeguimiento as $conv): ?>
                                     <?php
-                                        $stTelefono = aiWaIdToDisplayPhone((string)$conv['wa_id']);
+                                        $stTelefono = aiWaIdToDisplayPhoneConResuelto((string)$conv['wa_id'], $conv['telefono_resuelto'] ?? null);
                                         $stNombre = trim((string)($conv['nombre_perfil'] ?? ''));
                                         $stTitulo = $stNombre !== '' ? $stNombre : ($stTelefono ?? 'Contacto de WhatsApp');
                                     ?>

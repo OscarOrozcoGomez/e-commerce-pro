@@ -1,0 +1,1637 @@
+[
+  {
+    "id": null,
+    "nombre": "60 Billion Women Probiotics",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Establece una barrera protectora por su alta adherencia a la mucosa vaginal.",
+      "Reduce la probabilidad de infecciones vaginales."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Ferty Blend",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Elimina el colesterol malo del organismo.",
+      "Protege los huesos manteniéndolos sanos y fuertes.",
+      "Ayuda a producir glóbulos rojos previniendo la anemia.",
+      "Previene el riesgo de malformaciones congénitas durante el embarazo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Folic Acid Blend",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Elimina el colesterol malo del organismo.",
+      "Protege los huesos manteniéndolos sanos y fuertes.",
+      "Ayuda a producir glóbulos rojos previniendo la anemia.",
+      "Previene el riesgo de malformaciones congénitas durante el embarazo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Methyl Folate Blend",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Puede aumentar la fertilidad.",
+      "Combate trastornos genéticos de los óvulos.",
+      "Ayuda a metabolizar el ácido fólico."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Myo Inositol",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Regula el ciclo mestrual y estimula la ovulación."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pre Nat Blend",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Ayuda a preparar el cuerpo de la mamá para todo el proceso del embarazo.",
+      "Aumenta el nivel de vitamina B6, Magnesio y Zinc.",
+      "Ayuda a la formación de los huesos del bebé."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Shatavari",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Ayuda a equilibrar las hormonas femeninas en el cuerpo.",
+      "Regula el ciclo menstrual y los efectos de la menopausia.",
+      "Mejora la fertilidad en hombres y mujeres.",
+      "Promueve la salud gastrointestinal."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Womens Blend",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Ayuda con las hormonas de la mujer."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Womens HR",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Fortalece el cabello mejorando su aspecto.",
+      "Contrarresta la caída del cabello, ya que aporta los nutrientes adecuados a las células de la raíz.",
+      "Contribuye a la hidratación y evita un cabello quebradizo.",
+      "Ayuda a un crecimiento más rápido.",
+      "Ayuda a fortalecer los folículos pilosos y a dejar el cabello brillante y saludable."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Womens Mult Matur3",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Ayuda a aumentar la resistencia física y el desempeño diario.",
+      "Reduce los desequilibrios hormonales que ocurren en la etapa de la menopausia.",
+      "Previene y mitiga los síntomas de la osteoporosis evitando la debilidad en los huesos.",
+      "Disminuye la pérdida de cabello."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Womens Zen",
+    "marca": "Be Life",
+    "categoria": "Para ella",
+    "beneficios": [
+      "Ayuda a regular las hormonas femeninas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mens Blend",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Contribuye al metabolismo energético normal.",
+      "Disminuye el cansancio y la fatiga.",
+      "Contribuye al buen funcionamiento del sistema inmunitario y del corazón.",
+      "Ayuda a mantener la salud de los huesos y los músculos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mens HR",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Estimula el crecimiento del cabello y uñas.",
+      "Ayuda a evitar la caída del cabello.",
+      "Ayuda a regenerar los tejidos, como el cuero cabelludo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mens Mult Matur3",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Ayuda a aumentar la resistencia física y la producción de testosterona.",
+      "Previene y mitiga los síntomas de la osteoporosis.",
+      "Reduce el riesgo cardiovascular, disminuyendo los niveles de colesterol y controlando los niveles de azúcar en la sangre.",
+      "Ayuda a disminuir la incontinencia."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mens T",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Aumenta los niveles de testosterona mejorando el rendimiento físico.",
+      "Aumenta la libido.",
+      "Aumenta la resistencia.",
+      "Mejora la musculatura y el rendimiento atlético de los deportistas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pros Blend",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Ayuda a prevenir el cáncer de próstata.",
+      "Regenera y estimula el tejido glandular prostático.",
+      "Disminuye la infección de la zona, previniendo el crecimiento del tejido prostático."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Tongkat Ali",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Aumenta los niveles de testosterona en hombres.",
+      "Incrementa la resistencia física y mental."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Tribulus Terrestris",
+    "marca": "Be Life",
+    "categoria": "Para él",
+    "beneficios": [
+      "Aumenta la resistencia, la libido y la función sexual de los hombres.",
+      "Alivia los síntomas de la andropausia.",
+      "Mejora la musculatura, la resistencia y el rendimiento atlético de los deportistas.",
+      "Mejora el estado de ánimo y de bienestar."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "60 Billion Probiotics",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Ayuda a la absorción de nutrientes.",
+      "Mejora el sistema inmune.",
+      "Alivia el intestino irritable."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "200 Billion Probiotics",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Ayuda a la absorción de nutrientes.",
+      "Mejora el sistema inmune.",
+      "Alivia el intestino irritable."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Aloe Vera Pure Extract",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Ayuda a bajar la tasa de glucosa en la sangre y estimula la producción de insulina.",
+      "Tiene propiedades antioxidantes que ayudan a retrasar la aparición de los signos de la edad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Apple Cider Vinegar",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Puede acelerar el metabolismo y ayudar bajar de peso.",
+      "Ayuda a estabilizar la presión arterial.",
+      "Puede ayudar a combatir los resfriados y el dolor de garganta."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Col On Blend",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Alivia la irritación estomacal, la inflamación intestinal y el estreñimiento.",
+      "Ayuda a regenerar daños causados al colon por el uso de laxantes.",
+      "Previene la formación de pequeñas apéndices en el trayecto del esófago o intestino."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "DIM Blend",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Promueve la desintoxicación del cuerpo, especialmente del hígado.",
+      "Alivia síntomas del SPM, endometriosis y fibromas uterinos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Dtox Blend",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Ayuda a eliminar residuos y toxinas, logrando purificar el organismo y restableciendo la flora intestinal.",
+      "Beneficia la pérdida de peso.",
+      "Refuerza el sistema inmunitario."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Enzym Blend",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Ayudan a la digestión y reducen la acidez, la sensación de hinchazón y gases.",
+      "Mejora la digestión y reduce la acidez, la sensación de hinchazón y los gases.",
+      "Ayuda a la digestión y reduce la acidez.",
+      "Disminuye las alergias alimentarias debido a la buena digestión de las proteínas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Gas Relief",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Disminuye la distensión abdominal.",
+      "Contribuye a facilitar digestiones pesadas.",
+      "Reduce la sensación de pesadez después de las comidas.",
+      "Descompone los azúcares que producen gases."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Prebiotic Blend",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Promueve un ambiente saludable en el tracto gastrointestinal.",
+      "Favorece el crecimiento de bacterias beneficiosas como las bifidobacterias y los lactobacilos.",
+      "Puede ayudar a prevenir o aliviar problemas digestivos como el estreñimiento, la diarrea y el síndrome del intestino irritable.",
+      "Ayuda a una digestión equilibrada."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Psyllium Husk Fiber",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Mejora y regula el tránsito intestinal.",
+      "Reduce las concentraciones de glucosa en la sangre.",
+      "Disminuye el colesterol en la sangre.",
+      "Ayuda a aliviar los síntomas de acidez estomacal.",
+      "Brinda beneficios esenciales para tu equilibrio interior."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Artichoke",
+    "marca": "Be Life",
+    "categoria": "Probióticos",
+    "beneficios": [
+      "Contribuye a mantener una piel tersa y ayuda a recuperar la elasticidad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Evening Primrose",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Ayuda con los síntomas de la menopausia.",
+      "Regula la liberación y acción de los neurotransmisores del sistema nervioso.",
+      "Mejora los trastornos prostáticos en el hombre.",
+      "Previene el envejecimiento cutáneo, hidratando la piel y favoreciendo la elasticidad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Icelandic Krill Oil",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Mejora la función del sistema nervioso, así como la concentración y la memoria.",
+      "Previene la diabetes, ya que reduce la resistencia a la insulina.",
+      "Ayuda a mejorar la salud de nuestro corazón."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Omega 3 Fish Oil",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Disminuye los niveles de colesterol LDL y VLDL y los triglicéridos en sangre.",
+      "Contribuye al funcionamiento saludable del cerebro.",
+      "Ayuda a mantener el correcto estado celular.",
+      "Previene enfermedades asociadas al sistema nervioso central y sus funciones."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Omega 3 Flaxseed Oil",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Favorece una mejor función cardíaca.",
+      "Previene el estreñimiento y ayuda a reducir posibles inflamaciones intestinales.",
+      "Ayuda a hidratar la piel y actúa como calmante contra las quemaduras del sol y el acné.",
+      "Ayuda a reducir dolores menstruales y síntomas de los ovarios poliquísticos o de la menopausia."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Omega 3 Salmon Oil",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Mejora la función cardíaca y contribuye a mejorar la coagulación.",
+      "Mejora la función cardíaca y la presión arterial.",
+      "Mejora la función pulmonar y reduce el asma."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Omega 3-6-9",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Contribuye a la reducción de los niveles de triglicéridos en la sangre.",
+      "Tiene un poderoso efecto antiinflamatorio para personas con artritis reumatoide.",
+      "Ayuda a disminuir la presión arterial, especialmente en personas hipertensas y de mayor edad.",
+      "Combate el estreñimiento y los parásitos intestinales."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Soy Lecithin",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Mejora la calidad del sistema circulatorio y cardiovascular.",
+      "Fortalece las células cerebrales.",
+      "Mejora los niveles de colesterol.",
+      "Mejora la función cognitiva."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Sunflower Lecithin",
+    "marca": "Be Life",
+    "categoria": "Omegas",
+    "beneficios": [
+      "Contribuye a eliminar la acumulación de placas de grasa en las arterias.",
+      "Mejora la función cerebral.",
+      "Ayuda a reducir la viscosidad de la leche materna y a prevenir la obstrucción.",
+      "Contribuye a la salud de la piel."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "3 Mag Blend",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Ayuda en determinar funciones del sistema nervioso.",
+      "Ayuda a producir fácilmente energía.",
+      "Contribuye en la actividad muscular (contracción y relajación)."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Chloride Mag",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Favorece una correcta circulación sanguínea.",
+      "Ayuda a la relajación muscular.",
+      "Favorece una buena digestión."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Citrate Mag",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Protege y fortalece huesos y dientes.",
+      "Ayuda en la limpieza del intestino."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Citrate Mag Polvo",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Protege y fortalece huesos y dientes.",
+      "Ayuda en la limpieza del intestino."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Glycinate Mag",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Contribuye a destensar los músculos y a mejorar el sueño."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Glycinate Mag Polvo",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Necesario para mantener y mejorar la calidad de los nervios, músculos y demás funciones del cuerpo.",
+      "Esencial en la producción de energía de todas las células del cuerpo.",
+      "Contribuye a destensar los músculos y a mejorar el sueño.",
+      "Mayor eficiencia en dosis más pequeñas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mag+Pot Citrate",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Mejora la función muscular y evita calambres.",
+      "Previene calambres y optimiza la recuperación después del ejercicio.",
+      "Mantiene la hidratación y regula el pH del cuerpo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Marine Mag",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Contribuye a la síntesis protéica y al funcionamiento de los músculos.",
+      "Disminuye el cansancio y la fatiga, y contribuye al equilibrio electrolítico.",
+      "Ayuda a la función psicológica normal y al buen funcionamiento del sistema nervioso.",
+      "Ayuda al mantenimiento de los huesos y los dientes."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Threonate Mag",
+    "marca": "Be Life",
+    "categoria": "Magnesios",
+    "beneficios": [
+      "Mejora la función articular en personas con afecciones como la osteoartritis.",
+      "Ayudar a reducir el dolor en las articulaciones.",
+      "Ayudar a mejorar la función cerebral, la memoria y el enfoque.",
+      "Reduce los síntomas de estrés y ansiedad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "3 Mag Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Mejora la hidratación y la elasticidad de la piel.",
+      "Protege y fortalece huesos y dientes.",
+      "Ayuda a mantener un metabolismo energético saludable."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "80 Billion Probiotics Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Promueve una mejor digestión.",
+      "Mejora el sistema inmune.",
+      "Alivia el intestino irritable."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "9 Mag Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Previene calambres y mejora la recuperación muscular después del ejercicio.",
+      "Promueve la formación y mantenimiento de huesos fuertes, previniendo la osteoporosis.",
+      "Combate el cansancio con esta fórmula de vitalidad.",
+      "Mejora tu rendimiento físico con nuestra fórmula de 9 tipos de magnesios."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Clarity Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Ayuda con el estrés mental.",
+      "Ayuda a mantenerse más enfocado durante el día.",
+      "Ayuda a combatir la ansiedad y la depresión."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Inositol Blend Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Mejora la función ovárica y la fertilidad.",
+      "Disminuye los niveles de testosterona.",
+      "Beneficia la función cognitiva y el bienestar psicológico."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mens T Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Incrementa los niveles de testosterona mejorando el rendimiento físico.",
+      "Incrementa los niveles de testosterona.",
+      "Aumenta la libido y la función sexual.",
+      "Aumenta la resistencia y el rendimiento físico.",
+      "Mejora la ganancia de masa muscular."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Myo y D-Chiro Inositol Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Regula los niveles de azúcar en sangre.",
+      "Mejora la fertilidad en mujeres con SOP.",
+      "Reduce los síntomas de la depresión."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Myo y D-Chiro Inositol Platinum Polvo",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Regula los niveles de azúcar en sangre.",
+      "Mejora la fertilidad en mujeres con SOP.",
+      "Reduce los síntomas de la depresión."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Omega 3 Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Disminuye los niveles de colesterol LDL y VLDL, y los triglicéridos en sangre.",
+      "Contribuye al funcionamiento saludable del cerebro.",
+      "Ayuda a mantener el correcto estado celular.",
+      "Previene enfermedades asociadas al sistema nervioso central y sus funciones."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Organic Apple Vinegar Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Ayuda a la desintoxicación del organismo.",
+      "Puede acelerar el metabolismo y ayuda a bajar peso.",
+      "Ayuda a bajar la presión arterial.",
+      "Puede ayudar a combatir los resfriados y el dolor de garganta."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pros Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Contribuye a mantener una piel tersa y ayuda a recuperar la elasticidad.",
+      "Tiene propiedades antioxidantes.",
+      "Refuerza el sistema inmune.",
+      "Ayudan a quemar grasas y ganar músculo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Venflow Platinum",
+    "marca": "Be Life",
+    "categoria": "Platinum",
+    "beneficios": [
+      "Mejora la circulación de la sangre.",
+      "Reduce la tensión arterial.",
+      "Previene la aparición de las enfermedades cardiovasculares.",
+      "Ayuda a controlar los niveles de colesterol sanguíneos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Ally Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Apoya el combate de ciertas infecciones por sus propiedades antimicrobianas y antifúngicas.",
+      "Reduce la inflamación en las articulaciones, los músculos y otros tejidos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Alpha Lipoic Acid",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Descompone los carbohidratos y genera energía.",
+      "Promueve la cicatrización y la reparación de tejidos.",
+      "Reduce el colesterol total y el colesterol de lipoproteínas.",
+      "Estimula el sistema inmunitario."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Astaxanthin Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Mejora la elasticidad de la piel, haciendo más fuerte su capa de colágeno.",
+      "Mejora el estado físico y aporta mayor resistencia a la actividad física.",
+      "Ayuda a retrasar los efectos del envejecimiento."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Co Q-10 Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Ayuda a eliminar las grasas que se depositan en el hígado.",
+      "Favorece la oxigenación de los tejidos y la resistencia al esfuerzo reduciendo la fatiga.",
+      "Favorece a la pérdida de peso."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Cranberry Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Mejora el malestar urinario.",
+      "Previene el deterioro cognitivo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "N-Acetyl Cysteine",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Ayuda a la recuperación de bronquitis y protege el aparato respiratorio.",
+      "Favorece la expectoración y protege el aparato respiratorio.",
+      "Disminuye la viscosidad y aumenta la fluidez del moco.",
+      "Protege las células inmunitarias y combate ciertas bacterias."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "NADH Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Ayuda a proteger nuestras células del daño causado por los radicales libres.",
+      "Contribuye a una piel sana, flexible y firme.",
+      "Fortalece el cabello y las uñas, ayudando a reducir la fragilidad y las roturas.",
+      "Ayuda a equilibrar los niveles de ciertas hormonas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "NMN Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Aumenta la vitalidad, energía y resistencia física.",
+      "Favorece un metabolismo saludable.",
+      "Puede ayudar a proteger el corazón y los vasos sanguíneos.",
+      "Aumenta tus niveles de energía con este precursor natural de NAD+."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Curcumin",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Estimula el sistema inmunitario.",
+      "Reduce los niveles de colesterol."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Lysine",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Ayuda en la producción de colágeno.",
+      "Mejora la recuperación muscular después del ejercicio y aumenta la resistencia.",
+      "Refuerza el sistema inmunitario contra enfermedades e infecciones."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Quercetin Blend",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Ayuda al sistema inmunitario a combatir bacterias y virus que invaden al cuerpo.",
+      "Controla el azúcar en la sangre.",
+      "Tiene efectos antioxidantes y antiinflamatorios que ayudan a reducir la hinchazón.",
+      "Combate los radicales libres."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Resveratrol",
+    "marca": "Be Life",
+    "categoria": "Antioxidantes",
+    "beneficios": [
+      "Actúa como protector cardiovascular y anticancerígeno.",
+      "Ayuda con la función cardiovascular."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Collagen Bio",
+    "marca": "Be Life",
+    "categoria": "Colágenos",
+    "beneficios": [
+      "Ayuda al fortalecimiento natural del cabello y las uñas.",
+      "Previene problemas cutáneos como dermatitis o psoriasis, ya que puede regenerar los tejidos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Collagen Blend",
+    "marca": "Be Life",
+    "categoria": "Colágenos",
+    "beneficios": [
+      "Ayuda al fortalecimiento natural del cabello y las uñas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Collagen Blend I II III V X",
+    "marca": "Be Life",
+    "categoria": "Colágenos",
+    "beneficios": [
+      "Contribuye a mantener una piel tersa y ayuda a recuperar la elasticidad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Collagen Dark",
+    "marca": "Be Life",
+    "categoria": "Colágenos",
+    "beneficios": [
+      "Fortalece el cabello y las uñas mejorando su aspecto.",
+      "Previene y retarda la aparición de arrugas, líneas de expresión y celulitis.",
+      "Disminuye y evita el surgimiento de estrías."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Collagen Powder Blend",
+    "marca": "Be Life",
+    "categoria": "Colágenos",
+    "beneficios": [
+      "Previene y mitiga los síntomas de la osteoporosis.",
+      "Fortalece el cabello y las uñas mejorando su aspecto.",
+      "Previene y retarda la aparición de arrugas, líneas de expresión y celulitis.",
+      "Disminuye y evita el surgimiento de estrías."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "SKN Blend",
+    "marca": "Be Life",
+    "categoria": "Colágenos",
+    "beneficios": [
+      "Ayuda a estimular la producción de colágeno en el organismo.",
+      "Mejora la firmeza y la elasticidad de la piel.",
+      "Previene y retarda la aparición de arrugas, líneas de expresión y celulitis.",
+      "Disminuye y evita el surgimiento de estrías.",
+      "Ayuda en la formación de tejido muscular y favorece la recuperación después del ejercicio."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Calcium & D3",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Consigue la correcta absorción de calcio por el organismo.",
+      "Ayuda con la coagulación de la sangre.",
+      "Beneficia la contracción y relajación muscular.",
+      "Contribuye al mantenimiento de un ritmo cardíaco normal."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Caltrato & D3",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Mejora la función inmunológica.",
+      "Refuerza la salud de la piel, cabello y uñas.",
+      "Fortalece los huesos y los dientes."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Chromium Blend",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Regula el metabolismo.",
+      "Mejora los niveles de colesterol.",
+      "Disminuye el apetito y el trastorno alimentario compulsivo.",
+      "Aumenta la masa muscular.",
+      "Mejora tus niveles de colesterol promoviendo una salud cardiovascular óptima."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Iron Blend",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Favorece la regularidad digestiva.",
+      "Mantiene los músculos fuertes."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "MTLS D'tox",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Ayuda a tu sistema inmunológico y gastrointestinal.",
+      "Protege las células del daño oxidativo y reduciendo el estrés oxidativo.",
+      "Elimina toxinas y metales pesados del organismo.",
+      "Ayuda a mejorar la salud intestinal al absorber toxinas y radicales libres en el tracto gastrointestinal."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Potassium Citrate",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Ayuda al rendimiento deportivo y contracciones musculares.",
+      "Puede ayudar a reducir el riesgo de accidente cerebrovascular.",
+      "Ayuda a modificar el pH de la orina y contribuye a la eliminación de cálculos renales.",
+      "Puede mejorar la salud del corazón y los huesos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Shilajit",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Aumenta la energía, la resistencia física y la fuerza muscular.",
+      "Reduce la inflamación y los dolores provocados por ésta.",
+      "Incrementa la función sexual."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Selenm Blend",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Protege al cuerpo contra infecciones y el daño causado por los radicales libres.",
+      "Fortalece el sistema inmunológico.",
+      "Mejora el funcionamiento de la tiroides.",
+      "Actúa como antioxidante."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Z Blend",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Promueve la función cognitiva y la memoria.",
+      "Disminuye el riesgo de enfermedades relacionadas con la edad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Z Blend Drops",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Promueve la función cognitiva y la memoria.",
+      "Disminuye el riesgo de enfermedades relacionadas con la edad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "ZMA Blend",
+    "marca": "Be Life",
+    "categoria": "Minerales",
+    "beneficios": [
+      "Ayuda a mejorar la somnolencia y el insomnio.",
+      "Aumenta el nivel de vitamina B6, magnesio y zinc."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "A Blend",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Ayuda a la formación y mantenimiento de dientes, tejidos blandos, óseos y membranas.",
+      "Favorece la buena visión preservando la salud de los tejidos de la retina.",
+      "Promueve un sistema inmunológico más saludable y resistente."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "B Yeast Blend",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Efectos benignos sobre la flora intestinal y la digestión.",
+      "Repara el daño celular.",
+      "Refuerza la salud de la piel y el cabello.",
+      "Contribuye a evitar la anemia."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "BPS",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Ayuda a reducir la presión arterial sistólica y diastólica.",
+      "Contribuye a la regulación de la presión sanguínea en personas con hipertensión.",
+      "Protege las arterias evitando su calcificación."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "C Blend",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Aumenta el sistema inmune y ayuda a reducir la duración de los resfriados.",
+      "Previene enfermedades cardiacas.",
+      "Disminuye el colesterol y evita que la grasa se adhiera a los vasos sanguíneos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "C Blend Drops",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Aumenta el sistema inmune y ayuda a reducir la duración de los resfriados.",
+      "Previene enfermedades cardiacas.",
+      "Disminuye el colesterol y evita que la grasa se adhiera a los vasos sanguíneos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "C Liposomal",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Fortalece el tejido óseo.",
+      "Ayuda a fortalecer el sistema inmunológico.",
+      "Favorece el funcionamiento de las arterias y el corazón.",
+      "Contribuye al fortalecimiento y salud de los huesos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Coconut Oil D3+K2",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Fortalece el tejido óseo.",
+      "Ayuda a fortalecer el sistema inmunológico.",
+      "Favorece el funcionamiento de las arterias y el corazón.",
+      "Contribuye al fortalecimiento y salud de los huesos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "D3",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Mantiene los huesos fuertes y previene la osteoporosis.",
+      "Estimula el sistema imunológico y protege contra los virus como el resfriado común.",
+      "Reduce el riesgo de enfermedad cardíaca y presión arterial alta."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "D3 Little Drops",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Ayuda a mantener huesos y dientes fuertes.",
+      "Estimula el sistema inmune y protege contra los virus.",
+      "Ayuda al cuerpo a absorber el calcio."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Defenc Kids Drops",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Fortalece las defensas del cuerpo.",
+      "Actúa en las vías respiratorias superiores."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "DFN Blend Drops",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Estimula la respuesta del cuerpo ante amenazas bacterianas y virales.",
+      "Mantiene el sistema inmune funcionando correctamente."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "DFN Kids (Gomitas)",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Estimula la respuesta del cuerpo ante amenazas bacterianas y virales.",
+      "Mantiene el sistema inmune funcionando correctamente."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Immun Blend",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Estimula la respuesta del cuerpo ante amenazas bacterianas y virales.",
+      "Mantiene el sistema inmune funcionando correctamente."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Levadura de Cerveza B12+",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Contribuye al normal funcionamiento del sistema nervioso y del metabolismo.",
+      "Contribuye a la elaboración del ADN, el material genético presente en todas las células.",
+      "Previene la anemia denominada megaloblástica.",
+      "Mejora el funcionamiento del sistema inmunológico y el sistema nervioso."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mult Blend Kids (Gomitas)",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Estimula la respuesta del cuerpo ante amenazas bacterianas y virales.",
+      "Mantiene el sistema inmune funcionando correctamente."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Vitamin E + Biotin",
+    "marca": "Be Life",
+    "categoria": "Vitaminas",
+    "beneficios": [
+      "Consigue la correcta absorción de calcio por el organismo.",
+      "Contribuye a la formación de glóbulos rojos.",
+      "Estimula el sistema inmunitario a fin de que pueda combatir las bacterias y los virus que lo invaden.",
+      "Favorece al crecimiento del cabello, aportando más elasticidad."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "AKG Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Puede ayudar a aumentar la masa muscular y mejorar la recuperación después del ejercicio.",
+      "Protege las células del daño oxidativo causado por radicales libres."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Ashwagandha Root Powder",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a moderar los estados depresivos y ansiosos.",
+      "Ayuda a mejorar el sueño y a mitigar el insomnio.",
+      "Contribuye a una mejor concentración."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "BSS Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a reducir los niveles de azúcar en la sangre.",
+      "Tiene propiedades antiinflamatorias y antibacterianas.",
+      "Incrementa el flujo de sangre a las terminaciones nerviosas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Clear Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda con el estrés mental.",
+      "Ayuda a mantenerse más enfocado durante el día.",
+      "Ayuda a combatir la ansiedad y la depresión."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Echinacea Garlic",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Evita los resfriados y es un remedio eficaz contra la gripe.",
+      "Alivia los dolores de garganta.",
+      "Alivia las migrañas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Fenugreek",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Aumenta los niveles de testosterona incrementando la fuerza y el desempeño.",
+      "Ayuda a proteger la mucosa gástrica e incluso puede prevenir las lesiones ulcerosas.",
+      "Puede ayudar a mantener a raya los niveles de glucosa en sangre.",
+      "Puede generar un aumento en la producción de leche materna."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Fire Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Mejora significativamente tu capacidad física y desempeño.",
+      "Refuerza el sistema inmune.",
+      "Reduce la fatiga crónica, alivia dolores óseos y musculares.",
+      "Mejora la actividad mental."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Ginseng Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Estimula las funciones mentales y de la memoria.",
+      "Incrementa el nivel de insulina.",
+      "Previene la formación de úlceras causadas por estrés.",
+      "Combate la disfunción eréctil y la eyaculación precoz."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Glutathione Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a aumentar la potencia de las células madre.",
+      "Reduce la cantidad de especies reactivas al oxígeno (ROS) y los daños causados por el estrés oxidativo.",
+      "Previene el daño prematuro adicional de células y tejidos.",
+      "Mantiene la salud celular."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Green Coffee",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Favorece la eliminación de grasas en el organismo.",
+      "Reduce la celulitis.",
+      "Aumenta la energía por sus niveles de cafeína.",
+      "Mejora la salud del cerebro."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Greens Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Contribuye al aumento de las defensas.",
+      "Ayuda a limpiar el hígado."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Hawthorn Root",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Combate algunas bacterias y hongos."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Joint Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Permite tener las articulaciones sanas y saludables.",
+      "Estimula la formación y reparación del cartílago articular."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Lions Mane Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a combatir la ansiedad y la depresión.",
+      "Mejora el sistema inmunológico.",
+      "Ayuda a prevenir el cáncer.",
+      "Mejora la salud digestiva."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Lungs Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a aliviar y prevenir enfermedades respiratorias."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Maca Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Actúa como energizante, mejora la memoria y ayuda a combatir el estrés.",
+      "Aumenta la libido en hombres y en mujeres.",
+      "Reducen los síntomas premenstruales y el dolor.",
+      "Regula el colesterol."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mlk Thistle Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Promueve la salud de la piel y la limpieza del organismo.",
+      "Ayuda a limpiar y desintoxicar el hígado."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Mushroom Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a combatir la ansiedad y depresión.",
+      "Ayuda a reducir colesterol."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Night Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a tener un sueño más profundo y relajado.",
+      "Mejora la calidad del sueño en general.",
+      "Aumenta la duración del sueño profundo el cual es el más reparador."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Om Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Alivia los síntomas de depresión y reduce el estrés físico y mental.",
+      "Ayuda a la relajación y concentración.",
+      "Mejora los problemas de insomnio y ansiedad.",
+      "Puede contribuir a la relajación, al reducir la frecuencia cardíaca de una persona en reposo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Organic Lions Mane",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Fortalece el sistema inmunológico.",
+      "Mejora los problemas digestivos.",
+      "Controla los niveles de colesterol y de presión arterial.",
+      "Fortalece tu sistema inmunitario de forma natural."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Organic Matcha Polvo",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Fortalece el sistema inmunitario y reduce el estrés.",
+      "Estimula la mente y relaja el cuerpo.",
+      "Ayuda a prevenir el cáncer, infecciones y las caries.",
+      "Ayuda a bajar los niveles de azúcar en sangre."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Organic Spirulina",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Refuerza el sistema inmune gracias a sus propiedades antivirales y antiinflamatorias.",
+      "Estimula el tránsito intestinal y mejora los casos de estreñimiento.",
+      "Disminuye los niveles de colesterol en la sangre."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Berberine",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Reduce la presión arterial y fortalece los latidos del corazón.",
+      "Mejora los niveles de colesterol y triglicéridos.",
+      "Ayuda a reducir la hinchazón.",
+      "Reduce el azúcar en sangre."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Tryptophan",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Mejora la calidad de vida de personas que sufren ansiedad, estrés y depresión.",
+      "Tiene efectos antidepresivos.",
+      "Ayuda en la síntesis de la serotonina, actuando como un ansiolítico."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Reishi Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda a estimular la producción de colágeno en el organismo.",
+      "Tiene un potente efecto antienvejecimiento.",
+      "Mejora la calidad y la duración del sueño.",
+      "Contribuye a tener un sistema circulatorio sano."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Thyr Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ralentiza la absorción de grasas en el intestino lo cual ayuda con el sobrepeso."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Turmeric + Ginger",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Actúa como antiinflamatorio y antimicrobiano.",
+      "Mejora los síntomas de la diabetes."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "U Tonic",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Ayuda en infecciones urinarias como la cistitis, la uretritis y la prostatitis.",
+      "Estimula la emisión de orina, favorece la eliminación de toxinas, previene la retención de líquidos.",
+      "Previene la formación de piedras en el riñón."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Venflow Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Reduce la tensión arterial.",
+      "Previene la aparición de enfermedades cardiovasculares.",
+      "Ayuda a controlar los niveles de colesterol en sangre."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Vsion Blend",
+    "marca": "Be Life",
+    "categoria": "Otros",
+    "beneficios": [
+      "Previene la pérdida de la visión.",
+      "Previene la degeneración macular.",
+      "Ayuda con el cansancio ocular.",
+      "Mejora la visión nocturna."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "BCAA´s + Glutamine",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Reduce el estrés o cansancio durante el ejercicio.",
+      "Ayuda a una rápida recuperación después del ejercicio."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Beta Alanine",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Mejora el rendimiento físico.",
+      "Aumenta la disponibilidad de este aminoácido en el cuerpo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Caffeine Blend",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Incrementa la atención y la concentración."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Carnitine Blend",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Contribuye a la absorción de ácidos grasos.",
+      "Favorece el rendimiento físico y el metabolismo energético.",
+      "Ayuda a mantener un equilibrio entre grasa/masa magra.",
+      "Favorece la absorción de ácidos grasos esenciales, permitiendo que tu metabolismo energético funcione de manera más eficiente."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Creatine Monohydrate Caps",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Aumenta la masa muscular en los atletas y adultos mayores.",
+      "Mejora notablemente la capacidad anaeróbica del deportista.",
+      "Contribuye a disminuir la fatiga después del ejercicio.",
+      "Mejora significativamente tu capacidad anaeróbica."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Down Blend",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Previene las alteraciones del sistema metabólico e incrementa la saciedad.",
+      "Previene la acumulación de grasa."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Electroly Blend",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Ayuda a transportar nutrientes al interior de las células.",
+      "Elimina los desechos de las células."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Organic Vegan Protein Chocolate",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Evita la depleción muscular."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Organic Vegan Protein Vainilla",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Evita la depleción muscular."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Arginine",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Estimula la liberación de la hormona de crecimiento.",
+      "Reduce los niveles de grasa corporal.",
+      "Facilita la recuperación de los deportistas."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Gaba",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Favorece la reparación y el buen desarrollo de la musculatura.",
+      "Ayuda a la pérdida de peso y al intercambio de grasa por músculo."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Pure Glutamine",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Protege los músculos al favorecer la síntesis proteica.",
+      "Ayuda a la síntesis de aminoácidos y purinas.",
+      "Refuerza el sistema inmunológico y protege al organismo de posibles infecciones."
+    ]
+  },
+  {
+    "id": null,
+    "nombre": "Up Blend",
+    "marca": "Be Life",
+    "categoria": "Deportes",
+    "beneficios": [
+      "Mejora el rendimiento físico.",
+      "Ayuda facilitar el transporte de los ácidos grasos de cadena larga hacia las mitocondrias."
+    ]
+  }
+]

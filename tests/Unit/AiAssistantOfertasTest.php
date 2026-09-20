@@ -124,6 +124,50 @@ final class AiAssistantOfertasTest extends TestCase
         $this->assertSame(8, $ofertas[0]['id_producto']);
     }
 
+    public function testListarOfertasVigentesMuestraNombreCortoEnVezDelNombreLargo(): void
+    {
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(70, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 450.0, 200.0, null, null, 'activo', null, null, 'Maca Blend');
+        $this->ponerEnOferta(70, $idOferta);
+        $this->seedInventario(70, 1, 10);
+
+        $ofertas = aiListarOfertasVigentes($this->pdo);
+
+        $this->assertCount(1, $ofertas);
+        $this->assertSame('Maca Blend', $ofertas[0]['nombre']);
+    }
+
+    public function testBusquedaTextoEnOfertasEncuentraPorNombreCorto(): void
+    {
+        // El cliente pregunta por la oferta usando la etiqueta del pomo, no el nombre largo.
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(71, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 450.0, 200.0, null, null, 'activo', null, null, 'Maca Blend');
+        $this->seedProducto(72, 'Colageno Hidrolizado', 399.0, 150.0);
+        $this->ponerEnOferta(71, $idOferta);
+        $this->ponerEnOferta(72, $idOferta);
+        $this->seedInventario(71, 1, 10);
+        $this->seedInventario(72, 1, 10);
+
+        $ofertas = aiListarOfertasVigentes($this->pdo, 'Maca Blend');
+
+        $this->assertCount(1, $ofertas);
+        $this->assertSame(71, $ofertas[0]['id_producto']);
+    }
+
+    public function testListarOfertasVigentesSigueMostrandoElNombreLargoSinNombreCorto(): void
+    {
+        // Regresion: sin nombre_corto capturado, el comportamiento es identico al de antes.
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(73, 'Creatina Monohidratada', 350.0, 140.0);
+        $this->ponerEnOferta(73, $idOferta);
+        $this->seedInventario(73, 1, 5);
+
+        $ofertas = aiListarOfertasVigentes($this->pdo);
+
+        $this->assertCount(1, $ofertas);
+        $this->assertSame('Creatina Monohidratada', $ofertas[0]['nombre']);
+    }
+
     public function testToolConsultarOfertasRegresaMensajeCuandoNoHayNinguna(): void
     {
         $resultado = aiToolConsultarOfertas($this->pdo, []);
@@ -164,6 +208,98 @@ final class AiAssistantOfertasTest extends TestCase
         $this->assertCount(12, $resultado['ofertas']);
         $this->assertArrayHasKey('message', $resultado);
         $this->assertStringContainsString('13 ofertas vigentes', $resultado['message']);
+    }
+
+    // ------------------------------------------------------------------
+    // aiSearchInventory() marca en_oferta/precio_normal cuando el producto SI esta en
+    // oferta -- sin esto Alex presentaba el precio ya rebajado como si fuera el precio de
+    // siempre cuando el cliente preguntaba por el producto directo (sin decir "oferta"),
+    // porque solo llamaba a consultar_inventario y nunca a consultar_ofertas por separado.
+    // Caso real reportado: "tienen Oregano Oil?" -> Alex solo dijo "Precio: $301.37" sin
+    // mencionar que ya traia descuento (normal $369).
+    // ------------------------------------------------------------------
+
+    public function testAiSearchInventoryMarcaEnOfertaYPrecioNormalCuandoElProductoEstaEnOferta(): void
+    {
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(60, 'Oregano Oil', 369.0, 200.0, 301.37);
+        $this->ponerEnOferta(60, $idOferta);
+        $this->seedInventario(60, 1, 4);
+
+        $resultados = aiSearchInventory($this->pdo, 'Oregano Oil');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame(301.37, $resultados[0]['precio']);
+        $this->assertTrue($resultados[0]['en_oferta']);
+        $this->assertSame(369.0, $resultados[0]['precio_normal']);
+    }
+
+    public function testAiSearchInventoryNoMarcaEnOfertaParaUnProductoFueraDeLaCategoria(): void
+    {
+        // Regresion: un producto que NUNCA estuvo en la categoria "Ofertas" no debe traer
+        // la llave en_oferta en absoluto (ni en false) -- comportamiento identico al de
+        // antes de este fix para el 99% del catalogo.
+        $this->seedProducto(61, 'Creatina Normal', 499.0, 200.0);
+        $this->seedInventario(61, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Creatina Normal');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('en_oferta', $resultados[0]);
+        $this->assertArrayNotHasKey('precio_normal', $resultados[0]);
+    }
+
+    public function testAiSearchInventoryNoMarcaEnOfertaSiElOverrideManualNoEsMenorAlPrecioNormal(): void
+    {
+        // Dato mal capturado (o precio_venta subido despues sin actualizar precio_oferta):
+        // el override manual quedo IGUAL o MAYOR al precio de siempre. Nunca debe decirle al
+        // cliente "esta en oferta, ahorras $0" (o un ahorro negativo).
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(63, 'Oferta Mal Capturada', 300.0, 100.0, 300.0);
+        $this->ponerEnOferta(63, $idOferta);
+        $this->seedInventario(63, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Oferta Mal Capturada');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('en_oferta', $resultados[0]);
+        $this->assertArrayNotHasKey('precio_normal', $resultados[0]);
+        $this->assertSame(300.0, $resultados[0]['precio']);
+    }
+
+    public function testAiSearchInventoryNoMarcaEnOfertaSiElCostoMas50SuperaElPrecioNormal(): void
+    {
+        // Mismo cuidado pero para el fallback automatico costo+$50 (sin override manual):
+        // un producto de margen delgado (precio_venta 140, costo 100) da costo+50=150, que ya
+        // es MAYOR al precio normal -- no es una oferta real.
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(64, 'Margen Delgado', 140.0, 100.0);
+        $this->ponerEnOferta(64, $idOferta);
+        $this->seedInventario(64, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Margen Delgado');
+
+        $this->assertCount(1, $resultados);
+        $this->assertArrayNotHasKey('en_oferta', $resultados[0]);
+        $this->assertSame(140.0, $resultados[0]['precio']);
+    }
+
+    public function testAiSearchInventoryUsaCostoMas50ComoPrecioNormalCuandoNoHayOverrideManual(): void
+    {
+        // Sin precio_oferta capturado a mano, ofertaPrecioEfectivo() cae a costo+$50 -- el
+        // precio_normal expuesto aqui debe seguir siendo precio_venta (el de siempre), no
+        // ese costo+$50 (que es el precio EN oferta, no el normal).
+        $idOferta = $this->seedCategoriaOferta();
+        $this->seedProducto(62, 'Sin Override', 300.0, 100.0);
+        $this->ponerEnOferta(62, $idOferta);
+        $this->seedInventario(62, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Sin Override');
+
+        $this->assertCount(1, $resultados);
+        $this->assertTrue($resultados[0]['en_oferta']);
+        $this->assertSame(300.0, $resultados[0]['precio_normal']);
+        $this->assertSame(150.0, $resultados[0]['precio']); // costo (100) + 50
     }
 
     // ------------------------------------------------------------------
@@ -235,8 +371,9 @@ final class AiAssistantOfertasTest extends TestCase
         $this->pdo->exec("CREATE TABLE almacenes (id_almacen INTEGER PRIMARY KEY, nombre TEXT NOT NULL)");
         $this->pdo->exec("CREATE TABLE productos (
             id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, nombre_variante TEXT NULL,
+            nombre_corto TEXT NULL,
             codigo_barras TEXT NOT NULL DEFAULT '', descripcion TEXT NULL,
-            ingredientes TEXT NULL, beneficios TEXT NULL, modo_uso TEXT NULL, tabla_nutrimental TEXT NULL,
+            ingredientes TEXT NULL, beneficios TEXT NULL, perfil_recomendado TEXT NULL, modo_uso TEXT NULL, tabla_nutrimental TEXT NULL,
             precio_venta REAL NOT NULL DEFAULT 0, precio_costo REAL NOT NULL DEFAULT 0,
             precio_oferta REAL NULL, categoria TEXT NULL,
             capsulas_por_envase INTEGER NULL, porcion_capsulas INTEGER NULL,
@@ -244,6 +381,9 @@ final class AiAssistantOfertasTest extends TestCase
         )");
         $this->pdo->exec("CREATE TABLE inventario_almacen (
             id_producto INTEGER NOT NULL, id_almacen INTEGER NOT NULL, cantidad_actual INTEGER NOT NULL DEFAULT 0
+        )");
+        $this->pdo->exec("CREATE TABLE producto_relacionados (
+            id_producto INTEGER NOT NULL, id_producto_relacionado INTEGER NOT NULL, nota TEXT NULL
         )");
         $this->pdo->exec("CREATE TABLE categorias (id_categoria INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, estado TEXT DEFAULT 'activo')");
         $this->pdo->exec("CREATE TABLE producto_categorias (id_producto INTEGER, id_categoria INTEGER, PRIMARY KEY (id_producto, id_categoria))");
@@ -288,12 +428,13 @@ final class AiAssistantOfertasTest extends TestCase
         ?string $variante = null,
         string $estado = 'activo',
         ?int $capsulasPorEnvase = null,
-        ?int $porcionCapsulas = null
+        ?int $porcionCapsulas = null,
+        ?string $nombreCorto = null
     ): void {
         $this->pdo->prepare(
-            'INSERT INTO productos (id_producto, nombre, nombre_variante, precio_venta, precio_costo, precio_oferta, estado, capsulas_por_envase, porcion_capsulas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$id, $nombre, $variante, $precioVenta, $precioCosto, $precioOferta, $estado, $capsulasPorEnvase, $porcionCapsulas]);
+            'INSERT INTO productos (id_producto, nombre, nombre_variante, precio_venta, precio_costo, precio_oferta, estado, capsulas_por_envase, porcion_capsulas, nombre_corto)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $variante, $precioVenta, $precioCosto, $precioOferta, $estado, $capsulasPorEnvase, $porcionCapsulas, $nombreCorto]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void

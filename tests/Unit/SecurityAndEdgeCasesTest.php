@@ -621,11 +621,13 @@ final class SecurityAndEdgeCasesTest extends TestCase
                 nombre TEXT NOT NULL,
                 codigo_barras TEXT NOT NULL DEFAULT "",
                 nombre_variante TEXT NULL,
+                nombre_corto TEXT NULL,
                 precio_venta REAL NOT NULL DEFAULT 0,
                 estado TEXT NOT NULL DEFAULT "activo",
                 descripcion TEXT NULL,
                 ingredientes TEXT NULL,
                 beneficios TEXT NULL,
+                perfil_recomendado TEXT NULL,
                 modo_uso TEXT NULL,
                 tabla_nutrimental TEXT NULL,
                 capsulas_por_envase INTEGER NULL,
@@ -637,6 +639,13 @@ final class SecurityAndEdgeCasesTest extends TestCase
                 id_producto INTEGER NOT NULL,
                 id_almacen INTEGER NOT NULL,
                 cantidad_actual INTEGER NOT NULL DEFAULT 0
+            )'
+        );
+        $this->pdo->exec(
+            'CREATE TABLE producto_relacionados (
+                id_producto INTEGER NOT NULL,
+                id_producto_relacionado INTEGER NOT NULL,
+                nota TEXT NULL
             )'
         );
         $this->pdo->exec(

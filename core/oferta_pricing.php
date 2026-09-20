@@ -46,11 +46,20 @@ function ofertaPrecioEfectivo(float $precioVenta, float $precioCosto, $precioOfe
         return round($precioVenta, 2);
     }
 
+    $precioVentaRedondeado = round($precioVenta, 2);
+
+    // Nunca cobrar MAS por estar "en oferta" que el precio de siempre: un override manual
+    // mal capturado (>= precio_venta, ej. se les olvido bajarlo o el precio de venta subio
+    // despues sin actualizarlo) o el costo+$50 automatico superando un precio_venta de
+    // margen delgado no deben terminar cobrandole de mas al cliente en el carrito publico
+    // (ver ofertaSqlPrecioEfectivoExpr(), misma regla) ni haciendo que Alex le diga "esta en
+    // oferta, ahorras $0" o un ahorro negativo -- se cae al precio normal, como si el
+    // producto no estuviera en oferta.
     if ($precioOferta !== null && $precioOferta !== '' && (float) $precioOferta > 0) {
-        return round((float) $precioOferta, 2);
+        return min(round((float) $precioOferta, 2), $precioVentaRedondeado);
     }
 
-    return ofertaPrecioSugerido($precioCosto);
+    return min(ofertaPrecioSugerido($precioCosto), $precioVentaRedondeado);
 }
 
 /**
@@ -83,8 +92,10 @@ function ofertaSqlPrecioEfectivoExpr(string $ventaCol, string $costoCol, string 
 {
     $margen = (string) OFERTA_MARGEN_SOBRE_COSTO;
 
+    // LEAST(...) es la misma regla que el min() de ofertaPrecioEfectivo(): nunca cobrar mas
+    // por estar "en oferta" que el precio de venta normal (ver docblock de esa funcion).
     return "CASE WHEN {$enOfertaExpr}"
-        . " THEN COALESCE(NULLIF({$ofertaCol}, 0), ROUND(GREATEST({$costoCol}, 0) + {$margen}, 2))"
+        . " THEN LEAST({$ventaCol}, COALESCE(NULLIF({$ofertaCol}, 0), ROUND(GREATEST({$costoCol}, 0) + {$margen}, 2)))"
         . " ELSE {$ventaCol} END";
 }
 

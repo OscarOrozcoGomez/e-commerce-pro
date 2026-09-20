@@ -22,6 +22,13 @@ $pdo = getPDO();
 $error = '';
 $canManageCustomers = isAdmin() || isEncargado();
 
+// URL absoluta (con dominio) para el boton "Compartir" -- WhatsApp/Facebook/correo la usan
+// tal cual, no pueden resolver una ruta relativa como BASE_URL.
+$compartirScheme = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https'))
+    ? 'https' : 'http';
+$productoPublicoBaseUrl = $compartirScheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . BASE_URL . 'views/producto_publico.php?id=';
+
 $id_almacen_actual = resolveSalesWarehouseId($pdo);
 $almacenActualNombre = '';
 
@@ -271,6 +278,38 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<div id="modal-ver-beneficios" class="modal" style="max-width: 520px;">
+    <div class="modal-content">
+        <h5 style="margin-top: 0;"><i class="material-icons left">info</i>Beneficios del producto</h5>
+        <p class="grey-text text-darken-1 beneficios-producto-nombre" style="margin-top: -8px; font-weight: 600;"></p>
+        <p class="grey-text" style="font-size: 0.85rem;">Referencia interna para contestarle al cliente -- no se muestra en el catálogo ni se le lee tal cual.</p>
+        <div class="beneficios-producto-lista" style="margin: 10px 0;"></div>
+        <div class="beneficios-producto-perfil" style="margin-top: 14px; display: none;">
+            <strong style="font-size: 0.9rem;">Perfil recomendado</strong>
+            <p class="grey-text text-darken-2 beneficios-producto-perfil-texto" style="margin: 4px 0 0; font-size: 0.9rem; line-height: 1.5;"></p>
+        </div>
+        <div class="beneficios-producto-vacio grey-text" style="display: none;">Este producto todavía no tiene beneficios ni perfil recomendado capturados.</div>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect waves-grey btn-flat">Cerrar</a>
+    </div>
+</div>
+
+<div id="modal-compartir-producto" class="modal" style="max-width: 480px;">
+    <div class="modal-content">
+        <h5 style="margin-top: 0;"><i class="material-icons left">share</i>Compartir producto</h5>
+        <p class="grey-text text-darken-1 compartir-producto-nombre" style="margin-top: -8px; font-weight: 600;"></p>
+        <p class="grey-text" style="font-size: 0.85rem;">El mensaje se precarga tal cual se ve abajo -- revísalo o edítalo antes de enviarlo, ningún canal lo manda solo.</p>
+        <div class="compartir-producto-preview" style="white-space: pre-wrap; background: #f5f5f5; border-radius: 6px; padding: 10px 12px; font-size: 0.85rem; color: #333; max-height: 160px; overflow-y: auto;"></div>
+    </div>
+    <div class="modal-footer" style="display: flex; gap: 8px; justify-content: flex-end;">
+        <a href="#!" class="modal-close waves-effect waves-grey btn-flat">Cerrar</a>
+        <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light blue darken-2 compartir-link-facebook"><i class="fa-brands fa-facebook left"></i>Facebook</a>
+        <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light grey darken-1 compartir-link-correo"><i class="material-icons left">email</i>Correo</a>
+        <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light green darken-1 compartir-link-whatsapp"><i class="fa-brands fa-whatsapp left"></i>WhatsApp</a>
+    </div>
+</div>
+
 <template id="venta-template">
     <div id="venta-{{id}}" class="row animated fadeIn venta-context" style="margin-top: 20px;">
         <div class="col s12 m8">
@@ -466,8 +505,68 @@ include __DIR__ . '/includes/header.php';
     .tab-color-1 .active { border-bottom: 3px solid #4caf50 !important; color: #4caf50 !important; }
     .tab-color-2 .active { border-bottom: 3px solid #9c27b0 !important; color: #9c27b0 !important; }
     .tab-color-3 .active { border-bottom: 3px solid #ff9800 !important; color: #ff9800 !important; }
-    .producto-item { background: #fff; transition: all 0.3s; border-left: 4px solid #4caf50; }
+    .producto-item {
+        background: #fff;
+        transition: all 0.3s;
+        border-left: 4px solid #4caf50;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 4px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
     .producto-item:hover { background: #f5f5f5; }
+    /* Cada renglon (imagen+nombre, luego cantidad/precio/descuento cada uno en su propia
+       fila, luego total+eliminar) se acomoda con flexbox en vez del grid de 12 columnas de
+       Materialize -- la suma de columnas que usaba antes (imagen+nombre+cant+precio+desc+
+       total+eliminar) superaba 12, lo que desbordaba el grid y encimaba los labels con los
+       inputs a ciertos anchos. Flexbox con flex-wrap se acomoda solo sin tener que cuadrar
+       esa aritmetica.  */
+    .producto-item-layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+    /* Ancho y alto fijos en px (no %): Materialbox necesita un tamaño definido para calcular
+       la miniatura -- con flexbox (sin la columna fija de Materialize que habia antes) un
+       tamaño en porcentaje queda ambiguo y termina mostrando la foto a su resolucion real. */
+    .producto-item-media { flex: 0 0 80px; width: 80px; }
+    .producto-item-media img { display: block; width: 80px; height: 80px; object-fit: cover; }
+    .producto-item-info { flex: 1 1 200px; min-width: 180px; }
+    .producto-item-fields { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; min-width: 210px; }
+    .producto-item-field-row { display: flex; align-items: center; gap: 10px; }
+    .producto-item-field-label { flex: 0 0 90px; color: #607d8b; font-size: 0.85rem; }
+    .producto-item-field-input {
+        height: 38px;
+        width: 110px;
+        margin: 0;
+        padding: 0 8px;
+        border: 1px solid #b0bec5;
+        border-radius: 4px;
+        color: #2e7d32;
+        font-weight: bold;
+        box-sizing: border-box;
+    }
+    .producto-item-field-input--desc { color: #c62828; }
+    .producto-item-totals { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; margin-left: auto; }
+    .producto-item-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; vertical-align: middle; }
+    .producto-item-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 50%;
+        background: transparent;
+        cursor: pointer;
+        line-height: 1;
+        touch-action: manipulation;
+        transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    }
+    .producto-item-action:hover { transform: translateY(-1px); }
+    .producto-item-action:focus-visible { outline: 3px solid rgba(33, 150, 243, 0.4); outline-offset: 2px; }
+    .producto-item-action i { font-size: 23px; }
+    .producto-item-action--beneficios { color: #1565c0; border-color: #bbdefb; background: #e3f2fd; }
+    .producto-item-action--beneficios:hover { background: #bbdefb; }
+    .producto-item-action--compartir { color: #2e7d32; border-color: #c8e6c9; background: #e8f5e9; }
+    .producto-item-action--compartir:hover { background: #c8e6c9; }
     .w-100 { width: 100%; }
     /* Buscador de productos: dropdown propio (reemplaza M.Autocomplete de Materialize) para
        poder ocultar el codigo de barras del texto visible y agrandar la miniatura, que es lo
@@ -544,7 +643,23 @@ include __DIR__ . '/includes/header.php';
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     .fadeIn { animation-name: fadeIn; }
     .sales-qty-control { display: flex; align-items: center; gap: 8px; }
-    .sales-qty-control input { margin: 0 !important; text-align: center; }
+    .sales-qty-control input {
+        flex: 0 0 48px;
+        width: 48px;
+        height: 44px !important;
+        margin: 0 !important;
+        padding: 0 4px;
+        border: 1px solid #b0bec5 !important;
+        border-radius: 4px;
+        background: #fff;
+        color: #263238;
+        font-size: 1.05rem;
+        font-weight: 700;
+        line-height: 44px;
+        text-align: center;
+        box-sizing: border-box;
+    }
+    .sales-qty-control input:focus { border-color: #1976d2 !important; box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.16) !important; }
     .sales-line-total { font-size: 1.15rem; font-weight: 700; color: #2e7d32; padding-top: 18px; }
     .delivery-address-preview {
         display: flex;
@@ -627,6 +742,7 @@ include __DIR__ . '/includes/header.php';
 
 <script>
     const productosDisponibles = <?php echo json_encode($productos, JSON_UNESCAPED_UNICODE); ?>;
+    const PRODUCTO_PUBLICO_BASE_URL = <?php echo json_encode($productoPublicoBaseUrl, JSON_UNESCAPED_SLASHES); ?>;
     const clientesActivos = <?php echo json_encode($clientesActivos, JSON_UNESCAPED_UNICODE); ?>;
     const ID_ALMACEN_VENTA = <?php echo (int) $id_almacen_actual; ?>;
     const SALES_TABS_STORAGE_KEY = 'sales_tabs_draft_v4';
@@ -1971,6 +2087,85 @@ include __DIR__ . '/includes/header.php';
         scheduleSalesDraftSave();
     }
 
+    // "Ver beneficios": referencia interna (nunca prometas curas/diagnosticos, solo lenguaje
+    // de bienestar orientativo) para que admin/encargado/vendedor puedan contestarle al
+    // cliente si pregunta -- mismos datos que ya usa Alex, ver core/ai_assistant.php.
+    function verBeneficiosProducto(idProducto) {
+        const product = productosDisponibles.find((p) => String(p.id_producto) === String(idProducto));
+        const modal = document.getElementById('modal-ver-beneficios');
+        if (!product || !modal) return;
+
+        const label = product.nombre_variante ? `${product.nombre} - ${product.nombre_variante}` : product.nombre;
+        modal.querySelector('.beneficios-producto-nombre').textContent = label;
+
+        const beneficios = String(product.beneficios || '').trim();
+        const perfilRecomendado = String(product.perfil_recomendado || '').trim();
+
+        const listaEl = modal.querySelector('.beneficios-producto-lista');
+        const perfilWrap = modal.querySelector('.beneficios-producto-perfil');
+        const perfilTexto = modal.querySelector('.beneficios-producto-perfil-texto');
+        const vacioEl = modal.querySelector('.beneficios-producto-vacio');
+
+        if (beneficios !== '') {
+            const chips = beneficios.split(',').map((b) => b.trim()).filter(Boolean)
+                .map((b) => `<span class="chip" style="background:#e8f5e9; color:#2e7d32;">${escHtmlBeneficios(b)}</span>`)
+                .join('');
+            listaEl.innerHTML = chips;
+            listaEl.style.display = '';
+        } else {
+            listaEl.innerHTML = '';
+            listaEl.style.display = 'none';
+        }
+
+        if (perfilRecomendado !== '') {
+            perfilTexto.textContent = perfilRecomendado;
+            perfilWrap.style.display = '';
+        } else {
+            perfilWrap.style.display = 'none';
+        }
+
+        vacioEl.style.display = (beneficios === '' && perfilRecomendado === '') ? '' : 'none';
+
+        const modalInstance = M.Modal.getInstance(modal) || M.Modal.init(modal);
+        modalInstance.open();
+    }
+
+    // Comparte el producto desde el carrito, donde el vendedor ya esta atendiendo al cliente.
+    // El mensaje usa solo texto comercial y la ficha publica; beneficios y perfil son referencia interna.
+    function compartirProducto(idProducto) {
+        const product = productosDisponibles.find((p) => String(p.id_producto) === String(idProducto));
+        const modal = document.getElementById('modal-compartir-producto');
+        if (!product || !modal) return;
+
+        const nombreCompleto = product.nombre_variante ? `${product.nombre} - ${product.nombre_variante}` : product.nombre;
+        const precio = parseFloat(product.precio_venta || 0).toFixed(2);
+        const urlPublica = PRODUCTO_PUBLICO_BASE_URL + encodeURIComponent(product.id_producto);
+        const textoVenta = String(product.texto_compartir || '').trim();
+
+        let mensaje = `*${nombreCompleto}*\n$${precio}\n`;
+        if (textoVenta !== '') mensaje += `\n${textoVenta}\n`;
+        mensaje += `\n${urlPublica}`;
+
+        modal.querySelector('.compartir-producto-nombre').textContent = nombreCompleto;
+        modal.querySelector('.compartir-producto-preview').textContent = mensaje;
+
+        const linkWhatsapp = modal.querySelector('.compartir-link-whatsapp');
+        const linkCorreo = modal.querySelector('.compartir-link-correo');
+        const linkFacebook = modal.querySelector('.compartir-link-facebook');
+        if (linkWhatsapp) linkWhatsapp.href = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+        if (linkCorreo) linkCorreo.href = `mailto:?subject=${encodeURIComponent(nombreCompleto)}&body=${encodeURIComponent(mensaje)}`;
+        if (linkFacebook) linkFacebook.href = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(urlPublica)}`;
+
+        const modalInstance = M.Modal.getInstance(modal) || M.Modal.init(modal);
+        modalInstance.open();
+    }
+
+    function escHtmlBeneficios(txt) {
+        return String(txt || '').replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[c]);
+    }
+
     function agregarProductoALista(tabId, product, options = {}) {
         const silent = !!options.silent;
         const context = document.getElementById(`venta-${tabId}`);
@@ -1999,34 +2194,43 @@ include __DIR__ . '/includes/header.php';
         const label = product.nombre_variante ? `${product.nombre} - ${product.nombre_variante}` : product.nombre;
         const imgSrc = resolveProductImageSrc(product.imagen_resuelta || product.imagen_fuente || product.imagen || product.imagen_url);
         const html = `
-            <div class="row producto-item animated fadeIn" data-id="${product.id_producto}" style="padding: 15px; margin: 10px 0; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid #4caf50;">
+            <div class="producto-item animated fadeIn" data-id="${product.id_producto}">
                 <input type="hidden" name="producto_${productoIndex}" value="${product.id_producto}">
-                <div class="col s12 m2 center-align">
-                    <img src="${imgSrc}" class="responsive-img materialboxed" style="max-height: 80px; border-radius: 4px;">
-                </div>
-                <div class="col s12 m3">
-                    <p style="margin: 0; font-weight: bold; font-size: 1.1rem;">${label}</p>
-                    <small class="grey-text">Cod: ${product.codigo_barras || 'N/A'}</small>
-                </div>
-                <div class="col s12 m2">
-                    <label class="active">Cant.</label>
-                    <div class="sales-qty-control">
-                        <button type="button" class="btn-small grey lighten-1 black-text waves-effect" onclick="decrementarCantidad(this, '${tabId}')">-</button>
-                        <input type="number" class="cantidad" name="cantidad_${productoIndex}" value="1" min="1" max="${stockDisponible}" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; font-weight: bold; text-align: center;">
-                        <button type="button" class="btn-small grey lighten-1 black-text waves-effect" onclick="incrementarCantidad(this, '${tabId}')">+</button>
+                <div class="producto-item-layout">
+                    <div class="producto-item-media">
+                        <img src="${imgSrc}" class="materialboxed" style="border-radius: 4px;">
                     </div>
-                </div>
-                <div class="input-field col s6 m2" style="margin: 0;">
-                    <input type="number" class="precio-unitario" name="precio_${productoIndex}" value="${product.precio_venta}" min="0.01" step="0.01" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; color: #2e7d32; font-weight: bold;">
-                    <label class="active">Precio Unit.</label>
-                </div>
-                <div class="input-field col s6 m2" style="margin: 0;">
-                    <input type="number" class="descuento-linea" name="descuento_linea_${productoIndex}" value="0" min="0" step="0.01" oninput="actualizarTotal('${tabId}')" style="height: 2.5rem; margin: 0; color: #c62828; font-weight: bold;">
-                    <label class="active">Desc. $</label>
-                </div>
-                <div class="col s8 m2 right-align sales-line-total">$<span class="line-subtotal">0.00</span></div>
-                <div class="col s4 m1 right-align" style="padding-top: 5px;">
-                    <button type="button" class="btn-floating btn-small waves-effect waves-light red" onclick="eliminarProducto(this, '${tabId}')"><i class="material-icons">delete</i></button>
+                    <div class="producto-item-info">
+                        <p style="margin: 0; font-weight: bold; font-size: 1.1rem;">${label}
+                            <span class="producto-item-actions">
+                                <button type="button" class="producto-item-action producto-item-action--beneficios" onclick="verBeneficiosProducto(${product.id_producto});" title="Ver beneficios" aria-label="Ver beneficios del producto"><i class="material-icons">info</i></button>
+                                <button type="button" class="producto-item-action producto-item-action--compartir" onclick="compartirProducto(${product.id_producto});" title="Compartir producto" aria-label="Compartir producto"><i class="material-icons">share</i></button>
+                            </span>
+                        </p>
+                        <small class="grey-text">Cod: ${product.codigo_barras || 'N/A'}</small>
+                    </div>
+                    <div class="producto-item-fields">
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Cant.</span>
+                            <div class="sales-qty-control">
+                                <button type="button" class="btn-small grey lighten-1 black-text waves-effect" onclick="decrementarCantidad(this, '${tabId}')">-</button>
+                                <input type="number" class="cantidad" name="cantidad_${productoIndex}" value="1" min="1" max="${stockDisponible}" oninput="actualizarTotal('${tabId}')">
+                                <button type="button" class="btn-small grey lighten-1 black-text waves-effect" onclick="incrementarCantidad(this, '${tabId}')">+</button>
+                            </div>
+                        </div>
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Precio Unit.</span>
+                            <input type="number" class="precio-unitario producto-item-field-input" name="precio_${productoIndex}" value="${product.precio_venta}" min="0.01" step="0.01" oninput="actualizarTotal('${tabId}')">
+                        </div>
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Desc. $</span>
+                            <input type="number" class="descuento-linea producto-item-field-input producto-item-field-input--desc" name="descuento_linea_${productoIndex}" value="0" min="0" step="0.01" oninput="actualizarTotal('${tabId}')">
+                        </div>
+                    </div>
+                    <div class="producto-item-totals">
+                        <div class="sales-line-total">$<span class="line-subtotal">0.00</span></div>
+                        <button type="button" class="btn-floating btn-small waves-effect waves-light red" onclick="eliminarProducto(this, '${tabId}')"><i class="material-icons">delete</i></button>
+                    </div>
                 </div>
             </div>
         `;

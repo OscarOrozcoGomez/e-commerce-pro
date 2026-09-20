@@ -150,6 +150,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmtCli = $pdo->prepare("INSERT INTO clientes (nombre, email, telefono, id_usuario) VALUES (?, ?, ?, ?)");
                     $stmtCli->execute([$nombreCliente, $email, $telefonoCliente, $newUserId]);
 
+                    // Auditoria: alta de cuenta desde el sitio (aun no hay sesion: el actor es la cuenta nueva).
+                    logAudit(
+                        'CUENTA_CLIENTE_REGISTRADA',
+                        'usuarios',
+                        (int)$newUserId,
+                        'Nueva cuenta de cliente registrada desde el sitio: ' . auditEnmascararPii('email', (string)$email),
+                        null,
+                        ['nombre' => $nombre, 'email' => auditEnmascararPii('email', (string)$email), 'telefono' => auditEnmascararPii('telefono', (string)$telefonoNormalizado)],
+                        ['id_usuario' => (int)$newUserId, 'usuario_nombre' => $nombre, 'usuario_rol' => 'cliente']
+                    );
+
                     $_SESSION['session_notice'] = 'Cuenta creada con éxito. Ya puedes iniciar sesión.';
                     if (session_status() === PHP_SESSION_ACTIVE) {
                         session_write_close();

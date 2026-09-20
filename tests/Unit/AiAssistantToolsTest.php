@@ -39,12 +39,63 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('', aiBuildWhatsAppLinkLine('12345'));
     }
 
+    // --- aiEsConversacionDePrueba() / aiSendTelegramAlert(): playground local (TESTLOCAL) ---
+
+    public function testEsConversacionDePruebaReconoceElPrefijoDelPlayground(): void
+    {
+        $this->assertTrue(aiEsConversacionDePrueba(AI_PLAYGROUND_WA_PREFIX . '1234567'));
+        $this->assertTrue(aiEsConversacionDePrueba('0001234567'));
+    }
+
+    public function testEsConversacionDePruebaRechazaNumerosReales(): void
+    {
+        // Ningun numero real de WhatsApp (siempre con codigo de pais, nunca arranca en "0")
+        // debe poder confundirse con una conversacion de prueba.
+        $this->assertFalse(aiEsConversacionDePrueba('5213334040398'));
+        $this->assertFalse(aiEsConversacionDePrueba(''));
+    }
+
+    public function testSendTelegramAlertNoTronaConWaIdDePruebaAunSinCredencialesReales(): void
+    {
+        // Regresion de forma: nunca debe lanzar, con o sin wa_id, con o sin TELEGRAM_* configurado.
+        aiSendTelegramAlert('Texto de prueba', AI_PLAYGROUND_WA_PREFIX . '1234567');
+        aiSendTelegramAlert('Texto de prueba');
+        $this->addToAssertionCount(1); // llegar aqui sin excepcion es la aserción real
+    }
+
     public function testAiBuildWhatsAppLinkLineReturnsEmptyForLidIdentifiers(): void
     {
         // aiWaIdToMxDigits() valida el patron exacto 52(1)?+10 digitos -- un LID de WhatsApp
         // (identificador de privacidad, 14-15 digitos, sin relacion con el telefono real) no
         // encaja en ese patron, asi que no se arma ningun link inventado.
         $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194'));
+    }
+
+    public function testAiBuildWhatsAppLinkLineUsaElTelefonoResueltoParaUnLid(): void
+    {
+        // Caso real: 170 de 171 conversaciones son LID -- antes de esto, TODA alerta de
+        // Telegram sobre una de ellas se quedaba sin ningun link para abrir el chat, aunque
+        // scripts/resolver_lids_whatsapp.php ya hubiera logrado resolver el telefono real.
+        $linea = aiBuildWhatsAppLinkLine('275131343581194', '3221234567');
+
+        $this->assertStringContainsString('https://wa.me/523221234567', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLinePrefiereElNumeroRealSobreElResuelto(): void
+    {
+        // Si el wa_id YA es un telefono real, nunca debe usarse un telefono_resuelto que
+        // llegara por error/inconsistencia -- el numero real siempre gana.
+        $linea = aiBuildWhatsAppLinkLine('5213334040398', '3221234567');
+
+        $this->assertStringContainsString('https://wa.me/523334040398', $linea);
+        $this->assertStringNotContainsString('3221234567', $linea);
+    }
+
+    public function testAiBuildWhatsAppLinkLineIgnoraUnTelefonoResueltoMalFormado(): void
+    {
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194', '12345'));
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194', null));
+        $this->assertSame('', aiBuildWhatsAppLinkLine('275131343581194', ''));
     }
 
     public function testAiExtractTelegramErrorDescriptionParsesRealTelegramErrorBody(): void
@@ -361,6 +412,120 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('c!!d', aiEscapeLikeTerm('c!d'));
     }
 
+    // --- aiNombreParaCliente(): nombre_corto (etiqueta del pomo) sobre el nombre largo de Shopify ---
+
+    public function testNombreParaClientePrefiereNombreCortoSobreElNombreLargo(): void
+    {
+        $this->assertSame(
+            'Maca Blend',
+            aiNombreParaCliente('Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'Maca Blend')
+        );
+    }
+
+    public function testNombreParaClienteAgregaLaVarianteAlNombreCorto(): void
+    {
+        $this->assertSame(
+            'Vegan Protein - Vainilla',
+            aiNombreParaCliente('Organic Vegan Protein Suplemento Natural Proteina Vegana Vainilla', 'Vegan Protein', 'Vainilla')
+        );
+    }
+
+    public function testNombreParaClienteCaeAlNombreLargoCuandoNoHayNombreCorto(): void
+    {
+        // Regresion: la gran mayoria del catalogo todavia no tiene nombre_corto capturado --
+        // nunca debe quedarse sin nombre.
+        $this->assertSame('Nombre Largo Oficial', aiNombreParaCliente('Nombre Largo Oficial', null));
+        $this->assertSame('Nombre Largo Oficial', aiNombreParaCliente('Nombre Largo Oficial', ''));
+    }
+
+    public function testNombreParaClienteTrataNombreCortoDeSoloEspaciosComoVacio(): void
+    {
+        // Dato sucio (captura a medias desde el admin): un nombre_corto de puros espacios
+        // no debe convertirse en un nombre de producto en blanco para el cliente.
+        $this->assertSame('Nombre Largo Oficial', aiNombreParaCliente('Nombre Largo Oficial', '   '));
+    }
+
+    public function testNombreParaClienteRecortaEspaciosSobrantesDelNombreCorto(): void
+    {
+        $this->assertSame('Maca Blend', aiNombreParaCliente('Nombre Largo', '  Maca Blend  '));
+    }
+
+    public function testNombreParaClienteIgnoraVarianteDeSoloEspacios(): void
+    {
+        $this->assertSame('Maca Blend', aiNombreParaCliente('Nombre Largo', 'Maca Blend', '   '));
+    }
+
+    public function testNombreParaClienteSinVarianteNiNombreCortoUsaSoloElNombreLargo(): void
+    {
+        $this->assertSame('Zinc', aiNombreParaCliente('Zinc', null, null));
+    }
+
+    // --- aiSearchInventory() / aiCountInventoryMatches(): buscar y mostrar por nombre_corto ---
+
+    public function testAiSearchInventoryEncuentraPorNombreCortoAunqueNoAparezcaEnElNombreLargo(): void
+    {
+        // Caso real reportado: el cliente pregunta por la etiqueta del pomo ("Maca Blend"),
+        // no por el nombre largo sincronizado de blifemx.myshopify.com.
+        $this->seedProducto(90, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA90', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(90, 1, 25);
+
+        $resultados = aiSearchInventory($this->pdo, 'Maca Blend');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame(90, $resultados[0]['id_producto']);
+        $this->assertSame('Maca Blend', $resultados[0]['nombre']);
+    }
+
+    public function testAiSearchInventoryMuestraNombreCortoAunqueLaCoincidenciaVengaDelNombreLargo(): void
+    {
+        // Si el cliente busca usando el nombre largo (o parte de el), Alex igual debe
+        // OFRECERLO con la etiqueta corta, no con el nombre de SEO.
+        $this->seedProducto(91, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA91', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(91, 1, 10);
+
+        $resultados = aiSearchInventory($this->pdo, 'Organic Vegan Maca Root');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Maca Blend', $resultados[0]['nombre']);
+    }
+
+    public function testAiSearchInventorySigueMostrandoElNombreLargoCuandoNoHayNombreCortoCapturado(): void
+    {
+        // Regresion explicita: sin nombre_corto, el comportamiento debe ser identico al de
+        // antes de esta feature.
+        $this->seedProducto(92, 'Omega 3 Forte 1000mg', 'OM92', null, 280.00);
+        $this->seedInventario(92, 1, 5);
+
+        $resultados = aiSearchInventory($this->pdo, 'Omega 3 Forte');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Omega 3 Forte 1000mg', $resultados[0]['nombre']);
+    }
+
+    public function testAiSearchInventoryCombinaNombreCortoConVariante(): void
+    {
+        $this->seedProducto(93, 'Organic Vegan Protein Suplemento Natural Proteina Vegana Vainilla', 'PROT93', 'Vainilla', 599.00, 'activo', null, null, null, null, null, null, null, 'Vegan Protein');
+        $this->seedInventario(93, 1, 8);
+
+        $resultados = aiSearchInventory($this->pdo, 'Vegan Protein');
+
+        $this->assertCount(1, $resultados);
+        $this->assertSame('Vegan Protein - Vainilla', $resultados[0]['nombre']);
+    }
+
+    public function testAiCountInventoryMatchesCuentaCoincidenciasPorNombreCortoIgualQueAiSearchInventory(): void
+    {
+        // Antes de este fix, aiSearchInventory() SI hubiera podido encontrar el producto por
+        // nombre_corto (una vez arreglado) pero aiCountInventoryMatches() no lo contaba --
+        // el LLM hubiera visto "1 resultado" en la lista pero "total_encontrados: 0", una
+        // inconsistencia que confunde a Alex sobre si hay mas para mostrar.
+        $this->seedProducto(94, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA94', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(94, 1, 3);
+
+        $this->assertCount(1, aiSearchInventory($this->pdo, 'Maca Blend'));
+        $this->assertSame(1, aiCountInventoryMatches($this->pdo, 'Maca Blend'));
+    }
+
     public function testAiToolConsultarInventarioRejectsEmptySearch(): void
     {
         $result = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => '  ']);
@@ -502,8 +667,21 @@ final class AiAssistantToolsTest extends TestCase
         // "Be Life" en vez de "Blife" (ver testAiGetToolDefinitionsDoesNotContainTheBeLifeBrandTypo).
         $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
 
-        $this->assertStringContainsString('Nuestra unica marca es Blife', $prompt);
+        $this->assertStringContainsString('Vendemos unicamente productos de la marca Blife', $prompt);
         $this->assertStringContainsString('"Be Life"', $prompt);
+    }
+
+    public function testAiBuildSystemPromptDiceQueElNegocioEsBellezaYBienestarNoBlife(): void
+    {
+        // Caso real: Alex se presento a un cliente como "Alejandra, de la tienda Blife",
+        // haciendose pasar por la marca del proveedor en vez de decir el nombre real del
+        // negocio (Belleza y Bienestar, ver el <title> de views/includes/header.php y el
+        // dominio bellezaybienestar.com.mx) -- Blife es la marca de los productos que
+        // vendemos, no nuestro negocio.
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+
+        $this->assertStringContainsString('Belleza y Bienestar', $prompt);
+        $this->assertStringContainsString('jamas digas "somos Blife"', $prompt);
     }
 
     public function testAiGetToolDefinitionsDoesNotContainTheBeLifeBrandTypo(): void
@@ -745,6 +923,111 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotEmpty($resolved['errores']);
     }
 
+    public function testAiResolveOrderItemsUsaNombreCortoEnElItemDelPedido(): void
+    {
+        // El pedido final debe llamar al producto igual que ya lo hizo Alex durante toda la
+        // conversacion (consultar_inventario/consultar_ofertas) -- si aqui se usara el
+        // nombre largo de Shopify, el aviso interno de Telegram y el mensaje de "sin
+        // existencia" mencionarian un nombre distinto al que el cliente ya vio.
+        $this->seedProducto(95, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA95', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(95, 1, 10);
+
+        $resolved = aiResolveOrderItems($this->pdo, [['id_producto' => 95, 'cantidad' => 2]]);
+
+        $this->assertSame([], $resolved['errores']);
+        $this->assertSame('Maca Blend', $resolved['items'][0]['nombre']);
+    }
+
+    public function testAiResolveOrderItemsUsaNombreCortoEnElMensajeDeSinExistencia(): void
+    {
+        $this->seedProducto(96, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA96', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedInventario(96, 1, 1);
+
+        $resolved = aiResolveOrderItems($this->pdo, [['id_producto' => 96, 'cantidad' => 5]]);
+
+        $this->assertSame([], $resolved['items']);
+        $this->assertStringContainsString('Maca Blend', $resolved['errores'][0]);
+        $this->assertStringNotContainsString('Organic Vegan Maca Root Extract', $resolved['errores'][0]);
+    }
+
+    public function testAiResolveOrderItemsSigueUsandoElNombreLargoSinNombreCorto(): void
+    {
+        // Regresion: sin nombre_corto capturado, identico al comportamiento de antes.
+        $this->seedProducto(97, 'Creatina Monohidratada', 'CRT97', null, 499.00);
+        $this->seedInventario(97, 1, 5);
+
+        $resolved = aiResolveOrderItems($this->pdo, [['id_producto' => 97, 'cantidad' => 1]]);
+
+        $this->assertSame('Creatina Monohidratada', $resolved['items'][0]['nombre']);
+    }
+
+    public function testAiResolveOrderItemsConVariosProductosUsaNombreCortoSoloDondeExiste(): void
+    {
+        // Un pedido mixto (un producto con etiqueta de pomo capturada, otro sin ella) no debe
+        // "contagiar" el fallback de uno al otro -- cada item resuelve su propio nombre.
+        $this->seedProducto(98, 'Organic Vegan Maca Root Extract Superfood Blend Supplement Natural', 'MACA98', null, 450.00, 'activo', null, null, null, null, null, null, null, 'Maca Blend');
+        $this->seedProducto(99, 'Creatina Monohidratada', 'CRT99', null, 499.00);
+        $this->seedInventario(98, 1, 10);
+        $this->seedInventario(99, 1, 10);
+
+        $resolved = aiResolveOrderItems($this->pdo, [
+            ['id_producto' => 98, 'cantidad' => 1],
+            ['id_producto' => 99, 'cantidad' => 1],
+        ]);
+
+        $this->assertSame([], $resolved['errores']);
+        $nombres = array_column($resolved['items'], 'nombre');
+        $this->assertContains('Maca Blend', $nombres);
+        $this->assertContains('Creatina Monohidratada', $nombres);
+    }
+
+    // --- aiGetProductosRelacionadosConStock(): venta cruzada usando nombre_corto ---
+
+    private function seedProductoRelacionado(int $idProducto, int $idProductoRelacionado, ?string $nota = null): void
+    {
+        $this->pdo->prepare('INSERT INTO producto_relacionados (id_producto, id_producto_relacionado, nota) VALUES (?, ?, ?)')
+            ->execute([$idProducto, $idProductoRelacionado, $nota]);
+    }
+
+    public function testGetProductosRelacionadosConStockUsaNombreCortoDelSugerido(): void
+    {
+        $this->seedProducto(100, 'Magnesio Glicinato', 'MAG100', null, 350.00);
+        $this->seedInventario(100, 1, 10);
+        $this->seedProducto(101, 'Organic Melatonin Sleep Support Supplement Natural', 'MEL101', null, 199.00, 'activo', null, null, null, null, null, null, null, 'Melatonina Blend');
+        $this->seedInventario(101, 1, 6);
+        $this->seedProductoRelacionado(100, 101, 'mismo ritual antes de dormir');
+
+        $relacionados = aiGetProductosRelacionadosConStock($this->pdo, [100]);
+
+        $this->assertArrayHasKey(100, $relacionados);
+        $this->assertCount(1, $relacionados[100]);
+        $this->assertSame('Melatonina Blend', $relacionados[100][0]['nombre']);
+    }
+
+    public function testGetProductosRelacionadosConStockExcluyeSugeridosSinStock(): void
+    {
+        $this->seedProducto(102, 'Magnesio Glicinato', 'MAG102', null, 350.00);
+        $this->seedInventario(102, 1, 10);
+        $this->seedProducto(103, 'Melatonina', 'MEL103', null, 199.00, 'activo', null, null, null, null, null, null, null, 'Melatonina Blend');
+        $this->seedInventario(103, 1, 0);
+        $this->seedProductoRelacionado(102, 103);
+
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, [102]));
+    }
+
+    public function testGetProductosRelacionadosConStockSinRelacionesRegresaArregloVacio(): void
+    {
+        $this->seedProducto(104, 'Producto Sin Relaciones', 'SOLO104', null, 100.00);
+
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, [104]));
+    }
+
+    public function testGetProductosRelacionadosConStockConIdsInvalidosRegresaArregloVacio(): void
+    {
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, [0, -1]));
+        $this->assertSame([], aiGetProductosRelacionadosConStock($this->pdo, []));
+    }
+
     public function testAiGetOrCreateConversationIsIdempotentByWaId(): void
     {
         $first = aiGetOrCreateConversation($this->pdo, '5215512340000', 'Cliente Uno');
@@ -846,6 +1129,56 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame([], aiTrimOrphanedLeadingToolMessages([
             ['role' => 'tool', 'tool_call_id' => 'call_1', 'content' => '{}'],
         ]));
+    }
+
+    public function testLoadConversationHistoryOmiteRespuestaFinalQueNuncaSeEnvio(): void
+    {
+        // Caso real (2026-09-17): un asesor escribio a mano mientras el puente todavia
+        // esperaba su delay de 60-120s (ver aiConfirmarEnvioWhatsapp()); esa respuesta
+        // quedo guardada con enviado_whatsapp=0 pero el cliente JAMAS la vio. Si el
+        // historial se la sigue mandando a DeepSeek, Alex "recuerda" haber preguntado
+        // algo (ej. la ciudad para confirmar cobertura) que en realidad nunca salio, y no
+        // lo vuelve a preguntar en el siguiente turno.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000100', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Hola, quiero info');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'Antes que nada, en que ciudad estas?', null, null, null, null, false);
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Tienen magnesio?');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'Si, tenemos varias opciones.', null, null, null, null, true);
+
+        $history = aiLoadConversationHistory($this->pdo, $idConversacion);
+
+        $this->assertCount(3, $history);
+        $contenidos = array_column($history, 'content');
+        $this->assertNotContains('Antes que nada, en que ciudad estas?', $contenidos);
+        $this->assertContains('Hola, quiero info', $contenidos);
+        $this->assertContains('Tienen magnesio?', $contenidos);
+        $this->assertContains('Si, tenemos varias opciones.', $contenidos);
+    }
+
+    public function testLoadConversationHistoryConservaRondasDeToolCallsAunqueNoEsten_Enviado_Whatsapp(): void
+    {
+        // Regresion: una ronda intermedia de tool-calling (el LLM pidiendo llamar a una
+        // funcion) SIEMPRE tiene enviado_whatsapp=0 -- no es texto que se le manda al
+        // cliente, es conversacion interna con DeepSeek. El filtro de arriba NO debe
+        // tocar estas filas, solo las respuestas finales (sin tool_calls) que se
+        // suprimieron.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500000101', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Tienen omega 3?');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', null, [
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'consultar_inventario', 'arguments' => '{"busqueda_texto":"omega 3"}']],
+        ]);
+        aiAppendMessage($this->pdo, $idConversacion, 'tool', '{"ok":true,"productos":[]}', null, 'call_1', 'consultar_inventario');
+        aiAppendMessage($this->pdo, $idConversacion, 'assistant', 'No tenemos existencia por ahora.', null, null, null, null, true);
+
+        $history = aiLoadConversationHistory($this->pdo, $idConversacion);
+
+        $this->assertCount(4, $history);
+        $this->assertSame('assistant', $history[1]['role']);
+        $this->assertArrayHasKey('tool_calls', $history[1]);
     }
 
     public function testAiLoadConversationHistoryNeverStartsWithAnOrphanedToolMessage(): void
@@ -1122,6 +1455,25 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNotContains((int) $cerradaVieja['id_conversacion'], $ids);
     }
 
+    public function testFindConversationsToAutoReactivateSkipsStaleHumanIntervention(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030006', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiSetConversationState($this->pdo, $idConversacion, 'pausado', 'Intervencion manual detectada.');
+        $this->pdo->prepare(
+            'INSERT INTO whatsapp_mensajes (id_conversacion, rol, contenido, enviado_whatsapp, creado_en) VALUES (?, "humano", ?, 1, ?)'
+        )->execute([$idConversacion, 'Yo te apoyo directamente.', date('Y-m-d H:i:s', strtotime('-25 hours'))]);
+        $this->pdo->prepare('UPDATE whatsapp_conversaciones SET ultimo_mensaje_en = ? WHERE id_conversacion = ?')
+            ->execute([date('Y-m-d H:i:s', strtotime('-25 hours')), $idConversacion]);
+
+        $ids = array_map(
+            static fn(array $r) => (int) $r['id_conversacion'],
+            aiFindConversationsToAutoReactivate($this->pdo)
+        );
+
+        $this->assertNotContains($idConversacion, $ids);
+    }
+
     public function testAutoReactivateConversationSetsEstadoActivoYLimpiaMotivo(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5213300030005', null);
@@ -1240,6 +1592,71 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertNull(aiWaIdToDisplayPhone('120363402368777906')); // LID
     }
 
+    // --- aiWaIdToDisplayPhoneConResuelto() / aiFormatMxPhoneDigits(): telefono de un LID ya
+    // resuelto por scripts/resolver_lids_whatsapp.php ---
+
+    public function testFormatMxPhoneDigitsHandlesTwoAndThreeDigitLadas(): void
+    {
+        $this->assertSame('+52 33 3404 0398', aiFormatMxPhoneDigits('3334040398'));
+        $this->assertSame('+52 341 123 4567', aiFormatMxPhoneDigits('3411234567'));
+    }
+
+    // --- aiWaIdDigitsConResuelto(): fuente unica de la prioridad "numero real > resuelto",
+    // compartida por aiWaIdToDisplayPhoneConResuelto() y las vistas que arman el link de
+    // "Abrir WhatsApp" (antes cada una repetia la misma logica por su cuenta) ---
+
+    public function testWaIdDigitsConResueltoPrefiereElNumeroRealSobreElResuelto(): void
+    {
+        $this->assertSame('3334040398', aiWaIdDigitsConResuelto('5213334040398', '3221234567'));
+    }
+
+    public function testWaIdDigitsConResueltoUsaElResueltoParaUnLid(): void
+    {
+        $this->assertSame('3221234567', aiWaIdDigitsConResuelto('53236337742009', '3221234567'));
+    }
+
+    public function testWaIdDigitsConResueltoRegresaNullSinNingunDatoValido(): void
+    {
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', null));
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', ''));
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', '12345'));
+        $this->assertNull(aiWaIdDigitsConResuelto('53236337742009', 'abcdefghij'));
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoPrefiereElNumeroRealSobreElResuelto(): void
+    {
+        // Si el wa_id YA es un telefono real, nunca debe usarse telefono_resuelto (aunque
+        // venga uno, seria redundante/potencialmente inconsistente).
+        $this->assertSame(
+            '+52 33 3404 0398',
+            aiWaIdToDisplayPhoneConResuelto('5213334040398', '3221234567')
+        );
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoUsaElResueltoParaUnLid(): void
+    {
+        $this->assertSame(
+            '+52 322 123 4567',
+            aiWaIdToDisplayPhoneConResuelto('53236337742009', '3221234567')
+        );
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoRegresaNullSinNingunDato(): void
+    {
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', null));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', ''));
+    }
+
+    public function testWaIdToDisplayPhoneConResueltoIgnoraUnResueltoMalFormado(): void
+    {
+        // Defensa en profundidad: telefono_resuelto deberia venir siempre en 10 digitos
+        // limpios (asi lo guarda el script), pero si algo mas escribiera basura ahi, nunca
+        // debe mostrarse como si fuera un telefono real.
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', '12345'));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', 'abcdefghij'));
+        $this->assertNull(aiWaIdToDisplayPhoneConResuelto('53236337742009', '52332212345678'));
+    }
+
     public function testAiPhoneHasLocalLadaDistinguishesFromOtherJaliscoLadasStartingWithThree(): void
     {
         // Caso real: un pedido se agendo para Villa Purificacion, Jalisco (fuera de la
@@ -1296,24 +1713,29 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('local', aiClasificarZonaEntrega('Tlajomulco de Zuniga, Jal'));
     }
 
-    public function testAiClasificarZonaEntregaFlagsRealIncidentAddressAsForanea(): void
+    public function testAiClasificarZonaEntregaFlagsRealIncidentAddressAsIndeterminado(): void
     {
-        // Caso real: pedido agendado a Villa Purificacion, Jalisco -- fuera de la ZMG pero
-        // dentro del estado. Debe marcarse "foraneo", no "local" ni "indeterminado".
+        // Caso real: pedido agendado a Villa Purificacion, Jalisco -- fuera de la ZMG y de
+        // la periferia real con reparto. NO debe marcarse "local" (nunca se le regalo el
+        // envio) ni "foraneo" (el negocio no entrega ahi ni con cargo, no es periferia
+        // cercana): queda "indeterminado" para que un humano decida.
         $this->assertSame(
-            'foraneo',
+            'indeterminado',
             aiClasificarZonaEntrega('Nicolas Bravo 221, Colonia Centro, CP 48900, Villa Purificacion, Jalisco')
         );
     }
 
-    public function testAiClasificarZonaEntregaDoesNotConfuseOtherJaliscoMunicipiosWithZmg(): void
+    public function testAiClasificarZonaEntregaNeverAssumesForaneoForOtherJaliscoCities(): void
     {
-        // Ninguno de estos es municipio de la ZMG, aunque varios empiecen igual que "Tonala"
-        // o esten en el mismo estado -- deben quedar "foraneo", no "local".
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Puerto Vallarta, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Ciudad Guzman, Jalisco'));
-        $this->assertSame('foraneo', aiClasificarZonaEntrega('Tepatitlan de Morelos, Jalisco'));
+        // Incidente real (2026-09-16): Autlan de Navarro (~170 km) y Puerto Vallarta
+        // (~180 km) se cotizaban con el cargo "foraneo" de $40 como si fueran entregables
+        // solo por mencionar "Jalisco". El negocio no hace envios por paqueteria a otras
+        // ciudades, asi que ninguno de estos debe quedar "foraneo" (=entregable con cargo)
+        // ni "local" (=gratis): quedan "indeterminado" para revision humana.
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Autlan de Navarro, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Puerto Vallarta, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Ciudad Guzman, Jalisco'));
+        $this->assertSame('indeterminado', aiClasificarZonaEntrega('Tepatitlan de Morelos, Jalisco'));
     }
 
     public function testAiClasificarZonaEntregaReturnsIndeterminadoWithoutEnoughInfo(): void
@@ -1366,7 +1788,12 @@ final class AiAssistantToolsTest extends TestCase
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020008', null);
 
         // WA_BRIDGE_SEND_URL no esta configurado en el entorno de tests, asi que el envio
-        // real falla (ok:false), pero el mensaje se debe seguir guardando y marcando.
+        // real falla (ok:false) -- el mensaje se sigue guardando (para que quede registro de
+        // lo que se intento mandar) y la conversacion se marca "esperando respuesta" igual,
+        // pero enviado_whatsapp debe reflejar la falla real, NUNCA true (regresion: antes de
+        // este fix quedaba marcado como enviado sin importar si en realidad salio o no, asi
+        // que Alex "recordaria" un seguimiento que el cliente jamas recibio -- ver
+        // aiLoadConversationHistory()).
         $ok = aiSendFollowupMessage($this->pdo, $conversacion);
         $this->assertFalse($ok);
 
@@ -1375,7 +1802,26 @@ final class AiAssistantToolsTest extends TestCase
 
         $mensaje = $this->pdo->query('SELECT rol, enviado_whatsapp FROM whatsapp_mensajes ORDER BY id_mensaje DESC LIMIT 1')->fetch();
         $this->assertSame('assistant', $mensaje['rol']);
-        $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+        $this->assertSame(0, (int) $mensaje['enviado_whatsapp']);
+    }
+
+    public function testSendFollowupMessageMarcaEnviadoWhatsappCuandoElEnvioSiFunciona(): void
+    {
+        // Complemento del test anterior: si waSendOutboundMessage() SI tiene exito
+        // (AI_ASSISTANT_TEST_MODE simula un envio ok), enviado_whatsapp debe quedar en 1 --
+        // el fix no debe volverse "siempre false", solo debe dejar de mentir.
+        $original = getenv('AI_ASSISTANT_TEST_MODE');
+        putenv('AI_ASSISTANT_TEST_MODE=1');
+        try {
+            $conversacion = aiGetOrCreateConversation($this->pdo, '5215500020009', null);
+            $ok = aiSendFollowupMessage($this->pdo, $conversacion);
+            $this->assertTrue($ok);
+
+            $mensaje = $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes ORDER BY id_mensaje DESC LIMIT 1')->fetch();
+            $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+        } finally {
+            putenv($original === false ? 'AI_ASSISTANT_TEST_MODE' : 'AI_ASSISTANT_TEST_MODE=' . $original);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1416,6 +1862,64 @@ final class AiAssistantToolsTest extends TestCase
         aiRegistrarEnvioProactivo($this->pdo);
 
         $this->assertNotNull($this->pdo->query('SELECT ultimo_envio_proactivo_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
+    }
+
+    // ------------------------------------------------------------------
+    // aiPuedeResponderCatchupAhora(): el catch-up de horario (contestar con retraso algo
+    // que el cliente YA escribio) tiene su propio cupo de ~5 min, sin el tope de 1/hora del
+    // seguimiento de 24h -- aclaracion del negocio 2026-09-18, ver el comentario junto a
+    // AI_CATCHUP_INTERVALO_MIN_MINUTOS en ai_assistant.php.
+    // ------------------------------------------------------------------
+
+    public function testPuedeResponderCatchupAhoraEsTrueLaPrimeraVezEnHorario(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraEsFalseFueraDeHorario(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 03:00:00')));
+        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 22:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraEsTrueApenasAbreElHorario(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 07:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraIgnoraElUltimoSeguimientoDe24h(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        // Un seguimiento de 24h se mando hace apenas un minuto -- eso NO debe bloquear el
+        // catch-up, son cupos independientes.
+        $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = '2026-09-14 11:59:00' WHERE id_config = 1");
+
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00')));
+    }
+
+    public function testPuedeResponderCatchupAhoraBloqueaAntesDeQuePasenCincoMinutos(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_catchup_en = '2026-09-14 12:00:00' WHERE id_config = 1");
+
+        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:04:59')));
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:05:00')));
+    }
+
+    public function testRegistrarEnvioCatchupActualizaSuPropioTimestampSinTocarElDeSeguimiento(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+
+        aiRegistrarEnvioCatchup($this->pdo);
+
+        $this->assertNotNull($this->pdo->query('SELECT ultimo_envio_catchup_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
+        $this->assertNull($this->pdo->query('SELECT ultimo_envio_proactivo_en FROM ai_asistente_config WHERE id_config = 1')->fetchColumn());
     }
 
     public function testGenerarTextoSeguimientoUnicoUsaLaPlantillaFijaSiLaConversacionNoTieneHistorial(): void
@@ -1658,6 +2162,229 @@ final class AiAssistantToolsTest extends TestCase
             'SELECT COUNT(*) FROM whatsapp_mensajes WHERE id_conversacion = ' . (int) $conversacion['id_conversacion']
         )->fetchColumn();
         $this->assertSame(1, $total);
+    }
+
+    #[Group('ai_deepseek')]
+    public function testRunAssistantTurnIncluyeIdMensajeEnLaParteDeTextoParaElRechequeoPostDelay(): void
+    {
+        $medioDia = new DateTimeImmutable('2026-09-14 12:00:00');
+
+        $reply = aiRunAssistantTurn('5215500050098', null, 'Hola, buenos dias', null, null, $medioDia, $this->pdo);
+
+        $this->assertNotEmpty($reply);
+        $this->assertSame('text', $reply[0]['type']);
+        $this->assertArrayHasKey('id_mensaje', $reply[0]);
+        $this->assertIsInt($reply[0]['id_mensaje']);
+        $this->assertGreaterThan(0, $reply[0]['id_mensaje']);
+
+        $stmt = $this->pdo->prepare('SELECT rol, contenido, enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ?');
+        $stmt->execute([$reply[0]['id_mensaje']]);
+        $mensaje = $stmt->fetch();
+        $this->assertSame('assistant', $mensaje['rol']);
+        $this->assertSame($reply[0]['text'], $mensaje['contenido']);
+        $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+    }
+
+    // --- aiHandleHumanOutboundMessage(): pausa el bot cuando un asesor escribe a mano ---
+
+    public function testHandleHumanOutboundMessagePausaUnaConversacionActiva(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070001', null);
+        $this->assertSame('activo', (string) $conv['estado_bot']);
+
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070001', 'Ya te apoyo yo con eso', 'WA-HUMANO-1');
+
+        $row = $this->pdo->query("SELECT estado_bot, motivo_transferencia FROM whatsapp_conversaciones WHERE wa_id = '5215500070001'")->fetch();
+        $this->assertSame('pausado', $row['estado_bot']);
+        $this->assertNotEmpty($row['motivo_transferencia']);
+
+        $mensaje = $this->pdo->query(
+            "SELECT rol, contenido, enviado_whatsapp FROM whatsapp_mensajes WHERE id_conversacion = " . (int) $conv['id_conversacion']
+        )->fetch();
+        $this->assertSame('humano', $mensaje['rol']);
+        $this->assertSame('Ya te apoyo yo con eso', $mensaje['contenido']);
+        $this->assertSame(1, (int) $mensaje['enviado_whatsapp']);
+    }
+
+    public function testHandleHumanOutboundMessageNoPisaUnMotivoDeTransferenciaYaExistente(): void
+    {
+        // Si ya estaba pausada (p.ej. transferir_a_humano con un motivo especifico), un
+        // segundo mensaje del asesor no debe sobreescribir ese motivo original.
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070002', null);
+        aiSetConversationState($this->pdo, (int) $conv['id_conversacion'], 'pausado', 'Motivo original del tool');
+
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070002', 'Hola, ya vi tu pedido', 'WA-HUMANO-2');
+
+        $row = $this->pdo->query("SELECT estado_bot, motivo_transferencia FROM whatsapp_conversaciones WHERE wa_id = '5215500070002'")->fetch();
+        $this->assertSame('pausado', $row['estado_bot']);
+        $this->assertSame('Motivo original del tool', $row['motivo_transferencia']);
+    }
+
+    public function testHandleHumanOutboundMessageIgnoraTextoOWaIdVacios(): void
+    {
+        aiHandleHumanOutboundMessage($this->pdo, '', 'Hola', 'WA-VACIO-1');
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070003', '   ', 'WA-VACIO-2');
+        aiHandleHumanOutboundMessage($this->pdo, '   ', '   ', null);
+
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM whatsapp_conversaciones')->fetchColumn());
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM whatsapp_mensajes')->fetchColumn());
+    }
+
+    public function testHandleHumanOutboundMessageRespetaElDedupDeWaMessageId(): void
+    {
+        // Reintento del puente sobre el mismo evento fromMe=true: no debe duplicar el
+        // mensaje ni volver a tocar el estado (aunque para eso ya bastaria con que siguiera
+        // pausado, lo importante es que no se inserte una segunda fila).
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070004', 'Primer intento', 'WA-DEDUP-HUMANO');
+        aiHandleHumanOutboundMessage($this->pdo, '5215500070004', 'Primer intento', 'WA-DEDUP-HUMANO');
+
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500070004', null);
+        $total = (int) $this->pdo->query(
+            'SELECT COUNT(*) FROM whatsapp_mensajes WHERE id_conversacion = ' . (int) $conv['id_conversacion']
+        )->fetchColumn();
+        $this->assertSame(1, $total);
+    }
+
+    // --- aiConfirmarEnvioWhatsapp(): segundo chequeo, justo antes de enviar de verdad ---
+
+    public function testConfirmarEnvioWhatsappPermiteEnviarCuandoLaConversacionSigueActiva(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080001', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Claro, con gusto te ayudo', null, null, null, null, true);
+
+        $this->assertTrue(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080001', $idMensaje));
+
+        // No debe tocar el flag: sigue marcado como enviado.
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(1, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappBloqueaYMarcaNoEnviadoSiUnHumanoPausoLaConversacionDuranteElDelay(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080002', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Claro, con gusto te ayudo', null, null, null, null, true);
+
+        // Simula que, DESPUES de que Alex genero la respuesta, un asesor escribio desde el
+        // celular mientras el puente todavia esperaba su delay de 60-120s.
+        aiHandleHumanOutboundMessage($this->pdo, '5215500080002', 'Ya te contesto yo', 'WA-CARRERA-1');
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080002', $idMensaje));
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappEsIdempotenteSiElPuenteReintenta(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080003', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Texto', null, null, null, null, true);
+        aiSetConversationState($this->pdo, (int) $conv['id_conversacion'], 'pausado', 'Intervencion manual');
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080003', $idMensaje));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080003', $idMensaje));
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaConversacionInexistente(): void
+    {
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080999', 1));
+        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM whatsapp_conversaciones')->fetchColumn());
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaIdMensajeInexistente(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080004', null);
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080004', 999999));
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaIdsNoPositivos(): void
+    {
+        aiGetOrCreateConversation($this->pdo, '5215500080005', null);
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080005', 0));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080005', -1));
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaWaIdVacio(): void
+    {
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '', 1));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '   ', 1));
+    }
+
+    public function testConfirmarEnvioWhatsappNoConfundeMensajesDeOtraConversacion(): void
+    {
+        // id_mensaje real, pero de OTRO wa_id -- nunca hay que confiar en el id que manda un
+        // cliente HTTP externo sin cruzarlo contra la conversacion que el mismo dice.
+        $convA = aiGetOrCreateConversation($this->pdo, '5215500080006', null);
+        aiGetOrCreateConversation($this->pdo, '5215500080007', null);
+        $idMensajeDeA = aiAppendMessage($this->pdo, (int) $convA['id_conversacion'], 'assistant', 'Respuesta para A', null, null, null, null, true);
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080007', $idMensajeDeA));
+
+        // Tampoco debio tocar el mensaje real de A solo porque alguien mando su id con el wa_id de B.
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensajeDeA)->fetchColumn();
+        $this->assertSame(1, $enviado);
+    }
+
+    public function testConfirmarEnvioWhatsappRechazaMensajeDeRolUsuarioAunquePerteneceALaConversacion(): void
+    {
+        // Un id_mensaje que si es de la conversacion correcta pero es del CLIENTE (rol
+        // 'user'), no de Alex -- no tiene sentido "confirmar el envio" de algo que el
+        // cliente mando, y no hay que dejar que se le pueda apagar el flag enviado_whatsapp.
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500080008', null);
+        $idMensajeUsuario = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'user', 'Hola, tienen omega 3?');
+
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500080008', $idMensajeUsuario));
+    }
+
+    // --- aiMarcarMensajeNoEnviado(): helper compartido por aiConfirmarEnvioWhatsapp() y el
+    // catch de api/whatsapp_confirmar_envio.php cuando la funcion de arriba truena a medias ---
+
+    public function testMarcarMensajeNoEnviadoApagaElFlag(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500090001', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Texto', null, null, null, null, true);
+
+        aiMarcarMensajeNoEnviado($this->pdo, $idMensaje);
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+    }
+
+    public function testMarcarMensajeNoEnviadoEsIdempotenteYSeguraConIdsInvalidos(): void
+    {
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500090002', null);
+        $idMensaje = aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'assistant', 'Texto', null, null, null, null, true);
+
+        aiMarcarMensajeNoEnviado($this->pdo, $idMensaje);
+        aiMarcarMensajeNoEnviado($this->pdo, $idMensaje); // segunda vez, no debe tronar
+
+        $enviado = (int) $this->pdo->query('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ' . $idMensaje)->fetchColumn();
+        $this->assertSame(0, $enviado);
+
+        // ids invalidos: no deben tronar ni afectar nada (defensa en profundidad, aunque el
+        // llamador ya deberia haber validado esto).
+        aiMarcarMensajeNoEnviado($this->pdo, 0);
+        aiMarcarMensajeNoEnviado($this->pdo, -1);
+        $this->addToAssertionCount(2);
+    }
+
+    // --- aiEsConversacionDePrueba(): el prefijo del playground nunca debe confundirse con
+    // un identificador real de WhatsApp (telefono con codigo de pais o LID de privacidad) ---
+
+    public function testEsConversacionDePruebaExigeElLargoExactoDelPlayground(): void
+    {
+        // El playground siempre genera exactamente 10 digitos (prefijo "000" + 7 mas, ver
+        // views/alex_playground.php). Un LID real de WhatsApp (14-15 digitos) que por azar
+        // empezara en "000" NO debe confundirse con una conversacion de prueba -- eso
+        // silenciaria una alerta real de Telegram (ver aiSendTelegramAlert()).
+        $this->assertTrue(aiEsConversacionDePrueba('0001234567')); // 10 digitos, valido
+        $this->assertFalse(aiEsConversacionDePrueba('00012345678901')); // 14 digitos, tipo LID
+        $this->assertFalse(aiEsConversacionDePrueba('000123')); // muy corto
+        $this->assertFalse(aiEsConversacionDePrueba('5213334040398')); // numero real normal
     }
 
     // --- aiFindConversationsPendingRespuesta(): edge cases adicionales ---
@@ -1936,6 +2663,97 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertContains(AI_TAG_PREGUNTON, $names);
     }
 
+    // --- aiToolConfirmarZonaEntrega(): fuera de cobertura se marca ANTES de intentar
+    // agendar un pedido, no solo cuando el cliente ya llego a esa parte -- caso real
+    // reportado: un cliente foraneo (Puerto Vallarta) nunca se etiqueto porque nunca llego a
+    // pedir nada, asi que el seguimiento de 24h lo hubiera seguido intentando contactar. ---
+
+    public function testConfirmarZonaEntregaLocalNoEtiquetaYPermiteContinuar(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009030', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Guadalajara'], $context);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('local', $result['zona']);
+        $this->assertTrue($result['en_cobertura']);
+        $names = array_map(static fn(array $t) => $t['nombre'], aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion']));
+        $this->assertNotContains(AI_TAG_FUERA_COBERTURA, $names);
+    }
+
+    public function testConfirmarZonaEntregaForaneoNoEtiquetaPeroAvisaDelCargo(): void
+    {
+        // Colonia periferica conocida: SI es entregable (con cargo de $40), no es lo mismo
+        // que "sin cobertura" -- no debe etiquetarse como Fuera de Cobertura.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009031', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Fraccionamiento Chula Vista'], $context);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('foraneo', $result['zona']);
+        $this->assertTrue($result['en_cobertura']);
+        $this->assertStringContainsString('40', $result['message']);
+        $names = array_map(static fn(array $t) => $t['nombre'], aiGetConversationTags($this->pdo, (int) $conversacion['id_conversacion']));
+        $this->assertNotContains(AI_TAG_FUERA_COBERTURA, $names);
+    }
+
+    public function testConfirmarZonaEntregaIndeterminadaEtiquetaFueraDeCobertura(): void
+    {
+        // Caso real: Puerto Vallarta, mencionado en la conversacion normal, SIN que el
+        // cliente haya llegado a pedir nada todavia.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009032', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        $context = ['id_conversacion' => $idConversacion];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Puerto Vallarta, Jalisco'], $context);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('indeterminado', $result['zona']);
+        $this->assertFalse($result['en_cobertura']);
+        $names = array_map(static fn(array $t) => $t['nombre'], aiGetConversationTags($this->pdo, $idConversacion));
+        $this->assertContains(AI_TAG_FUERA_COBERTURA, $names);
+    }
+
+    public function testConfirmarZonaEntregaFueraDeCoberturaQuedaExcluidaDelSeguimientoProactivo(): void
+    {
+        // Verifica el efecto real que le importa al negocio: una vez etiquetada, el cron de
+        // seguimiento de 24h (aiFindConversationsNeedingFollowup) ya no debe volver a
+        // intentar contactar a este cliente.
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009033', null);
+        $idConversacion = (int) $conversacion['id_conversacion'];
+        aiAppendMessage($this->pdo, $idConversacion, 'user', 'Hola, quiero info');
+        aiAppendMessage(
+            $this->pdo,
+            $idConversacion,
+            'assistant',
+            'Claro, en que ciudad estas?',
+            null,
+            null,
+            null,
+            null,
+            true
+        );
+        $this->pdo->prepare("UPDATE whatsapp_mensajes SET creado_en = datetime('now', '-2 days') WHERE id_conversacion = ?")
+            ->execute([$idConversacion]);
+
+        aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => 'Puerto Vallarta, Jalisco'], ['id_conversacion' => $idConversacion]);
+
+        $pendientes = array_map(static fn(array $c) => (int) $c['id_conversacion'], aiFindConversationsNeedingFollowup($this->pdo));
+        $this->assertNotContains($idConversacion, $pendientes);
+    }
+
+    public function testConfirmarZonaEntregaFallaGraciosamenteSinUbicacion(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009034', null);
+        $context = ['id_conversacion' => (int) $conversacion['id_conversacion']];
+
+        $result = aiToolConfirmarZonaEntrega($this->pdo, ['ciudad_o_direccion' => '   '], $context);
+
+        $this->assertFalse($result['ok']);
+    }
+
     public function testEtiquetarClienteRejectsUnknownTagWithoutCreatingIt(): void
     {
         $conversacion = aiGetOrCreateConversation($this->pdo, '5215500009011', null);
@@ -2076,11 +2894,13 @@ final class AiAssistantToolsTest extends TestCase
                 nombre TEXT NOT NULL,
                 codigo_barras TEXT NOT NULL DEFAULT "",
                 nombre_variante TEXT NULL,
+                nombre_corto TEXT NULL,
                 precio_venta REAL NOT NULL DEFAULT 0,
                 estado TEXT NOT NULL DEFAULT "activo",
                 descripcion TEXT NULL,
                 ingredientes TEXT NULL,
                 beneficios TEXT NULL,
+                perfil_recomendado TEXT NULL,
                 modo_uso TEXT NULL,
                 tabla_nutrimental TEXT NULL,
                 capsulas_por_envase INTEGER NULL,
@@ -2092,6 +2912,13 @@ final class AiAssistantToolsTest extends TestCase
                 id_producto INTEGER NOT NULL,
                 id_almacen INTEGER NOT NULL,
                 cantidad_actual INTEGER NOT NULL DEFAULT 0
+            )'
+        );
+        $this->pdo->exec(
+            'CREATE TABLE producto_relacionados (
+                id_producto INTEGER NOT NULL,
+                id_producto_relacionado INTEGER NOT NULL,
+                nota TEXT NULL
             )'
         );
         $this->pdo->exec(
@@ -2189,7 +3016,8 @@ final class AiAssistantToolsTest extends TestCase
                 temperatura REAL NOT NULL DEFAULT 0.30,
                 prompt_sistema_override TEXT NULL,
                 api_key_variable TEXT NOT NULL DEFAULT "DEEPSEEK_AI_ASSISTANT",
-                ultimo_envio_proactivo_en TEXT NULL
+                ultimo_envio_proactivo_en TEXT NULL,
+                ultimo_envio_catchup_en TEXT NULL
             )'
         );
         $this->pdo->exec(
@@ -2240,12 +3068,13 @@ final class AiAssistantToolsTest extends TestCase
         ?string $modoUso = null,
         ?string $tablaNutrimental = null,
         ?int $capsulasPorEnvase = null,
-        ?int $porcionCapsulas = null
+        ?int $porcionCapsulas = null,
+        ?string $nombreCorto = null
     ): void {
         $this->pdo->prepare(
-            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental, capsulas_por_envase, porcion_capsulas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental, $capsulasPorEnvase, $porcionCapsulas]);
+            'INSERT INTO productos (id_producto, nombre, codigo_barras, nombre_variante, precio_venta, estado, descripcion, ingredientes, beneficios, modo_uso, tabla_nutrimental, capsulas_por_envase, porcion_capsulas, nombre_corto)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$id, $nombre, $codigoBarras, $variante, $precio, $estado, $descripcion, $ingredientes, $beneficios, $modoUso, $tablaNutrimental, $capsulasPorEnvase, $porcionCapsulas, $nombreCorto]);
     }
 
     private function seedInventario(int $idProducto, int $idAlmacen, int $cantidad): void

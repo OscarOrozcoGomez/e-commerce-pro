@@ -51,6 +51,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':notas' => $notas !== '' ? $notas : null,
                     ':id_usuario' => (int) ($_SESSION['usuario']['id_usuario'] ?? 0) ?: null,
                 ]);
+                logAudit(
+                    'CAMPANA_GUARDADA',
+                    'calendario_campanas',
+                    (int) $pdo->lastInsertId() ?: null,
+                    'Campaña "' . $nombre . '" (' . $canal . ') del ' . $fechaInicio . ' al ' . $fechaFin . (empty($productos) ? '' : ' | ' . count($productos) . ' producto(s) destacado(s)'),
+                    null,
+                    ['nombre' => $nombre, 'canal' => $canal, 'fecha_inicio' => $fechaInicio, 'fecha_fin' => $fechaFin, 'productos_destacados' => array_values($productos)]
+                );
                 $success = 'Campaña registrada.';
             } catch (Throwable $e) {
                 $error = 'No se pudo guardar: ' . $e->getMessage();
@@ -59,7 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (($_POST['accion'] ?? '') === 'eliminar_campana') {
         $idCampana = (int) ($_POST['id_campana'] ?? 0);
         if ($idCampana > 0) {
+            $auditNombreCampana = auditNombreRegistro($pdo, 'calendario_campanas', 'id_campana', 'nombre', $idCampana);
             $pdo->prepare('DELETE FROM calendario_campanas WHERE id_campana = ?')->execute([$idCampana]);
+            logAudit('CAMPANA_ELIMINADA', 'calendario_campanas', $idCampana, 'Campaña "' . $auditNombreCampana . '" eliminada', null, null, ['severidad' => 'alerta']);
             $success = 'Campaña eliminada.';
         }
     }

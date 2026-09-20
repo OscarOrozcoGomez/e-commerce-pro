@@ -98,9 +98,9 @@ o a un cron/script que le mande algo a un cliente por WhatsApp debe verificar qu
 cumpliendo, y si se toca ese código, se tiene que volver a razonar explícitamente si sigue
 cumpliéndolas**:
 
-1. **Los mensajes PROACTIVOS de Alex (el cliente no escribió primero — seguimiento de 24h y
-   catch-up de horario) nunca pasan de UNO combinado por hora**, sin importar qué tan grande
-   sea el backlog ni cuántas veces corra el cron mientras tanto (`scripts/whatsapp_followup_cron.php`
+1. **El seguimiento de 24h de Alex (el cliente no escribió primero, es puro reenganche para
+   rescatar una venta a medias) nunca pasa de UNO por hora**, sin importar qué tan grande sea
+   el backlog ni cuántas veces corra el cron mientras tanto (`scripts/whatsapp_followup_cron.php`
    corre cada 20 min, pero solo manda algo si `aiPuedeEnviarProactivoAhora()` lo permite — ver
    `AI_PROACTIVO_INTERVALO_MIN_MINUTOS` en `ai_assistant.php`). Un backlog grande se vacía a lo
    largo de varios días si hace falta, nunca de un jalón ni sostenido hora tras hora. El texto
@@ -109,6 +109,23 @@ cumpliéndolas**:
    destinatarios es en sí mismo un patrón detectable, aunque vaya espaciado. Cualquier futura
    funcionalidad de "mensaje a varios clientes" (campañas/broadcast) debe pasar por esta misma
    disciplina: cadencia de horas, no de segundos, y texto variado.
+   El **catch-up de horario** (contestar con retraso algo que el cliente YA escribió mientras
+   Alex estaba callado a propósito de 10pm a 7am, ver `aiEstaEnHorarioAtencion()`) es un cupo
+   **aparte** desde 2026-09-18 (`aiPuedeResponderCatchupAhora()`/`aiRegistrarEnvioCatchup()`,
+   timestamp propio `ultimo_envio_catchup_en`), con su propia cadencia de ~5 minutos
+   (`AI_CATCHUP_INTERVALO_MIN_MINUTOS`) — no comparte el tope de 1/hora del seguimiento: no es
+   contacto no solicitado, y antes de separarlos un cliente nuevo de madrugada podía esperar
+   horas su primerísima respuesta si el cupo compartido ya lo había gastado un seguimiento.
+   Sigue sin riesgo de ráfaga: nunca instantáneo para todo el backlog de la noche a la vez,
+   siempre espaciado ~5 min entre cada cliente distinto, muy por debajo del patrón real del
+   incidente de 2026-09-13 (~24 mensajes idénticos en el mismo segundo). Para que este ritmo
+   de 5 min se note de verdad hace falta que el cron mismo corra seguido (ver el crontab del
+   VPS, `*/N * * * * ... whatsapp_followup_cron.php`) — si corre cada 20 min, el catch-up en
+   la práctica sigue limitado a como mucho 1 cada 20 min aunque el código ya permita 1 cada 5.
+   "Cupos independientes" es solo la cadencia de cada uno **entre corridas** — `whatsapp_followup_cron.php`
+   sigue mandando como máximo **un** mensaje real por corrida (si el catch-up tuvo algo que
+   contestar, el seguimiento de 24h espera a la siguiente corrida), para que abrir el horario
+   con ambos cupos libres a la vez nunca mande 2 mensajes reales en la misma ejecución.
 2. **Las respuestas de Alex en vivo (conversación normal) se mandan con un retraso humano
    deliberado** (60-120s aleatorios, ver `enviarReplyParts`/el delay antes de llamarla dentro
    de `messages.upsert` en `/opt/wa-bridge/app/index.js` — código del puente, vive en el VPS,
@@ -129,6 +146,17 @@ wa-bridge`, `/opt/wa-bridge/app/index.js`).
 - PHPUnit 10.5, **solo `tests/Unit/`** (~60 archivos).
 - `tests/bootstrap.php` hace `require_once` manual de ~30 librerías de `core/`. **Si añades una lib de `core/` que un test necesita, agrégala a `bootstrap.php`** o el test no la verá.
 - Los tests que tocan DB usan PDO en memoria / datos sembrados en el propio test, no una DB real.
+
+## Auditoría (quién hizo qué)
+
+Toda operación que **modifique datos** (precios, ofertas, inventario, clientes, usuarios, permisos, configuración…) debe dejar rastro en `logs_auditoria`; se consulta en `views/activity_logs.php` (pestaña "Movimientos").
+
+- `logAudit($accion, $tabla, $id, $detalles, $antes, $despues, $opciones)` en `core/auth.php`. Toma solo el usuario, rol, IP, dispositivo, sesión y URL de la petición. Los 4 primeros parámetros son los de siempre; `$antes`/`$despues` son arrays con los campos que cambiaron.
+- Para cambios sobre un registro usa **`logAuditCambios()`** con "fotos" antes/después (`auditSnapshotProducto/Cliente/Direccion/Usuario/Almacen`, `auditSnapshotFila` en `core/audit_snapshots.php`): calcula el diff, no escribe nada si no hubo cambio real y enmascara PII (teléfono/correo/dirección) y oculta secretos. **Nunca** metas contraseñas, tokens ni PII en claro en `$detalles`, `$antes` o `$despues` (los arrays pasados a `logAudit` directo NO se enmascaran; los de `auditDiff` sí).
+- Registra **después** del commit, nunca dentro de la transacción de negocio. `logAudit` no lanza excepciones.
+- Cada acción nueva (constante en MAYÚSCULAS, ≤ 50 caracteres) va en `auditMapaEtiquetasAccion()` de `core/audit_utils.php` con su nombre legible; `tests/Unit/AuditUtilsTest.php` falla si falta.
+- Red de seguridad: `auditIniciarRegistroPeticiones()` registra como `PETICION_ESCRITURA` cualquier POST/PUT/DELETE con sesión que no haya registrado nada propio (payload sin secretos). Endpoints que no deben entrar (sondeos, chat, login) van en `AUDIT_ENDPOINTS_SIN_REGISTRO`.
+- Las columnas nuevas de `logs_auditoria` las agrega `20260919_000001_*`; `logAudit` y la vista toleran que aún no existan (deploy en curso).
 
 ## Convenciones
 
