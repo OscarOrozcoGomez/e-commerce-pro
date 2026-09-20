@@ -143,13 +143,61 @@ final class CatalogoUtilsTest extends TestCase
         $this->assertStringContainsString('JOIN producto_categorias', $parts['sql_main']);
         $this->assertStringContainsString('JOIN producto_categorias', $parts['sql_count']);
 
-        foreach ([':search_name', ':search_code', ':search_variant', ':search_ex', ':search_ex_code', ':search_ex_variant'] as $p) {
+        foreach ([':search_name', ':search_code', ':search_variant', ':search_short', ':search_ex', ':search_ex_code', ':search_ex_variant', ':search_ex_short'] as $p) {
             $this->assertArrayHasKey($p, $parts['params']);
             $this->assertSame('%omega%', $parts['params'][$p]);
         }
 
         // El filtro de agotados y los de categoría/búsqueda conviven en el mismo WHERE.
         $this->assertStringContainsString('COALESCE(stk.stock_familia, 0) > 0', $parts['sql_main']);
+    }
+
+    public function testCatalogBuildQueriesBuscaTambienPorNombreCortoEnProductoYVariantes(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '3 mag');
+
+        // Igual que views/products.php: el nombre corto (etiqueta del pomo) cuenta como texto buscable,
+        // en la fila raiz y en sus variantes, y en la consulta principal y en la de conteo (paginacion).
+        foreach (['sql_main', 'sql_count'] as $key) {
+            $this->assertStringContainsString('p.nombre_corto LIKE :search_short', $parts[$key], $key);
+            $this->assertStringContainsString('p_v.nombre_corto LIKE :search_ex_short', $parts[$key], $key);
+        }
+        $this->assertSame('%3 mag%', $parts['params'][':search_short']);
+        $this->assertSame('%3 mag%', $parts['params'][':search_ex_short']);
+    }
+
+    public function testCatalogBuildQueriesSinBusquedaNoAgregaCondicionesDeNombreCorto(): void
+    {
+        $parts = catalogBuildQueries($this->pdoStub(), '', '');
+
+        $this->assertStringNotContainsString(':search_short', $parts['sql_main']);
+        $this->assertStringNotContainsString(':search_ex_short', $parts['sql_count']);
+        // La columna con los nombres cortos de las variantes (para el filtro en vivo) va siempre en la consulta principal.
+        $this->assertStringContainsString('AS nombres_cortos_variantes', $parts['sql_main']);
+        $this->assertStringNotContainsString('nombres_cortos_variantes', $parts['sql_count']);
+    }
+
+    public function testCardShortNamesJuntaNombreCortoDelProductoYDeSusVariantes(): void
+    {
+        $this->assertSame(
+            '3 mag blend mag citrato mag oxido',
+            catalogCardShortNames(['nombre_corto' => '3 Mag Blend', 'nombres_cortos_variantes' => 'Mag Citrato Mag Oxido'])
+        );
+        // Solo uno de los dos: sin espacios sobrantes.
+        $this->assertSame('3 mag blend', catalogCardShortNames(['nombre_corto' => '  3 Mag Blend  ']));
+        $this->assertSame('mag citrato', catalogCardShortNames(['nombre_corto' => '', 'nombres_cortos_variantes' => 'Mag Citrato']));
+    }
+
+    public function testCardShortNamesQuedaVacioSinNombreCorto(): void
+    {
+        $this->assertSame('', catalogCardShortNames([]));
+        $this->assertSame('', catalogCardShortNames(['nombre_corto' => null, 'nombres_cortos_variantes' => null]));
+        $this->assertSame('', catalogCardShortNames(['nombre_corto' => '   ']));
+    }
+
+    public function testCardShortNamesRespetaAcentosYMayusculasUnicode(): void
+    {
+        $this->assertSame('cúrcuma ñ', catalogCardShortNames(['nombre_corto' => 'CÚRCUMA Ñ']));
     }
 
     public function testCatalogBuildPaginationMetaReturnsExpectedHasMore(): void

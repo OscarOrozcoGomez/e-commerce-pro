@@ -375,7 +375,9 @@ function applyLiveCatalogFilter() {
     cards.forEach(card => {
         const name = normalizeFilterText(card.getAttribute('data-name'));
         const sku = normalizeFilterText(card.getAttribute('data-sku'));
-        const matches = query === '' || name.includes(query) || sku.includes(query);
+        // Nombre corto (etiqueta del pomo) del producto y de sus variantes, igual que la busqueda del servidor.
+        const shortName = normalizeFilterText(card.getAttribute('data-short'));
+        const matches = query === '' || name.includes(query) || sku.includes(query) || shortName.includes(query);
         card.style.display = matches ? '' : 'none';
     });
 }
