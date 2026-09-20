@@ -5,7 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-if (!isAdmin()) {
+if (!hasPermission('ver_salud_sistema')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

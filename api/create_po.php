@@ -5,7 +5,8 @@ require_once __DIR__ . '/../core/api_security_utils.php';
 
 header('Content-Type: application/json');
 
-if (!isAuthenticated() || (!isAdmin() && !isEncargado())) {
+refreshSessionPermissions();
+if (!isAuthenticated() || !hasPermission('inventario')) {
     echo json_encode(['success' => false, 'error' => 'No autorizado']);
     exit;
 }

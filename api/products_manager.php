@@ -735,9 +735,8 @@ try {
             }
         }
         elseif ($action === 'bulk_assign_category') {
-            // Fase 4: basta con 'gestionar_productos' (ya exigido arriba); el rol
-            // admin/encargado se mantiene como respaldo.
-            if (!hasPermission('gestionar_productos') && !canBulkAssignCategories()) {
+            // 'asignar_categorias_masivo' (o 'gestionar_productos', que ya lo incluia).
+            if (!hasPermission('asignar_categorias_masivo') && !hasPermission('gestionar_productos')) {
                 throw new Exception("No tienes permiso para asignar categorías de forma masiva.");
             }
 
@@ -764,8 +763,8 @@ try {
             }
 
             if ($nuevaCategoria !== '') {
-                if (!isAdmin()) {
-                    throw new Exception("Solo un administrador puede crear categorías nuevas. Selecciona una existente o pide que la creen primero.");
+                if (!hasPermission('crear_categorias')) {
+                    throw new Exception("No tienes permiso para crear categorías nuevas. Selecciona una existente o pide que la creen primero.");
                 }
                 if (!dbCreateCategory($nuevaCategoria)) {
                     throw new Exception("No se pudo crear la categoría.");

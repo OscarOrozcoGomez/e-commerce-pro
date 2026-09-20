@@ -152,13 +152,13 @@ final class VendedorSucursalScopeTest extends TestCase
 
     // ------------------------------------------------------------------
     // sales.php: agendar a domicilio exige permiso 'asignar_entregas'
-    // (rol encargado/admin como respaldo). Sin eso, solo venta en sucursal.
+    // (sin respaldo por rol). Sin eso, solo venta en sucursal.
     // ------------------------------------------------------------------
 
     /** Igual que views/sales.php ($puedeAgendarDomicilio) y api/ventas.php. */
     private function puedeAgendarDomicilio(): bool
     {
-        return hasPermission('asignar_entregas') || canManageDeliveryOrders();
+        return hasPermission('asignar_entregas');
     }
 
     public function testVendedorSinPermisoNoPuedeAgendarADomicilio(): void
@@ -185,10 +185,15 @@ final class VendedorSucursalScopeTest extends TestCase
 
     public function testEncargadoYAdminSiPuedenAgendarADomicilio(): void
     {
-        // Encargado: por el respaldo de rol aunque no tenga la clave en 'permisos'.
-        $_SESSION['usuario'] = ['rol' => 'encargado', 'id_almacen' => 2, 'permisos' => []];
+        // Encargado: ya no hay respaldo por rol; la migracion 20260920_000001 le siembra la clave.
+        $_SESSION['usuario'] = ['rol' => 'encargado', 'id_almacen' => 2, 'permisos' => ['asignar_entregas']];
         $this->assertTrue($this->puedeAgendarDomicilio());
         $this->assertTrue(saleDeliveryModeIsAllowedForUser('Domicilio', $this->puedeAgendarDomicilio()));
+
+        // ...y si se la quitan desde el panel, deja de poder aunque siga siendo encargado.
+        $_SESSION['usuario'] = ['rol' => 'encargado', 'id_almacen' => 2, 'permisos' => []];
+        $this->assertFalse($this->puedeAgendarDomicilio());
+        $this->assertFalse(saleDeliveryModeIsAllowedForUser('Domicilio', $this->puedeAgendarDomicilio()));
 
         // Admin: hasPermission() hace short-circuit.
         $_SESSION['usuario'] = ['rol' => 'admin'];

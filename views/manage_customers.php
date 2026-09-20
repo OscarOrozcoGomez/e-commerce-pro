@@ -9,8 +9,8 @@ require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
 require_once __DIR__ . '/../core/cliente_telefono_utils.php';
 requireAuth();
-// Permiso 'gestionar_clientes' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
+// Permiso 'gestionar_clientes' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('gestionar_clientes')) { header('Location: dashboard.php'); exit; }
 
 $pdo = getPDO();
 

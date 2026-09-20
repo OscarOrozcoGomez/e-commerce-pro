@@ -5,8 +5,8 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-// Fase 4: el permiso 'inventario' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('inventario') && !isAdmin() && !isEncargado()) {
+// El permiso 'inventario' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('inventario')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

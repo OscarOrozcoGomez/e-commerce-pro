@@ -9,8 +9,8 @@ require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 
 requireAuth();
-// Fase 4: el permiso 'asignar_entregas' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('asignar_entregas') && !canManageDeliveryOrders()) {
+// El permiso 'asignar_entregas' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('asignar_entregas')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
