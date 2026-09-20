@@ -2,23 +2,37 @@ import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
   loginAsStaff,
+  telefonoUnico,
   E2E_PRODUCT_NAME,
   E2E_LOW_STOCK_PRODUCT_NAME,
   E2E_OUT_OF_STOCK_PRODUCT_NAME,
+  E2E_CLIENTE_SIN_TELEFONO_A,
+  E2E_CLIENTE_SIN_TELEFONO_B,
 } from './helpers';
 
 // Cubre lo que sales-agendar-pedido.staff.spec.ts no toca: alta de cliente nuevo desde el
 // propio formulario, las alertas de telefono/direccion faltante, los guardrails de stock y
 // descuento del carrito, el manejo de pestañas multiples y el borrador en localStorage. El
 // happy-path basico y la validacion de "sin cliente seleccionado" ya viven en el otro spec.
+//
+// PR #202: un cliente NUNCA se da de alta sin telefono. Por eso el alta desde el formulario lo exige, y las
+// alertas de "cliente sin telefono" solo se pueden ver con clientes ANTIGUOS (sembrados sin telefono a proposito).
 
-async function crearClienteNuevo(page: Page, form: Locator, nombre: string): Promise<void> {
+async function crearClienteNuevo(page: Page, form: Locator, nombre: string, telefono: string = telefonoUnico()): Promise<void> {
   await form.getByRole('link', { name: '+ Crear cliente nuevo' }).click();
   const modal = page.locator('#modal-nuevo-cliente');
   await expect(modal).toBeVisible();
   await modal.locator('#nuevo-cliente-nombre').fill(nombre);
+  await modal.locator('#nuevo-cliente-telefono').fill(telefono);
   await page.locator('#btn-guardar-nuevo-cliente').click();
   await expect(page.getByText('Cliente creado y seleccionado.')).toBeVisible();
+}
+
+// Igual que sales-agendar-pedido.staff.spec.ts: escribir el nombre exacto y salir del campo resuelve el cliente.
+async function seleccionarClienteExistente(form: Locator, nombre: string): Promise<void> {
+  await form.locator('.cliente_nombre').fill(nombre);
+  await form.locator('.cliente_nombre').press('Tab');
+  await expect(form.locator('.selected-customer-chip')).toContainText(nombre, { timeout: 10000 });
 }
 
 async function agregarProductoPorNombre(form: Locator, nombreProducto: string): Promise<void> {
@@ -29,18 +43,48 @@ async function agregarProductoPorNombre(form: Locator, nombreProducto: string): 
 }
 
 test.describe('Agendar pedido (sales.php): edge cases', () => {
-  test('un encargado crea un cliente nuevo sin telefono y ve las alertas de datos faltantes', async ({ page }) => {
+  test('un encargado crea un cliente nuevo (con telefono) y ve la alerta de que aun no tiene direccion', async ({ page }) => {
     await loginAsStaff(page, 'encargado');
     await page.goto('views/sales.php');
     const form = page.locator('.formulario-venta').first();
 
-    const nombreCliente = `Playwright Sales Sin Telefono ${Date.now()}`;
-    await crearClienteNuevo(page, form, nombreCliente);
+    const nombreCliente = `Playwright Sales Cliente Nuevo ${Date.now()}`;
+    await crearClienteNuevo(page, form, nombreCliente, '3319876543');
 
     await expect(form.locator('.selected-customer-chip')).toContainText(nombreCliente);
-    await expect(form.locator('.cliente-sin-telefono-alert')).toBeVisible();
+    // El telefono capturado en el alta ya viene en el formulario: ya no hay alerta de "sin telefono".
+    await expect(form.locator('.cliente_telefono')).toHaveValue('(331) - 987 - 6543');
+    await expect(form.locator('.cliente-sin-telefono-alert')).toBeHidden();
     await expect(form.locator('.customer-address-select')).toHaveValue('');
     await expect(form.getByText('Este cliente no tiene una direccion valida.')).toBeVisible();
+  });
+
+  test('no se puede crear un cliente nuevo sin telefono: el modal avisa y no se selecciona nada', async ({ page }) => {
+    await loginAsStaff(page, 'encargado');
+    await page.goto('views/sales.php');
+    const form = page.locator('.formulario-venta').first();
+
+    await form.getByRole('link', { name: '+ Crear cliente nuevo' }).click();
+    const modal = page.locator('#modal-nuevo-cliente');
+    await expect(modal).toBeVisible();
+    const nombreCliente = `Playwright Sales Sin Telefono ${Date.now()}`;
+    await modal.locator('#nuevo-cliente-nombre').fill(nombreCliente);
+    await page.locator('#btn-guardar-nuevo-cliente').click();
+
+    await expect(modal.locator('#nuevo-cliente-error')).toContainText('El telefono es obligatorio y debe tener 10 digitos.');
+    await expect(modal).toBeVisible();
+    await expect(page.getByText('Cliente creado y seleccionado.')).toHaveCount(0);
+    await expect(form.locator('.selected-customer-chip')).toHaveCount(0);
+  });
+
+  test('un cliente antiguo sin telefono muestra la alerta de datos faltantes', async ({ page }) => {
+    await loginAsStaff(page, 'encargado');
+    await page.goto('views/sales.php');
+    const form = page.locator('.formulario-venta').first();
+
+    await seleccionarClienteExistente(form, E2E_CLIENTE_SIN_TELEFONO_A);
+    await expect(form.locator('.cliente-sin-telefono-alert')).toBeVisible();
+    await expect(form.locator('.cliente_telefono')).toHaveValue('');
   });
 
   test('agregar telefono desde la alerta lo guarda y quita la alerta', async ({ page }) => {
@@ -48,8 +92,7 @@ test.describe('Agendar pedido (sales.php): edge cases', () => {
     await page.goto('views/sales.php');
     const form = page.locator('.formulario-venta').first();
 
-    const nombreCliente = `Playwright Sales Agregar Tel ${Date.now()}`;
-    await crearClienteNuevo(page, form, nombreCliente);
+    await seleccionarClienteExistente(form, E2E_CLIENTE_SIN_TELEFONO_B);
     await expect(form.locator('.cliente-sin-telefono-alert')).toBeVisible();
 
     await form.locator('.cliente-editar-telefono-link').click();
@@ -68,7 +111,7 @@ test.describe('Agendar pedido (sales.php): edge cases', () => {
     await page.goto('views/sales.php');
     const form = page.locator('.formulario-venta').first();
 
-    await crearClienteNuevo(page, form, `Playwright Sales Sin Tel Submit ${Date.now()}`);
+    await seleccionarClienteExistente(form, E2E_CLIENTE_SIN_TELEFONO_A);
     await agregarProductoPorNombre(form, E2E_PRODUCT_NAME);
     await expect(form.locator('.producto-item')).toHaveCount(1);
 

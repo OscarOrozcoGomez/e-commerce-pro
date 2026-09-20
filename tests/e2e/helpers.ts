@@ -45,6 +45,18 @@ export const E2E_MAYOREO_PRODUCT_NAME = 'Playwright E2E Mayoreo Product';
 export const E2E_CLEANUP_PRODUCT_NAME = 'Playwright E2E Cleanup Reservations Product';
 // Cliente fijo (no autoregistrado) con domicilio guardado, para views/sales.php.
 export const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
+// Clientes "legados" SIN telefono (ya no se pueden dar de alta asi desde el PR #202). A solo se lee; B lo modifica
+// el test de "agregar telefono desde la alerta". Deben coincidir con scripts/seed_e2e_test_data.php.
+export const E2E_CLIENTE_SIN_TELEFONO_A = 'Playwright E2E Cliente Sin Telefono A';
+export const E2E_CLIENTE_SIN_TELEFONO_B = 'Playwright E2E Cliente Sin Telefono B';
+
+/**
+ * Telefono de 10 digitos unico por llamada. Desde el PR #202 register.php lo exige, y si coincide con el de un
+ * cliente existente la cuenta se enlaza a ESE cliente (findClienteByPhone), asi que no puede repetirse.
+ */
+export function telefonoUnico(): string {
+  return `33${Math.floor(Math.random() * 1e8).toString().padStart(8, "0")}`;
+}
 
 /**
  * Registra e inicia sesión con una cuenta cliente nueva y desechable.
@@ -67,6 +79,7 @@ export async function registerAndLogin(page: Page): Promise<{ nombre: string; em
   await page.goto('views/register.php');
   await page.locator('#nombre').fill(cliente.nombre);
   await page.locator('#email').fill(cliente.email);
+  await page.locator('#telefono').fill(telefonoUnico());
   await page.locator('#password').fill(cliente.password);
   await page.locator('#confirm_password').fill(cliente.password);
   await page.getByRole('button', { name: 'REGISTRARME' }).click();
@@ -101,6 +114,8 @@ export const E2E_STAFF_EMAILS = {
   // Encargado con override individual 'conceder ver_auditoria' (scripts/seed_e2e_staff_accounts.php): abre
   // Logs de Actividad > Movimientos sin ser admin.
   auditor: 'e2e-auditor@playwright.test',
+  // Vendedor exclusivo de permisos-en-vivo.staff.spec.ts (se le cambian permisos a media sesion).
+  permisosVivo: 'e2e-permisos-vivo@playwright.test',
 } as const;
 
 /**

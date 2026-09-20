@@ -22,8 +22,23 @@ test.describe('Mi Perfil', () => {
     await page.locator('#telefono').fill('abc123');
     await page.getByRole('button', { name: 'Guardar Cambios' }).click();
 
-    await expect(page.getByText('Si capturas teléfono, debe tener 10 dígitos con formato (331) - 863 - 5185.')).toBeVisible();
+    await expect(page.getByText('El teléfono es obligatorio: debe tener 10 dígitos con formato (331) - 863 - 5185.')).toBeVisible();
     // El nombre sigue siendo el original: el guardado es todo-o-nada, no se aplicó nada.
+    await expect(page.locator('#nombre')).toHaveValue(cliente.nombre);
+  });
+
+  // PR #202: el telefono ya no se puede dejar vacio (antes era opcional y borrarlo se permitia).
+  test('borrar el teléfono del perfil se rechaza: ya es obligatorio', async ({ page }) => {
+    const cliente = await registerAndLogin(page);
+    await page.goto('views/mi_perfil.php');
+    await expect(page.locator('#telefono')).not.toHaveValue('');
+
+    // Se quita el "required" nativo para llegar al chequeo del SERVIDOR (el que protege ante un POST directo).
+    await page.locator('#telefono').evaluate((el) => { (el as HTMLInputElement).required = false; });
+    await page.locator('#telefono').fill('');
+    await page.getByRole('button', { name: 'Guardar Cambios' }).click();
+
+    await expect(page.getByText('El teléfono es obligatorio: debe tener 10 dígitos con formato (331) - 863 - 5185.')).toBeVisible();
     await expect(page.locator('#nombre')).toHaveValue(cliente.nombre);
   });
 

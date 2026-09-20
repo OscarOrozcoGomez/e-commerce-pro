@@ -73,7 +73,7 @@ test.describe('Asignación masiva de categorías', () => {
   });
 
   test('un encargado puede asignar una categoría existente pero no puede crear una nueva', async ({ page }) => {
-    // Un encargado no puede crear categorías (solo admin), así que primero sembramos
+    // Un encargado no trae el permiso crear_categorias (PR #205: antes era "solo admin" por rol), así que primero sembramos
     // una vía admin para que el encargado tenga algo que elegir en la pestaña "Existente".
     const nombreCategoria = `Playwright BAC Encargado Categoria ${Date.now()}`;
     await loginAsStaff(page, 'admin');
@@ -92,7 +92,7 @@ test.describe('Asignación masiva de categorías', () => {
 
     // La pestaña "Nueva" le muestra un aviso en vez del input de texto.
     await page.locator('#bac-tab-nueva').click();
-    await expect(page.getByText('Solo un administrador puede crear categorías nuevas.')).toBeVisible();
+    await expect(page.getByText('No tienes permiso para crear categorías nuevas.')).toBeVisible();
     await expect(page.locator('#bac-nueva-categoria')).toHaveCount(0);
 
     await page.locator('#bac-tab-existente').click();

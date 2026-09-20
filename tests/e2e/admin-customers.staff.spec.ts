@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { loginAsStaff } from './helpers';
+import { loginAsStaff, telefonoUnico } from './helpers';
 
 test.describe('Admin: alta de cliente (walk-in)', () => {
   test('crear un cliente nuevo desde el modal lo muestra en la tabla', async ({ page }) => {
@@ -57,6 +57,8 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await page.getByRole('link', { name: 'Nuevo cliente' }).click();
     const modal = page.locator('#modal-crear-cliente');
     await modal.locator('input[name="nombre"]').fill(nombre);
+    // PR #202: ningun cliente se da de alta sin telefono.
+    await modal.locator('input[name="telefono"]').fill(telefonoUnico());
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
 
@@ -82,6 +84,8 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await page.getByRole('link', { name: 'Nuevo cliente' }).click();
     const modal = page.locator('#modal-crear-cliente');
     await modal.locator('input[name="nombre"]').fill(nombre);
+    // PR #202: ningun cliente se da de alta sin telefono.
+    await modal.locator('input[name="telefono"]').fill(telefonoUnico());
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
 
@@ -101,6 +105,8 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
     await page.getByRole('link', { name: 'Nuevo cliente' }).click();
     const modal = page.locator('#modal-crear-cliente');
     await modal.locator('input[name="nombre"]').fill(nombre);
+    // PR #202: ningun cliente se da de alta sin telefono.
+    await modal.locator('input[name="telefono"]').fill(telefonoUnico());
     await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
     await expect(page.locator('.manage-customers-name', { hasText: nombre })).toBeVisible({ timeout: 20000 });
 
@@ -124,5 +130,23 @@ test.describe('Admin: alta de cliente (walk-in)', () => {
       expect(estado.visibleCount).toBe(1);
       expect(estado.todasCoinciden).toBe(true);
     }).toPass({ timeout: 30000 });
+  });
+
+  // PR #202: un cliente nunca se da de alta sin telefono (la ruta de entrega y los avisos por WhatsApp lo necesitan).
+  test('no se puede crear un cliente sin teléfono: el campo es obligatorio y el cliente no aparece en la tabla', async ({ page }) => {
+    await loginAsStaff(page, 'admin');
+    await page.goto('views/manage_customers.php');
+
+    const nombre = `Playwright Cliente Sin Telefono ${Date.now()}`;
+    await page.getByRole('link', { name: 'Nuevo cliente' }).click();
+    const modal = page.locator('#modal-crear-cliente');
+    await modal.locator('input[name="nombre"]').fill(nombre);
+    await expect(modal.locator('input[name="telefono"]')).toHaveAttribute('required', '');
+    await modal.getByRole('button', { name: /Crear|Guardar/ }).click();
+
+    // El navegador frena el envio (campo requerido vacio): el modal sigue abierto y no se creo nada.
+    await expect(modal).toBeVisible();
+    expect(await modal.locator('input[name="telefono"]').evaluate((el) => (el as HTMLInputElement).validity.valueMissing)).toBe(true);
+    await expect(page.locator('.manage-customers-name', { hasText: nombre })).toHaveCount(0);
   });
 });

@@ -48,7 +48,12 @@ test.describe('Cancelar pedido: edge cases', () => {
 
     // "Otro motivo" es requiere_detalle=1 (ver migración 20260817_000002) -- confirmar sin
     // llenar el textarea debe bloquearse en el propio Swal (preConfirm), sin llamar la API.
-    await page.locator('#swal-motivo-cancelacion').selectOption({ label: 'Otro motivo' });
+    // Bajo carga el evento change puede dispararse antes de que el Swal enganche su manejador (y el textarea del
+    // detalle nunca se muestra): se reintenta la seleccion hasta que el textarea aparezca.
+    await expect(async () => {
+      await page.locator('#swal-motivo-cancelacion').selectOption({ label: 'Otro motivo' });
+      await expect(page.locator('#swal-detalle-cancelacion')).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 15000 });
     await page.getByRole('button', { name: 'Sí, cancelar pedido' }).click();
     await expect(page.locator('.swal2-validation-message')).toHaveText('Cuéntanos brevemente el motivo de tu cancelación.');
     expect(apiCalled).toBe(false);

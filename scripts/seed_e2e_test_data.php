@@ -94,6 +94,11 @@ $productsToSeed = [
 const E2E_SALES_CLIENTE_NOMBRE = 'Playwright E2E Sales Cliente';
 const E2E_SALES_CLIENTE_TELEFONO = '3320001122';
 const E2E_SALES_CLIENTE_DIRECCION = 'Av. Vallarta 1500, Guadalajara, Jal.';
+// Clientes "legados" SIN telefono (de antes del PR #202, que ya no deja dar de alta ninguno asi) para probar las
+// alertas de sales.php de un cliente sin telefono. A solo se lee; B lo modifica la prueba de "agregar telefono desde
+// la alerta" -- por eso son dos: los specs corren en paralelo y una prueba no puede arruinar a la otra. Se re-siembran
+// SIN telefono en cada corrida (ver abajo). Deben coincidir con tests/e2e/helpers.ts.
+const E2E_CLIENTES_SIN_TELEFONO = ['Playwright E2E Cliente Sin Telefono A', 'Playwright E2E Cliente Sin Telefono B'];
 
 // resolvePickupWarehouseId() (core/auth.php) solo reconoce como sucursal publica de
 // pickup un almacen cuyo nombre contenga "papeler" o "liz" -- ninguno de los que
@@ -143,7 +148,7 @@ try {
         $nombre = (function_exists('piiIsEncryptedValue') && piiIsEncryptedValue($nombreRaw))
             ? trim((string) piiDecryptValue($nombreRaw))
             : $nombreRaw;
-        if ($nombre !== E2E_SALES_CLIENTE_NOMBRE && strpos($nombre, 'Playwright ') === 0) {
+        if (!in_array($nombre, [E2E_SALES_CLIENTE_NOMBRE, ...E2E_CLIENTES_SIN_TELEFONO], true) && strpos($nombre, 'Playwright ') === 0) {
             $idsDesechables[] = (int) $c['id_cliente'];
         }
     }
@@ -541,6 +546,21 @@ try {
     }
 
     echo "Seed OK: " . E2E_SALES_CLIENTE_NOMBRE . " -> id_cliente={$idCliente}, con domicilio 'Casa'\n";
+
+    foreach (E2E_CLIENTES_SIN_TELEFONO as $nombreSinTelefono) {
+        $stmt = $pdo->prepare('SELECT id_cliente FROM clientes WHERE nombre = :nombre LIMIT 1');
+        $stmt->execute(['nombre' => $nombreSinTelefono]);
+        $idSinTelefono = (int) $stmt->fetchColumn();
+        if ($idSinTelefono <= 0) {
+            $pdo->prepare('INSERT INTO clientes (nombre, telefono, estado, id_almacen) VALUES (:nombre, NULL, "activo", :id_almacen)')
+                ->execute(['nombre' => $nombreSinTelefono, 'id_almacen' => $idAlmacen]);
+            $idSinTelefono = (int) $pdo->lastInsertId();
+        } else {
+            $pdo->prepare('UPDATE clientes SET telefono = NULL, estado = "activo", id_almacen = :id_almacen WHERE id_cliente = :id_cliente')
+                ->execute(['id_almacen' => $idAlmacen, 'id_cliente' => $idSinTelefono]);
+        }
+        echo "Seed OK: {$nombreSinTelefono} -> id_cliente={$idSinTelefono}, SIN telefono\n";
+    }
 
     $pdo->commit();
     exit(0);

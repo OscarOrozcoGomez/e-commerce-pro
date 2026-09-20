@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { loginAsStaff, registerAndLogin } from './helpers';
+import { loginAsStaff, registerAndLogin, telefonoUnico } from './helpers';
 
 // Auditoría completa (PR #201): views/activity_logs.php > pestaña "Movimientos" (logs_auditoria) responde
 // "quién hizo qué, cuándo y desde dónde, con el valor de antes y de después". Este spec prueba la cadena
@@ -184,6 +184,7 @@ test.describe('Auditoría: Movimientos (activity_logs.php)', () => {
     await page.goto('views/register.php');
     await page.locator('#nombre').fill(nombre);
     await page.locator('#email').fill(email);
+    await page.locator('#telefono').fill(telefonoUnico());
     await page.locator('#password').fill(password);
     await page.locator('#confirm_password').fill(password);
     await page.getByRole('button', { name: 'REGISTRARME' }).click();

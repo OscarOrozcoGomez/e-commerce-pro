@@ -33,6 +33,10 @@ $staffAccounts = [
     // Encargado (NO admin) al que se le concede SOLO el permiso 'ver_auditoria' por override individual (ver
     // abajo): prueba que la vista de Movimientos abre por permiso y no solo por ser admin.
     ['rol' => 'encargado', 'nombre' => 'Playwright E2E Auditor', 'email' => 'e2e-auditor@playwright.test', 'almacen' => 'default'],
+    // Vendedor EXCLUSIVO de permisos-en-vivo.staff.spec.ts: esa prueba le concede/quita permisos a media
+    // sesion (scripts/e2e_permiso_override.php). No se comparte con otros specs porque corren en paralelo y
+    // se contaminarian entre si; abajo se le borran los overrides que haya dejado una corrida interrumpida.
+    ['rol' => 'vendedor', 'nombre' => 'Playwright E2E Permisos En Vivo', 'email' => 'e2e-permisos-vivo@playwright.test', 'almacen' => 'default'],
 ];
 
 $pdo = getPDO();
@@ -131,6 +135,10 @@ try {
         )->execute(['u' => $ids['id_usuario'], 'p' => $ids['id_permiso'], 'efecto' => $efectoDeny]);
         echo "Seed OK: {$emailDeny} -> {$efectoDeny} {$claveDeny} (override individual)\n";
     }
+
+    // La cuenta de permisos-en-vivo arranca SIEMPRE sin overrides (una corrida interrumpida pudo dejarle alguno).
+    $pdo->prepare('DELETE FROM usuario_permisos WHERE id_usuario = (SELECT id_usuario FROM usuarios WHERE email = :email)')
+        ->execute(['email' => 'e2e-permisos-vivo@playwright.test']);
 
     $pdo->commit();
     exit(0);
