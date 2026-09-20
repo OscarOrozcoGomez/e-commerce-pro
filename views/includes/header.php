@@ -606,6 +606,7 @@
         var CURRENT_USER_WAREHOUSE_ID = window.CURRENT_USER_WAREHOUSE_ID;
         const BASE_URL_HEADER = '<?php echo BASE_URL; ?>';
         const FAVORITES_API_URL = '<?php echo BASE_URL; ?>api/favorites.php';
+        const FAVORITES_CSRF_TOKEN = <?php echo json_encode(getCsrfToken()); ?>;
         const IS_CHAT_PAGE_VIEW = window.location.pathname.toLowerCase().includes('/views/chat.php');
 
         // Persistir parametros de marketing para atribucion de conversiones.
@@ -801,7 +802,7 @@
             try {
                 const response = await fetch(FAVORITES_API_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': FAVORITES_CSRF_TOKEN },
                     body: JSON.stringify({
                         action: 'sync',
                         items: productIds

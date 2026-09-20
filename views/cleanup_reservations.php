@@ -243,6 +243,7 @@ function liberarProducto(detailId, productName, maxQty) {
 
 function ejecutarLiberacion(payload) {
     payload.threshold_hours = thresholdHours;
+    payload.csrf_token = <?php echo json_encode(getCsrfToken()); ?>;
     payload.apply_threshold = applyThreshold;
     fetch('<?php echo BASE_URL; ?>api/cleanup_reservations.php', {
         method: 'POST',

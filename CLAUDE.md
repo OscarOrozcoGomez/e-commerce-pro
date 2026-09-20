@@ -63,6 +63,8 @@ C:\xampp\php\php.exe scripts/migrate.php --to=20260907_120000     # aplicar hast
 
 Archivo grande (~2900 líneas). Helpers clave: `requireAuth()`, `hasPermission(string $clave)`, `requirePermission(string $clave, string $redirect='')`, `isAdmin()`, `isSuperAdmin()`, `isCliente()`. Las **claves de permiso son strings sembradas por migración** (p.ej. `gestionar_caducidades`, `asignar_entregas`, `transferir_stock`, `ver_conversaciones_whatsapp`). La administración de roles/permisos vive en `views/roles_permisos.php` + funciones `rp*`. CSRF: `getCsrfToken()`, `csrfInput()`, `validateCsrfToken()`.
 
+**Seguridad de `api/` (`core/api_security_utils.php`):** la app autentica con la cookie de sesión de PHP (HttpOnly, SameSite=Lax), no con tokens por petición. Por eso **todo endpoint que escribe con sesión debe llamar `apiRequerirCsrf()`** (después de comprobar sesión/permisos; el token viaja en la cabecera `X-CSRF-Token`, en el campo `csrf_token` del form/FormData o en el JSON) y, si solo admite POST, `apiRequerirMetodo('POST')`. Los endpoints públicos (sin sesión) llevan `apiLimitarPeticiones('nombre', max_por_minuto)`. Los servidor-a-servidor (puente de WhatsApp, migraciones) usan un token compartido **solo por cabecera** (`X-Webhook-Token`, `X-Migrations-Token`) comparado con `hash_equals()`; nunca por `?token=`. El "cron local" de `cleanup_reservations.php` se decide con `apiEsCronLocal()` (127.0.0.1 **sin** cabeceras de proxy). `ApiSecurityContractTest` falla si un endpoint nuevo escribe con sesión sin CSRF (excepciones justificadas en `EXCEPCIONES_CSRF`).
+
 ### Entornos y secretos
 
 - `APP_ENV` por defecto es `qa` en localhost/CLI, `production` en remoto.

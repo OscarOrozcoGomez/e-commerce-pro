@@ -4,8 +4,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/site_behavior.php';
+require_once __DIR__ . '/../core/api_security_utils.php';
 
 ignore_user_abort(true);
+
+// Publico (telemetria de visitas): tope generoso por IP para que no lo usen de manguera de escritura.
+apiLimitarPeticiones('log_activity', 600);
 
 function respondNoContent(): void
 {
