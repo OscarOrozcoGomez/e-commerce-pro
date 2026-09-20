@@ -21,6 +21,10 @@ $scopeIsAdmin = isAdmin();
 $error = '';
 $success = '';
 $sessionFlashKey = 'manage_customers_flash';
+// Id del cliente recien creado (viaja en el aviso de un solo uso tras la redireccion) para ofrecer
+// agendarle una venta de inmediato.
+$clienteRecienCreadoId = 0;
+$nuevoClienteFlashId = 0;
 
 // Llegar con ?id_cliente=NN (p.ej. desde sales.php al hacer clic en el
 // nombre del cliente ya seleccionado) filtra el listado a ese cliente y
@@ -36,6 +40,7 @@ if (isset($_SESSION[$sessionFlashKey]) && is_array($_SESSION[$sessionFlashKey]))
     unset($_SESSION[$sessionFlashKey]);
     $error = isset($flash['type']) && $flash['type'] === 'error' ? (string)($flash['message'] ?? '') : $error;
     $success = isset($flash['type']) && $flash['type'] === 'success' ? (string)($flash['message'] ?? '') : $success;
+    $clienteRecienCreadoId = isset($flash['type']) && $flash['type'] === 'success' ? (int)($flash['nuevo_cliente_id'] ?? 0) : 0;
 }
 
 $hasClienteDireccionesTable = false;
@@ -105,25 +110,7 @@ $normalizePhone = static function (string $phone): ?string {
  * @return array{lat: float, lng: float}|null
  */
 $resolveDireccionCoords = static function (string $mapsLink, string $direccion): ?array {
-    static $apiKey = null;
-    if ($apiKey === null) {
-        $apiKey = getMapsApiKey(false);
-    }
-
-    $mapsLink = trim($mapsLink);
-    if ($mapsLink !== '') {
-        $coords = deliveryExtractCoordinatesFromMapsUrl($mapsLink);
-        if ($coords !== null) {
-            return $coords;
-        }
-        $coords = obtenerCoordenadasDesdeUrl($mapsLink, $apiKey);
-        if ($coords !== null) {
-            return $coords;
-        }
-    }
-
-    $direccion = trim($direccion);
-    return $direccion !== '' ? deliveryGeocodeAddress($direccion, $apiKey) : null;
+    return clienteResolverCoordsDireccion($mapsLink, $direccion);
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
@@ -275,6 +262,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     auditDiff([], $auditDespues, array_keys($auditDespues))['despues']
                 );
                 $success = 'Cliente creado correctamente.';
+                $nuevoClienteFlashId = $nuevoClienteId;
             } elseif ($accion === 'editar_cliente') {
                 $nombre = trim((string)($_POST['nombre'] ?? ''));
                 $email = trim((string)($_POST['email'] ?? ''));
@@ -566,6 +554,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             $_SESSION[$sessionFlashKey] = [
                 'type' => $error !== '' ? 'error' : 'success',
                 'message' => $error !== '' ? $error : $success,
+                'nuevo_cliente_id' => $error === '' ? $nuevoClienteFlashId : 0,
             ];
             header('Location: ' . basename($_SERVER['PHP_SELF']));
             exit;
@@ -630,6 +619,23 @@ foreach ($clientes as &$cliente) {
     $cliente['direcciones'] = $direccionesPorCliente[(int)$cliente['id_cliente']] ?? [];
 }
 unset($cliente);
+
+// Tras crear un cliente se ofrece agendarle una venta de una vez (solo a quien puede vender: el
+// permiso de ventas es el que abre views/sales.php). Con 'asignar_entregas' la venta se agenda a
+// domicilio; sin el, es una venta en sucursal (mostrador).
+$clienteRecienCreado = null;
+if ($clienteRecienCreadoId > 0 && hasPermission('realizar_ventas')) {
+    foreach ($clientes as $clienteNuevo) {
+        if ((int)$clienteNuevo['id_cliente'] === $clienteRecienCreadoId) {
+            $clienteRecienCreado = [
+                'id_cliente' => $clienteRecienCreadoId,
+                'nombre' => (string)$clienteNuevo['nombre'],
+                'puede_agendar' => hasPermission('asignar_entregas'),
+            ];
+            break;
+        }
+    }
+}
 
 // El ORDER BY del query ordena el texto cifrado (no el nombre real) cuando el
 // cifrado de PII esta activo, asi que el orden alfabetico real se aplica aqui,
@@ -845,6 +851,55 @@ include __DIR__ . '/includes/header.php';
     .modal-content {
         max-height: 82vh;
         overflow-y: auto;
+    }
+
+    /* Confirmacion propia (#modal-confirmar-accion) y aviso "Cliente creado" (#modal-venta-tras-crear):
+       compactos en escritorio; en movil ocupan casi todo el ancho (92% del .modal de arriba) con los
+       botones apilados y comodos de tocar. */
+    #modal-confirmar-accion,
+    #modal-venta-tras-crear {
+        max-width: 440px !important;
+    }
+
+    #modal-confirmar-accion .modal-content,
+    #modal-venta-tras-crear .modal-content {
+        padding: 20px 20px 8px;
+    }
+
+    #modal-confirmar-accion .modal-footer,
+    #modal-venta-tras-crear .modal-footer {
+        height: auto;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 20px 16px;
+    }
+
+    #modal-confirmar-accion .modal-footer .btn,
+    #modal-venta-tras-crear .modal-footer .btn,
+    #modal-confirmar-accion .modal-footer .btn-flat,
+    #modal-venta-tras-crear .modal-footer .btn-flat {
+        margin: 0;
+    }
+
+    @media (max-width: 600px) {
+        #modal-confirmar-accion .modal-footer,
+        #modal-venta-tras-crear .modal-footer {
+            flex-direction: column-reverse;
+            align-items: stretch;
+        }
+
+        #modal-confirmar-accion .modal-footer .btn,
+        #modal-venta-tras-crear .modal-footer .btn,
+        #modal-confirmar-accion .modal-footer .btn-flat,
+        #modal-venta-tras-crear .modal-footer .btn-flat {
+            width: 100%;
+            height: 48px;
+            line-height: 48px;
+            text-align: center;
+            padding: 0 12px;
+        }
     }
 
     /* Modal de direcciones: pantalla completa en moviles para facilitar el uso tactil */
@@ -1126,7 +1181,7 @@ include __DIR__ . '/includes/header.php';
                                 <input type="hidden" name="id_usuario" value="<?php echo (int)($c['id_usuario'] ?? 0); ?>">
                                 <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
                                 <input type="hidden" name="accion" value="eliminar_cliente">
-                                <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar cliente" onclick="return confirm('¿Eliminar este cliente? Sus pedidos quedaran sin cliente asignado y sus direcciones se borraran.');">
+                                <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar cliente" data-confirmar="Sus pedidos quedaran sin cliente asignado y sus direcciones se borraran." data-confirmar-titulo="¿Eliminar este cliente?" data-confirmar-boton="Si, eliminar" data-confirmar-color="red darken-2">
                                     <i class="material-icons">delete_forever</i>
                                 </button>
                             </form>
@@ -1231,7 +1286,7 @@ include __DIR__ . '/includes/header.php';
                             <input type="hidden" name="id_usuario" value="<?php echo (int)($c['id_usuario'] ?? 0); ?>">
                             <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
                             <input type="hidden" name="accion" value="eliminar_cliente">
-                            <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar cliente" onclick="return confirm('¿Eliminar este cliente? Sus pedidos quedaran sin cliente asignado y sus direcciones se borraran.');">
+                            <button type="submit" class="btn-small red darken-2 waves-effect waves-light" title="Eliminar cliente" data-confirmar="Sus pedidos quedaran sin cliente asignado y sus direcciones se borraran." data-confirmar-titulo="¿Eliminar este cliente?" data-confirmar-boton="Si, eliminar" data-confirmar-color="red darken-2">
                                 <i class="material-icons left" style="margin-right:4px;">delete_forever</i>Eliminar
                             </button>
                         </form>
@@ -1247,7 +1302,7 @@ include __DIR__ . '/includes/header.php';
                     $horariosCliente = $horariosPorCliente[(int)$c['id_cliente']] ?? [];
                     $waPhoneCliente = waBuildBusinessLinkPhone((string)($c['telefono'] ?? ''));
                 ?>
-                <div id="modal-editar-cliente-<?php echo (int)$c['id_cliente']; ?>" class="modal" style="max-width: 640px;">
+                <div id="modal-editar-cliente-<?php echo (int)$c['id_cliente']; ?>" class="modal no-autoinit" style="max-width: 640px;">
                     <div class="modal-content">
                         <h5>Editar cliente</h5>
                         <form method="POST">
@@ -1281,14 +1336,14 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
 
-                <div id="modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="modal modal-fixed-footer manage-customers-direcciones-modal" data-cliente-id="<?php echo (int)$c['id_cliente']; ?>" style="max-width: 760px;">
+                <div id="modal-dir-<?php echo (int)$c['id_cliente']; ?>" class="modal modal-fixed-footer manage-customers-direcciones-modal no-autoinit" data-cliente-id="<?php echo (int)$c['id_cliente']; ?>" style="max-width: 760px;">
                     <div class="modal-content">
                         <h5>Direcciones de <?php echo esc((string)$c['nombre']); ?></h5>
                         <p class="grey-text" style="margin-top:0;">Agrega una o varias direcciones con alias para que ventas y reparto puedan elegir correctamente el domicilio.</p>
                         <div class="divider"></div>
                         <div class="row" style="margin-top:20px;">
                             <div class="col s12 m6">
-                                <ul class="collection">
+                                <ul class="collection" data-refresco="direcciones">
                                     <?php if (empty($direccionesCliente)): ?>
                                         <li class="collection-item grey-text center">Sin direcciones registradas.</li>
                                     <?php else: ?>
@@ -1350,7 +1405,7 @@ include __DIR__ . '/includes/header.php';
                                                         <input type="hidden" name="accion" value="eliminar_direccion">
                                                         <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
                                                         <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
-                                                        <button type="submit" class="btn-small red waves-effect waves-light" onclick="return confirm('¿Eliminar esta direccion?')">Eliminar</button>
+                                                        <button type="submit" class="btn-small red waves-effect waves-light" data-confirmar="Se borrara del cliente y ya no estara disponible para ventas ni reparto." data-confirmar-titulo="¿Eliminar esta direccion?" data-confirmar-boton="Si, eliminar" data-confirmar-color="red">Eliminar</button>
                                                     </form>
                                                 </div>
                                                 <?php if (!$confirmadaCliente): ?>
@@ -1367,7 +1422,7 @@ include __DIR__ . '/includes/header.php';
                                                             <input type="hidden" name="accion" value="marcar_direccion_confirmada">
                                                             <input type="hidden" name="id_cliente" value="<?php echo (int)$c['id_cliente']; ?>">
                                                             <input type="hidden" name="id_direccion" value="<?php echo (int)$d['id_direccion']; ?>">
-                                                            <button type="submit" class="btn-small teal waves-effect waves-light" onclick="return confirm('¿El cliente ya confirmo que esta direccion es correcta?')">
+                                                            <button type="submit" class="btn-small teal waves-effect waves-light" data-confirmar="Solo marcala si el cliente ya te dijo que el domicilio es correcto." data-confirmar-titulo="¿El cliente ya confirmo esta direccion?" data-confirmar-boton="Si, marcar confirmada" data-confirmar-color="teal">
                                                                 <i class="material-icons tiny">check</i> Marcar confirmada
                                                             </button>
                                                         </form>
@@ -1425,6 +1480,7 @@ include __DIR__ . '/includes/header.php';
                                     <strong>Preferencias de entrega por horario</strong>
                                     <p class="grey-text" style="margin:8px 0 0;">Registra ventanas por dia para este cliente y domicilio. La ruta los tomara en cuenta al ordenar las paradas.</p>
 
+                                    <div data-refresco="horarios">
                                     <?php if (!empty($horariosCliente)): ?>
                                         <ul class="collection" style="margin-top:12px;">
                                             <?php foreach ($horariosCliente as $horario): ?>
@@ -1455,6 +1511,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php else: ?>
                                         <p class="grey-text" style="margin:12px 0 0;">Todavia no hay horarios registrados para este cliente.</p>
                                     <?php endif; ?>
+                                    </div>
 
                                     <form method="POST" style="margin-top:16px;" data-schedule-form id="schedule-form-<?php echo (int)$c['id_cliente']; ?>">
                                         <?php echo csrfInput(); ?>
@@ -1542,7 +1599,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<div id="modal-crear-cliente" class="modal manage-customers-direcciones-modal" data-cliente-id="crear" style="max-width: 720px;">
+<div id="modal-crear-cliente" class="modal manage-customers-direcciones-modal no-autoinit" data-cliente-id="crear" style="max-width: 720px;">
     <div class="modal-content">
         <h5>Nuevo cliente</h5>
         <form method="POST" id="dir-form-crear">
@@ -1597,6 +1654,39 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+
+<!-- Confirmacion propia (en lugar de confirm() del navegador). La dispara cualquier boton de
+     envio con data-confirmar; ver el listener de submit en el script de abajo. -->
+<div id="modal-confirmar-accion" class="modal no-autoinit" style="max-width: 440px;">
+    <div class="modal-content">
+        <h5 id="confirmar-accion-titulo">¿Confirmar?</h5>
+        <p id="confirmar-accion-mensaje" class="grey-text text-darken-2"></p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect btn-flat">Cancelar</a>
+        <button type="button" id="confirmar-accion-aceptar" class="btn waves-effect waves-light">Aceptar</button>
+    </div>
+</div>
+
+<?php if ($clienteRecienCreado !== null): ?>
+<!-- Tras crear un cliente: ofrece ir directo a agendarle una venta (views/sales.php?id_cliente=NN
+     abre la venta con el cliente, su telefono y su domicilio ya cargados). -->
+<div id="modal-venta-tras-crear" class="modal no-autoinit">
+    <div class="modal-content">
+        <h5><i class="material-icons left green-text">check_circle</i> Cliente creado</h5>
+        <p class="grey-text text-darken-2" style="font-size:1.05rem;">
+            <strong><?php echo esc($clienteRecienCreado['nombre']); ?></strong> ya quedo registrado.
+            ¿Quieres <?php echo $clienteRecienCreado['puede_agendar'] ? 'agendarle una venta' : 'registrarle una venta'; ?> ahora?
+        </p>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect btn-flat">Ahora no</a>
+        <a href="<?php echo BASE_URL; ?>views/sales.php?id_cliente=<?php echo (int)$clienteRecienCreado['id_cliente']; ?>" id="btn-ir-a-venta" class="waves-effect waves-light btn green darken-1">
+            <i class="material-icons left">event</i> <?php echo $clienteRecienCreado['puede_agendar'] ? 'Si, agendar venta' : 'Si, registrar venta'; ?>
+        </a>
+    </div>
+</div>
+<?php endif; ?>
 
 <script src="https://maps.googleapis.com/maps/api/js?key=<?php echo GOOGLE_MAPS_API_KEY; ?>&libraries=places&callback=initAutocompleteManageCustomers" async defer></script>
 
@@ -1712,8 +1802,14 @@ function actualizarMapaDireccionDesdeCoords(idCliente, coords) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    M.Modal.init(document.querySelectorAll('.modal:not(.manage-customers-direcciones-modal)'));
+    // Estos modales llevan `no-autoinit` para que M.AutoInit() del footer no los reinicialice
+    // con las opciones por defecto. `dismissible: false`: no se cierran al hacer clic fuera ni
+    // con Esc (se perdia lo capturado); solo con Cancelar / Cerrar.
+    M.Modal.init(document.querySelectorAll('.modal:not(.manage-customers-direcciones-modal)'), {
+        dismissible: false
+    });
     M.Modal.init(document.querySelectorAll('.manage-customers-direcciones-modal'), {
+        dismissible: false,
         onOpenEnd: function(modalEl) {
             const idCliente = modalEl.dataset.clienteId;
             tryInitDireccionMap(idCliente, 20);
@@ -1956,6 +2052,241 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Cada formulario de la pagina es un POST + redireccion que recarga todo y vaciaba el buscador.
+    // Dos cosas evitan eso:
+    //  1. Los formularios de dentro de los modales de direcciones / editar cliente se envian con
+    //     fetch y solo se refresca lo que cambio (lista de direcciones, horarios, fila del cliente):
+    //     el modal no se cierra ni se recarga la pagina.
+    //  2. Los demas formularios (bloquear, eliminar cliente, crear cliente...) si recargan, pero
+    //     antes se guarda la busqueda y los filtros y se restauran al volver.
+    const filtrosStorageKey = 'manageCustomersFiltrosTrasEnvio';
+    const filtrosControles = {
+        buscar: buscarInput,
+        origen: origenSelect,
+        acceso: accesoSelect,
+        estado: estadoSelect,
+        sucursal: sucursalSelect,
+    };
+
+    function recordarEstadoAntesDeEnviar() {
+        try {
+            const guardado = {};
+            Object.keys(filtrosControles).forEach((clave) => {
+                guardado[clave] = filtrosControles[clave] ? filtrosControles[clave].value : '';
+            });
+            window.sessionStorage.setItem(filtrosStorageKey, JSON.stringify(guardado));
+        } catch (error) {
+            // Sin storage se pierde la busqueda al recargar, pero no se rompe el envio.
+        }
+    }
+
+    function mostrarAviso(texto, esError) {
+        const toast = M.toast({
+            html: '<span></span>',
+            classes: esError ? 'red darken-2' : 'green darken-2',
+            displayLength: 5000,
+        });
+        toast.el.querySelector('span').textContent = texto;
+    }
+
+    // Aviso de exito/error que la pagina imprime arriba (tapado por el modal abierto), leido de
+    // un documento HTML: { texto, esError } o null si no hay.
+    function leerAvisoDe(raiz) {
+        const aviso = raiz.querySelector('.card-panel.green.lighten-4, .card-panel.red.lighten-4');
+        const texto = aviso ? aviso.textContent.trim() : '';
+        return texto === '' ? null : { texto: texto, esError: aviso.classList.contains('red') };
+    }
+
+    function reemplazarRegion(actual, nuevo, region) {
+        const destino = actual.querySelector(`[data-refresco="${region}"]`);
+        const origen = nuevo.querySelector(`[data-refresco="${region}"]`);
+        if (destino && origen) destino.innerHTML = origen.innerHTML;
+    }
+
+    // Toma el HTML recien recibido y actualiza SOLO lo de este cliente: su fila, su tarjeta movil,
+    // el titulo y las listas de direcciones y horarios del modal. Los formularios del modal y el
+    // mapa no se tocan, asi que lo que se este escribiendo ahi no se pierde.
+    // Devuelve false si no se pudo (p.ej. sesion vencida o cliente ya inexistente).
+    function actualizarClienteDesde(doc, idCliente) {
+        const id = String(idCliente);
+        const filaNueva = doc.querySelector(`table.manage-customers-table tbody tr[data-client-id="${id}"]`);
+        const dirNuevo = doc.getElementById(`modal-dir-${id}`);
+        const dirActual = document.getElementById(`modal-dir-${id}`);
+        const filaActual = tableRows.find((fila) => fila.getAttribute('data-client-id') === id);
+        if (!filaNueva || !dirNuevo || !dirActual || !filaActual) return false;
+
+        const filaImportada = document.importNode(filaNueva, true);
+        filaActual.replaceWith(filaImportada);
+        tableRows[tableRows.indexOf(filaActual)] = filaImportada;
+
+        const tarjetaActual = cardsByClientId.get(id);
+        const tarjetaNueva = doc.querySelector(`.manage-customers-cards .manage-customers-card[data-client-id="${id}"]`);
+        if (tarjetaActual && tarjetaNueva) {
+            const tarjetaImportada = document.importNode(tarjetaNueva, true);
+            tarjetaActual.replaceWith(tarjetaImportada);
+            cardsByClientId.set(id, tarjetaImportada);
+        }
+
+        reemplazarRegion(dirActual, dirNuevo, 'direcciones');
+        reemplazarRegion(dirActual, dirNuevo, 'horarios');
+
+        const selectActual = dirActual.querySelector('.schedule-direccion');
+        const selectNuevo = dirNuevo.querySelector('.schedule-direccion');
+        if (selectActual && selectNuevo) {
+            const valorPrevio = selectActual.value;
+            selectActual.innerHTML = selectNuevo.innerHTML;
+            selectActual.value = valorPrevio;
+            if (selectActual.selectedIndex < 0) selectActual.selectedIndex = 0;
+        }
+
+        const tituloActual = dirActual.querySelector('h5');
+        const tituloNuevo = dirNuevo.querySelector('h5');
+        if (tituloActual && tituloNuevo) tituloActual.textContent = tituloNuevo.textContent;
+
+        if (typeof window.waApplyBusinessLinks === 'function') window.waApplyBusinessLinks(dirActual);
+        applyColumnPreset(readColumnPreset());
+        applyFilters();
+        return true;
+    }
+
+    // Solo los formularios de los modales de direcciones / editar cliente. "Nuevo cliente" recarga
+    // (al crearse cambia el listado completo) y la confirmacion propia no envia nada.
+    function esFormularioSinRecarga(form) {
+        const modal = form.closest('.modal');
+        return !!modal
+            && modal.id !== 'modal-crear-cliente'
+            && modal.id !== 'modal-confirmar-accion'
+            && !!form.querySelector('input[name="id_cliente"]')
+            && typeof window.fetch === 'function'
+            && typeof DOMParser !== 'undefined';
+    }
+
+    async function enviarSinRecargar(form, submitter) {
+        const idCliente = (form.querySelector('input[name="id_cliente"]') || {}).value || '';
+        const accion = (form.querySelector('input[name="accion"]') || {}).value || '';
+        const botones = Array.from(form.querySelectorAll('button[type="submit"]'));
+        botones.forEach((boton) => { boton.disabled = true; });
+
+        let html = '';
+        try {
+            let datos;
+            try {
+                datos = new FormData(form, submitter || undefined);
+            } catch (error) {
+                datos = new FormData(form); // navegadores sin soporte del segundo argumento
+            }
+            const respuesta = await fetch(form.getAttribute('action') || window.location.href, {
+                method: 'POST',
+                body: datos,
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!respuesta.ok) throw new Error('HTTP ' + respuesta.status);
+            html = await respuesta.text();
+        } catch (error) {
+            botones.forEach((boton) => { boton.disabled = false; });
+            mostrarAviso('No se pudo enviar. Revisa tu conexion e intenta de nuevo.', true);
+            return;
+        }
+        botones.forEach((boton) => { boton.disabled = false; });
+
+        // Ya se hizo el POST: si algo falla al refrescar, recargar es lo seguro (nunca reenviar).
+        try {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const aviso = leerAvisoDe(doc);
+            if (aviso) mostrarAviso(aviso.texto, aviso.esError);
+            if (aviso && aviso.esError) return; // el formulario queda como estaba para corregirlo
+
+            if (!actualizarClienteDesde(doc, idCliente)) {
+                recordarEstadoAntesDeEnviar();
+                window.location.reload();
+                return;
+            }
+            if (accion === 'agregar_direccion' || accion === 'editar_direccion') resetDireccionForm(idCliente);
+            if (accion === 'guardar_horario_direccion') resetHorarioForm(idCliente);
+        } catch (error) {
+            recordarEstadoAntesDeEnviar();
+            window.location.reload();
+        }
+    }
+
+    function enviarFormulario(form, submitter) {
+        if (esFormularioSinRecarga(form)) {
+            enviarSinRecargar(form, submitter);
+            return;
+        }
+        recordarEstadoAntesDeEnviar();
+        form.submit();
+    }
+
+    // Confirmacion propia: los botones de envio con data-confirmar abren #modal-confirmar-accion
+    // en lugar del confirm() del navegador. Va en fase de captura para correr antes que el
+    // manejador de abajo, que ignora los envios cancelados con preventDefault.
+    const confirmarModalEl = document.getElementById('modal-confirmar-accion');
+    const confirmarModal = confirmarModalEl ? M.Modal.init(confirmarModalEl) : null;
+    const confirmarBtn = document.getElementById('confirmar-accion-aceptar');
+    let envioPendienteConfirmar = null;
+
+    // Cliente recien creado: se ofrece agendarle una venta (el modal solo existe si aplica).
+    const ventaTrasCrearEl = document.getElementById('modal-venta-tras-crear');
+    if (ventaTrasCrearEl) {
+        M.Modal.init(ventaTrasCrearEl, { dismissible: true }).open();
+    }
+
+    document.addEventListener('submit', (event) => {
+        const boton = event.submitter;
+        const mensaje = boton && boton.dataset ? boton.dataset.confirmar : '';
+        if (!mensaje || !confirmarModal || !confirmarBtn) return;
+        event.preventDefault();
+        envioPendienteConfirmar = { form: event.target, submitter: boton };
+        document.getElementById('confirmar-accion-titulo').textContent = boton.dataset.confirmarTitulo || '¿Confirmar?';
+        document.getElementById('confirmar-accion-mensaje').textContent = mensaje;
+        confirmarBtn.textContent = boton.dataset.confirmarBoton || 'Aceptar';
+        confirmarBtn.className = 'btn waves-effect waves-light ' + (boton.dataset.confirmarColor || 'blue darken-2');
+        confirmarModal.open();
+    }, true);
+
+    if (confirmarBtn) {
+        confirmarBtn.addEventListener('click', () => {
+            const pendiente = envioPendienteConfirmar;
+            envioPendienteConfirmar = null;
+            if (!pendiente) return;
+            confirmarModal.close();
+            enviarFormulario(pendiente.form, pendiente.submitter);
+        });
+    }
+
+    document.addEventListener('submit', (event) => {
+        const form = event.target;
+        if (event.defaultPrevented || !form || String(form.method || '').toLowerCase() !== 'post') return;
+        if (esFormularioSinRecarga(form)) {
+            event.preventDefault();
+            enviarSinRecargar(form, event.submitter);
+            return;
+        }
+        recordarEstadoAntesDeEnviar(); // el envio normal sigue y recarga la pagina
+    });
+
+    if (PRESET_EDIT_CLIENT_ID <= 0) {
+        try {
+            const raw = window.sessionStorage.getItem(filtrosStorageKey);
+            window.sessionStorage.removeItem(filtrosStorageKey);
+            const guardado = raw ? JSON.parse(raw) : null;
+            if (guardado && typeof guardado === 'object') {
+                Object.keys(filtrosControles).forEach((clave) => {
+                    const control = filtrosControles[clave];
+                    if (!control || typeof guardado[clave] !== 'string') return;
+                    control.value = guardado[clave];
+                    // Si la opcion guardada ya no existe, el select queda sin valor: se vuelve al primero.
+                    if (control.tagName === 'SELECT' && control.selectedIndex < 0) control.selectedIndex = 0;
+                });
+                M.updateTextFields();
+            }
+        } catch (error) {
+            // Storage bloqueado o JSON invalido: se arranca sin filtros.
+        }
+    }
+
     applyFilters();
 
     if (PRESET_EDIT_CLIENT_ID > 0) {
@@ -1970,7 +2301,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
             const modalEl = document.getElementById(`modal-editar-cliente-${PRESET_EDIT_CLIENT_ID}`);
             if (!modalEl) return;
-            const instance = M.Modal.getInstance(modalEl) || M.Modal.init(modalEl);
+            const instance = M.Modal.getInstance(modalEl) || M.Modal.init(modalEl, { dismissible: false });
             instance.open();
         }, 400);
     }
