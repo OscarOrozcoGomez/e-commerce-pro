@@ -33,6 +33,13 @@ const INV_REC_DIAS_CADUCIDAD_MOVER = 90;
 const INV_REC_MIN_VISITANTES_INTERES = 3;
 /** Margen (% sobre precio de venta) desde el que se considera alto. */
 const INV_REC_MARGEN_ALTO_PCT = 40.0;
+/**
+ * Cuantos productos de "Mover" se muestran: los de mayor capital parado (los que caducan van
+ * primero). La lista completa puede tener cientos y abruma; el resumen sigue contando todos.
+ */
+const INV_REC_LIMITE_MOVER = 15;
+/** Cuantos productos sin precio/costo se listan en el aviso de configuracion. */
+const INV_REC_LIMITE_SIN_CONFIGURACION = 20;
 
 const INV_REC_ACCION_REPONER = 'reponer';
 const INV_REC_ACCION_VENTAS_PERDIDAS = 'ventas_perdidas';
@@ -82,7 +89,7 @@ function analiticaSqlProductoNoPrueba(string $alias = 'p'): string
  * caducidad, aparador, mover por estancado, sin accion.
  *
  * @param array<string, mixed> $m
- * @return array{accion:string, etiqueta:string, motivo:string, prioridad:float, cobertura_dias:?int, margen_pct:?float, capital:float}
+ * @return array{accion:string, etiqueta:string, motivo:string, prioridad:float, cobertura_dias:?int, margen_pct:?float, capital:float, falta_config:?string}
  */
 function analiticaClasificarProducto(array $m): array
 {
@@ -106,7 +113,13 @@ function analiticaClasificarProducto(array $m): array
     $hayInteres = $visitantes >= INV_REC_MIN_VISITANTES_INTERES;
     $margenAlto = $margen !== null && $margen >= INV_REC_MARGEN_ALTO_PCT;
 
-    $resultado = static function (string $accion, string $etiqueta, string $motivo, float $prioridad) use ($cobertura, $margen, $capital): array {
+    // Sin precio de venta o sin costo no se puede evaluar bien (margen, capital parado, aparador):
+    // se avisa en cada fila y en el listado de "sin configuracion".
+    $faltaPrecio = $precioVenta <= 0;
+    $faltaCosto = $precioCosto <= 0;
+    $faltaConfig = $faltaPrecio && $faltaCosto ? 'precio y costo' : ($faltaPrecio ? 'precio de venta' : ($faltaCosto ? 'costo' : null));
+
+    $resultado = static function (string $accion, string $etiqueta, string $motivo, float $prioridad) use ($cobertura, $margen, $capital, $faltaConfig): array {
         return [
             'accion' => $accion,
             'etiqueta' => $etiqueta,
@@ -115,6 +128,7 @@ function analiticaClasificarProducto(array $m): array
             'cobertura_dias' => $cobertura,
             'margen_pct' => $margen,
             'capital' => $capital,
+            'falta_config' => $faltaConfig,
         ];
     };
 
@@ -163,7 +177,8 @@ function analiticaClasificarProducto(array $m): array
             $diasACaducar < 0
                 ? 'Tiene un lote ya caducado con piezas en inventario.'
                 : 'Un lote caduca en ' . $diasACaducar . ' dias y aun tiene piezas.',
-            600 + (INV_REC_DIAS_CADUCIDAD_MOVER - $diasACaducar)
+            // Muy por encima del capital de cualquier estancado: lo que caduca se pierde, va primero.
+            100000 + (INV_REC_DIAS_CADUCIDAD_MOVER - $diasACaducar)
         );
     }
 
@@ -340,7 +355,10 @@ function analiticaMetricasProductos(PDO $pdo, ?DateTimeImmutable $ahora = null):
  * Arma las tres listas de accion (comprar, aparador, mover) mas un resumen y el contexto de
  * cuanta evidencia hay detras, para que la vista sea honesta sobre lo poco o mucho que se sabe.
  *
- * @return array{resumen: array<string, int|float>, comprar: array<int, array<string, mixed>>, aparador: array<int, array<string, mixed>>, mover: array<int, array<string, mixed>>, contexto: array<string, mixed>}
+ * "mover" muestra solo los INV_REC_LIMITE_MOVER de mayor prioridad (primero lo que caduca, luego
+ * por capital parado); el resumen cuenta todos.
+ *
+ * @return array{resumen: array<string, int|float>, comprar: array<int, array<string, mixed>>, aparador: array<int, array<string, mixed>>, mover: array<int, array<string, mixed>>, sin_configuracion: array<int, array<string, mixed>>, contexto: array<string, mixed>}
  */
 function analiticaRecomendaciones(PDO $pdo, int $limitePorLista = 40, ?DateTimeImmutable $ahora = null): array
 {
@@ -350,12 +368,24 @@ function analiticaRecomendaciones(PDO $pdo, int $limitePorLista = 40, ?DateTimeI
     $comprar = [];
     $aparador = [];
     $mover = [];
+    $sinConfiguracion = [];
     $sinAccion = 0;
     $capitalParado = 0.0;
 
     foreach (analiticaMetricasProductos($pdo, $ahora) as $fila) {
         $clas = analiticaClasificarProducto($fila);
         $item = array_merge($fila, $clas);
+
+        // Productos activos sin precio de venta o sin costo (aunque ademas tengan otra accion).
+        if ($clas['falta_config'] !== null) {
+            $sinConfiguracion[] = [
+                'id_producto' => $fila['id_producto'],
+                'nombre' => $fila['nombre'],
+                'falta' => $clas['falta_config'],
+                'stock' => $fila['stock'],
+                'total_vendido' => $fila['total_vendido'],
+            ];
+        }
 
         switch ($clas['accion']) {
             case INV_REC_ACCION_REPONER:
@@ -381,6 +411,9 @@ function analiticaRecomendaciones(PDO $pdo, int $limitePorLista = 40, ?DateTimeI
 
     $totales = ['comprar' => count($comprar), 'aparador' => count($aparador), 'mover' => count($mover)];
 
+    // Primero los que ya se han vendido (les urge un precio/costo bien), luego los que tienen mas stock.
+    usort($sinConfiguracion, static fn(array $a, array $b): int => [$b['total_vendido'] > 0, $b['stock']] <=> [$a['total_vendido'] > 0, $a['stock']]);
+
     // Contexto: cuanta evidencia real hay (sin pedidos de prueba) para no sobrevender la precision.
     $noPrueba = analiticaSqlProductoNoPrueba('pr');
     $evidencia = $pdo->query(
@@ -402,11 +435,13 @@ function analiticaRecomendaciones(PDO $pdo, int $limitePorLista = 40, ?DateTimeI
             'aparador' => $totales['aparador'],
             'mover' => $totales['mover'],
             'sin_accion' => $sinAccion,
+            'sin_configuracion' => count($sinConfiguracion),
             'capital_parado' => round($capitalParado, 2),
         ],
         'comprar' => array_slice($ordenar($comprar), 0, $limitePorLista),
         'aparador' => array_slice($ordenar($aparador), 0, $limitePorLista),
-        'mover' => array_slice($ordenar($mover), 0, $limitePorLista),
+        'mover' => array_slice($ordenar($mover), 0, min($limitePorLista, INV_REC_LIMITE_MOVER)),
+        'sin_configuracion' => array_slice($sinConfiguracion, 0, INV_REC_LIMITE_SIN_CONFIGURACION),
         'contexto' => [
             'pedidos_reales' => (int) ($evidencia['pedidos'] ?? 0),
             'piezas_vendidas' => (int) ($evidencia['piezas'] ?? 0),
@@ -420,6 +455,7 @@ function analiticaRecomendaciones(PDO $pdo, int $limitePorLista = 40, ?DateTimeI
                 'dias_caducidad_mover' => INV_REC_DIAS_CADUCIDAD_MOVER,
                 'margen_alto_pct' => INV_REC_MARGEN_ALTO_PCT,
                 'min_visitantes_interes' => INV_REC_MIN_VISITANTES_INTERES,
+                'limite_mover' => INV_REC_LIMITE_MOVER,
             ],
         ],
     ];

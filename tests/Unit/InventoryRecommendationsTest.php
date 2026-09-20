@@ -159,6 +159,78 @@ final class InventoryRecommendationsTest extends TestCase
         $this->assertNull($r['margen_pct']);
     }
 
+    public function testFaltaConfiguracionSeAvisaPorProducto(): void
+    {
+        $this->assertNull(analiticaClasificarProducto($this->producto())['falta_config']);
+        $this->assertSame('costo', analiticaClasificarProducto($this->producto(['precio_costo' => 0.0]))['falta_config']);
+        $this->assertSame('precio de venta', analiticaClasificarProducto($this->producto(['precio_venta' => 0.0]))['falta_config']);
+        $this->assertSame('precio y costo', analiticaClasificarProducto($this->producto(['precio_venta' => 0.0, 'precio_costo' => 0.0]))['falta_config']);
+    }
+
+    public function testLoQueCaducaVaAntesQueUnEstancadoConMuchoCapital(): void
+    {
+        $porCaducar = analiticaClasificarProducto($this->producto(['stock' => 1, 'precio_costo' => 10.0, 'dias_a_caducar' => 85]));
+        $estancadoCaro = analiticaClasificarProducto($this->producto(['stock' => 500, 'precio_costo' => 200.0, 'dias_en_catalogo' => 200]));
+        $this->assertSame('Por caducar', $porCaducar['etiqueta']);
+        $this->assertSame('No recomprar', $estancadoCaro['etiqueta']);
+        $this->assertGreaterThan($estancadoCaro['prioridad'], $porCaducar['prioridad']);
+    }
+
+    public function testMoverMuestraSoloLosDeMayorCapitalPeroElResumenCuentaTodos(): void
+    {
+        $pdo = $this->bdDePrueba();
+        $ahora = new DateTimeImmutable('2026-09-19 12:00:00');
+
+        // 20 productos estancados (con stock, sin ventas, viejos) con capital creciente: el ultimo es el mayor.
+        for ($i = 1; $i <= 20; $i++) {
+            $pdo->exec("INSERT INTO productos VALUES ({$i}, 'Estancado {$i}', 300, " . (100 + $i) . ", 'activo', '2026-01-01 00:00:00')");
+            $pdo->exec("INSERT INTO inventario_almacen VALUES ({$i}, 1, 3, 0)");
+        }
+        // Uno con lote que caduca en 30 dias y poco capital: debe salir primero aunque cueste poco.
+        $pdo->exec("INSERT INTO productos VALUES (21, 'Por caducar barato', 300, 5, 'activo', '2026-01-01 00:00:00')");
+        $pdo->exec("INSERT INTO inventario_almacen VALUES (21, 1, 1, 0)");
+        $pdo->exec("INSERT INTO lotes_inventario VALUES (21, 'activo', 1, '2026-10-19')");
+
+        $r = analiticaRecomendaciones($pdo, 40, $ahora);
+
+        $this->assertSame(21, $r['resumen']['mover']);
+        $this->assertCount(INV_REC_LIMITE_MOVER, $r['mover']);
+        $this->assertSame(21, $r['mover'][0]['id_producto']);   // lo que caduca, primero
+        $this->assertSame(20, $r['mover'][1]['id_producto']);   // luego el de mayor capital (3 x $120)
+        $this->assertSame(19, $r['mover'][2]['id_producto']);
+        // El capital parado del resumen suma todos, no solo los mostrados.
+        $capitalTodos = 1 * 5.0;
+        for ($i = 1; $i <= 20; $i++) {
+            $capitalTodos += 3 * (100 + $i);
+        }
+        $this->assertSame(round($capitalTodos, 2), $r['resumen']['capital_parado']);
+    }
+
+    public function testProductosSinPrecioOCostoSeListanParaConfigurarlos(): void
+    {
+        $pdo = $this->bdDePrueba();
+        $ahora = new DateTimeImmutable('2026-09-19 12:00:00');
+        $pdo->exec("INSERT INTO productos VALUES
+            (1, 'Sin costo pero vendido', 300, 0, 'activo', '2026-01-01 00:00:00'),
+            (2, 'Sin precio ni costo', 0, 0, 'activo', '2026-01-01 00:00:00'),
+            (3, 'Todo configurado', 300, 100, 'activo', '2026-01-01 00:00:00'),
+            (4, 'Playwright sin costo', 300, 0, 'activo', '2026-01-01 00:00:00')");
+        $pdo->exec("INSERT INTO inventario_almacen VALUES (1, 1, 5, 0), (2, 1, 9, 0), (3, 1, 5, 0), (4, 1, 5, 0)");
+        $pdo->exec("INSERT INTO pedidos VALUES (1, 'entregado', '2026-09-10 10:00:00')");
+        $pdo->exec("INSERT INTO detalle_pedidos VALUES (1, 1, 1, 'entregado')");
+
+        $r = analiticaRecomendaciones($pdo, 40, $ahora);
+
+        $this->assertSame(2, $r['resumen']['sin_configuracion']);
+        $lista = array_column($r['sin_configuracion'], null, 'id_producto');
+        $this->assertSame('costo', $lista[1]['falta']);
+        $this->assertSame('precio y costo', $lista[2]['falta']);
+        $this->assertArrayNotHasKey(3, $lista);
+        $this->assertArrayNotHasKey(4, $lista); // los productos de prueba no cuentan
+        // Primero el que ya se vendio.
+        $this->assertSame(1, $r['sin_configuracion'][0]['id_producto']);
+    }
+
     private function bdDePrueba(): PDO
     {
         $pdo = new PDO('sqlite::memory:');

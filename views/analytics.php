@@ -36,6 +36,18 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 
+    <!-- Productos activos sin precio o costo: sin eso no se puede evaluar su margen ni su capital -->
+    <div class="row" id="config-row" style="display: none;">
+        <div class="col s12">
+            <div class="card-panel red lighten-5" style="border-left: 4px solid #e53935; margin: 0;">
+                <details id="config-detalle">
+                    <summary><i class="material-icons left red-text text-darken-2">warning</i> <span id="config-resumen"></span></summary>
+                    <ul id="config-lista" class="rec-config-lista"></ul>
+                </details>
+            </div>
+        </div>
+    </div>
+
     <!-- Resumen -->
     <div class="row rec-kpis">
         <div class="col s6 m3">
@@ -74,7 +86,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="rec-table-wrap"><table class="rec-table"><thead id="head-aparador"></thead><tbody id="body-aparador"></tbody></table></div>
                     </section>
                     <section class="rec-panel" id="panel-mover" role="tabpanel">
-                        <p class="grey-text rec-panel-desc">Stock que no está saliendo o lotes por caducar: ofértalo, cámbialo de lugar o no lo vuelvas a comprar. Ordenados por capital parado.</p>
+                        <p class="grey-text rec-panel-desc">Stock que no está saliendo o lotes por caducar: ofértalo, cámbialo de lugar o no lo vuelvas a comprar. Se muestran los de mayor prioridad: primero lo que caduca y luego lo de más capital parado.</p>
                         <div class="rec-table-wrap"><table class="rec-table"><thead id="head-mover"></thead><tbody id="body-mover"></tbody></table></div>
                     </section>
 
@@ -148,7 +160,7 @@ include __DIR__ . '/includes/header.php';
     // Columnas de cada lista: [titulo, clase, funcion que devuelve el HTML de la celda].
     const COLUMNAS = {
         comprar: [
-            ['Producto', 'rec-nombre', (p) => `<strong>${escHtml(p.nombre)}</strong>`],
+            ['Producto', 'rec-nombre', (p) => celdaNombre(p)],
             ['Sugerencia', 'rec-accion', (p) => chip(p.etiqueta)],
             ['Por qué', 'rec-motivo', (p) => escHtml(p.motivo)],
             ['Stock', 'rec-num', (p) => escHtml(p.stock)],
@@ -156,7 +168,7 @@ include __DIR__ . '/includes/header.php';
             ['Alcanza (días)', 'rec-num', (p) => p.cobertura_dias === null ? '—' : escHtml(p.cobertura_dias)],
         ],
         aparador: [
-            ['Producto', 'rec-nombre', (p) => `<strong>${escHtml(p.nombre)}</strong>`],
+            ['Producto', 'rec-nombre', (p) => celdaNombre(p)],
             ['Sugerencia', 'rec-accion', (p) => chip(p.etiqueta)],
             ['Por qué', 'rec-motivo', (p) => escHtml(p.motivo)],
             ['Stock', 'rec-num', (p) => escHtml(p.stock)],
@@ -165,13 +177,35 @@ include __DIR__ . '/includes/header.php';
             ['Margen', 'rec-num', (p) => p.margen_pct === null ? '—' : escHtml(p.margen_pct) + '%'],
         ],
         mover: [
-            ['Producto', 'rec-nombre', (p) => `<strong>${escHtml(p.nombre)}</strong>`],
+            ['Producto', 'rec-nombre', (p) => celdaNombre(p)],
             ['Sugerencia', 'rec-accion', (p) => chip(p.etiqueta)],
             ['Por qué', 'rec-motivo', (p) => escHtml(p.motivo)],
             ['Stock', 'rec-num', (p) => escHtml(p.stock)],
             ['Capital parado', 'rec-num', (p) => dinero(p.capital)],
         ],
     };
+
+    // Nombre del producto; si le falta precio de venta o costo se avisa (margen y capital no son confiables).
+    function celdaNombre(p) {
+        const aviso = p.falta_config ? `<br><small class="red-text text-darken-2">Falta configurar ${escHtml(p.falta_config)}</small>` : '';
+        return `<strong>${escHtml(p.nombre)}</strong>${aviso}`;
+    }
+
+    function renderSinConfiguracion(lista, total) {
+        const fila = document.getElementById('config-row');
+        if (!Array.isArray(lista) || lista.length === 0) {
+            fila.style.display = 'none';
+            return;
+        }
+        document.getElementById('config-resumen').textContent =
+            `${total} producto${total === 1 ? '' : 's'} activo${total === 1 ? '' : 's'} sin precio de venta o costo: su margen y su capital parado no son confiables.`;
+        document.getElementById('config-lista').innerHTML = lista.map((p) => `
+            <li>
+                <a href="${PRODUCTOS_URL}${Number(p.id_producto) || 0}"><strong>${escHtml(p.nombre)}</strong></a>
+                <span class="grey-text">— falta ${escHtml(p.falta)}${Number(p.total_vendido) > 0 ? '; ya se ha vendido' : ''}${Number(p.stock) > 0 ? '; ' + escHtml(p.stock) + ' pza en stock' : ''}</span>
+            </li>`).join('') + (total > lista.length ? `<li class="grey-text">Y ${total - lista.length} más.</li>` : '');
+        fila.style.display = '';
+    }
 
     function chip(etiqueta) {
         const color = COLOR_ETIQUETA[etiqueta] || 'grey';
@@ -206,7 +240,7 @@ include __DIR__ . '/includes/header.php';
             <ul class="rec-reglas-lista">
                 <li><strong>Comprar:</strong> se vendió en los últimos ${escHtml(s.ventana_dias)} días y está agotado, o el stock no alcanza para los ~${escHtml(objetivo)} días que tarda el proveedor (${escHtml(s.dias_entrega_proveedor)} + ${escHtml(s.dias_colchon)} de colchón), o está en su stock mínimo y ya se ha vendido. También aparece lo que visitan ${escHtml(s.min_visitantes_interes)}+ personas en 30 días y no hay.</li>
                 <li><strong>Aparador:</strong> con stock y precio, se vendieron 2+ piezas en ${escHtml(s.ventana_dias)} días, o 1 pieza y además lo visitan o deja margen alto (${escHtml(s.margen_alto_pct)}%+), o lo visitan y deja margen alto.</li>
-                <li><strong>Mover:</strong> con stock y un lote que caduca en ${escHtml(s.dias_caducidad_mover)} días o menos, o sin ventas en ${escHtml(s.dias_sin_venta_mover)}+ días (o nunca vendido tras ${escHtml(s.dias_sin_venta_mover)}+ días en catálogo). Si además nadie lo visita, sale como "No recomprar".</li>
+                <li><strong>Mover:</strong> con stock y un lote que caduca en ${escHtml(s.dias_caducidad_mover)} días o menos, o sin ventas en ${escHtml(s.dias_sin_venta_mover)}+ días (o nunca vendido tras ${escHtml(s.dias_sin_venta_mover)}+ días en catálogo). Si además no tiene visitas registradas, sale como "No recomprar". Se listan los ${escHtml(s.limite_mover)} de mayor prioridad: primero lo que caduca y luego lo de más capital parado.</li>
             </ul>
             <p class="grey-text"><strong>Supuestos a validar:</strong> el tiempo de entrega del proveedor (${escHtml(s.dias_entrega_proveedor)} días) es una estimación; no se guarda el real. Las visitas al producto se registran en pocas páginas, así que "sin visitas" no siempre significa que nadie lo vio. No se consideran pedidos cancelados, productos rechazados en la entrega ni productos de pruebas automatizadas.</p>`;
     }
@@ -274,6 +308,7 @@ include __DIR__ . '/includes/header.php';
                 renderLista('comprar', rec.comprar, resumen.comprar || 0);
                 renderLista('aparador', rec.aparador, resumen.aparador || 0);
                 renderLista('mover', rec.mover, resumen.mover || 0);
+                renderSinConfiguracion(rec.sin_configuracion, resumen.sin_configuracion || 0);
                 renderReglas(ctx.supuestos || {});
                 initTabs();
 
@@ -357,6 +392,9 @@ include __DIR__ . '/includes/header.php';
     .rec-abrir-texto { display: none; }
     .rec-chip { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
 
+    .rec-config-lista { margin: 10px 0 0; padding-left: 18px; }
+    .rec-config-lista li { list-style: disc; margin-bottom: 6px; }
+    #config-detalle summary { cursor: pointer; font-weight: 600; min-height: 32px; }
     .rec-reglas { margin-top: 18px; }
     .rec-reglas summary { cursor: pointer; padding: 10px 0; color: #1a237e; font-weight: 600; }
     .rec-reglas-lista { padding-left: 18px; }
