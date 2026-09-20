@@ -3191,4 +3191,293 @@ final class AiAssistantToolsTest extends TestCase
             $this->assertSame('pausado', $estado);
         });
     }
+
+    // ------------------------------------------------------------------
+    // Telefono del pedido y del cliente (incidente 2026-09-16, pedido 75):
+    // el numero real del chat manda; nunca se da de alta un cliente sin telefono.
+    // ------------------------------------------------------------------
+
+    private const LID_SIN_TELEFONO = '209358885511206';
+
+    /** @return array<string, mixed> */
+    private function argsVentaSinDireccion(array $extra = []): array
+    {
+        return array_merge([
+            'nombre_cliente' => 'Daniel Armando Reyes',
+            'direccion_envio' => '',
+            'metodo_pago_preferido' => 'Efectivo',
+            'lista_productos' => [['id_producto' => 610, 'cantidad' => 1]],
+        ], $extra);
+    }
+
+    private function seedProductoParaVenta(): void
+    {
+        $this->seedProducto(610, 'Producto Telefono', 'PT610', null, 199.00);
+        $this->seedInventario(610, 1, 5);
+    }
+
+    private function telefonoDeClientePlano(int $idCliente): ?string
+    {
+        $v = $this->pdo->query('SELECT telefono FROM clientes WHERE id_cliente = ' . $idCliente)->fetchColumn();
+
+        return ($v === false || $v === null) ? null : (string) piiDecryptValue((string) $v);
+    }
+
+    public function testAiTelefonoRealDelChatPrefiereElWaIdYCaeAlNumeroResuelto(): void
+    {
+        $this->assertSame('3317778888', aiTelefonoRealDelChat(['wa_id' => '5213317778888', 'telefono_resuelto' => '3310301214']));
+        $this->assertSame('3310301214', aiTelefonoRealDelChat(['wa_id' => self::LID_SIN_TELEFONO, 'telefono_resuelto' => '3310301214']));
+        $this->assertSame('3310301214', aiTelefonoRealDelChat(['wa_id' => self::LID_SIN_TELEFONO, 'telefono_resuelto' => '(331) - 030 - 1214']));
+        $this->assertNull(aiTelefonoRealDelChat(['wa_id' => self::LID_SIN_TELEFONO]));
+        $this->assertNull(aiTelefonoRealDelChat(['wa_id' => self::LID_SIN_TELEFONO, 'telefono_resuelto' => null]));
+        $this->assertNull(aiTelefonoRealDelChat([]));
+    }
+
+    public function testAiFindOrCreateClienteNoDaDeAltaUnClienteSinTelefono(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $id = aiFindOrCreateCliente($this->pdo, self::LID_SIN_TELEFONO, 'Cliente Sin Numero');
+
+            $this->assertSame(0, $id);
+            $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn());
+        });
+    }
+
+    public function testAiFindOrCreateClienteUsaElTelefonoQueSeLePasaParaUnLid(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $id = aiFindOrCreateCliente($this->pdo, self::LID_SIN_TELEFONO, 'Cliente Lid', '3310301214');
+
+            $this->assertGreaterThan(0, $id);
+            $this->assertSame('(331) - 030 - 1214', $this->telefonoDeClientePlano($id));
+        });
+    }
+
+    public function testAgendarVentaConLidUsaElNumeroResueltoYNoElDeRelleno(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, self::LID_SIN_TELEFONO, null);
+            $context = ['wa_id' => self::LID_SIN_TELEFONO, 'telefono_resuelto' => '3310301214', 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            // Justo el caso real: el modelo relleno "telefono" con un numero de ejemplo.
+            $result = aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(['telefono' => '3312345678']), $context);
+
+            $this->assertFalse($result['ok'], 'Falta la direccion, no el telefono');
+            $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn());
+            $this->assertSame('(331) - 030 - 1214', $this->telefonoDeClientePlano(1), 'El cliente nace con el numero REAL del chat');
+        });
+    }
+
+    public function testAgendarVentaConNumeroDelChatIgnoraOtroNumeroDictado(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, '5213317778888', null);
+            $context = ['wa_id' => '5213317778888', 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(['telefono' => '3318635185']), $context);
+
+            $this->assertSame('(331) - 777 - 8888', $this->telefonoDeClientePlano(1), 'Gana el numero del chat, no el dictado');
+        });
+    }
+
+    public function testAgendarVentaConLidSinNumeroUsaElDictadoSiEsValido(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, self::LID_SIN_TELEFONO, null);
+            $context = ['wa_id' => self::LID_SIN_TELEFONO, 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(['telefono' => '(331) 863-5185']), $context);
+
+            $this->assertSame('(331) - 863 - 5185', $this->telefonoDeClientePlano(1));
+        });
+    }
+
+    public function testAgendarVentaSinNingunTelefonoLoPideYNoDaDeAltaAlCliente(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, self::LID_SIN_TELEFONO, null);
+            $idConversacion = (int) $conversacion['id_conversacion'];
+            $context = ['wa_id' => self::LID_SIN_TELEFONO, 'id_conversacion' => $idConversacion];
+
+            $result = aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(), $context);
+
+            $this->assertFalse($result['ok']);
+            $this->assertStringContainsString('telefono', strtolower((string) $result['message']));
+            $this->assertStringContainsString('Nunca inventes', (string) $result['message']);
+            $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn(), 'Nunca un cliente sin telefono');
+
+            $tipos = $this->pdo->query('SELECT tipo_error FROM ai_errores_diagnostico')->fetchAll(PDO::FETCH_COLUMN);
+            $this->assertContains('venta_sin_telefono', $tipos);
+
+            $estado = $this->pdo->query('SELECT estado_bot FROM whatsapp_conversaciones WHERE id_conversacion = ' . $idConversacion)->fetchColumn();
+            $this->assertNotSame('pausado', $estado, 'No es motivo para pausar el bot: Alex solo debe pedir el numero');
+        });
+    }
+
+    public function testAgendarVentaSinNumeroDelChatRechazaUnDictadoDeRelleno(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, self::LID_SIN_TELEFONO, null);
+            $context = ['wa_id' => self::LID_SIN_TELEFONO, 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            $result = aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(['telefono' => '3312345678']), $context);
+
+            $this->assertFalse($result['ok']);
+            $this->assertStringContainsString('Falta el telefono', (string) $result['message']);
+            $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn());
+        });
+    }
+
+    public function testAgendarVentaUsaElTelefonoDelClienteYaLigadoSiNoHayOtro(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $this->seedCliente(77, '3311112222');
+            $conversacion = aiGetOrCreateConversation($this->pdo, self::LID_SIN_TELEFONO, null);
+            $context = ['wa_id' => self::LID_SIN_TELEFONO, 'id_cliente' => 77, 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            $result = aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(), $context);
+
+            $this->assertStringNotContainsString('Falta el telefono', (string) $result['message'], 'El cliente ya tiene telefono: no se le vuelve a pedir');
+            $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn(), 'No se crea otro cliente');
+        });
+    }
+
+    public function testAgendarVentaNoReusaUnTelefonoDeRellenoYaGuardadoEnLaFicha(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $this->seedCliente(78, '3312345678');
+            $conversacion = aiGetOrCreateConversation($this->pdo, self::LID_SIN_TELEFONO, null);
+            $context = ['wa_id' => self::LID_SIN_TELEFONO, 'id_cliente' => 78, 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            $result = aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(), $context);
+
+            $this->assertFalse($result['ok']);
+            $this->assertStringContainsString('Falta el telefono', (string) $result['message']);
+        });
+    }
+
+    public function testLaHerramientaAgendarVentaPideOmitirElTelefonoSiNoLoDioElCliente(): void
+    {
+        $descripcion = '';
+        foreach (aiGetToolDefinitions() as $tool) {
+            if (($tool['function']['name'] ?? '') === 'agendar_venta') {
+                $descripcion = (string) $tool['function']['parameters']['properties']['telefono']['description'];
+            }
+        }
+
+        $this->assertStringContainsString('OMITE', $descripcion);
+        $this->assertStringContainsString('Nunca inventes', $descripcion);
+        $this->assertStringNotContainsString('Telefono de contacto a 10 digitos', $descripcion);
+    }
+
+    // ------------------------------------------------------------------
+    // Alex le dice al cliente con que numero se le avisara (transparencia)
+    // ------------------------------------------------------------------
+
+    public function testLaLineaDelTelefonoDelChatSeLeDiceAlClienteYSePuedeCorregir(): void
+    {
+        $linea = aiBuildTelefonoChatContextLine('3310301214');
+
+        $this->assertStringContainsString('(331) - 030 - 1214', $linea);
+        $this->assertStringContainsString('verificado por WhatsApp', $linea);
+        $this->assertStringContainsString('usaremos este numero de tu WhatsApp', $linea);
+        $this->assertStringContainsString('otro', $linea);
+        $this->assertStringContainsString('telefono_alterno_confirmado=true', $linea);
+        $this->assertStringContainsString('No le pidas el telefono', $linea);
+    }
+
+    public function testLaLineaSinNumeroConocidoLePideAlModeloQueLoPida(): void
+    {
+        foreach (['', '209358885511206', 'abc'] as $sinNumero) {
+            $linea = aiBuildTelefonoChatContextLine($sinNumero);
+
+            $this->assertStringContainsString('No se conoce el telefono de este chat', $linea, $sinNumero);
+            $this->assertStringContainsString('nunca lo inventes', $linea, $sinNumero);
+        }
+    }
+
+    public function testLaLineaDelTelefonoNoSeAgregaSiQuienLlamaNoInformaNada(): void
+    {
+        $this->assertSame('', aiBuildTelefonoChatContextLine(null));
+    }
+
+    public function testElPromptIncluyeLaLineaDelTelefonoSoloCuandoSeLePasa(): void
+    {
+        $sin = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null);
+        $conocido = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null, [], [], null, null, null, [], '3310301214');
+        $desconocido = aiBuildSystemPrompt(['nombre_persona' => 'Alex'], null, [], [], null, null, null, [], '');
+
+        $this->assertStringNotContainsString('Telefono de este chat', $sin);
+        $this->assertStringNotContainsString('No se conoce el telefono de este chat', $sin);
+        $this->assertStringContainsString('Telefono de este chat (verificado por WhatsApp): (331) - 030 - 1214', $conocido);
+        $this->assertStringContainsString('No se conoce el telefono de este chat', $desconocido);
+    }
+
+    public function testElPromptPersonalizadoTambienLlevaLaLineaDelTelefono(): void
+    {
+        $prompt = aiBuildSystemPrompt(['nombre_persona' => 'Alex', 'prompt_sistema_override' => 'Eres un asistente.'], null, [], [], null, null, null, [], '3310301214');
+
+        $this->assertStringContainsString('(331) - 030 - 1214', $prompt);
+    }
+
+    public function testElMensajeDeConfirmacionDelPedidoDiceConQueNumeroQuedo(): void
+    {
+        $delChat = aiTelefonoConfirmacionMensaje('3310301214', 'chat');
+        $dado = aiTelefonoConfirmacionMensaje('3318635185', 'dictado_confirmado');
+
+        $this->assertStringContainsString('(331) - 030 - 1214', $delChat);
+        $this->assertStringContainsString('el numero de este chat de WhatsApp', $delChat);
+        $this->assertStringContainsString('transferir_a_humano', $delChat, 'Un pedido ya agendado no lo cambia Alex');
+        $this->assertStringContainsString('(331) - 863 - 5185', $dado);
+        $this->assertStringContainsString('el numero que nos dio el cliente', $dado);
+    }
+
+    public function testLaHerramientaTieneElParametroDeNumeroAlternoConfirmado(): void
+    {
+        $tool = null;
+        foreach (aiGetToolDefinitions() as $candidata) {
+            if (($candidata['function']['name'] ?? '') === 'agendar_venta') {
+                $tool = $candidata;
+            }
+        }
+        $this->assertNotNull($tool);
+        $props = (array) $tool['function']['parameters']['properties'];
+
+        $this->assertSame('boolean', $props['telefono_alterno_confirmado']['type']);
+        $this->assertStringContainsString('OTRO numero', (string) $props['telefono_alterno_confirmado']['description']);
+        $this->assertNotContains('telefono_alterno_confirmado', $tool['function']['parameters']['required'], 'No es requerido');
+    }
+
+    public function testAgendarVentaUsaElNumeroDistintoSoloSiElClienteLoConfirmo(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, '5213317778888', null);
+            $context = ['wa_id' => '5213317778888', 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(['telefono' => '3318635185', 'telefono_alterno_confirmado' => true]), $context);
+
+            $this->assertSame('(331) - 863 - 5185', $this->telefonoDeClientePlano(1), 'El cliente pidio expresamente ese numero');
+        });
+    }
+
+    public function testAgendarVentaIgnoraLaConfirmacionSiElNumeroEsDeRelleno(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedProductoParaVenta();
+            $conversacion = aiGetOrCreateConversation($this->pdo, '5213317778888', null);
+            $context = ['wa_id' => '5213317778888', 'id_conversacion' => (int) $conversacion['id_conversacion']];
+
+            aiToolAgendarVenta($this->pdo, $this->argsVentaSinDireccion(['telefono' => '3312345678', 'telefono_alterno_confirmado' => true]), $context);
+
+            $this->assertSame('(331) - 777 - 8888', $this->telefonoDeClientePlano(1));
+        });
+    }
 }

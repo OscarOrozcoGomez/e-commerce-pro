@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/phone_utils.php';
+require_once __DIR__ . '/../core/cliente_telefono_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 requireAuth();
 if (!isCliente()) { header('Location: dashboard.php'); exit; }
@@ -97,7 +98,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 $telefonoFormateado = formatearTelefonoMxDesdeDigitos($digits);
                 $telefonoStore = function_exists('piiEncryptValue') ? piiEncryptValue($telefonoFormateado) : $telefonoFormateado;
                 $auditTelefonoAntes = (string)($_SESSION['usuario']['telefono_cliente'] ?? '');
+                $telefonoAnteriorCliente = clienteObtenerTelefonoPlano($pdo, (int)$idCliente);
                 $pdo->prepare("UPDATE clientes SET telefono = ? WHERE id_cliente = ?")->execute([$telefonoStore, $idCliente]);
+                // Sus pedidos abiertos que aun llevaban el telefono viejo (o uno invalido/de relleno) pasan al nuevo.
+                clienteAuditarSincronizacionTelefono(
+                    (int)$idCliente,
+                    clienteSincronizarTelefonoPedidosAbiertos($pdo, (int)$idCliente, $telefonoAnteriorCliente, $telefonoFormateado)
+                );
                 logAudit(
                     'CLIENTE_TELEFONO_CAMBIADO',
                     'clientes',
