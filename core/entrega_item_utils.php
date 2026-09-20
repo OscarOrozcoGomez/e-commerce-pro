@@ -317,3 +317,34 @@ function dbCancelarPedidoCompleto(PDO $pdo, int $idPedido, ?int $idRepartidorFil
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
+
+/**
+ * Precios de un renglon de la tarjeta de entrega (views/entregas.php): lo que el repartidor le dice al cliente.
+ *
+ * "Precio de lista" de una pieza = el MAYOR entre precio_original (p.ej. antes de una oferta) y precio_unitario
+ * (lo que se cobro por pieza). Hay descuento visible cuando el precio de lista de todas las piezas supera el
+ * subtotal cobrado; cubre las dos formas en que se guarda:
+ *   - oferta: precio_original > precio_unitario (el subtotal ya es unitario x cantidad);
+ *   - descuento de linea del POS (sales.php): precio_original = precio_unitario y detalle_pedidos.subtotal ya
+ *     trae restado monto_descuento (ver dbMarkProductoNoEntregado: "100 base - 20 descuento = 80").
+ * Antes solo se cubria la oferta, asi que un descuento del POS se veia como un subtotal rebajado sin explicacion.
+ *
+ * @param ?float $subtotal detalle_pedidos.subtotal; null = sin dato (se asume unitario x cantidad).
+ * @return array{cantidad: int, subtotal: float, unitario: float, mostrar_unitario: bool, lista_total: float, con_descuento: bool}
+ */
+function entregaPreciosItem(int $cantidad, float $precioUnitario, float $precioOriginal, ?float $subtotal): array
+{
+    $cantidad = max(1, $cantidad);
+    $precioUnitario = max(0.0, $precioUnitario);
+    $subtotalCobrado = $subtotal !== null ? max(0.0, $subtotal) : $precioUnitario * $cantidad;
+    $listaTotal = max($precioOriginal, $precioUnitario) * $cantidad;
+
+    return [
+        'cantidad' => $cantidad,
+        'subtotal' => $subtotalCobrado,
+        'unitario' => $precioUnitario,
+        'mostrar_unitario' => $cantidad > 1 && $precioUnitario > 0,
+        'lista_total' => $listaTotal,
+        'con_descuento' => $precioUnitario > 0 && $listaTotal > $subtotalCobrado + 0.004,
+    ];
+}

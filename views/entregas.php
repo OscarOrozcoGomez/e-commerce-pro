@@ -954,11 +954,18 @@ include __DIR__ . '/includes/header.php';
                                             $esUltimoItemTarjeta = $indexItemTarjeta === array_key_last($itemsPedidoTarjeta);
                                             // Foto y precio de cada producto: el repartidor confirma que lleva el correcto y
                                             // cuanto cuesta cada cosa (por si el cliente pregunta o rechaza una).
-                                            $cantidadItem = max(1, (int)($d['cantidad'] ?? 1));
-                                            $precioUnitarioItem = (float)($d['precio_unitario'] ?? 0);
-                                            $subtotalItem = isset($d['subtotal']) && $d['subtotal'] !== null ? (float)$d['subtotal'] : $precioUnitarioItem * $cantidadItem;
-                                            $precioOriginalItem = (float)($d['precio_original'] ?? 0);
-                                            $itemConDescuento = $precioUnitarioItem > 0 && $precioOriginalItem > $precioUnitarioItem + 0.004;
+                                            // Oferta (precio_original > unitario) y descuento de linea del POS (subtotal ya rebajado):
+                                            // ver entregaPreciosItem() en core/entrega_item_utils.php.
+                                            $preciosItem = entregaPreciosItem(
+                                                (int)($d['cantidad'] ?? 1),
+                                                (float)($d['precio_unitario'] ?? 0),
+                                                (float)($d['precio_original'] ?? 0),
+                                                isset($d['subtotal']) && $d['subtotal'] !== null ? (float)$d['subtotal'] : null
+                                            );
+                                            $cantidadItem = $preciosItem['cantidad'];
+                                            $precioUnitarioItem = $preciosItem['unitario'];
+                                            $subtotalItem = $preciosItem['subtotal'];
+                                            $itemConDescuento = $preciosItem['con_descuento'];
                                             $imagenItemSrc = catalogResolveCardImageSrc((string)($d['imagen_producto'] ?? ''), (int)($d['id_producto'] ?? 0));
                                         ?>
                                         <li style="padding:8px 0;<?php echo $esUltimoItemTarjeta ? '' : ' border-bottom:1px solid #e0e0e0;'; ?>">
@@ -968,11 +975,11 @@ include __DIR__ . '/includes/header.php';
                                                     <?php echo $cantidadItem; ?>x <?php echo esc($pName); ?>
                                                     <span class="entrega-item-precio">
                                                         <strong>$<?php echo number_format($subtotalItem, 2); ?></strong>
-                                                        <?php if ($cantidadItem > 1 && $precioUnitarioItem > 0): ?>
+                                                        <?php if ($preciosItem['mostrar_unitario']): ?>
                                                             <span class="grey-text">(<?php echo $cantidadItem; ?> &times; $<?php echo number_format($precioUnitarioItem, 2); ?> c/u)</span>
                                                         <?php endif; ?>
                                                         <?php if ($itemConDescuento): ?>
-                                                            <span class="grey-text"><s>$<?php echo number_format($precioOriginalItem * $cantidadItem, 2); ?></s></span>
+                                                            <span class="grey-text"><s>$<?php echo number_format($preciosItem['lista_total'], 2); ?></s></span>
                                                         <?php endif; ?>
                                                     </span>
                                                 </span>
