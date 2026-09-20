@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
+require_once __DIR__ . '/../core/cliente_telefono_utils.php';
 
 header('Content-Type: application/json');
 
@@ -79,6 +80,7 @@ try {
     }
 
     $auditAntes = auditSnapshotCliente($pdo, $idCliente);
+    $telefonoAnterior = clienteObtenerTelefonoPlano($pdo, $idCliente);
     $pdo->prepare('UPDATE clientes SET telefono = ? WHERE id_cliente = ?')
         ->execute([$storeValue($telefonoNormalizado), $idCliente]);
     // Teléfono enmascarado (últimos 4 dígitos): se sabe que cambió y quién lo cambió, sin volcar el dato.
@@ -92,12 +94,17 @@ try {
         ['contexto' => 'Cliente "' . (string)($auditAntes['nombre'] ?? ('#' . $idCliente)) . '"', 'severidad' => 'aviso']
     );
 
+    // Los pedidos abiertos que aun llevaban el telefono viejo (o uno invalido/de relleno) pasan al nuevo.
+    $pedidosSincronizados = clienteSincronizarTelefonoPedidosAbiertos($pdo, $idCliente, $telefonoAnterior, $telefonoNormalizado);
+    clienteAuditarSincronizacionTelefono($idCliente, $pedidosSincronizados);
+
     echo json_encode([
         'success' => true,
         'cliente' => [
             'id_cliente' => $idCliente,
             'telefono' => $telefonoNormalizado,
         ],
+        'pedidos_actualizados' => count($pedidosSincronizados),
     ]);
 } catch (Throwable $e) {
     http_response_code(400);

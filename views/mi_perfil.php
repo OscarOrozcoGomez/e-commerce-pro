@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/phone_utils.php';
+require_once __DIR__ . '/../core/cliente_telefono_utils.php';
 require_once __DIR__ . '/../core/ventas_features.php';
 require_once __DIR__ . '/../core/referrals.php';
 
@@ -80,8 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Nombre y correo son obligatorios.';
         } elseif (!isLikelyDeliverableEmailProfile($email)) {
             $error = 'No pudimos validar el dominio del correo. Usa un correo real y verificable.';
-        } elseif ($telefono === null) {
-            $error = 'Si capturas teléfono, debe tener 10 dígitos con formato (331) - 863 - 5185.';
+        } elseif ($telefono === null || $telefono === '') {
+            $error = 'El teléfono es obligatorio: debe tener 10 dígitos con formato (331) - 863 - 5185.';
         } elseif ($hasAliasPerfil && mb_strlen($aliasPerfil) > 80) {
             $error = 'El alias no puede exceder 80 caracteres.';
         } else {
@@ -92,9 +93,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Ese correo ya está registrado por otro usuario.');
                 }
 
-                if ($telefono !== '' && findClienteByPhone($pdo, $telefono, (int)$perfil['id_cliente']) !== null) {
+                // $perfil aun no existe durante el POST (se arma mas abajo): el id_cliente propio sale de la
+                // BD para excluirlo del cruce; con (int)$perfil['id_cliente'] valia 0, el telefono actual del
+                // propio cliente chocaba consigo mismo y, ya obligatorio, el perfil no se podia guardar.
+                $stmtIdCliente = $pdo->prepare('SELECT id_cliente FROM clientes WHERE id_usuario = :id LIMIT 1');
+                $stmtIdCliente->execute([':id' => $userId]);
+                $idClientePerfil = (int)($stmtIdCliente->fetchColumn() ?: 0);
+
+                if ($telefono !== '' && findClienteByPhone($pdo, $telefono, $idClientePerfil > 0 ? $idClientePerfil : null) !== null) {
                     throw new Exception('Ese teléfono ya está asociado a otra cuenta.');
                 }
+                $telefonoAnteriorPerfil = $idClientePerfil > 0 ? clienteObtenerTelefonoPlano($pdo, $idClientePerfil) : null;
 
                 // Auditoria: el propio cliente edito su perfil. "Antes" sale de la sesion (lo ultimo
                 // que la persona tenia); solo se comparan digitos del telefono para no marcar un
@@ -162,6 +171,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->commit();
+
+                // Sus pedidos abiertos que aun llevaban el telefono viejo (o uno invalido/de relleno) pasan al nuevo.
+                if ($idClientePerfil > 0) {
+                    clienteAuditarSincronizacionTelefono(
+                        $idClientePerfil,
+                        clienteSincronizarTelefonoPedidosAbiertos($pdo, $idClientePerfil, $telefonoAnteriorPerfil, $telefono)
+                    );
+                }
 
                 logAuditCambios(
                     'CLIENTE_PERFIL_EDITADO',
@@ -297,9 +314,9 @@ include __DIR__ . '/includes/header.php';
 
                         <div class="input-field">
                             <i class="material-icons prefix">phone</i>
-                            <input id="telefono" name="telefono" type="tel" value="<?php echo esc((string)($perfil['telefono'] ?? '')); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
-                            <label for="telefono" class="active">Teléfono (opcional)</label>
-                            <span class="helper-text">Si capturas teléfono, debe tener 10 dígitos.</span>
+                            <input id="telefono" name="telefono" type="tel" required value="<?php echo esc((string)($perfil['telefono'] ?? '')); ?>" placeholder="Ej: (331) - 863 - 5185" maxlength="19" inputmode="numeric" autocomplete="tel-national">
+                            <label for="telefono" class="active">Teléfono</label>
+                            <span class="helper-text">Obligatorio: debe tener 10 dígitos.</span>
                         </div>
 
                         <div class="right-align">

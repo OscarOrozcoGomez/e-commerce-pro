@@ -7,6 +7,7 @@ require_once __DIR__ . '/../core/whatsapp_link_utils.php';
 require_once __DIR__ . '/../core/cliente_direccion_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
+require_once __DIR__ . '/../core/cliente_telefono_utils.php';
 requireAuth();
 // Permiso 'gestionar_clientes' abre esta vista; el rol se mantiene como respaldo.
 if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) { header('Location: dashboard.php'); exit; }
@@ -230,8 +231,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if ($nombre === '') {
                     throw new Exception('El nombre del cliente es obligatorio.');
                 }
-                if ($telefonoNormalizado === null) {
-                    throw new Exception('Si capturas telefono, debe tener 10 digitos.');
+                if ($telefonoNormalizado === null || $telefonoNormalizado === '') {
+                    throw new Exception('El telefono es obligatorio y debe tener 10 digitos.');
                 }
                 if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     throw new Exception('El correo capturado no es valido.');
@@ -285,14 +286,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                 if ($nombre === '') {
                     throw new Exception('El nombre del cliente es obligatorio.');
                 }
-                if ($telefonoNormalizado === null) {
-                    throw new Exception('Si capturas telefono, debe tener 10 digitos.');
+                if ($telefonoNormalizado === null || $telefonoNormalizado === '') {
+                    throw new Exception('El telefono es obligatorio y debe tener 10 digitos.');
                 }
                 if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     throw new Exception('El correo capturado no es valido.');
                 }
 
                 $auditAntes = auditSnapshotCliente($pdo, $idCliente);
+                $telefonoAnterior = clienteObtenerTelefonoPlano($pdo, $idCliente);
                 $stmtUpdate = $pdo->prepare('UPDATE clientes SET nombre = ?, email = ?, telefono = ? WHERE id_cliente = ?');
                 $stmtUpdate->execute([
                     $storeValue($nombre),
@@ -310,7 +312,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     ['nombre', 'email', 'telefono'],
                     ['contexto' => (string)($auditAntes['nombre'] ?? ('Cliente #' . $idCliente)), 'severidad' => 'aviso']
                 );
-                $success = 'Cliente actualizado correctamente.';
+                // Los pedidos abiertos que aun llevaban el telefono viejo (o uno invalido/de relleno) pasan al nuevo.
+                $pedidosSincronizados = clienteSincronizarTelefonoPedidosAbiertos($pdo, $idCliente, $telefonoAnterior, $telefonoNormalizado);
+                clienteAuditarSincronizacionTelefono($idCliente, $pedidosSincronizados);
+                $success = 'Cliente actualizado correctamente.'
+                    . ($pedidosSincronizados !== [] ? ' Tambien se actualizo el telefono de entrega de ' . count($pedidosSincronizados) . ' pedido(s) abierto(s).' : '');
             } elseif ($accion === 'agregar_direccion' || $accion === 'editar_direccion') {
                 if (!$hasClienteDireccionesTable) {
                     throw new Exception('La tabla de direcciones no esta disponible.');
@@ -1260,7 +1266,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             <div class="row">
                                 <div class="input-field col s12 m6">
-                                    <input type="tel" name="telefono" maxlength="19" inputmode="numeric" autocomplete="tel-national" value="<?php echo esc((string)($c['telefono'] ?? '')); ?>">
+                                    <input type="tel" name="telefono" required maxlength="19" inputmode="numeric" autocomplete="tel-national" value="<?php echo esc((string)($c['telefono'] ?? '')); ?>">
                                     <label class="active">Telefono</label>
                                 </div>
                                 <div class="col s12 m6" style="display:flex; align-items:center; min-height:72px; color:#546e7a;">
@@ -1554,7 +1560,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="row">
                 <div class="input-field col s12 m6">
-                    <input type="tel" name="telefono" maxlength="19" inputmode="numeric" autocomplete="tel-national">
+                    <input type="tel" name="telefono" required maxlength="19" inputmode="numeric" autocomplete="tel-national">
                     <label>Telefono</label>
                 </div>
                 <div class="input-field col s12 m6">

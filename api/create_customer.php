@@ -65,8 +65,9 @@ try {
     if ($nombre === '') {
         throw new Exception('El nombre del cliente es obligatorio.');
     }
-    if ($telefonoNormalizado === null) {
-        throw new Exception('Si capturas telefono, debe tener 10 digitos.');
+    // Un cliente nunca se da de alta sin telefono (lo necesitan la ruta de entrega y los avisos por WhatsApp).
+    if ($telefonoNormalizado === null || $telefonoNormalizado === '') {
+        throw new Exception('El telefono es obligatorio y debe tener 10 digitos.');
     }
     if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         throw new Exception('El correo capturado no es valido.');

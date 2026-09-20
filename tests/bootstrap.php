@@ -43,3 +43,4 @@ require_once __DIR__ . '/../core/ventas_features.php';
 require_once __DIR__ . '/../core/attribution.php';
 require_once __DIR__ . '/../core/referrals.php';
 require_once __DIR__ . '/../core/site_behavior.php';
+require_once __DIR__ . '/../core/cliente_telefono_utils.php';

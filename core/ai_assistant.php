@@ -12,6 +12,7 @@ require_once __DIR__ . '/whatsapp_helper.php';
 require_once __DIR__ . '/whatsapp_link_utils.php';
 require_once __DIR__ . '/lote_caducidad_utils.php'; // loteDiasTratamiento() -- ver aiBuildRendimientoEstimadoTexto()
 require_once __DIR__ . '/oferta_pricing.php';       // ofertaPrecioEfectivo() -- precios de productos en la categoria "Ofertas"
+require_once __DIR__ . '/cliente_telefono_utils.php'; // telefonoResolverParaPedido() -- que telefono lleva el pedido de Alex
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -167,7 +168,8 @@ function aiBuildSystemPrompt(
     ?float $horasInactividad = null,
     ?bool $esLadaLocal = null,
     ?string $perfilClienteTexto = null,
-    array $plantillasDisponibles = []
+    array $plantillasDisponibles = [],
+    ?string $telefonoChat = null
 ): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
@@ -252,6 +254,10 @@ function aiBuildSystemPrompt(
     $perfilCliente = trim((string)($perfilClienteTexto ?? ''));
     if ($perfilCliente !== '') {
         $lines[] = $perfilCliente . ' Usalo solo para personalizar sugerencias de forma natural (por ejemplo, mencionar que hay reabastecimiento de algo que ya compro), nunca lo repitas de forma literal ni digas que "tienes registrado" nada.';
+    }
+    $lineaTelefonoChat = aiBuildTelefonoChatContextLine($telefonoChat);
+    if ($lineaTelefonoChat !== '') {
+        $lines[] = $lineaTelefonoChat;
     }
     if ($horasInactividad !== null && $horasInactividad >= AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS) {
         $diasInactivo = max(1, (int)round($horasInactividad / 24));
@@ -379,7 +385,8 @@ function aiGetToolDefinitions(): array
                     'type' => 'object',
                     'properties' => [
                         'nombre_cliente' => ['type' => 'string', 'description' => 'Nombre completo del cliente.'],
-                        'telefono' => ['type' => 'string', 'description' => 'Telefono de contacto a 10 digitos.'],
+                        'telefono' => ['type' => 'string', 'description' => 'OMITE este campo salvo que el cliente te haya dado EXPRESAMENTE un numero de contacto en esta conversacion (10 digitos): el sistema ya usa el numero real del chat. Nunca inventes, completes ni uses un numero de ejemplo. Si la funcion te responde que falta el telefono, pideselo al cliente y mandalo aqui.'],
+                        'telefono_alterno_confirmado' => ['type' => 'boolean', 'description' => 'true SOLO si el cliente te pidio expresamente usar OTRO numero de contacto (el que mandas en telefono) en lugar del de este chat. En cualquier otro caso omitelo.'],
                         'direccion_envio' => ['type' => 'string', 'description' => 'Direccion completa: calle, numero, colonia, codigo postal y ciudad. Si el cliente todavia no la tiene lista, manda cadena vacia -- no dejes de llamar a la funcion por esto.'],
                         'lista_productos' => [
                             'type' => 'array',
@@ -556,6 +563,53 @@ function aiWaIdToMxDigits(string $waId): ?string
     }
 
     return $m[1];
+}
+
+/**
+ * Numero REAL del chat (10 digitos): el que sale del wa_id cuando es un telefono, o el ya
+ * resuelto por scripts/resolver_lids_whatsapp.php cuando el wa_id es un LID de WhatsApp
+ * (privacidad, no contiene telefono). null si no se conoce. Es el unico numero verificado por
+ * WhatsApp: un numero que el modelo "dicte" en una herramienta nunca debe ganarle.
+ */
+function aiTelefonoRealDelChat(array $context): ?string
+{
+    return aiWaIdToMxDigits((string)($context['wa_id'] ?? ''))
+        ?? telefonoDigitos10((string)($context['telefono_resuelto'] ?? ''));
+}
+
+/**
+ * Linea de contexto para el prompt de Alex sobre el telefono de ESTE chat.
+ *   - null  -> '' (quien llama no informa nada: no se agrega linea).
+ *   - numero conocido -> Alex se lo dice al cliente y le da oportunidad de corregirlo ANTES de agendar.
+ *   - '' o no valido -> no se conoce (WhatsApp lo oculta por privacidad): Alex debe pedirlo.
+ */
+function aiBuildTelefonoChatContextLine(?string $telefonoChat): string
+{
+    if ($telefonoChat === null) {
+        return '';
+    }
+
+    $digitos = telefonoDigitos10($telefonoChat);
+    if ($digitos === null) {
+        return 'No se conoce el telefono de este chat (WhatsApp lo oculta por privacidad). Antes de agendar el pedido pidele su numero de celular a 10 digitos y mandalo en el campo telefono de agendar_venta; nunca lo inventes.';
+    }
+
+    $legible = formatPhoneMxDigits($digitos);
+
+    return "Telefono de este chat (verificado por WhatsApp): {$legible}. Es el numero que se usara para avisarle de su entrega. Cuando reunas los datos del pedido (paso 6), dile con naturalidad que usaras ese numero de su WhatsApp y dale oportunidad de corregirlo antes de agendar, por ejemplo: \"Para avisarte de tu entrega usaremos este numero de tu WhatsApp: {$legible}. ¿Te parece bien, o prefieres que use otro?\". No le pidas el telefono ni lo mandes en agendar_venta; solo si el cliente te pide usar OTRO numero, mandalo en telefono junto con telefono_alterno_confirmado=true.";
+}
+
+/**
+ * Frase que se agrega al resultado de agendar_venta para que Alex le confirme al cliente con que
+ * numero quedo su pedido (segunda oportunidad de que lo corrija). Un pedido ya agendado no lo
+ * modifica Alex: si quiere otro numero, se transfiere a un asesor.
+ */
+function aiTelefonoConfirmacionMensaje(string $telefono, string $origen): string
+{
+    $legible = formatPhoneMxDigits($telefono);
+    $fuente = $origen === 'chat' ? 'el numero de este chat de WhatsApp' : 'el numero que nos dio el cliente';
+
+    return "Al confirmar el pedido dile al cliente que el aviso de entrega ira a {$legible} ({$fuente}). Si te dice que quiere otro numero, no lo cambies tu: llama a transferir_a_humano.";
 }
 
 /**
@@ -2622,19 +2676,22 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
  * que api/create_customer.php -- si no hay match. Nunca pisa el nombre de un cliente
  * ya existente con lo que el cliente escribio en WhatsApp esta vez.
  */
-function aiFindOrCreateCliente(PDO $pdo, string $waId, string $nombre): int
+function aiFindOrCreateCliente(PDO $pdo, string $waId, string $nombre, ?string $telefono = null): int
 {
-    $telefonoDigits = aiWaIdToMxDigits($waId);
-    if ($telefonoDigits !== null && $telefonoDigits !== '') {
-        $match = findClienteByPhone($pdo, $telefonoDigits);
-        if (is_array($match) && isset($match['id_cliente']) && (int)$match['id_cliente'] > 0) {
-            return (int)$match['id_cliente'];
-        }
+    // Telefono con el que se identifica/da de alta al cliente: el que se pase (ya resuelto por
+    // telefonoResolverParaPedido) o, si no, el del wa_id. Un cliente NUNCA se da de alta sin
+    // telefono: si no hay ninguno, devuelve 0 y el llamador debe pedirselo al cliente.
+    $telefonoDigits = telefonoDigitos10($telefono) ?? aiWaIdToMxDigits($waId);
+    if ($telefonoDigits === null || $telefonoDigits === '') {
+        return 0;
     }
 
-    $telefonoFormateado = ($telefonoDigits !== null && strlen($telefonoDigits) === 10)
-        ? sprintf('(%s) - %s - %s', substr($telefonoDigits, 0, 3), substr($telefonoDigits, 3, 3), substr($telefonoDigits, 6, 4))
-        : null;
+    $match = findClienteByPhone($pdo, $telefonoDigits);
+    if (is_array($match) && isset($match['id_cliente']) && (int)$match['id_cliente'] > 0) {
+        return (int)$match['id_cliente'];
+    }
+
+    $telefonoFormateado = sprintf('(%s) - %s - %s', substr($telefonoDigits, 0, 3), substr($telefonoDigits, 3, 3), substr($telefonoDigits, 6, 4));
 
     $storeValue = static function (?string $value): ?string {
         $value = $value !== null ? trim($value) : null;
@@ -2725,8 +2782,44 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         return ['ok' => false, 'message' => 'Faltan datos para registrar el pedido (nombre o productos).'];
     }
 
-    $telefonoDigits = normalizePhoneDigitsMx($telefonoBruto) ?? aiWaIdToMxDigits((string)($context['wa_id'] ?? ''));
-    $telefono = ($telefonoDigits !== null && $telefonoDigits !== '') ? $telefonoDigits : $telefonoBruto;
+    // Telefono del pedido: el numero REAL del chat manda sobre lo que el modelo dicte (el modelo
+    // rellenaba este campo opcional con numeros de ejemplo -- incidente 2026-09-16); el dictado solo
+    // se usa si no se conoce el del chat y no parece de relleno. Ver telefonoResolverParaPedido().
+    $alternoConfirmado = filter_var($args['telefono_alterno_confirmado'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $resolucionTelefono = telefonoResolverParaPedido($telefonoBruto, aiTelefonoRealDelChat($context), $alternoConfirmado);
+    $telefono = $resolucionTelefono['telefono'];
+    $origenTelefono = $resolucionTelefono['origen'];
+    $idClienteConocido = (isset($context['id_cliente']) && (int)$context['id_cliente'] > 0) ? (int)$context['id_cliente'] : null;
+
+    if ($telefono === '' && $idClienteConocido !== null) {
+        // Sin numero nuevo, pero el cliente ya esta ligado a la conversacion: usa el que ya tiene.
+        $telefonoDelCliente = telefonoDigitos10(clienteObtenerTelefonoPlano($pdo, $idClienteConocido));
+        // Un numero de relleno ya guardado en la ficha (secuela del incidente 2026-09-16) tampoco vale.
+        if ($telefonoDelCliente !== null && !telefonoParecePlaceholder($telefonoDelCliente)) {
+            $telefono = $telefonoDelCliente;
+            $origenTelefono = 'cliente';
+        }
+    }
+
+    if ($telefono === '') {
+        // Nunca se agenda ni se da de alta a un cliente sin telefono. Se le pide al modelo que se lo
+        // pida al cliente en vez de inventarlo.
+        aiLogDiagnosticError(
+            $pdo,
+            (int)($context['id_conversacion'] ?? 0) ?: null,
+            'venta_sin_telefono',
+            $nombre,
+            ['dictado_parecia_relleno' => $resolucionTelefono['descartado'] !== null]
+        );
+        return ['ok' => false, 'message' => 'Falta el telefono de contacto del cliente. Pidele su numero de celular a 10 digitos y vuelve a llamar a agendar_venta con ese numero en el campo telefono. Nunca inventes un numero ni uses uno de ejemplo.'];
+    }
+
+    $notaTelefono = '';
+    if ($resolucionTelefono['origen'] === 'dictado_confirmado') {
+        $notaTelefono = "\nNota: el cliente pidio usar otro numero de contacto para la entrega ({$telefono}); el de este chat es {$resolucionTelefono['alterno']}.";
+    } elseif ($resolucionTelefono['alterno'] !== null) {
+        $notaTelefono = "\nNota: el cliente menciono otro numero de contacto ({$resolucionTelefono['alterno']}); el pedido usa el del chat.";
+    }
 
     $resolved = aiResolveOrderItems($pdo, $listaProductos);
     if (!empty($resolved['errores'])) {
@@ -2739,9 +2832,9 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
     // Se resuelve/crea el cliente ANTES de validar la direccion: aunque falte la
     // direccion, ya queda registrado el contacto (nombre + telefono) para que un
     // asesor humano solo tenga que completar la direccion, no capturar todo de cero.
-    $idClienteExistente = (isset($context['id_cliente']) && (int)$context['id_cliente'] > 0) ? (int)$context['id_cliente'] : null;
+    $idClienteExistente = $idClienteConocido;
     try {
-        $idCliente = $idClienteExistente ?? aiFindOrCreateCliente($pdo, (string)($context['wa_id'] ?? ''), $nombre);
+        $idCliente = $idClienteExistente ?? aiFindOrCreateCliente($pdo, (string)($context['wa_id'] ?? ''), $nombre, $telefono);
     } catch (Throwable $e) {
         error_log('ERROR en aiToolAgendarVenta al crear/resolver cliente: ' . $e->getMessage());
         $idCliente = $idClienteExistente;
@@ -2884,6 +2977,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             . "Direccion: {$direccion}\n"
             . "Productos: {$listaItems}\n"
             . 'Confirma si se puede entregar ahi y que costo aplica -- Alex NO le prometio nada al cliente sobre el envio.'
+            . $notaTelefono
             . aiBuildWhatsAppLinkLine($waIdVenta, $context['telefono_resuelto'] ?? null),
             $waIdVenta
         );
@@ -2913,6 +3007,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
             'total' => $result['total'] ?? null,
             'zona_entrega' => $zonaEntrega,
             'cargo_envio_foraneo' => $cargoEnvio,
+        'telefono_del_pedido' => formatPhoneMxDigits($telefono),
             'message' => 'El pedido quedo registrado con los datos del cliente y los productos, pero la direccion esta fuera de nuestra zona habitual de reparto. Dile al cliente que un companero del equipo le va a confirmar en breve si se puede entregar ahi y el costo -- nunca le prometas que si se entrega ni le des un costo de envio tu mismo.',
         ];
     }
@@ -2922,6 +3017,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         . "Pedido #{$result['pedido']} - \${$totalPedido} MXN\n"
         . "Productos: {$listaItems}"
         . ($cargoEnvio > 0 ? "\nIncluye cargo de envio foraneo: +\${$cargoEnvio} MXN" : '')
+        . $notaTelefono
         . aiBuildWhatsAppLinkLine($waIdVenta, $context['telefono_resuelto'] ?? null),
         $waIdVenta
     );
@@ -2932,6 +3028,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
     } elseif ($zonaEntrega === 'foraneo') {
         $mensajeRespuesta .= ' La direccion esta fuera de la Zona Metropolitana de Guadalajara, pero el pedido incluye 2 o mas productos distintos, asi que el envio sigue siendo gratis por la promocion vigente -- puedes mencionarselo al cliente.';
     }
+    $mensajeRespuesta .= ' ' . aiTelefonoConfirmacionMensaje($telefono, $origenTelefono);
     $mensajeRespuesta .= ' Incluye tambien esta leyenda LEGAL tal cual, sin cambiarle ni una palabra (puedes introducirla con naturalidad, pero el texto de la leyenda en si no se parafrasea): "' . AI_LEYENDA_NO_MEDICAMENTO . '"';
 
     return [
@@ -2941,6 +3038,7 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         'total' => $result['total'] ?? null,
         'zona_entrega' => $zonaEntrega,
         'cargo_envio_foraneo' => $cargoEnvio,
+        'telefono_del_pedido' => formatPhoneMxDigits($telefono),
         'message' => $mensajeRespuesta,
     ];
 }
@@ -3792,7 +3890,8 @@ function aiGenerarRespuestaParaConversacion(
         $horasInactividad,
         $esLadaLocal,
         $perfilClienteTexto,
-        $plantillasDisponibles
+        $plantillasDisponibles,
+        aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]) ?? ''
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],
