@@ -369,12 +369,14 @@
                 </li>
                 
                 <?php if (isAuthenticated() && !isCliente() && !isRepartidor()): ?>
+                    <?php if (hasPermission('ver_notificaciones_pickup')): ?>
                     <li style="position: relative;">
                         <a id="pickup-alert-link" href="<?php echo BASE_URL; ?>views/pickup_notifications.php" title="Compras Pickup Agendadas" style="position: relative;" data-pickup-count="<?php echo (int)$pickupAlertCount; ?>">
                             <i id="pickup-alert-icon" class="material-icons <?php echo $showPickupAlertInHeader ? 'deep-orange-text text-lighten-2 animated pulse infinite' : ''; ?>">store_mall_directory</i>
                             <span id="pickup-alert-badge" class="new badge deep-orange" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px; <?php echo $pickupAlertCount > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$pickupAlertCount; ?></span>
                         </a>
                     </li>
+                    <?php endif; ?>
 
                     <?php
                         $pdoHead = getPDO();
@@ -388,7 +390,7 @@
                         $countLowStock = $pdoHead->query($sqlAlert)->fetchColumn();
                     ?>
                     <li style="position: relative;">
-                        <a href="<?php echo (isAdmin() || isEncargado()) ? BASE_URL . 'views/purchase_orders.php' : '#'; ?>" title="Alertas de Stock" style="position: relative;">
+                        <a href="<?php echo hasPermission('inventario') ? BASE_URL . 'views/purchase_orders.php' : '#'; ?>" title="Alertas de Stock" style="position: relative;">
                             <i class="material-icons <?php echo $countLowStock > 0 ? 'orange-text text-lighten-2 animated pulse infinite' : ''; ?>">notifications</i>
                             <?php if ($countLowStock > 0): ?>
                                 <span class="new badge orange" data-badge-caption="" style="position: absolute; top: 10px; right: -5px; min-width: 18px; height: 18px; line-height: 18px; padding: 0 4px; font-size: 11px;"><?php echo $countLowStock; ?></span>
@@ -401,12 +403,13 @@
                     <?php
                         // Preparar notificaciones de chat para cualquier usuario logueado
                         if (!isset($pdoHead)) $pdoHead = getPDO();
+                        $puedeChat = canUseSupportChat();
                         $id_u = (int)$_SESSION['usuario']['id_usuario'];
                         $col = isCliente() ? 'leido_cliente' : 'leido_staff';
                         
                         // Contar mensajes no leídos
                         $sqlChat = "SELECT COUNT(*) FROM mensajes_soporte WHERE $col = 0 AND " . (isCliente() ? "id_cliente = $id_u" : "1=1");
-                        $unreadChat = (int)$pdoHead->query($sqlChat)->fetchColumn();
+                        $unreadChat = $puedeChat ? (int)$pdoHead->query($sqlChat)->fetchColumn() : 0;
 
                         // Verificar si alguno de esos mensajes es una alerta de sistema (bloqueo)
                         $hasSecurityAlert = false;
@@ -414,6 +417,7 @@
                             $hasSecurityAlert = (int)$pdoHead->query("SELECT COUNT(*) FROM mensajes_soporte WHERE leido_staff = 0 AND tipo_mensaje = 'sistema'")->fetchColumn() > 0;
                         }
                     ?>
+                    <?php if ($puedeChat): ?>
                     <li>
                         <a href="<?php echo BASE_URL; ?>views/chat.php" title="Chat de Soporte" style="position: relative;">
                             <i id="header-chat-icon" class="material-icons <?php echo $unreadChat > 0 ? ($hasSecurityAlert ? 'orange-text text-darken-2' : 'green-text text-lighten-2') : ''; ?>">chat</i>
@@ -426,6 +430,7 @@
                             <?php endif; ?>
                         </a>
                     </li>
+                    <?php endif; ?>
                     <li>
                         <a href="<?php echo BASE_URL; ?>favoritos.php" class="nav-favorites-link" title="Mis Favoritos">
                             <i class="material-icons">favorite</i>
@@ -466,7 +471,9 @@
                             <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Soporte en vivo</a></li>
                         <?php else: ?>
                             <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
+                            <?php if (hasPermission('atender_chat')): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Centro de Mensajes</a></li>
+                            <?php endif; ?>
                         <?php endif; ?>
                         
                         <?php if (hasPermission('gestionar_blogs')): ?>
@@ -482,7 +489,12 @@
                             <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
                         <?php endif; ?>
 
-                        <?php if (isAdmin()): ?>
+                        <?php if (hasPermission('configurar_notificaciones')): ?>
+                            <li><a href="<?php echo BASE_URL; ?>views/notificaciones_pedidos.php"><i class="material-icons">mark_email_unread</i> Notificaciones de pedidos</a></li>
+                            <li><a href="<?php echo BASE_URL; ?>views/notificaciones_caducidades.php"><i class="material-icons">event_busy</i> Notificaciones de caducidades</a></li>
+                        <?php endif; ?>
+
+                        <?php if (hasPermission('ver_salud_sistema')): ?>
                             <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
                         <?php endif; ?>
 
@@ -548,13 +560,17 @@
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
             <?php else: ?>
                 <li><a href="<?php echo BASE_URL; ?>views/dashboard.php"><i class="material-icons">dashboard</i> Dashboard</a></li>
+                <?php if (hasPermission('ver_notificaciones_pickup')): ?>
                 <li>
                     <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php">
                         <i class="material-icons">store_mall_directory</i> Notificaciones Pickup
                         <span id="pickup-alert-badge-mobile" class="new badge deep-orange" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $pickupAlertCount > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$pickupAlertCount; ?></span>
                     </a>
                 </li>
+                <?php endif; ?>
+                <?php if (hasPermission('atender_chat')): ?>
                 <li><a href="<?php echo BASE_URL; ?>views/chat.php"><i class="material-icons">chat</i> Mensajes <span id="header-chat-badge-mobile" class="new badge <?php echo $hasSecurityAlert ? 'orange darken-3' : 'green'; ?>" data-badge-caption="" style="float: none; margin-left: 5px; <?php echo $unreadChat > 0 ? '' : 'display:none;'; ?>"><?php echo (int)$unreadChat; ?></span></a></li>
+                <?php endif; ?>
                 <li><a href="<?php echo BASE_URL; ?>favoritos.php"><i class="material-icons">favorite</i> Mis Favoritos <span class="new badge pink favorites-count-mobile" data-badge-caption="" style="float: none; margin-left: 5px;">0</span></a></li>
 
                 <?php
@@ -565,9 +581,10 @@
                 $mostrarBlogsMovil = hasPermission('gestionar_blogs');
                 $mostrarUsuariosMovil = hasPermission('gestionar_usuarios');
                 $mostrarConversacionesWaMovil = hasPermission('ver_conversaciones_whatsapp');
-                $mostrarSaludMovil = isAdmin();
+                $mostrarSaludMovil = hasPermission('ver_salud_sistema');
+                $mostrarNotificacionesMovil = hasPermission('configurar_notificaciones');
                 ?>
-                <?php if ($mostrarBlogsMovil || $mostrarUsuariosMovil || $mostrarConversacionesWaMovil || $mostrarSaludMovil): ?>
+                <?php if ($mostrarBlogsMovil || $mostrarUsuariosMovil || $mostrarConversacionesWaMovil || $mostrarSaludMovil || $mostrarNotificacionesMovil): ?>
                     <li><div class="divider"></div></li>
                     <li><a class="subheader">Administración</a></li>
                 <?php endif; ?>
@@ -580,6 +597,10 @@
                 <?php endif; ?>
                 <?php if ($mostrarConversacionesWaMovil): ?>
                     <li><a href="<?php echo BASE_URL; ?>views/whatsapp_contactos.php"><i class="material-icons">chat</i> Conversaciones WhatsApp</a></li>
+                <?php endif; ?>
+                <?php if ($mostrarNotificacionesMovil): ?>
+                    <li><a href="<?php echo BASE_URL; ?>views/notificaciones_pedidos.php"><i class="material-icons">mark_email_unread</i> Notificaciones de pedidos</a></li>
+                    <li><a href="<?php echo BASE_URL; ?>views/notificaciones_caducidades.php"><i class="material-icons">event_busy</i> Notificaciones de caducidades</a></li>
                 <?php endif; ?>
                 <?php if ($mostrarSaludMovil): ?>
                     <li><a href="<?php echo BASE_URL; ?>views/salud_sistema.php"><i class="material-icons">monitor_heart</i> Salud del sistema</a></li>
@@ -598,6 +619,8 @@
     <script>
         window.USER_IS_AUTHENTICATED = <?php echo isAuthenticated() ? 'true' : 'false'; ?>;
         window.USER_IS_INTERNAL_STAFF = <?php echo (isAuthenticated() && !isCliente() && !isRepartidor()) ? 'true' : 'false'; ?>;
+        window.USER_CAN_PICKUP_ALERTS = <?php echo hasPermission('ver_notificaciones_pickup') ? 'true' : 'false'; ?>;
+        window.USER_CAN_STAFF_CHAT = <?php echo (isAuthenticated() && !isCliente() && hasPermission('atender_chat')) ? 'true' : 'false'; ?>;
         window.CURRENT_USER_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_usuario'] ?? 0) : 0; ?>;
         window.CURRENT_USER_WAREHOUSE_ID = <?php echo isAuthenticated() ? (int)($_SESSION['usuario']['id_almacen'] ?? 0) : 0; ?>;
         var USER_IS_AUTHENTICATED = window.USER_IS_AUTHENTICATED;
@@ -907,7 +930,7 @@
         }
 
         async function pollStaffChatAlerts() {
-            if (!USER_IS_INTERNAL_STAFF) {
+            if (!USER_IS_INTERNAL_STAFF || !window.USER_CAN_STAFF_CHAT) {
                 return;
             }
             try {
@@ -1016,7 +1039,7 @@
         }
 
         async function pollPickupAlerts() {
-            if (!USER_IS_INTERNAL_STAFF) {
+            if (!USER_IS_INTERNAL_STAFF || !window.USER_CAN_PICKUP_ALERTS) {
                 return;
             }
             try {

@@ -3,6 +3,11 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 requireAuth();
+// Cliente: su chat de ayuda. Personal: solo con el permiso 'atender_chat'.
+if (!canUseSupportChat()) {
+    header('Location: ' . BASE_URL . 'views/dashboard.php');
+    exit;
+}
 
 $pageTitle = 'Chat';
 $pdo = getPDO();

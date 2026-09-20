@@ -20,8 +20,8 @@ if (!isAuthenticated()) {
 }
 refreshSessionPermissions();
 
-// Fase 4: el permiso 'realizar_ventas' abre este endpoint; el rol se mantiene como respaldo.
-if (!hasPermission('realizar_ventas') && !canScheduleSalesOrders()) {
+// El permiso 'realizar_ventas' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('realizar_ventas')) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado para agendar pedidos a domicilio.']);
     exit;
@@ -128,17 +128,17 @@ try {
     // que nunca mandaban 'tipo_entrega' siguen comportandose igual.
     $esVentaSucursal = saleDeliveryModeIsCounter($_POST['tipo_entrega'] ?? null);
 
-    // Agendar a domicilio exige el permiso 'asignar_entregas' (rol encargado/admin como
-    // respaldo). Sin el, solo se permite la venta de mostrador. La UI ya oculta la
-    // opcion en sales.php; esto es el candado del lado servidor.
+    // Agendar a domicilio exige el permiso 'asignar_entregas'. Sin el, solo se permite la
+    // venta de mostrador. La UI ya oculta la opcion en sales.php; esto es el candado del
+    // lado servidor.
     if (!saleDeliveryModeIsAllowedForUser(
         $_POST['tipo_entrega'] ?? null,
-        hasPermission('asignar_entregas') || canManageDeliveryOrders()
+        hasPermission('asignar_entregas')
     )) {
         throw new Exception('No tienes permiso para agendar pedidos a domicilio; solo puedes registrar ventas en sucursal.');
     }
 
-    $bypassInventario = resolveVentaSinInventario($observaciones, isAdmin() || isEncargado(), SALE_INVENTORY_BYPASS_KEYWORD);
+    $bypassInventario = resolveVentaSinInventario($observaciones, hasPermission('vender_sin_inventario'), SALE_INVENTORY_BYPASS_KEYWORD);
     $ventaSinInventario = $bypassInventario['sin_inventario'];
     $observaciones = $bypassInventario['observaciones'];
 

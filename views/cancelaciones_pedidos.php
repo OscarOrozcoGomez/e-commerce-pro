@@ -6,8 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/alex_insights_utils.php';
 
 requireAuth();
-// Permiso 'gestionar_cancelaciones' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('gestionar_cancelaciones') && !isAdmin() && !isEncargado()) {
+// Permiso 'gestionar_cancelaciones' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('gestionar_cancelaciones')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

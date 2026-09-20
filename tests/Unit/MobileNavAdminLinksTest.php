@@ -77,14 +77,14 @@ final class MobileNavAdminLinksTest extends TestCase
         );
     }
 
-    public function testSaludDelSistemaEnMovilSoloParaAdmin(): void
+    public function testSaludDelSistemaEnMovilDetrasDeSuPermiso(): void
     {
         $this->assertStringContainsString('views/salud_sistema.php', $this->sidenav,
             'el menu movil no enlaza a views/salud_sistema.php');
         $this->assertMatchesRegularExpression(
-            "/isAdmin\(\).*views\/salud_sistema\.php/s",
+            "/ver_salud_sistema.*views\/salud_sistema\.php/s",
             $this->sidenav,
-            "salud_sistema.php en el menu movil debe quedar detras de isAdmin()"
+            "salud_sistema.php en el menu movil debe quedar detras de 'ver_salud_sistema'"
         );
     }
 
@@ -109,7 +109,7 @@ final class MobileNavAdminLinksTest extends TestCase
 
         $desktopAdminViews = array_unique(array_intersect(
             $mDesktop[1],
-            ['users.php', 'roles_permisos.php', 'manage_blogs.php', 'salud_sistema.php']
+            ['users.php', 'roles_permisos.php', 'manage_blogs.php', 'salud_sistema.php', 'notificaciones_pedidos.php', 'notificaciones_caducidades.php']
         ));
         $mobileViews = array_unique($mMobile[1]);
 

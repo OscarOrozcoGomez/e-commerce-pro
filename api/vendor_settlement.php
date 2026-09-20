@@ -13,9 +13,10 @@ if (!isAuthenticated()) {
     exit;
 }
 
-if (!isVendedor()) {
+refreshSessionPermissions();
+if (!hasPermission('declarar_liquidacion')) {
     http_response_code(403);
-    echo json_encode(['success' => false, 'message' => 'Solo vendedores pueden declarar liquidaciones.']);
+    echo json_encode(['success' => false, 'message' => 'No tienes permiso para declarar liquidaciones.']);
     exit;
 }
 

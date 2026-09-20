@@ -9,8 +9,8 @@ header('Content-Type: application/json');
 
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
 refreshSessionPermissions();
-// Permiso 'gestionar_caducidades' abre este endpoint; el rol se mantiene como respaldo.
-if (!isAuthenticated() || (!hasPermission('gestionar_caducidades') && !isAdmin() && !isEncargado())) {
+// Permiso 'gestionar_caducidades' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!isAuthenticated() || !hasPermission('gestionar_caducidades')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }

@@ -5,8 +5,8 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-// Permiso 'ver_notificaciones_pickup' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('ver_notificaciones_pickup') && !isEncargado() && !isAdmin() && !isVendedor()) {
+// Permiso 'ver_notificaciones_pickup' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('ver_notificaciones_pickup')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }

@@ -18,7 +18,9 @@ function getStaffUserById(PDO $pdo, int $id): ?array
     return $user !== false ? $user : null;
 }
 
-if (!isAuthenticated() || !isAdmin()) {
+refreshSessionPermissions();
+// Mismo permiso que abre views/users.php; las cuentas de admin siguen protegidas por isSuperAdmin() abajo.
+if (!isAuthenticated() || !hasPermission('gestionar_usuarios')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }

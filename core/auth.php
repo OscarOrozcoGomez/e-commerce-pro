@@ -55,6 +55,14 @@ const PERMISOS_EN_USO = [
     // Ajuste manual de stock en la ficha de producto (views/products.php +
     // api/products_manager.php); antes era isAdmin() por codigo.
     'ajustar_inventario_producto',
+    // Cobertura total (migracion 20260920_000001): lo que antes decidia solo por rol.
+    'configurar_notificaciones',
+    'ver_salud_sistema',
+    'atender_chat',
+    'vender_sin_inventario',
+    'crear_categorias',
+    'asignar_categorias_masivo',
+    'declarar_liquidacion',
 ];
 
 /**
@@ -705,27 +713,29 @@ function isCliente(): bool
 }
 
 /**
- * Verifica si el usuario puede agendar pedidos a domicilio y asignar repartidores.
+ * ¿Puede usar el chat de soporte? El cliente siempre (es su canal de ayuda); el personal solo con
+ * el permiso 'atender_chat'.
  */
-function canManageDeliveryOrders(): bool
+function canUseSupportChat(): bool
 {
-    return isAuthenticated() && (isAdmin() || isEncargado());
+    return isAuthenticated() && (isCliente() || hasPermission('atender_chat'));
 }
 
 /**
- * Verifica si el usuario puede agendar pedidos a domicilio.
+ * ¿Atiende el chat de soporte desde el lado del personal? (no cliente + permiso 'atender_chat').
  */
-function canScheduleSalesOrders(): bool
+function isSupportChatStaff(): bool
 {
-    return isAuthenticated() && (isAdmin() || isEncargado() || isVendedor());
+    return isAuthenticated() && !isCliente() && hasPermission('atender_chat');
 }
 
 /**
- * Verifica si el usuario puede asignar una categoria a muchos productos a la vez.
+ * Verifica si el usuario puede asignar una categoria a muchos productos a la vez:
+ * con su clave propia o, como siempre, si ya gestiona productos.
  */
 function canBulkAssignCategories(): bool
 {
-    return isAuthenticated() && (isAdmin() || isEncargado());
+    return hasPermission('asignar_categorias_masivo') || hasPermission('gestionar_productos');
 }
 
 /**

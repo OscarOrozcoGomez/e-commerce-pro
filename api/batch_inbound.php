@@ -8,8 +8,8 @@ header('Content-Type: application/json');
 
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
 refreshSessionPermissions();
-// Permiso 'inventario' abre este endpoint; el rol se mantiene como respaldo.
-if (!isAuthenticated() || (!hasPermission('inventario') && !isAdmin() && !isEncargado())) {
+// Permiso 'inventario' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!isAuthenticated() || !hasPermission('inventario')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }

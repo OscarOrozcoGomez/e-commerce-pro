@@ -17,8 +17,8 @@ if (!$isLocalCron) {
         exit;
     }
     refreshSessionPermissions();
-    // Permiso 'inventario' abre este endpoint; el rol se mantiene como respaldo.
-    if (!hasPermission('inventario') && !isAdmin() && !isEncargado()) {
+    // Permiso 'inventario' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
+    if (!hasPermission('inventario')) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => 'No autorizado']);
         exit;

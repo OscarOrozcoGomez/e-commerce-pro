@@ -61,7 +61,9 @@ C:\xampp\php\php.exe scripts/migrate.php --to=20260907_120000     # aplicar hast
 
 ### Auth y permisos — `core/auth.php`
 
-Archivo grande (~2900 líneas). Helpers clave: `requireAuth()`, `hasPermission(string $clave)`, `requirePermission(string $clave, string $redirect='')`, `isAdmin()`, `isSuperAdmin()`, `isCliente()`. Las **claves de permiso son strings sembradas por migración** (p.ej. `gestionar_caducidades`, `asignar_entregas`, `transferir_stock`, `ver_conversaciones_whatsapp`). La administración de roles/permisos vive en `views/roles_permisos.php` + funciones `rp*`. CSRF: `getCsrfToken()`, `csrfInput()`, `validateCsrfToken()`.
+Archivo grande (~2900 líneas). Helpers clave: `requireAuth()`, `hasPermission(string $clave)`, `requirePermission(string $clave, string $redirect='')`, `isAdmin()`, `isSuperAdmin()`, `isCliente()`. Las **claves de permiso son strings sembradas por migración** (p.ej. `gestionar_caducidades`, `asignar_entregas`, `transferir_stock`, `ver_conversaciones_whatsapp`). La administración de roles/permisos vive en `views/roles_permisos.php` + funciones `rp*`.
+
+**Todo va bajo un permiso, sin respaldo por rol.** Cada vista/endpoint de personal llama `hasPermission()`/`requirePermission()` con una clave (nunca `isEncargado()`/`isVendedor()`… como llave de acceso; `isAdmin()` ya lo cubre `hasPermission()`). Los helpers de rol solo sirven para *acotar datos* (p. ej. el encargado ve solo su sucursal). Una clave nueva necesita: fila en `permisos` por migración (con `rol_permisos` si un rol ya tenía ese acceso de facto), entrada en `PERMISOS_EN_USO` (`core/auth.php`) y, si el archivo es público/de cliente/con token, quedar justificado en `SIN_PERMISO_A_PROPOSITO` de `tests/Unit/CoberturaPermisosTest.php` (ese test falla si un archivo nuevo de `views/` o `api/` no comprueba ningún permiso). CSRF: `getCsrfToken()`, `csrfInput()`, `validateCsrfToken()`.
 
 ### Entornos y secretos
 

@@ -7,7 +7,8 @@ require_once __DIR__ . '/../core/catalogo_utils.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
-if (!isAuthenticated() || (!isAdmin() && !isEncargado())) {
+refreshSessionPermissions();
+if (!isAuthenticated() || !hasPermission('ver_reportes')) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;

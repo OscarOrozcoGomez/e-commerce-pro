@@ -16,8 +16,8 @@ if (!isAuthenticated()) {
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
 refreshSessionPermissions();
 
-// Permiso 'ver_entregas' abre este endpoint; el rol se mantiene como respaldo.
-if (!hasPermission('ver_entregas') && !isAdmin() && !isRepartidor()) {
+// Permiso 'ver_entregas' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('ver_entregas')) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'No autorizado.']);
     exit;
