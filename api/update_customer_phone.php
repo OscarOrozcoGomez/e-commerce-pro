@@ -17,8 +17,8 @@ if (!isAuthenticated()) {
 }
 refreshSessionPermissions();
 
-// Permiso 'gestionar_clientes' abre este endpoint; el rol se mantiene como respaldo.
-if (!hasPermission('gestionar_clientes') && !isAdmin() && !isEncargado()) {
+// Permiso 'gestionar_clientes' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('gestionar_clientes')) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'No autorizado para editar clientes.']);
     exit;

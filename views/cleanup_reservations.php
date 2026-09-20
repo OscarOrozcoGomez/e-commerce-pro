@@ -6,8 +6,8 @@ require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
 
-// Permiso 'inventario' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('inventario') && !isAdmin() && !isEncargado()) {
+// Permiso 'inventario' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('inventario')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -243,6 +243,7 @@ function liberarProducto(detailId, productName, maxQty) {
 
 function ejecutarLiberacion(payload) {
     payload.threshold_hours = thresholdHours;
+    payload.csrf_token = <?php echo json_encode(getCsrfToken()); ?>;
     payload.apply_threshold = applyThreshold;
     fetch('<?php echo BASE_URL; ?>api/cleanup_reservations.php', {
         method: 'POST',

@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /**
  * Decide si una venta debe omitir el descuento de inventario: solo cuando quien la captura
- * tiene permiso (admin/encargado) y sus notas contienen la palabra clave configurada. Si aplica,
+ * tiene el permiso 'vender_sin_inventario' y sus notas contienen la palabra clave configurada. Si aplica,
  * devuelve las notas ya sin la palabra clave para no guardarla en el pedido.
  *
  * @return array{sin_inventario: bool, observaciones: string}

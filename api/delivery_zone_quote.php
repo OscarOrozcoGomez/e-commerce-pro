@@ -11,8 +11,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php'; // arrastra delivery_zone_utils.php y delivery_route_utils.php
+require_once __DIR__ . '/../core/api_security_utils.php';
 
 header('Content-Type: application/json');
+
+// Publico (el carrito se usa sin login) y puede geocodificar: limite de cotizaciones por minuto y por IP.
+apiLimitarPeticiones('delivery_zone_quote', 60);
 
 $data = json_decode(file_get_contents('php://input'), true);
 if (!is_array($data)) {

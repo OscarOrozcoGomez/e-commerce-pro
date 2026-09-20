@@ -7,20 +7,19 @@ require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
 
 requireAuth();
-// Fase 4: el permiso 'realizar_ventas' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('realizar_ventas') && !canScheduleSalesOrders()) {
+// El permiso 'realizar_ventas' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('realizar_ventas')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
 
-// Agendar pedidos a domicilio exige el permiso 'asignar_entregas' (con el rol de
-// encargado/admin como respaldo, patron Fase 4 -- ver views/asignar_entregas.php).
+// Agendar pedidos a domicilio exige el permiso 'asignar_entregas' (sin respaldo por rol).
 // Quien no lo tiene (p. ej. un vendedor) solo puede registrar ventas de mostrador.
-$puedeAgendarDomicilio = hasPermission('asignar_entregas') || canManageDeliveryOrders();
+$puedeAgendarDomicilio = hasPermission('asignar_entregas');
 $pageTitle = $puedeAgendarDomicilio ? 'Registrar Venta / Pedido' : 'Registrar Venta en Sucursal';
 $pdo = getPDO();
 $error = '';
-$canManageCustomers = isAdmin() || isEncargado();
+$canManageCustomers = hasPermission('gestionar_clientes');
 
 // URL absoluta (con dominio) para el boton "Compartir" -- WhatsApp/Facebook/correo la usan
 // tal cual, no pueden resolver una ruta relativa como BASE_URL.

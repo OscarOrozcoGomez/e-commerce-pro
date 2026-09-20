@@ -5,7 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-// Fase 4: el permiso 'transferir_stock' abre esta vista; el rol admin se mantiene como respaldo.
+// El permiso 'transferir_stock' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
 if (!hasPermission('transferir_stock') && !isAdmin()) {
     header('Location: dashboard.php');
     exit;

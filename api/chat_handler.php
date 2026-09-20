@@ -10,11 +10,20 @@ if (!isAuthenticated()) {
     exit;
 }
 
+// Refresca permisos por si se concedieron/revocaron desde el panel hace poco.
+refreshSessionPermissions();
+
 $pdo = getPDO();
 $usuario = $_SESSION['usuario'];
 $id_actual = (int)$usuario['id_usuario'];
 $soyCliente = isCliente();
-$soyStaff = !isCliente();
+// El personal atiende el chat solo con el permiso 'atender_chat' (el cliente siempre puede usar el suyo).
+$soyStaff = isSupportChatStaff();
+if (!$soyCliente && !$soyStaff) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'No tienes permiso para atender el chat de soporte.']);
+    exit;
+}
 
 $action = $_GET['action'] ?? '';
 

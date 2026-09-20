@@ -57,11 +57,10 @@ function saleDeliveryModeInitialEstado(bool $isCounter): string
  *
  * La venta de mostrador ('Sucursal') la puede hacer cualquiera que llegue al panel de
  * ventas. Agendar a domicilio exige poder programar entregas: el permiso
- * 'asignar_entregas' (o el respaldo de rol canManageDeliveryOrders()). Un modo
- * vacío/desconocido normaliza a 'Domicilio', así que a quien no puede tampoco le pasa.
+ * 'asignar_entregas'. Un modo vacío/desconocido normaliza a 'Domicilio', así que a quien no puede tampoco le pasa.
  *
  * @param mixed $rawMode                Valor crudo de tipo_entrega.
- * @param bool  $canScheduleHomeDelivery hasPermission('asignar_entregas') || canManageDeliveryOrders().
+ * @param bool  $canScheduleHomeDelivery hasPermission('asignar_entregas').
  */
 function saleDeliveryModeIsAllowedForUser($rawMode, bool $canScheduleHomeDelivery): bool
 {

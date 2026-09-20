@@ -27,9 +27,8 @@ if (isset($_SERVER['HTTP_X_MIGRATIONS_TOKEN']) && is_string($_SERVER['HTTP_X_MIG
     $providedToken = trim($_SERVER['HTTP_X_MIGRATIONS_TOKEN']);
 }
 
-if ($providedToken === '' && isset($_GET['token']) && is_string($_GET['token'])) {
-    $providedToken = trim($_GET['token']);
-}
+// El token SOLO viaja por la cabecera X-Migrations-Token: en la URL (?token=) queda en los logs de acceso,
+// en el historial del navegador y en el Referer.
 
 if (!is_string($providedToken) || !hash_equals($expectedToken, $providedToken)) {
     http_response_code(403);

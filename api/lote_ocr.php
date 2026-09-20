@@ -9,7 +9,7 @@ header('Content-Type: application/json');
 
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
 refreshSessionPermissions();
-if (!isAuthenticated() || (!hasPermission('gestionar_caducidades') && !isAdmin() && !isEncargado())) {
+if (!isAuthenticated() || !hasPermission('gestionar_caducidades')) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;
 }

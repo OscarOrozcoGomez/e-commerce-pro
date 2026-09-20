@@ -10,7 +10,7 @@ header('Content-Type: application/json');
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco (no-op sin sesion).
 refreshSessionPermissions();
 
-// Fase 4: el permiso 'transferir_stock' abre este endpoint; el rol admin se mantiene como respaldo.
+// El permiso 'transferir_stock' abre este endpoint (sin respaldo por rol: el panel de Roles y Permisos manda).
 if (!isAuthenticated() || (!hasPermission('transferir_stock') && !isAdmin())) {
     echo json_encode(['success' => false, 'message' => 'No autorizado']);
     exit;

@@ -1047,7 +1047,7 @@ include __DIR__ . '/views/includes/header.php';
         try {
             const response = await fetch(PDP_FAVORITES_API_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': FAVORITES_CSRF_TOKEN },
                 body: JSON.stringify({
                     action: 'toggle',
                     id_producto: currentProduct.id_producto

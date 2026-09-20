@@ -44,8 +44,6 @@ final class UserRolesPermissionsTest extends TestCase
         $this->assertFalse(isVendedor());
         $this->assertFalse(isRepartidor());
         $this->assertFalse(isCliente());
-        $this->assertFalse(canManageDeliveryOrders());
-        $this->assertFalse(canScheduleSalesOrders());
         $this->assertFalse(canBulkAssignCategories());
     }
 
@@ -78,33 +76,38 @@ final class UserRolesPermissionsTest extends TestCase
         $_SESSION['usuario'] = ['rol' => 'admin'];
         $this->assertTrue(isAdmin());
         $this->assertFalse(isEncargado());
-        $this->assertTrue(canManageDeliveryOrders());
-        $this->assertTrue(canScheduleSalesOrders());
         $this->assertTrue(canBulkAssignCategories());
 
         $_SESSION['usuario'] = ['rol' => 'encargado'];
         $this->assertTrue(isEncargado());
         $this->assertFalse(isAdmin());
-        $this->assertTrue(canManageDeliveryOrders());
-        $this->assertTrue(canScheduleSalesOrders());
-        $this->assertTrue(canBulkAssignCategories());
 
         $_SESSION['usuario'] = ['rol' => 'vendedor'];
         $this->assertTrue(isVendedor());
-        $this->assertFalse(canManageDeliveryOrders());
-        $this->assertTrue(canScheduleSalesOrders());
-        $this->assertFalse(canBulkAssignCategories());
 
         $_SESSION['usuario'] = ['rol' => 'repartidor'];
         $this->assertTrue(isRepartidor());
-        $this->assertFalse(canManageDeliveryOrders());
-        $this->assertFalse(canScheduleSalesOrders());
-        $this->assertFalse(canBulkAssignCategories());
 
         $_SESSION['usuario'] = ['rol' => 'cliente'];
         $this->assertTrue(isCliente());
-        $this->assertFalse(canManageDeliveryOrders());
-        $this->assertFalse(canScheduleSalesOrders());
+    }
+
+    /**
+     * canBulkAssignCategories() ya no mira el rol: lo da su clave propia o gestionar_productos.
+     * Un encargado SIN esas claves no puede (antes entraba por ser encargado).
+     */
+    public function testAsignacionMasivaDeCategoriasDependeDePermisoNoDeRol(): void
+    {
+        $_SESSION['usuario'] = ['rol' => 'encargado', 'permisos' => []];
+        $this->assertFalse(canBulkAssignCategories());
+
+        $_SESSION['usuario'] = ['rol' => 'encargado', 'permisos' => ['asignar_categorias_masivo']];
+        $this->assertTrue(canBulkAssignCategories());
+
+        $_SESSION['usuario'] = ['rol' => 'vendedor', 'permisos' => ['gestionar_productos']];
+        $this->assertTrue(canBulkAssignCategories());
+
+        $_SESSION['usuario'] = ['rol' => 'vendedor', 'permisos' => ['realizar_ventas']];
         $this->assertFalse(canBulkAssignCategories());
     }
 

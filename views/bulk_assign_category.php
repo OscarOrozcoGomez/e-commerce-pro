@@ -5,8 +5,8 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-// Fase 4: el permiso 'gestionar_productos' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('gestionar_productos') && !canBulkAssignCategories()) {
+// El permiso 'gestionar_productos' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('asignar_categorias_masivo') && !hasPermission('gestionar_productos')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -44,14 +44,14 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                     <div id="bac-mode-nueva" style="padding-top:16px;">
-                        <?php if (isAdmin()): ?>
+                        <?php if (hasPermission('crear_categorias')): ?>
                             <div class="input-field" style="margin-top:0;">
                                 <input type="text" id="bac-nueva-categoria" maxlength="120" placeholder="Ej: Vitaminas">
                                 <label for="bac-nueva-categoria" class="active">Nombre de la nueva categoría</label>
                             </div>
                             <p class="grey-text" style="font-size:0.82rem; margin-top:-10px;">Se crea la categoría y se asigna a los productos seleccionados en un solo paso.</p>
                         <?php else: ?>
-                            <p class="grey-text">Solo un administrador puede crear categorías nuevas. Pídele que la cree, o usa una existente en la otra pestaña.</p>
+                            <p class="grey-text">No tienes permiso para crear categorías nuevas. Pídele a un administrador que la cree, o usa una existente en la otra pestaña.</p>
                         <?php endif; ?>
                     </div>
 

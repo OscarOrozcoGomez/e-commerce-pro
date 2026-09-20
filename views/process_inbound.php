@@ -3,8 +3,8 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 
 requireAuth();
-// Permiso 'inventario' abre esta vista; el rol se mantiene como respaldo.
-if (!hasPermission('inventario') && !isAdmin() && !isEncargado()) {
+// Permiso 'inventario' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
+if (!hasPermission('inventario')) {
     header('Location: ' . BASE_URL . 'views/dashboard.php');
     exit;
 }
@@ -52,6 +52,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-content">
                     <form id="form-process-inbound">
+                    <?php echo csrfInput(); ?>
                         <input type="hidden" name="id_orden_compra" value="<?php echo $idOrden; ?>">
                         <table class="striped">
                             <thead>

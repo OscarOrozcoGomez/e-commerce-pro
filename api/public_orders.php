@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/phone_utils.php';
+require_once __DIR__ . '/../core/api_security_utils.php';
 
 function normalizePhoneDigitsCheckout(string $value): string {
     return normalizePhoneDigitsMx($value) ?? '';
@@ -81,12 +82,21 @@ function guardarDireccionCheckoutSiAplica(array $data): void {
 }
 
 header('Content-Type: application/json');
+// Endpoint publico (checkout de invitados): limite de pedidos por minuto y por IP.
+apiLimitarPeticiones('public_orders', 30);
 $data = json_decode(file_get_contents('php://input'), true);
 
 if (!$data || empty($data['items'])) {
     echo json_encode(['success' => false, 'message' => 'Datos inválidos']);
     exit;
 }
+
+// Con sesion (cliente logueado) el pedido se liga a su cuenta: exige token CSRF. Un invitado no tiene
+// sesion que falsificar y no se bloquea (el pedido sin cuenta no toca nada de nadie).
+if (isAuthenticated()) {
+    apiRequerirCsrf($data);
+}
+unset($data['csrf_token']);
 
 // El checkout web solo esta disponible para cuentas de cliente.
 if (isAuthenticated() && !isCliente()) {

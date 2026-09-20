@@ -627,9 +627,11 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Productos</span>
                         <p class="display-metric" id="stat-productos">0</p>
                     </div>
+                    <?php if (hasPermission('gestionar_productos')): ?>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/products.php" class="white-text">Ver Productos</a>
                     </div>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -638,9 +640,11 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Stock Bajo</span>
                         <p class="display-metric" id="stat-stock-bajo">0</p>
                     </div>
+                    <?php if (hasPermission('gestionar_productos')): ?>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/products.php" class="white-text">Revisar Inventario</a>
                     </div>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -649,9 +653,11 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-title">Por Entregar</span>
                         <p class="display-metric" id="stat-por-entregar">0</p>
                     </div>
+                    <?php if (hasPermission('asignar_entregas')): ?>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/asignar_entregas.php" class="white-text">Asignar Entregas</a>
                     </div>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="col s12 m6 l3">
@@ -661,15 +667,18 @@ include __DIR__ . '/includes/header.php';
                         <p class="display-metric" id="stat-pickup-pendientes">0</p>
                         <p class="text-small" id="stat-pickup-breakdown">Nuevas: 0 | Vistas: 0 | Apartadas: 0 | Atendidas hoy: 0</p>
                     </div>
+                    <?php if (hasPermission('ver_notificaciones_pickup')): ?>
                     <div class="card-action">
                         <a href="<?php echo BASE_URL; ?>views/pickup_notifications.php" class="white-text">Ver Retiros</a>
                     </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">point_of_sale</i> Ventas y Atención</h5></div></div>
         <div class="row dashboard-actions">
+            <?php if (hasPermission('realizar_ventas')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -681,6 +690,8 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
+            <?php if (hasPermission('asignar_entregas')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -692,6 +703,8 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
+            <?php if (hasPermission('ver_reportes')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -703,6 +716,8 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
+            <?php if (hasPermission('gestionar_clientes')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -714,6 +729,8 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
+            <?php if (hasPermission('gestionar_cancelaciones')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -725,6 +742,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
             <?php if (hasPermission('ver_insights_ia')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
@@ -805,6 +823,7 @@ include __DIR__ . '/includes/header.php';
 
         <div class="row"><div class="col s12"><h5><i class="material-icons left">inventory_2</i> Inventario y Operación</h5></div></div>
         <div class="row dashboard-actions">
+            <?php if (hasPermission('inventario')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -816,6 +835,8 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
+            <?php if (hasPermission('inventario')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -827,6 +848,8 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
+            <?php if (hasPermission('inventario')): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
                     <div class="card-content">
@@ -838,6 +861,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
             <?php if (hasPermission('transferir_stock') || isAdmin()): ?>
             <div class="col s12 m6 l4">
                 <div class="card">
@@ -853,6 +877,7 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
 
+        <?php if (hasPermission('gestionar_blogs')): ?>
         <div class="row"><div class="col s12"><h5><i class="material-icons left">article</i> Contenido</h5></div></div>
         <div class="row dashboard-actions">
             <div class="col s12 m6 l4">
@@ -867,6 +892,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
     <?php elseif (isRepartidor()): ?>
         <!-- DASHBOARD REPARTIDOR -->
@@ -1025,7 +1051,9 @@ include __DIR__ . '/includes/header.php';
                                         <input type="text" id="input-observaciones-dia" maxlength="255" placeholder="Notas del corte del dia">
                                         <label for="input-observaciones-dia" class="active">Observaciones (opcional)</label>
                                     </div>
+                                    <?php if (hasPermission('declarar_liquidacion')): ?>
                                     <button type="button" id="btn-liquidar-dia" class="btn orange darken-3 waves-effect waves-light liquidacion-main-btn">DECLARAR Y ENTREGAR $ 0.00</button>
+                                    <?php endif; ?>
                                 </div>
                             </div>
 
@@ -1089,6 +1117,7 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <div class="row dashboard-actions">
+            <?php if (hasPermission('realizar_ventas')): ?>
             <div class="col s12 m6 l6">
                 <div class="card">
                     <div class="card-content">
@@ -1100,6 +1129,7 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
             <div class="col s12 m6 l6">
                 <div class="card">
                     <div class="card-content">
