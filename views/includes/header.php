@@ -268,6 +268,32 @@
             animation: pickupBuzz 0.75s ease-in-out 3;
             transform-origin: center;
         }
+        /* Menu lateral movil: Materialize fija cada enlace a height/line-height 48px, asi que
+           un texto largo ("Notificaciones de caducidades") se parte en dos lineas y la segunda
+           se encima sobre el siguiente enlace. Aqui el enlace crece con su contenido; los de una
+           sola linea siguen midiendo 48px. */
+        #mobile-nav li > a:not(.sidenav-close):not(.subheader) {
+            display: flex;
+            align-items: center;
+            height: auto;
+            min-height: 48px;
+            line-height: 24px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+        }
+        #mobile-nav li > a:not(.sidenav-close):not(.subheader) > i.material-icons {
+            float: none;
+            flex: 0 0 24px;
+            height: 24px;
+            line-height: 24px;
+        }
+        /* Materialize les da margin-top:13px a los badges (pensado para la altura fija de 48px). */
+        #mobile-nav li > a > .badge {
+            flex: 0 0 auto;
+            margin-top: 0;
+            margin-bottom: 0;
+            min-width: 1.5rem;
+        }
     </style>
 </head>
 <body class="grey lighten-4">
