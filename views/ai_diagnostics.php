@@ -71,6 +71,7 @@ include __DIR__ . '/includes/header.php';
                             <li><span class="chip">tool_excepcion</span> Ocurrio un error tecnico al ejecutar una herramienta (por ejemplo, un problema de base de datos). Vale la pena revisar el detalle por si es un bug real.</li>
                             <li><span class="chip">deepseek_conexion</span> El modelo de IA (DeepSeek) no respondio o fallo la conexion. Alex transfirio la conversacion a un humano automaticamente.</li>
                             <li><span class="chip">pase_a_humano_incertidumbre</span> Alex prefirio no arriesgarse a inventar una respuesta (precios exactos, promesas medicas, preguntas muy especificas) y paso la conversacion a una persona. Esto es un comportamiento correcto, no necesariamente un error.</li>
+                            <li><span class="chip">promesa_equipo_sin_transferir</span> Alex le dijo al cliente que lo confirmaba con el equipo pero no avisó a nadie por su cuenta; el sistema mandó la alerta de Telegram por él y pausó la conversación. Hay que contestarle al cliente.</li>
                         </ul>
 
                         <p><strong>Que hacer con cada fila:</strong></p>

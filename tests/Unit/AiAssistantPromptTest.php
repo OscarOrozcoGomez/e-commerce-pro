@@ -205,6 +205,25 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('[PASE_A_HUMANO]', $withOverride);
     }
 
+    public function testPromptProhibeInventarDatosDeProductoQueNoVinieronDeLaConsulta(): void
+    {
+        // Caso E2E 2026-09-21: sin capsulas_por_envase capturado, Alex dijo "120 capsulas" de memoria.
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null);
+
+        $this->assertStringContainsString('solo lo puedes decir si viene explicito en lo que consultar_inventario', $prompt);
+        $this->assertStringContainsString('NO lo deduzcas ni lo recuerdes de memoria', $prompt);
+    }
+
+    public function testDetectaPromesaDeConfirmarConElEquipo(): void
+    {
+        // Caso real 2026-09-21: prometió confirmar y nunca llegó la alerta a Telegram.
+        $this->assertTrue(aiTextoPrometeConsultarEquipo('¡Buena pregunta, Angy! 😊 Déjame confirmarte ese dato exacto con el equipo, porque quiero darte la información correcta.'));
+        $this->assertTrue(aiTextoPrometeConsultarEquipo('No tengo ese detalle, lo confirmo con el equipo y te aviso.'));
+        $this->assertTrue(aiTextoPrometeConsultarEquipo('Lo checo con un compañero y te cuento.'));
+        $this->assertFalse(aiTextoPrometeConsultarEquipo('Hacemos entregas los miércoles y sábados. El equipo sale desde temprano.'));
+        $this->assertFalse(aiTextoPrometeConsultarEquipo('Te confirmo tu pedido. Quedó con el equipo de logística. Gracias.'));
+    }
+
     public function testHandoffFlagDetectionAndStripping(): void
     {
         $this->assertFalse(aiTextContainsHandoffFlag('Hola, en que te ayudo?'));
