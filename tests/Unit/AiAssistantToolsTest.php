@@ -152,6 +152,143 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame([], aiSearchInventory($this->pdo, 'vitamina'));
     }
 
+    public function testMensajesSeguidosDelClienteSoloLosContestaElUltimoTurno(): void
+    {
+        // Caso real 2026-09-21: 2-3 mensajes seguidos del cliente generaban 2-3 respuestas pegadas.
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5213311110001', 'Cliente')['id_conversacion'];
+        $primero = aiAppendMessage($this->pdo, $conv, 'user', 'Hola, quiero informacion');
+        $segundo = aiAppendMessage($this->pdo, $conv, 'user', 'Donde se encuentra');
+
+        $this->assertTrue(aiEsperarYVerSiHayMensajeNuevo($this->pdo, $conv, $primero, 0), 'el primero debe callarse');
+        $this->assertFalse(aiEsperarYVerSiHayMensajeNuevo($this->pdo, $conv, $segundo, 0), 'el ultimo responde');
+
+        // Una respuesta de Alex posterior no cuenta como mensaje nuevo del cliente.
+        aiAppendMessage($this->pdo, $conv, 'assistant', 'Hola!');
+        $this->assertFalse(aiEsperarYVerSiHayMensajeNuevo($this->pdo, $conv, $segundo, 0));
+    }
+
+    /**
+     * Corre un turno completo de Alex con DeepSeek simulado (dice $respuestaModelo, sin tools).
+     *
+     * @return array{0: array, 1: array} [replyParts, fila de whatsapp_conversaciones]
+     */
+    private function turnoConModeloDiciendo(string $waId, string $mensajeCliente, string $respuestaModelo): array
+    {
+        $original = getenv('AI_ASSISTANT_TEST_MODE');
+        putenv('AI_ASSISTANT_TEST_MODE=1');
+        $GLOBALS['ai_test_respuesta_deepseek'] = $respuestaModelo;
+        try {
+            $reply = aiRunAssistantTurn($waId, 'Cliente', $mensajeCliente, null, null, new DateTimeImmutable('2026-09-14 12:00:00'), $this->pdo);
+        } finally {
+            unset($GLOBALS['ai_test_respuesta_deepseek']);
+            putenv($original === false ? 'AI_ASSISTANT_TEST_MODE' : 'AI_ASSISTANT_TEST_MODE=' . $original);
+        }
+        $conv = $this->pdo->query("SELECT estado_bot, motivo_transferencia FROM whatsapp_conversaciones WHERE wa_id = '{$waId}'")->fetch();
+
+        return [$reply, $conv];
+    }
+
+    public function testRafagaDelClienteSeContestaCitandoElUltimoMensaje(): void
+    {
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500080001', 'Cliente')['id_conversacion'];
+        aiAppendMessage($this->pdo, $conv, 'user', 'Hola, quiero informacion', null, null, null, 'WAMSG-1');
+        aiAppendMessage($this->pdo, $conv, 'user', 'Donde se encuentran?', null, null, null, 'WAMSG-2');
+
+        $this->assertSame(['wa_message_id' => 'WAMSG-2', 'texto' => 'Donde se encuentran?'], aiMensajeAResponderConCita($this->pdo, $conv));
+
+        // Pasos intermedios de tool-calling del mismo turno no cuentan como respuesta previa.
+        aiAppendMessage($this->pdo, $conv, 'assistant', null, [['id' => 'x']]);
+        $this->assertSame('WAMSG-2', aiMensajeAResponderConCita($this->pdo, $conv)['wa_message_id']);
+
+        // Ya contestada la rafaga, un mensaje suelto no se cita.
+        aiAppendMessage($this->pdo, $conv, 'assistant', 'Hola!');
+        aiAppendMessage($this->pdo, $conv, 'user', 'Gracias', null, null, null, 'WAMSG-3');
+        $this->assertNull(aiMensajeAResponderConCita($this->pdo, $conv));
+    }
+
+    public function testTurnoConMensajeUnicoNoCitaYConRafagaSi(): void
+    {
+        [$reply] = $this->turnoConModeloDiciendo('5215500080002', 'Hola', 'Hola, ¿en qué te ayudo?');
+        $this->assertArrayNotHasKey('quoted_wa_message_id', $reply[0]);
+
+        // Segundo mensaje sin respuesta de Alex de por medio (el primero quedó guardado, su turno calló).
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500080003', 'Cliente')['id_conversacion'];
+        aiAppendMessage($this->pdo, $conv, 'user', 'Hola, quiero informacion', null, null, null, 'WAMSG-A');
+        $original = getenv('AI_ASSISTANT_TEST_MODE');
+        putenv('AI_ASSISTANT_TEST_MODE=1');
+        try {
+            $reply = aiRunAssistantTurn('5215500080003', 'Cliente', 'Donde se encuentran?', 'WAMSG-B', null, new DateTimeImmutable('2026-09-14 12:00:00'), $this->pdo);
+        } finally {
+            putenv($original === false ? 'AI_ASSISTANT_TEST_MODE' : 'AI_ASSISTANT_TEST_MODE=' . $original);
+        }
+
+        $this->assertSame('WAMSG-B', $reply[0]['quoted_wa_message_id']);
+        $this->assertSame('Donde se encuentran?', $reply[0]['quoted_text']);
+    }
+
+    public function testTurnoRespuestaNormalNoPausaLaConversacion(): void
+    {
+        [$reply, $conv] = $this->turnoConModeloDiciendo('5215500070001', 'Hola', 'Hola, ¿en qué te ayudo?');
+
+        $this->assertSame('Hola, ¿en qué te ayudo?', $reply[0]['text']);
+        $this->assertSame('activo', $conv['estado_bot']);
+    }
+
+    public function testTurnoQuePrometeConfirmarConElEquipoPausaAvisaYAunAsiContesta(): void
+    {
+        // Caso real 2026-09-21 (Angy / Fish Oil): promesa en texto libre, sin tool ni bandera.
+        [$reply, $conv] = $this->turnoConModeloDiciendo(
+            '5215500070002',
+            '¿Cuántas cápsulas contiene la fish oil?',
+            'Déjame confirmarte ese dato exacto con el equipo, porque quiero darte la información correcta.'
+        );
+
+        $this->assertSame('pausado', $conv['estado_bot']);
+        $this->assertStringContainsString('cápsulas contiene la fish oil', $conv['motivo_transferencia']);
+        $this->assertNotEmpty($reply, 'el cliente sí recibe la respuesta, no se suprime');
+        $this->assertStringContainsString('con el equipo', $reply[0]['text']);
+        $tipo = $this->pdo->query("SELECT COUNT(*) FROM ai_errores_diagnostico WHERE tipo_error = 'promesa_equipo_sin_transferir'")->fetchColumn();
+        $this->assertSame(1, (int)$tipo);
+    }
+
+    public function testTurnoConBanderaPaseAHumanoPausaPeroNoSuprimeLaRespuesta(): void
+    {
+        // Regresión: antes el re-chequeo de estado_bot veía la conversación pausada por este
+        // mismo turno y descartaba la respuesta (el cliente no recibía nada).
+        [$reply, $conv] = $this->turnoConModeloDiciendo('5215500070003', 'Quiero una queja', 'Con gusto te ayuda un asesor. ' . AI_HANDOFF_TEXT_FLAG);
+
+        $this->assertSame('pausado', $conv['estado_bot']);
+        $this->assertNotEmpty($reply);
+        $this->assertSame('Con gusto te ayuda un asesor.', $reply[0]['text']);
+    }
+
+    public function testConsultarInventarioEncuentraPresentacionPorPalabrasSueltas(): void
+    {
+        // Caso real 2026-09-21: "resveratrol de 180 capsulas" no coincidia como frase con nada
+        // (nombre en un campo, "180 Caps" en otro) y Alex le dijo a la clienta que no lo teniamos.
+        $this->seedProducto(30, 'Resveratrol', 'RSV180', '180 Caps | 500 mg', 300.00);
+        $this->seedInventario(30, 1, 5);
+        $this->seedProducto(31, 'Resveratrol', 'RSV90', '90 Caps | 500 mg', 200.00);
+        $this->seedInventario(31, 1, 5);
+
+        $r = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'resveratrol de 180 cápsulas']);
+
+        $this->assertSame([30], array_column($r['productos'], 'id_producto'));
+        $this->assertSame(1, $r['total_encontrados']);
+        $this->assertArrayNotHasKey('message', $r);
+    }
+
+    public function testConsultarInventarioOfreceOtrasPresentacionesSiLaPedidaNoExiste(): void
+    {
+        $this->seedProducto(32, 'Resveratrol', 'RSV90', '90 Caps | 500 mg', 200.00);
+        $this->seedInventario(32, 1, 5);
+
+        $r = aiToolConsultarInventario($this->pdo, ['busqueda_texto' => 'resveratrol 180 caps']);
+
+        $this->assertSame([32], array_column($r['productos'], 'id_producto'));
+        $this->assertStringContainsString('otras presentaciones', $r['message']);
+    }
+
     public function testAiSearchInventoryMatchesByVariantName(): void
     {
         $this->seedProducto(12, 'Shampoo', 'SHMP', 'Frasco 500ml', 89.90);
@@ -246,6 +383,12 @@ final class AiAssistantToolsTest extends TestCase
         foreach ($resultados as $producto) {
             $this->assertArrayNotHasKey('rendimiento_estimado', $producto);
         }
+
+        // Pero el conteo del envase sí se expone solo (caso real 2026-09-21: "cuantas capsulas
+        // contiene Fish Oil"), sin inventar dosis; sin dato de conteo, la llave no aparece.
+        $porId = array_column($resultados, null, 'id_producto');
+        $this->assertSame(240, $porId[23]['capsulas_por_envase']);
+        $this->assertArrayNotHasKey('capsulas_por_envase', $porId[24]);
     }
 
     public function testAiBuildRendimientoEstimadoTextoUsesSingularForOneCapsulePerDay(): void

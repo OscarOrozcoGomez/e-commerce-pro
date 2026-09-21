@@ -197,12 +197,13 @@ function aiBuildSystemPrompt(
         $lines[] = '';
         $lines[] = 'REGLA MAS IMPORTANTE: jamas menciones un precio, existencia o caracteristica de un producto sin haber llamado antes a la funcion consultar_inventario. Si no tienes el dato, dile amablemente al cliente que lo vas a verificar con el equipo.';
         $lines[] = 'No inventes productos, precios ni promociones que no vengan de tus funciones.';
+        $lines[] = 'Un dato de un producto (cuantas capsulas trae el envase, dosis, ingredientes, tamano) solo lo puedes decir si viene explicito en lo que consultar_inventario te regreso para ESE producto. Si no viene, NO lo deduzcas ni lo recuerdes de memoria (aunque creas saberlo): omitelo, y si el cliente lo pidio dile con naturalidad que lo confirmas con el equipo y agrega la bandera ' . AI_HANDOFF_TEXT_FLAG . '.';
         $lines[] = '';
         $lines[] = 'Flujo de atencion:';
         $lines[] = '1. Saluda y da seguimiento a lo que el cliente ya pregunto antes en esta conversacion (tienes el historial completo).';
         $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. El catalogo tiene productos de varias categorias (vitaminas, minerales, suplementos, etc.) y muchos vienen en varias presentaciones/tamanos (por ejemplo 120, 240 o 500 capsulas) a precios distintos -- si consultar_inventario te regresa varias presentaciones del mismo producto, mencionalas todas para que el cliente elija la que le convenga, no asumas una sola. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
         $lines[] = '2b. Si un producto que te regreso consultar_inventario trae "en_oferta": true, el precio que ya te dio ("precio") YA es el precio rebajado -- nunca lo presentes como si fuera el precio de siempre. Dile al cliente explicitamente que esta en oferta y cuanto ahorra comparando contra "precio_normal" (ej. "esta en oferta a $X, antes $Y"), aunque el cliente no haya preguntado por ofertas ni descuentos -- no depende de que llames a consultar_ofertas por separado para mencionarlo.';
-        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental/rendimiento_estimado que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla). Preséntalo bonito y facil de leer, con iconos por seccion (🌿 para ingredientes, 📊 para informacion nutrimental, y dentro de la tabla usa el icono que mejor represente cada nutriente: ⚡ energetico/calorias, 🥑 grasas, 🍞 carbohidratos, 💪 proteinas, 🧂 sodio, etc.), no como parrafo corrido ni como JSON. Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
+        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental/rendimiento_estimado/capsulas_por_envase que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla, EXCEPTO si el dato que te piden no venia en el resultado anterior: el equipo lo captura de a poco, asi que vuelve a llamarla antes de decir que no lo tienes; y nunca prometas que "sigues checando" un dato -- no tienes forma de hacerlo). Preséntalo bonito y facil de leer, con iconos por seccion (🌿 para ingredientes, 📊 para informacion nutrimental, y dentro de la tabla usa el icono que mejor represente cada nutriente: ⚡ energetico/calorias, 🥑 grasas, 🍞 carbohidratos, 💪 proteinas, 🧂 sodio, etc.), no como parrafo corrido ni como JSON. Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
         $lines[] = '3b. Si el producto es en capsulas y consultar_inventario te regreso rendimiento_estimado, mencionalo cuando el cliente pregunte cuanto le dura o le rinde, o al confirmar la compra de ese producto -- deja claro que esa es la dosis SUGERIDA por la marca, no una regla obligatoria. Si el cliente pregunta que pasa si toma menos o mas capsulas al dia de lo sugerido, respondele que es completamente su criterio, pero reitera la dosis sugerida por la marca y que el producto tiene fecha de caducidad -- nunca le prometas ni le garantices cuanto le va a rendir si decide tomar una dosis distinta a la sugerida.';
         $lines[] = '3c. Cuando platiques de ingredientes, beneficios, para que sirve o modo de uso de un producto (no en cada mensaje, solo cuando el tema salga), incluye de forma natural esta leyenda LEGAL tal cual, sin cambiarle ni una palabra: "' . AI_LEYENDA_NO_MEDICAMENTO . '"';
         $lines[] = '3d. Si consultar_inventario te regreso beneficios y/o perfil_recomendado para un producto, son referencia INTERNA para que tu decidas que sugerir y como platicar del producto -- nunca los recites tal cual ni los enumeres como lista al cliente (son tags cortos, no estan redactados para leerse directo). Parafrasealos con tus palabras, en tono conversacional. Si perfil_recomendado trae un aviso de "embarazo y lactancia: no recomendado" (o similar) y el cliente menciona que esta embarazada, en periodo de lactancia, o pregunta directamente por eso, dilo de forma clara y explicita para ESE producto en concreto -- no te quedes en un consejo generico de "consulta a tu medico" cuando ya tienes la bandera especifica de ese producto.';
@@ -551,6 +552,17 @@ function aiTextContainsHandoffFlag(string $text): bool
 function aiStripHandoffFlag(string $text): string
 {
     return trim((string)str_ireplace(AI_HANDOFF_TEXT_FLAG, '', $text));
+}
+
+/**
+ * Red de seguridad de la bandera: Alex a veces le promete al cliente "lo confirmo con el
+ * equipo" en texto libre sin llamar a transferir_a_humano ni poner la bandera -- el cliente
+ * queda esperando y a Telegram no llega ninguna alerta (caso real 2026-09-21: "Déjame
+ * confirmarte ese dato exacto con el equipo"). Detecta esa promesa por la forma de la frase.
+ */
+function aiTextoPrometeConsultarEquipo(string $texto): bool
+{
+    return preg_match('/\b(confirm|verific|chec|revis|consult)\w*[^.!?\n]{0,60}\bcon (el equipo|mi equipo|un compa|el area)/iu', $texto) === 1;
 }
 
 /* ---------------------------------------------------------------------
@@ -1831,7 +1843,8 @@ function aiCallDeepSeek(array $messages, array $tools, string $model, float $tem
 {
     if (aiIsTestMode()) {
         return [
-            'message' => ['role' => 'assistant', 'content' => '[TEST MODE] Respuesta simulada de DeepSeek.'],
+            // $GLOBALS['ai_test_respuesta_deepseek']: solo tests, para simular lo que "dice" el modelo.
+            'message' => ['role' => 'assistant', 'content' => (string)($GLOBALS['ai_test_respuesta_deepseek'] ?? '[TEST MODE] Respuesta simulada de DeepSeek.')],
             'finish_reason' => 'stop',
         ];
     }
@@ -2224,7 +2237,60 @@ function aiGetProductosRelacionadosConStock(PDO $pdo, array $idsProducto): array
     return $resultado;
 }
 
-function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): array
+// Palabras que estorban al buscar por terminos sueltos (aiInventoryAlternativasDeBusqueda):
+// el catalogo escribe "180 Caps" o "Capsulas" segun el producto, asi que exigirlas rompe la busqueda.
+const AI_BUSQUEDA_PALABRAS_RELLENO = ['de', 'del', 'con', 'la', 'el', 'los', 'las', 'en', 'para', 'y', 'un', 'una', 'capsula', 'capsulas', 'caps', 'cap', 'pastillas', 'precio', 'presentacion'];
+
+/**
+ * Condicion SQL "cada termino aparece en alguno de los campos buscables" (terminos unidos
+ * con AND). Con un solo termino es la busqueda de frase completa de siempre.
+ */
+function aiInventoryCondicionTerminos(array $terminos, array &$params): string
+{
+    $campos = ['nombre', 'codigo_barras', 'nombre_variante', 'descripcion', 'ingredientes', 'beneficios', 'perfil_recomendado', 'nombre_corto'];
+    $partes = [];
+    foreach (array_values($terminos) as $i => $termino) {
+        $ors = [];
+        foreach ($campos as $k => $campo) {
+            $ors[] = "p.{$campo} LIKE :t{$i}_{$k} ESCAPE '!'";
+            $params[":t{$i}_{$k}"] = '%' . aiEscapeLikeTerm((string)$termino) . '%';
+        }
+        $partes[] = '(' . implode(' OR ', $ors) . ')';
+    }
+
+    return implode(' AND ', $partes);
+}
+
+/**
+ * Cuando la frase completa no coincide con nada ("resveratrol de 180 capsulas" no aparece
+ * literal: el nombre esta en un campo y "180 Caps" en otro), lista de intentos por palabras
+ * sueltas, del mas estricto al mas laxo: todas las palabras utiles y luego sin los numeros
+ * (para poder ofrecer otras presentaciones del mismo producto). Cada intento es una lista
+ * de terminos para aiSearchInventory().
+ *
+ * @return list<list<string>>
+ */
+function aiInventoryAlternativasDeBusqueda(string $busqueda): array
+{
+    $palabras = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower(trim($busqueda)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $palabras = array_values(array_unique(array_filter(
+        $palabras,
+        static fn(string $w): bool => mb_strlen($w) >= 2 && !in_array(aiStripAccentsLower($w), AI_BUSQUEDA_PALABRAS_RELLENO, true)
+    )));
+
+    $intentos = [];
+    if (count($palabras) >= 2) {
+        $intentos[] = $palabras;
+    }
+    $sinNumeros = array_values(array_filter($palabras, static fn(string $w): bool => !ctype_digit($w)));
+    if ($sinNumeros !== [] && $sinNumeros !== $palabras) {
+        $intentos[] = $sinNumeros;
+    }
+
+    return $intentos;
+}
+
+function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8, ?array $terminos = null): array
 {
     $busqueda = trim($busquedaTexto);
     $safeLimit = max(1, min(20, $limit));
@@ -2245,18 +2311,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         // nombre_corto entra a la busqueda para que un cliente que pregunta por la
         // etiqueta del pomo ("tienen Maca Blend?") si lo encuentre -- antes solo se
         // buscaba en el nombre largo sincronizado de Shopify.
-        $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
-                       OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
-                       OR p.perfil_recomendado LIKE :term7 ESCAPE '!' OR p.nombre_corto LIKE :term8 ESCAPE '!')";
-        $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
-        $params[':term1'] = $term;
-        $params[':term2'] = $term;
-        $params[':term3'] = $term;
-        $params[':term4'] = $term;
-        $params[':term5'] = $term;
-        $params[':term6'] = $term;
-        $params[':term7'] = $term;
-        $params[':term8'] = $term;
+        $sql .= ' AND ' . aiInventoryCondicionTerminos($terminos ?? [$busqueda], $params);
     }
     $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta,
                        p.ingredientes, p.modo_uso, p.tabla_nutrimental,
@@ -2362,6 +2417,11 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         $tablaNutrimental = aiFormatTablaNutrimental($row['tabla_nutrimental'] ?? null);
         if ($tablaNutrimental !== '') {
             $producto['tabla_nutrimental'] = $tablaNutrimental;
+        }
+        // Solo el conteo del envase, sin exigir la dosis: "cuantas capsulas trae" no depende
+        // de porcion_capsulas y antes solo llegaba a Alex dentro de rendimiento_estimado.
+        if ((int)($row['capsulas_por_envase'] ?? 0) > 0) {
+            $producto['capsulas_por_envase'] = (int)$row['capsulas_por_envase'];
         }
         $rendimientoEstimado = aiBuildRendimientoEstimadoTexto(
             isset($row['capsulas_por_envase']) && $row['capsulas_por_envase'] !== null ? (int)$row['capsulas_por_envase'] : null,
@@ -2523,7 +2583,7 @@ function aiFormatTablaNutrimentalGrilla(array $columnas, array $filas): string
  * que le manda este acotada -- probado contra datos reales, busquedas como "vitamina"
  * superan las 60 coincidencias.
  */
-function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
+function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto, ?array $terminos = null): int
 {
     $busqueda = trim($busquedaTexto);
     if ($busqueda === '') {
@@ -2532,23 +2592,12 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
         return $stmt ? (int)$stmt->fetchColumn() : 0;
     }
 
+    $params = [];
     $sql = "SELECT COUNT(*) FROM productos p
             WHERE p.estado = 'activo'
-              AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
-                   OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
-                   OR p.perfil_recomendado LIKE :term7 ESCAPE '!' OR p.nombre_corto LIKE :term8 ESCAPE '!')";
-    $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
+              AND " . aiInventoryCondicionTerminos($terminos ?? [$busqueda], $params);
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        ':term1' => $term,
-        ':term2' => $term,
-        ':term3' => $term,
-        ':term4' => $term,
-        ':term5' => $term,
-        ':term6' => $term,
-        ':term7' => $term,
-        ':term8' => $term,
-    ]);
+    $stmt->execute($params);
 
     return (int)$stmt->fetchColumn();
 }
@@ -2875,6 +2924,21 @@ function aiToolConsultarInventario(PDO $pdo, array $args, array $context = []): 
     }
 
     $resultados = aiSearchInventory($pdo, $busqueda, AI_INVENTORY_SEARCH_LIMIT);
+    $terminos = null;
+    $sinCoincidenciaExacta = false;
+    if (empty($resultados)) {
+        // La frase completa no coincidio: prueba por palabras sueltas (ej. "resveratrol de 180
+        // capsulas" -> resveratrol + 180 -> "180 Caps"). Si solo coincide quitando los numeros,
+        // se avisa abajo para que Alex no afirme que existe la presentacion pedida.
+        foreach (aiInventoryAlternativasDeBusqueda($busqueda) as $intento) {
+            $resultados = aiSearchInventory($pdo, $busqueda, AI_INVENTORY_SEARCH_LIMIT, $intento);
+            if (!empty($resultados)) {
+                $terminos = $intento;
+                $sinCoincidenciaExacta = preg_match('/\d/', $busqueda) === 1 && !array_filter($intento, 'ctype_digit');
+                break;
+            }
+        }
+    }
     if (empty($resultados)) {
         // Sin resultados exactos: intenta una correccion de tipeo 100% por codigo antes de
         // rendirse. Si encuentra algo, usa el termino corregido tambien para el conteo total
@@ -2892,22 +2956,12 @@ function aiToolConsultarInventario(PDO $pdo, array $args, array $context = []): 
         return ['ok' => true, 'productos' => [], 'total_encontrados' => 0, 'message' => 'No se encontraron productos activos que coincidan con esa busqueda.'];
     }
 
-    // Bitacora: a esta conversacion se le mostro un producto en oferta (ver alex_oferta_eventos_utils.php).
-    foreach ($resultados as $producto) {
-        if (!empty($producto['en_oferta'])) {
-            alexOfertaRegistrarEvento($pdo, ALEX_OFERTA_EVENTO_CONSULTADA, (int)$producto['id_producto'], [
-                'id_conversacion' => $context['id_conversacion'] ?? null,
-                'id_cliente' => $context['id_cliente'] ?? null,
-                'precio_unitario' => $producto['precio'],
-                'precio_normal' => $producto['precio_normal'] ?? null,
-            ]);
-        }
-    }
-
-    $total = aiCountInventoryMatches($pdo, $busqueda);
+    $total = aiCountInventoryMatches($pdo, $busqueda, $terminos);
     $result = ['ok' => true, 'productos' => $resultados, 'total_encontrados' => $total];
 
-    if ($total > count($resultados)) {
+    if ($sinCoincidenciaExacta) {
+        $result['message'] = 'Ningun producto coincide con la cantidad/presentacion exacta que pidio el cliente; estos son los del mismo nombre con otras presentaciones. Ofrecele lo que si hay, diciendo claramente cual presentacion es cada uno.';
+    } elseif ($total > count($resultados)) {
         $result['message'] = "Se encontraron {$total} productos en total; aqui se muestran los primeros " . count($resultados) . ". Si es una busqueda amplia, no los listes todos de golpe: destaca 2-3 opciones y pregunta algo puntual para acotar antes de seguir.";
     }
 
@@ -4174,6 +4228,63 @@ function aiAsegurarAvisoDePago(string $textoUsuario, string $respuesta): string
     return rtrim($respuesta) . "\n\nSobre el pago: por ahora solo manejamos efectivo o transferencia, contra entrega. 😊";
 }
 
+/**
+ * Mensaje del cliente que la respuesta debe citar (reply de WhatsApp), o null si no hace falta.
+ * Solo se cita cuando desde la ultima respuesta de Alex el cliente escribio 2 o mas mensajes
+ * (rafaga agrupada por aiEsperarYVerSiHayMensajeNuevo): ahi la cita deja claro a cual contesta,
+ * y citar TODAS las respuestas seria raro. Se cita el ultimo mensaje con id de WhatsApp.
+ *
+ * @return array{wa_message_id:string, texto:string}|null
+ */
+function aiMensajeAResponderConCita(PDO $pdo, int $idConversacion): ?array
+{
+    // Las filas 'assistant' con tool_calls_json son pasos intermedios de este mismo turno, no respuestas.
+    $stmt = $pdo->prepare(
+        "SELECT rol, wa_message_id, contenido FROM whatsapp_mensajes
+         WHERE id_conversacion = ? AND (rol = 'user' OR (rol = 'assistant' AND tool_calls_json IS NULL))
+         ORDER BY id_mensaje DESC LIMIT 20"
+    );
+    $stmt->execute([$idConversacion]);
+
+    $cita = null;
+    $mensajesDelCliente = 0;
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fila) {
+        if ($fila['rol'] === 'assistant') {
+            break;
+        }
+        $mensajesDelCliente++;
+        if ($cita === null && trim((string)$fila['wa_message_id']) !== '') {
+            $cita = ['wa_message_id' => trim((string)$fila['wa_message_id']), 'texto' => mb_substr(trim((string)$fila['contenido']), 0, 200)];
+        }
+    }
+
+    return $mensajesDelCliente >= 2 ? $cita : null;
+}
+
+// Segundos que espera un turno en vivo antes de responder, por si el cliente sigue escribiendo
+// (ver aiEsperarYVerSiHayMensajeNuevo). Se puede ajustar con AI_AGRUPAR_MENSAJES_SEGUNDOS
+// (0 = sin espera; phpunit.xml lo pone en 0). Ojo: el puente espera esta llamada HTTP completa,
+// asi que no conviene subirlo mucho (suma al tiempo de DeepSeek).
+const AI_AGRUPAR_MENSAJES_SEGUNDOS = 8;
+
+/**
+ * Espera unos segundos y regresa true si el cliente escribio otro mensaje despues de
+ * $idMensajeUsuario en la misma conversacion -- entonces el turno de ese mensaje mas nuevo es
+ * el que debe contestar todo junto, y este debe quedarse callado.
+ */
+function aiEsperarYVerSiHayMensajeNuevo(PDO $pdo, int $idConversacion, int $idMensajeUsuario, ?int $segundos = null): bool
+{
+    $segundos ??= (int)(getEnvVar('AI_AGRUPAR_MENSAJES_SEGUNDOS', (string)AI_AGRUPAR_MENSAJES_SEGUNDOS) ?? AI_AGRUPAR_MENSAJES_SEGUNDOS);
+    if ($segundos > 0) {
+        sleep($segundos);
+    }
+
+    $stmt = $pdo->prepare("SELECT 1 FROM whatsapp_mensajes WHERE id_conversacion = ? AND rol = 'user' AND id_mensaje > ? LIMIT 1");
+    $stmt->execute([$idConversacion, $idMensajeUsuario]);
+
+    return $stmt->fetchColumn() !== false;
+}
+
 function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUsuario, ?string $waMessageId = null, ?string $messageKind = null, ?DateTimeImmutable $ahora = null, ?PDO $pdo = null): array
 {
     $waId = trim($waId);
@@ -4222,7 +4333,16 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
     $horasInactividad = aiHoursSinceLastMessage($pdo, $idConversacion);
     $esLadaLocal = aiPhoneHasLocalLada($waId);
 
-    aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
+    $idMensajeUsuario = aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
+
+    // El puente manda cada mensaje del cliente en su propia llamada: si escribe 2-3 seguidos
+    // ("Hola" / "buenos dias" / "precio de X") sin esto salen 2-3 respuestas pegadas (y con el
+    // retraso humano del puente corriendo en paralelo, casi al mismo segundo) -- patron de
+    // automatizacion que ademas suena robotico. Solo responde el turno del ULTIMO mensaje, con
+    // todo el historial ya guardado; los anteriores se quedan callados.
+    if (aiEsperarYVerSiHayMensajeNuevo($pdo, $idConversacion, $idMensajeUsuario, aiEsConversacionDePrueba($waId) ? 0 : null)) {
+        return [];
+    }
 
     return aiGenerarRespuestaParaConversacion(
         $pdo,
@@ -4458,9 +4578,12 @@ function aiGenerarRespuestaParaConversacion(
         aiLogDiagnosticError($pdo, $idConversacion, 'pase_a_humano_incertidumbre', $textoUsuario, ['respuesta_alex' => $finalText]);
         aiToolTransferirHumano($pdo, ['motivo' => 'Alex incluyo la bandera ' . AI_HANDOFF_TEXT_FLAG . ' en su respuesta (baja confianza o requiere atencion personalizada).'], $context);
         $yaTransferido = true;
-        // Esta pausa la causo ESTE turno (no un humano): sin esto el re-chequeo de mas abajo la tomaba por una
-        // intervencion humana y tiraba la respuesta -- el cliente se quedaba sin ningun mensaje. Visto en prueba
-        // real: ante un domicilio fuera de cobertura o un descuento, Alex redacto una buena respuesta y no salio.
+        $pausadoPorEsteTurno = true; // sin esto el re-chequeo de estado_bot de abajo suprime la respuesta
+    } elseif (!$yaTransferido && !$pausadoPorEsteTurno && aiTextoPrometeConsultarEquipo($finalText)) {
+        // Prometio "confirmarlo con el equipo" sin avisar a nadie: se avisa por el.
+        aiLogDiagnosticError($pdo, $idConversacion, 'promesa_equipo_sin_transferir', $textoUsuario, ['respuesta_alex' => $finalText]);
+        aiToolTransferirHumano($pdo, ['motivo' => 'Alex le prometio al cliente confirmar un dato con el equipo. Cliente escribio: "' . mb_substr($textoUsuario, 0, 200) . '"'], $context);
+        $yaTransferido = true;
         $pausadoPorEsteTurno = true;
     }
 
@@ -4502,6 +4625,8 @@ function aiGenerarRespuestaParaConversacion(
         }
     }
 
+    // Antes de guardar la respuesta: despues, esa fila 'assistant' cortaria el conteo de mensajes del cliente.
+    $cita = aiMensajeAResponderConCita($pdo, $idConversacion);
     $idMensajeAsistente = aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
 
     $replyParts = [];
@@ -4510,7 +4635,14 @@ function aiGenerarRespuestaParaConversacion(
         // aiConfirmarEnvioWhatsapp() DESPUES del delay humanizado de 60-120s, justo antes
         // de mandar de verdad -- este re-chequeo de aqui arriba no cubre esa espera (ver
         // el comentario de aiConfirmarEnvioWhatsapp()).
-        $replyParts[] = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
+        $parteTexto = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
+        // Si el cliente mando varios mensajes seguidos, se contesta citando el ultimo (el puente
+        // usa quoted_* para responder "directamente" a ese mensaje; si no lo soporta, los ignora).
+        if ($cita !== null) {
+            $parteTexto['quoted_wa_message_id'] = $cita['wa_message_id'];
+            $parteTexto['quoted_text'] = $cita['texto'];
+        }
+        $replyParts[] = $parteTexto;
     }
     foreach ($mediaParts as $media) {
         $replyParts[] = $media;
