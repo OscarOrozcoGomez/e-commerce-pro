@@ -39,6 +39,8 @@ const AI_FOTO_PUNTAJE_MINIMO = 0.6;
 const AI_FOTO_PUNTAJE_CLARO = 0.85;
 /** Dos candidatos con menos de esta diferencia de puntaje se consideran empatados (ambiguo). */
 const AI_FOTO_MARGEN_EMPATE = 0.12;
+/** Un token que aparece en a lo mas N nombres del catalogo es "raro": basta uno leido para que el nombre cuente. */
+const AI_FOTO_DF_RARO = 4;
 /** Cuantos candidatos se le pasan a Alex como maximo. */
 const AI_FOTO_MAX_CANDIDATOS = 3;
 
@@ -81,6 +83,13 @@ function aiFotoNormalizar(string $texto): string
         'ú' => 'u', 'ù' => 'u', 'ü' => 'u', 'û' => 'u', 'ñ' => 'n',
     ]);
     $texto = (string) preg_replace('/[^a-z0-9]+/', ' ', $texto);
+    // Siglas: "N.M.N" -> "n m n" -> "nmn". Sin esto, "N.M.N Blend" se reduce a la palabra suelta "blend"
+    // (las letras solas se descartan) y coincide con cualquier otro "... Blend" (prueba con imagenes reales).
+    $texto = (string) preg_replace_callback(
+        '/(?<![a-z0-9])[a-z](?: [a-z])+(?![a-z0-9])/',
+        static fn(array $m): string => str_replace(' ', '', $m[0]),
+        $texto
+    );
 
     return trim($texto);
 }
@@ -211,6 +220,7 @@ function aiFotoCoincidencias(string $ocrNormalizado, array $indice): array
     foreach ($indice as $entrada) {
         $pesoTotal = 0.0;
         $pesoLeido = 0.0;
+        $hayTokenRaro = false;
 
         foreach ($entrada['tokens'] as $token) {
             $w = $peso($token);
@@ -234,6 +244,9 @@ function aiFotoCoincidencias(string $ocrNormalizado, array $indice): array
 
             if ($mejor > 0.0) {
                 $pesoLeido += $w * $mejor;
+                if (($df[$token] ?? 1) <= AI_FOTO_DF_RARO) {
+                    $hayTokenRaro = true;
+                }
             }
         }
 
@@ -242,14 +255,19 @@ function aiFotoCoincidencias(string $ocrNormalizado, array $indice): array
         }
 
         $puntaje = round($pesoLeido / $pesoTotal, 3);
-        if ($puntaje >= AI_FOTO_PUNTAJE_MINIMO) {
-            $resultados[] = ['label' => $entrada['label'], 'ids' => $entrada['ids'], 'puntaje' => $puntaje];
+        // Leer solo palabras comunes del catalogo ("blend", "platinum", "natural") no identifica a ningun producto.
+        if ($puntaje >= AI_FOTO_PUNTAJE_MINIMO && $hayTokenRaro) {
+            $resultados[] = ['label' => $entrada['label'], 'ids' => $entrada['ids'], 'puntaje' => $puntaje, 'n_tokens' => count($entrada['tokens'])];
         }
     }
 
-    usort($resultados, static fn(array $a, array $b): int => $b['puntaje'] <=> $a['puntaje']);
+    // A igual puntaje gana el nombre mas especifico (mas palabras): "Mag+Pot Citrate" antes que "Citrate Mag".
+    usort($resultados, static fn(array $a, array $b): int => [$b['puntaje'], $b['n_tokens']] <=> [$a['puntaje'], $a['n_tokens']]);
 
-    return array_slice($resultados, 0, AI_FOTO_MAX_CANDIDATOS);
+    return array_map(
+        static fn(array $r): array => ['label' => $r['label'], 'ids' => $r['ids'], 'puntaje' => $r['puntaje']],
+        array_slice($resultados, 0, AI_FOTO_MAX_CANDIDATOS)
+    );
 }
 
 /**

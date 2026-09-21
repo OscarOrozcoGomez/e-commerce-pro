@@ -88,3 +88,28 @@ curl -s -X POST "$BASE/api/alex_ocr_imagen.php" \
   -H "X-Webhook-Token: $WA_WEBHOOK_TOKEN" -H "Content-Type: application/json" \
   --data-binary '{"imagen_base64":"'"$(base64 -w0 frasco.jpg)"'"}'
 ```
+
+## Pruebas hechas (2026-09-20, base local)
+
+**OCR sobre 30 imagenes reales del catalogo** (fotos de estudio del frasco, no de celular), midiendo si el
+emparejador identifica el producto correcto por su `nombre_corto`:
+
+| Motor | Producto exacto | Entre 2 (incluye el correcto) | Incorrecto | Sin coincidencia |
+|---|---|---|---|---|
+| Tesseract.js (motor actual del puente) | 9 | 1 | 1 | 19 |
+| Google Vision `TEXT_DETECTION` (nuevo) | 25 | 1 | 0 | 4 |
+
+Las 4 sin coincidencia de Vision son nombres cortos demasiado cortos o ambiguos (`BPS`, `BSS`, `Mens T Platinum`,
+`9 Mag Platinum`): no se emparejan a proposito. Esta prueba destapo un falso positivo del emparejador ("N.M.N Blend"
+coincidia al 100% con cualquier "... Blend", porque las siglas se reducian a la palabra suelta "blend"); ya esta
+corregido y con pruebas de regresion. Limite: son fotos limpias y de frente; una foto hecha con el celular
+(frasco curvo, reflejos, angulo) puede rendir peor con ambos motores.
+
+**Comportamiento del modelo (DeepSeek real, 2 corridas por caso, sin ejecutar transferir_a_humano ni agendar_venta):**
+
+- Caso del incidente (el OCR solo leyo leyendas). Antes: buscaba "Mento Alimentic" y luego ofrecia colagenos y otros
+  productos "similares" (o transferia y aun asi listaba opciones). Despues: en las 2 corridas llama a
+  `transferir_a_humano` con un motivo que describe lo leido (frasco Blife, 180 capsulas, colageno/vitaminas/probioticos)
+  y responde breve, sin ofrecer productos que no son.
+- El OCR si leyo "WOMENS MULT MATUR3". Antes: buscaba "Womens Multi Mature" (0 resultados) y terminaba con
+  multivitaminicos que no eran. Despues: busca "Womens Mult Matur3" y responde con el producto correcto ($399, 2 pzas).

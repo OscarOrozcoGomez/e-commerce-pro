@@ -132,6 +132,63 @@ final class AiFotoProductoTest extends TestCase
         $this->assertGreaterThanOrEqual(AI_FOTO_PUNTAJE_CLARO, $c[0]['puntaje']);
     }
 
+    /** Catalogo con nombres reales que en la prueba con imagenes del catalogo daban falsos positivos. */
+    private function catalogoDeBlends(): array
+    {
+        $filas = [];
+        for ($n = 1; $n <= 20; $n++) {
+            $filas[] = ['id_producto' => 2000 + $n, 'nombre' => "Otro {$n}", 'nombre_corto' => "Otro Producto {$n}"];
+        }
+
+        return array_merge($filas, [
+            ['id_producto' => 1, 'nombre' => 'N.M.N', 'nombre_corto' => 'N.M.N Blend'],
+            ['id_producto' => 2, 'nombre' => 'Greens', 'nombre_corto' => 'Greens Blend'],
+            ['id_producto' => 3, 'nombre' => 'Night', 'nombre_corto' => 'Night Blend'],
+            ['id_producto' => 4, 'nombre' => 'Citrate', 'nombre_corto' => 'Citrate Mag'],
+            ['id_producto' => 5, 'nombre' => 'Mag Pot', 'nombre_corto' => 'Mag+Pot Citrate'],
+        ]);
+    }
+
+    public function testNormalizarJuntaLasSiglasParaQueNoSeReduzcanAUnaPalabraSuelta(): void
+    {
+        $this->assertSame('nmn blend', aiFotoNormalizar('N.M.N Blend'));
+        $this->assertSame('nmn blend', aiFotoNormalizar('n m n  BLEND'));
+        // Un solo caracter suelto no es sigla: se conserva tal cual.
+        $this->assertSame('vitamina c', aiFotoNormalizar('Vitamina C'));
+    }
+
+    /** Regresion (imagenes reales del catalogo): "N.M.N Blend" coincidia al 100% con CUALQUIER "... Blend". */
+    public function testUnNombreConSiglaNoCoincideConCualquierOtroBlend(): void
+    {
+        $indice = aiFotoConstruirIndice($this->catalogoDeBlends());
+
+        $greens = aiFotoCoincidencias(aiFotoNormalizar("B LIFE\nGREENS BLEND\nSUPLEMENTO ALIMENTICIO"), $indice);
+        $this->assertSame('Greens Blend', $greens[0]['label']);
+        $this->assertNotContains('N.M.N Blend', array_column($greens, 'label'));
+
+        $nmn = aiFotoCoincidencias(aiFotoNormalizar('N.M.N BLEND'), $indice);
+        $this->assertSame('N.M.N Blend', $nmn[0]['label']);
+    }
+
+    public function testLeerSoloPalabrasComunesDelCatalogoNoIdentificaNingunProducto(): void
+    {
+        $indice = aiFotoConstruirIndice($this->catalogoDeBlends());
+
+        $this->assertSame([], aiFotoCoincidencias(aiFotoNormalizar('BLEND BLEND SUPLEMENTO ALIMENTICIO'), $indice));
+    }
+
+    public function testAIgualPuntajeGanaElNombreMasEspecifico(): void
+    {
+        $indice = aiFotoConstruirIndice($this->catalogoDeBlends());
+
+        $c = aiFotoCoincidencias(aiFotoNormalizar('MAG+POT CITRATE'), $indice);
+
+        // Los dos coinciden al 100% ("Citrate Mag" tambien): pero "Mag+Pot Citrate" tiene mas palabras y va primero.
+        $this->assertSame('Mag+Pot Citrate', $c[0]['label']);
+        $this->assertContains('Citrate Mag', array_column($c, 'label'));
+        $this->assertArrayNotHasKey('n_tokens', $c[0]); // detalle interno: no se filtra al resultado
+    }
+
     public function testUnaSolaPalabraSueltaNoBastaParaProponerUnProducto(): void
     {
         $indice = aiFotoConstruirIndice($this->catalogo());
