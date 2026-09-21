@@ -188,6 +188,44 @@ final class AiAssistantToolsTest extends TestCase
         return [$reply, $conv];
     }
 
+    public function testRafagaDelClienteSeContestaCitandoElUltimoMensaje(): void
+    {
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500080001', 'Cliente')['id_conversacion'];
+        aiAppendMessage($this->pdo, $conv, 'user', 'Hola, quiero informacion', null, null, null, 'WAMSG-1');
+        aiAppendMessage($this->pdo, $conv, 'user', 'Donde se encuentran?', null, null, null, 'WAMSG-2');
+
+        $this->assertSame(['wa_message_id' => 'WAMSG-2', 'texto' => 'Donde se encuentran?'], aiMensajeAResponderConCita($this->pdo, $conv));
+
+        // Pasos intermedios de tool-calling del mismo turno no cuentan como respuesta previa.
+        aiAppendMessage($this->pdo, $conv, 'assistant', null, [['id' => 'x']]);
+        $this->assertSame('WAMSG-2', aiMensajeAResponderConCita($this->pdo, $conv)['wa_message_id']);
+
+        // Ya contestada la rafaga, un mensaje suelto no se cita.
+        aiAppendMessage($this->pdo, $conv, 'assistant', 'Hola!');
+        aiAppendMessage($this->pdo, $conv, 'user', 'Gracias', null, null, null, 'WAMSG-3');
+        $this->assertNull(aiMensajeAResponderConCita($this->pdo, $conv));
+    }
+
+    public function testTurnoConMensajeUnicoNoCitaYConRafagaSi(): void
+    {
+        [$reply] = $this->turnoConModeloDiciendo('5215500080002', 'Hola', 'Hola, ¿en qué te ayudo?');
+        $this->assertArrayNotHasKey('quoted_wa_message_id', $reply[0]);
+
+        // Segundo mensaje sin respuesta de Alex de por medio (el primero quedó guardado, su turno calló).
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500080003', 'Cliente')['id_conversacion'];
+        aiAppendMessage($this->pdo, $conv, 'user', 'Hola, quiero informacion', null, null, null, 'WAMSG-A');
+        $original = getenv('AI_ASSISTANT_TEST_MODE');
+        putenv('AI_ASSISTANT_TEST_MODE=1');
+        try {
+            $reply = aiRunAssistantTurn('5215500080003', 'Cliente', 'Donde se encuentran?', 'WAMSG-B', null, new DateTimeImmutable('2026-09-14 12:00:00'), $this->pdo);
+        } finally {
+            putenv($original === false ? 'AI_ASSISTANT_TEST_MODE' : 'AI_ASSISTANT_TEST_MODE=' . $original);
+        }
+
+        $this->assertSame('WAMSG-B', $reply[0]['quoted_wa_message_id']);
+        $this->assertSame('Donde se encuentran?', $reply[0]['quoted_text']);
+    }
+
     public function testTurnoRespuestaNormalNoPausaLaConversacion(): void
     {
         [$reply, $conv] = $this->turnoConModeloDiciendo('5215500070001', 'Hola', 'Hola, ¿en qué te ayudo?');
