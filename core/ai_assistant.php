@@ -3845,6 +3845,39 @@ function aiEsMensajeNoInterpretable(?string $messageKind, string $textoUsuario):
     return true;
 }
 
+/**
+ * Mensaje del cliente que la respuesta debe citar (reply de WhatsApp), o null si no hace falta.
+ * Solo se cita cuando desde la ultima respuesta de Alex el cliente escribio 2 o mas mensajes
+ * (rafaga agrupada por aiEsperarYVerSiHayMensajeNuevo): ahi la cita deja claro a cual contesta,
+ * y citar TODAS las respuestas seria raro. Se cita el ultimo mensaje con id de WhatsApp.
+ *
+ * @return array{wa_message_id:string, texto:string}|null
+ */
+function aiMensajeAResponderConCita(PDO $pdo, int $idConversacion): ?array
+{
+    // Las filas 'assistant' con tool_calls_json son pasos intermedios de este mismo turno, no respuestas.
+    $stmt = $pdo->prepare(
+        "SELECT rol, wa_message_id, contenido FROM whatsapp_mensajes
+         WHERE id_conversacion = ? AND (rol = 'user' OR (rol = 'assistant' AND tool_calls_json IS NULL))
+         ORDER BY id_mensaje DESC LIMIT 20"
+    );
+    $stmt->execute([$idConversacion]);
+
+    $cita = null;
+    $mensajesDelCliente = 0;
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fila) {
+        if ($fila['rol'] === 'assistant') {
+            break;
+        }
+        $mensajesDelCliente++;
+        if ($cita === null && trim((string)$fila['wa_message_id']) !== '') {
+            $cita = ['wa_message_id' => trim((string)$fila['wa_message_id']), 'texto' => mb_substr(trim((string)$fila['contenido']), 0, 200)];
+        }
+    }
+
+    return $mensajesDelCliente >= 2 ? $cita : null;
+}
+
 // Segundos que espera un turno en vivo antes de responder, por si el cliente sigue escribiendo
 // (ver aiEsperarYVerSiHayMensajeNuevo). Se puede ajustar con AI_AGRUPAR_MENSAJES_SEGUNDOS
 // (0 = sin espera; phpunit.xml lo pone en 0). Ojo: el puente espera esta llamada HTTP completa,
@@ -4203,6 +4236,8 @@ function aiGenerarRespuestaParaConversacion(
         }
     }
 
+    // Antes de guardar la respuesta: despues, esa fila 'assistant' cortaria el conteo de mensajes del cliente.
+    $cita = aiMensajeAResponderConCita($pdo, $idConversacion);
     $idMensajeAsistente = aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
 
     $replyParts = [];
@@ -4211,7 +4246,14 @@ function aiGenerarRespuestaParaConversacion(
         // aiConfirmarEnvioWhatsapp() DESPUES del delay humanizado de 60-120s, justo antes
         // de mandar de verdad -- este re-chequeo de aqui arriba no cubre esa espera (ver
         // el comentario de aiConfirmarEnvioWhatsapp()).
-        $replyParts[] = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
+        $parteTexto = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
+        // Si el cliente mando varios mensajes seguidos, se contesta citando el ultimo (el puente
+        // usa quoted_* para responder "directamente" a ese mensaje; si no lo soporta, los ignora).
+        if ($cita !== null) {
+            $parteTexto['quoted_wa_message_id'] = $cita['wa_message_id'];
+            $parteTexto['quoted_text'] = $cita['texto'];
+        }
+        $replyParts[] = $parteTexto;
     }
     foreach ($mediaParts as $media) {
         $replyParts[] = $media;
