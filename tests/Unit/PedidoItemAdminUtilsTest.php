@@ -48,6 +48,36 @@ final class PedidoItemAdminUtilsTest extends TestCase
         $this->assertSame(2, (int) $mov['cantidad']);
     }
 
+    public function testProductoEnOfertaSeAgregaAlPrecioDeOferta(): void
+    {
+        // Caso real: Myo Inositol / Curcumina en oferta se cobraron a precio normal. Producto 10: venta 200, costo 80 -> oferta 130.
+        $this->pdo->exec("INSERT INTO categorias (nombre) VALUES ('Oferta')");
+        $this->pdo->exec('INSERT INTO producto_categorias VALUES (10, ' . (int) $this->pdo->lastInsertId() . ')');
+        $this->seedPedido(120, 'en_reparto', 1, 300.00, 300.00);
+
+        $result = dbAdminAgregarProductoPedido($this->pdo, 120, 10, 2, 7);
+
+        $this->assertTrue($result['success']);
+        $detalle = $this->pdo->query('SELECT precio_original, precio_unitario, subtotal FROM detalle_pedidos WHERE id_pedido = 120')->fetch();
+        $this->assertEqualsWithDelta(130.00, (float) $detalle['precio_unitario'], 0.001);
+        $this->assertEqualsWithDelta(130.00, (float) $detalle['precio_original'], 0.001);
+        $this->assertEqualsWithDelta(260.00, (float) $detalle['subtotal'], 0.001);
+        $this->assertEqualsWithDelta(560.00, (float) $this->pdo->query('SELECT total FROM pedidos WHERE id_pedido = 120')->fetchColumn(), 0.001);
+    }
+
+    public function testProductoEnOfertaSinDescuentoRealSeAgregaAlPrecioNormal(): void
+    {
+        $this->seedProducto(13, 'Margen delgado', 240.00, 200.00, 'activo'); // costo+50 (250) supera la venta
+        $this->seedInventario(13, 1, 5);
+        $this->pdo->exec("INSERT INTO categorias (nombre) VALUES ('Oferta')");
+        $this->pdo->exec('INSERT INTO producto_categorias VALUES (13, ' . (int) $this->pdo->lastInsertId() . ')');
+        $this->seedPedido(121, 'en_reparto', 1, 100.00, 100.00);
+
+        $this->assertTrue(dbAdminAgregarProductoPedido($this->pdo, 121, 13, 1, 7)['success']);
+
+        $this->assertEqualsWithDelta(240.00, (float) $this->pdo->query('SELECT precio_unitario FROM detalle_pedidos WHERE id_pedido = 121')->fetchColumn(), 0.001);
+    }
+
     public function testAllowsAddingProductToAlreadyDeliveredOrder(): void
     {
         // Este es el caso clave del pedido del usuario: "reabrir" un pedido ya entregado
@@ -135,7 +165,9 @@ final class PedidoItemAdminUtilsTest extends TestCase
     private function createSchema(): void
     {
         $this->pdo->exec('CREATE TABLE pedidos (id_pedido INTEGER PRIMARY KEY, estado TEXT NOT NULL, id_almacen INTEGER NOT NULL, subtotal REAL NOT NULL DEFAULT 0, descuento_total REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0)');
-        $this->pdo->exec('CREATE TABLE productos (id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, precio_venta REAL NOT NULL DEFAULT 0, precio_costo REAL NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT \'activo\')');
+        $this->pdo->exec('CREATE TABLE productos (id_producto INTEGER PRIMARY KEY, nombre TEXT NOT NULL, precio_venta REAL NOT NULL DEFAULT 0, precio_costo REAL NOT NULL DEFAULT 0, precio_oferta REAL NULL, estado TEXT NOT NULL DEFAULT \'activo\')');
+        $this->pdo->exec('CREATE TABLE categorias (id_categoria INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, estado TEXT DEFAULT \'activo\')');
+        $this->pdo->exec('CREATE TABLE producto_categorias (id_producto INTEGER, id_categoria INTEGER, PRIMARY KEY (id_producto, id_categoria))');
         $this->pdo->exec('CREATE TABLE detalle_pedidos (id_detalle INTEGER PRIMARY KEY AUTOINCREMENT, id_pedido INTEGER NOT NULL, id_producto INTEGER NOT NULL, cantidad INTEGER NOT NULL, precio_original REAL NOT NULL DEFAULT 0, precio_unitario REAL NOT NULL DEFAULT 0, costo_unitario REAL NOT NULL DEFAULT 0, porcentaje_descuento REAL NOT NULL DEFAULT 0, monto_descuento REAL NOT NULL DEFAULT 0, subtotal REAL NOT NULL DEFAULT 0, estado_entrega TEXT NOT NULL DEFAULT \'entregado\')');
         $this->pdo->exec('CREATE TABLE inventario_almacen (id_producto INTEGER NOT NULL, id_almacen INTEGER NOT NULL, cantidad_actual INTEGER NOT NULL DEFAULT 0)');
         $this->pdo->exec('CREATE TABLE movimientos_inventario (id_movimiento INTEGER PRIMARY KEY AUTOINCREMENT, id_producto INTEGER NOT NULL, tipo_movimiento TEXT NOT NULL, id_almacen_origen INTEGER NULL, cantidad INTEGER NOT NULL, id_usuario INTEGER NULL, observacion TEXT NULL)');

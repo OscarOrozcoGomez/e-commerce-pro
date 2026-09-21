@@ -3,14 +3,19 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/ai_assistant.php';
+require_once __DIR__ . '/../core/alex_recompra_utils.php';
 
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "Este script solo se puede ejecutar por CLI (cron). Uso: C:\\xampp\\php\\php.exe scripts/whatsapp_followup_cron.php [--dry-run]" . PHP_EOL);
     exit(1);
 }
 
-$options = getopt('', ['dry-run']);
+// --recompra-ofertas: activa el paso 4 (recompra proactiva de productos por caducar, ver
+// core/alex_recompra_utils.php). Va APAGADO por defecto porque es contacto no solicitado: hay que
+// agregar la bandera al crontab del VPS a proposito.
+$options = getopt('', ['dry-run', 'recompra-ofertas']);
 $isDryRun = array_key_exists('dry-run', $options);
+$recompraActiva = array_key_exists('recompra-ofertas', $options);
 
 $pdo = getPDO();
 
@@ -27,6 +32,8 @@ $cerradasPorInactividad = 0;
 $seguimientosEnviados = 0;
 $seguimientosFallidos = 0;
 $reactivadasPorInactividad = 0;
+$recompras = 0;
+$recomprasFallidas = 0;
 
 // 0) Conversaciones pausadas por intervencion humana (o transferir_a_humano) donde nadie
 //    -- ni cliente ni asesor -- volvio a escribir en 24h: Alex retoma solo para no dejar
@@ -80,6 +87,7 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
 $retomadas = 0;
 $retomadasFallidas = 0;
 $huboCatchupEnEstaCorrida = false;
+$huboSeguimientoEnEstaCorrida = false;
 
 if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeResponderCatchupAhora($pdo)) {
     $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
@@ -114,6 +122,9 @@ if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeResponderCatchupAhora($pdo)) 
 //    sin problema -- ver aiPuedeEnviarProactivoAhora()/aiRegistrarEnvioProactivo().
 if (!$huboCatchupEnEstaCorrida && ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeEnviarProactivoAhora($pdo))) {
     $pendienteSeguimiento = aiFindConversationsNeedingFollowup($pdo)[0] ?? null;
+    if ($pendienteSeguimiento !== null) {
+        $huboSeguimientoEnEstaCorrida = true;
+    }
 
     if ($isDryRun) {
         if ($pendienteSeguimiento !== null) {
@@ -130,10 +141,44 @@ if (!$huboCatchupEnEstaCorrida && ($isDryRun ? aiEstaEnHorarioAtencion() : aiPue
     }
 }
 
+// 4) Recompra proactiva de productos por caducar (solo con --recompra-ofertas). Tambien es contacto
+//    no solicitado, asi que comparte EL MISMO cupo de 1/hora del seguimiento de 24h
+//    (aiPuedeEnviarRecompraAhora() lo consulta) y suma un tope diario propio. Solo si esta corrida
+//    no mando ya otro mensaje real (catch-up o seguimiento): nunca dos mensajes en una ejecucion.
+//    Si el modelo no genera un texto valido NO se manda nada (jamas un texto fijo de respaldo, ver
+//    core/alex_recompra_utils.php) y se prueba con el siguiente candidato, hasta
+//    AI_RECOMPRA_INTENTOS_POR_CORRIDA.
+if ($recompraActiva && !$huboCatchupEnEstaCorrida && !$huboSeguimientoEnEstaCorrida
+    && ($isDryRun ? aiRecompraEnHorario() : aiPuedeEnviarRecompraAhora($pdo))) {
+    $candidatos = array_slice(aiFindRecompraCandidatos($pdo), 0, AI_RECOMPRA_INTENTOS_POR_CORRIDA);
+
+    if ($isDryRun) {
+        if ($candidatos !== []) {
+            $recompras++;
+        }
+    } else {
+        $config = aiGetConfig($pdo);
+        foreach ($candidatos as $candidato) {
+            $texto = aiGenerarTextoRecompraUnico($pdo, $candidato, $config);
+            if ($texto === '') {
+                continue;
+            }
+            $ok = aiSendRecompraMessage($pdo, $candidato, $texto);
+            aiRegistrarEnvioProactivo($pdo);
+            if ($ok) {
+                $recompras++;
+            } else {
+                $recomprasFallidas++;
+            }
+            break; // uno por corrida, siempre
+        }
+    }
+}
+
 fwrite(
     STDOUT,
     sprintf(
-        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d | retomadas=%d | retomadas_fallidas=%d%s",
+        "RUN %s | dry-run=%s | reactivadas_por_inactividad=%d | seguimientos_enviados=%d | seguimientos_fallidos=%d | resueltas=%d | cerradas_por_inactividad=%d | retomadas=%d | retomadas_fallidas=%d | recompras=%d | recompras_fallidas=%d%s",
         date('Y-m-d H:i:s'),
         $isDryRun ? 'yes' : 'no',
         $reactivadasPorInactividad,
@@ -143,6 +188,8 @@ fwrite(
         $cerradasPorInactividad,
         $retomadas,
         $retomadasFallidas,
+        $recompras,
+        $recomprasFallidas,
         PHP_EOL
     )
 );

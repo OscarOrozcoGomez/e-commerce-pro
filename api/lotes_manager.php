@@ -186,6 +186,8 @@ try {
                     . ' (costo $' . number_format($res['precio_costo'], 2) . ', venta normal $' . number_format($res['precio_venta'], 2) . ')'
                     . ($res['ya_estaba'] ? ' | ya estaba en la categoría Ofertas' : ' | se agregó a la categoría Ofertas')
                     . ($res['precio_fijado'] ? ' | se fijó el precio de oferta' : ' | conservó el precio de oferta que ya tenía')
+                    . ($res['severidad'] !== null ? ' | urgencia del lote: ' . $res['severidad'] : '')
+                    . ($res['gestionada'] ? ' | queda gestionado: el cron baja el precio al acercarse la fecha y lo retira de Ofertas sin lotes en riesgo' : '')
                     . ((int) ($data['id_lote'] ?? 0) > 0 ? ' | desde el lote #' . (int) $data['id_lote'] : ''),
                 null,
                 [
@@ -194,6 +196,8 @@ try {
                     'precio_costo' => $res['precio_costo'],
                     'categoria_oferta_agregada' => !$res['ya_estaba'],
                     'precio_oferta_fijado' => $res['precio_fijado'],
+                    'severidad_lote' => $res['severidad'],
+                    'gestionado_automaticamente' => $res['gestionada'],
                 ],
                 ['severidad' => 'alerta']
             );

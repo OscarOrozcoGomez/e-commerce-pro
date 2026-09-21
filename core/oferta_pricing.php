@@ -28,6 +28,61 @@ function ofertaPrecioSugerido(float $precioCosto): float
     return round(max(0.0, $precioCosto) + OFERTA_MARGEN_SOBRE_COSTO, 2);
 }
 
+/*
+ * Escalera de descuento por urgencia de caducidad. Se aplica sobre el precio de venta normal
+ * y NUNCA baja del piso del negocio (costo + OFERTA_MARGEN_SOBRE_COSTO). Un lote "critico"
+ * (menos de LOTE_RUNWAY_CRITICO dias de margen real) se liquida directo al piso, que es la regla
+ * general de siempre; los demas escalones descuentan un porcentaje de precio_venta.
+ *   planificar / sin_rotacion -> 15%   |   urgente -> 30%   |   critico -> piso (costo + $50)
+ */
+const OFERTA_ESCALERA_PCT = ['sin_rotacion' => 15, 'planificar' => 15, 'urgente' => 30];
+
+/** Escalon inicial cuando no hay severidad conocida (producto sin lotes, o lote "vigilar"). */
+const OFERTA_ESCALERA_PCT_INICIAL = 15;
+
+/** Puntos porcentuales de precio_venta que se descuentan ademas en el precio de paquete. */
+const OFERTA_PAQUETE_PUNTOS_EXTRA = 10;
+
+/** Piezas minimas para que aplique el precio de paquete ("llevate 2"). */
+const OFERTA_PAQUETE_MIN_PIEZAS = 2;
+
+/**
+ * Precio de oferta que corresponde a una severidad de caducidad (ver OFERTA_ESCALERA_PCT).
+ * Nunca es mayor al precio de venta normal ni menor al piso costo + $50 (salvo que el propio
+ * precio de venta ya sea menor a ese piso: entonces se queda en el precio de venta).
+ */
+function ofertaPrecioEscalera(float $precioVenta, float $precioCosto, ?string $severidad): float
+{
+    $venta = round($precioVenta, 2);
+    $piso = min(ofertaPrecioSugerido($precioCosto), $venta);
+
+    if ($severidad === 'critico') {
+        return $piso;
+    }
+
+    $pct = OFERTA_ESCALERA_PCT[$severidad ?? ''] ?? OFERTA_ESCALERA_PCT_INICIAL;
+    $precio = round($venta * (1 - $pct / 100), 2);
+
+    return max($piso, min($precio, $venta));
+}
+
+/**
+ * Precio unitario de "paquete" (2 o mas piezas): un escalon extra sobre el precio de oferta
+ * vigente, sin bajar nunca del piso costo + $50. Regresa null si ya no hay margen para
+ * descontar mas (el lote critico ya esta en el piso): no hay paquete que ofrecer.
+ */
+function ofertaPrecioPaquete(float $precioVenta, float $precioCosto, float $precioOferta): ?float
+{
+    $venta = round($precioVenta, 2);
+    $oferta = round($precioOferta, 2);
+    $piso = min(ofertaPrecioSugerido($precioCosto), $venta);
+
+    // A pesos enteros ($300, no $300.10): un precio de paquete con centavos raros se lee como error.
+    $candidato = max($piso, round($oferta - $venta * OFERTA_PAQUETE_PUNTOS_EXTRA / 100));
+
+    return ($oferta - $candidato) >= 0.01 ? $candidato : null;
+}
+
 /**
  * Precio de venta efectivo de un producto considerando si esta en oferta.
  *
@@ -124,6 +179,41 @@ function ofertaProductoEnOferta(PDO $pdo, int $idProducto): bool
         // nada esta "en oferta": el precio de venta normal es el fallback seguro.
         return false;
     }
+}
+
+/**
+ * Aplica el precio de oferta a una lista de productos (filas con id_producto, precio_venta,
+ * precio_costo y precio_oferta), para pantallas que precargan el precio a cobrar (POS, agregar
+ * producto a un pedido). Si el producto esta en Ofertas Y la oferta es un descuento real, su
+ * precio_venta pasa a ser el de oferta y se agregan en_oferta=true y precio_normal; si no, la fila
+ * queda intacta. Antes de esto el POS precargaba siempre el precio normal y solo comparaba contra
+ * la oferta para auditar: dos ventas reales de productos en oferta se cobraron a precio normal.
+ *
+ * @param array<int,array<string,mixed>> $productos
+ * @return array<int,array<string,mixed>>
+ */
+function ofertaAplicarPrecioEfectivoALista(PDO $pdo, array $productos): array
+{
+    $enOferta = ofertaFiltrarEnOferta($pdo, array_column($productos, 'id_producto'));
+    if ($enOferta === []) {
+        return $productos;
+    }
+
+    foreach ($productos as &$producto) {
+        if (!isset($enOferta[(int) ($producto['id_producto'] ?? 0)])) {
+            continue;
+        }
+        $normal = round((float) ($producto['precio_venta'] ?? 0), 2);
+        $efectivo = ofertaPrecioEfectivo($normal, (float) ($producto['precio_costo'] ?? 0), $producto['precio_oferta'] ?? null, true);
+        if ($efectivo < $normal) {
+            $producto['precio_normal'] = $normal;
+            $producto['en_oferta'] = true;
+            $producto['precio_venta'] = $efectivo;
+        }
+    }
+    unset($producto);
+
+    return $productos;
 }
 
 /**
