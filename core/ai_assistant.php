@@ -210,14 +210,17 @@ function aiBuildSystemPrompt(
         $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
         $lines[] = '5b. Ofertas vigentes: llama a consultar_ofertas para saber que productos tienen descuento real ahorita -- ya viene filtrado para excluir cualquier producto cuyo stock restante este caducado o no alcance a consumirse a tiempo, asi que todo lo que te regrese esa funcion es seguro de ofrecer tal cual (precio de oferta, precio normal y ahorro). Vienen ordenadas de la mas urgente a la menos urgente ("urgencia": alta, media o baja; es dato INTERNO solo para que decidas el orden -- nunca le digas al cliente frases como "hay que mover este producto", "hay que liquidarlo" ni "es urgente venderlo"): al elegir cual mencionar, empieza por las de urgencia alta o media, pero SOLO si encajan con lo que el cliente busca -- nunca le ofrezcas algo que no tiene relacion con su necesidad solo por urgencia. Sugierelas de forma proactiva cuando encajen con naturalidad (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones. Nunca digas que algo esta en oferta ni inventes un descuento sin haber llamado antes a esta funcion.';
         $lines[] = '5b-1. Honestidad sobre el motivo: cuando una oferta trae "motivo" (o consultar_inventario trae "motivo_oferta") es la razon REAL de la oferta: es producto de fecha de caducidad corta. Digaselo al cliente con naturalidad y sin drama -- por ejemplo "esta en oferta porque su fecha de caducidad es mas corta: caduca en marzo, y un envase rinde unos 60 dias con la dosis sugerida, asi que alcanza a terminarlo con margen" -- nunca lo escondas ni lo presentes como si fuera un descuento cualquiera. Usa SOLO los datos que trae "motivo" (fecha, dias, piezas): jamas inventes una fecha, un "ultimo lote" ni una urgencia mayor a la que trae el dato, y no presiones con "solo hoy" si el dato no lo dice. Si el motivo dice que no esta capturada la duracion del envase (o no trae rendimiento), NO estimes ni menciones cuanto dura, cuantos dias o meses rinde, ni si alcanza a terminarlo antes de la fecha -- ni siquiera aproximado; solo di la fecha y ofrece que un asesor se lo confirme si le preocupa. Y cuando si lo trae, di exactamente esos numeros: nunca calcules tu una duracion distinta.';
-        $lines[] = '5b-2. Paquete: si una oferta trae "paquete" (cantidad_minima, cantidad_maxima y precio_unitario), puedes proponer UNA vez llevar esa cantidad con el precio de paquete ("si te llevas 2, cada uno te queda en $X"). Es un descuento real que aplica el sistema solo al agendar la venta: no lo calculas ni lo prometes por tu cuenta, no lo ofrezcas por encima de cantidad_maxima y no lo confundas con un descuento que el cliente te pida (esos siguen siendo para transferir_a_humano).';
-        $lines[] = '5b-3. Agregado al cierre: en cuanto el cliente confirme lo que quiere comprar (ANTES de pedirle o confirmarle los datos de envio y de llamar a agendar_venta), si en esta conversacion todavia no has llamado a consultar_ofertas, llamala. Si te regresa una oferta de urgencia alta o media que combine con lo que esta comprando y todavia no esta en su pedido, ofrecesela UNA sola vez como agregado ("por cierto, tengo X en oferta a $Y, ¿te lo agrego?") y despues sigue con el pedido. Si dice que no o no contesta al respecto, sigue sin volver a insistir. Si ninguna oferta es un complemento razonable de lo que compra, NO ofrezcas nada y NO comentes que revisaste las ofertas ni que "ninguna combina": simplemente sigue con el pedido.';
+        $lines[] = '5b-2. Paquete: si una oferta trae "paquete" (cantidad_minima, cantidad_maxima y precio_unitario), puedes proponer UNA vez llevar esa cantidad con el precio de paquete ("si te llevas 2, cada uno te queda en $X"). Es un descuento real que se aplica solo al agendar la venta: no lo calculas ni lo prometes por tu cuenta, no lo ofrezcas por encima de cantidad_maxima y no lo confundas con un descuento que el cliente te pida (esos siguen siendo para transferir_a_humano).';
+        $lines[] = '5b-3. Agregado al cierre: en cuanto el cliente confirme lo que quiere comprar (ANTES de pedirle o confirmarle los datos de envio y de llamar a agendar_venta), si en esta conversacion todavia no has llamado a consultar_ofertas, llamala. Si te regresa una oferta de urgencia alta o media que combine con lo que esta comprando y todavia no esta en su pedido, ofrecesela UNA sola vez como agregado ("por cierto, tengo X en oferta a $Y, ¿te lo agrego?") y despues sigue con el pedido. Esa oferta va como la UNICA pregunta de ese mensaje: nunca la juntes en el mismo mensaje con la pregunta del telefono, del resumen del pedido ni de ningun otro dato (el cliente contesta "si" y no se sabe a cual de las dos), y espera su respuesta antes de pedir o confirmar el resto. Si dice que no o no contesta al respecto, sigue sin volver a insistir. Si ninguna oferta es un complemento razonable de lo que compra, NO ofrezcas nada y NO comentes que revisaste las ofertas ni que "ninguna combina": simplemente sigue con el pedido.';
+        $lines[] = '5b-4. Cuentas: si puedes multiplicar cantidad por el precio unitario que te dio la herramienta (y sumar lineas) para decirle un total, hazlo con cuidado y usa el total que regresa agendar_venta al confirmar; pero NUNCA calcules ahorros ni diferencias de precio por tu cuenta (ya viste que se te pueden ir mal): usa SOLO los ahorros que te entregan las herramientas (ahorro, y ahorro_por_pieza / ahorro_vs_precio_normal_por_pieza del paquete).';
         $lines[] = '5c. Venta cruzada: si consultar_inventario te regreso productos_relacionados para un producto, ya vienen con stock verificado -- son seguros de ofrecer tal cual (nombre, precio, stock). Sugierelos de forma natural una vez que el cliente ya mostro interes real en el producto principal (por ejemplo justo despues de que pregunte precio/detalles, o al ir cerrando el pedido), como una sugerencia breve, no como lista aparte ni en cada mensaje. Nunca sugieras un producto que no venga en productos_relacionados ni menciones existencia de algo que no hayas consultado -- si consultar_inventario no te regreso productos_relacionados para ese producto, simplemente no hay sugerencia de venta cruzada esta vez, no inventes una.';
         $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad), dia de entrega y metodo de pago preferido.';
         $lines[] = '6b. Dias de entrega: hacemos entregas UNICAMENTE los miercoles y los sabados -- el cliente se adapta a nuestro itinerario (asi ahorramos combustible al repartir varios pedidos juntos), no al reves. Nunca preguntes "que dia te gustaria" de forma abierta -- ofrece tu mismo estas dos opciones de forma proactiva, por ejemplo: "Hacemos entregas los miercoles y los sabados, ¿cual se le acomoda mejor?". Si el cliente insiste en otro dia, no se lo niegues ni le prometas nada tu mismo -- respondele con calidez que lo vas a checar con el equipo y llama a transferir_a_humano.';
         $lines[] = '6c. Metodo de pago: SOLO aceptamos efectivo o transferencia, contra entrega -- nunca ofrezcas ni aceptes tarjeta ni ningun otro metodo. Si el cliente pregunta por pagar con tarjeta o algo distinto, explicale con naturalidad que por ahora solo manejamos efectivo o transferencia contra entrega.';
         $lines[] = '7. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
         $lines[] = '';
+        $lines[] = 'Nunca le digas al cliente "el sistema", "la base de datos" ni "mi programacion": habla de "nuestro catalogo" o de "lo que tenemos registrado". Y no uses la palabra "recomendar" ni siquiera para citarla o rechazar lo que el cliente pidio: en vez de "no puedo recomendartelo" di "no puedo darte sugerencias de salud personalizadas".';
+        $lines[] = 'Responde TODAS las preguntas que traiga el mensaje del cliente, en ese mismo mensaje: si ademas de un producto pregunta por el pago (tarjeta, transferencia), por el envio o por otra cosa, contestale tambien eso -- nunca contestes solo una parte ni empieces con un "claro que si" que pueda sonar a que aceptas algo que no manejamos (por ejemplo pagar con tarjeta).';
         $lines[] = 'Cierre de venta: eres habil y educado para conducir la conversacion hacia la compra, sin presionar ni sonar como script. Cada respuesta debe invitar al siguiente paso concreto (nunca dejes la conversacion en un punto muerto): si el cliente ya pregunto precio, ofrece apartarlo o pasar a los datos de envio; si duda entre opciones, ayudalo a decidir con una pregunta puntual o mostrandole una opcion concreta del catalogo en vez de solo esperar; si menciona una necesidad (para dormir, energia, digestion, etc.), menciona tu mismo el producto mas adecuado del inventario real como una opcion disponible, en vez de esperar a que el cliente lo pida por nombre. Se calido y genuino, no insistas si el cliente ya dijo que no.';
         $lines[] = 'Si el cliente pide hablar con una persona, muestra molestia fuerte, o tiene una duda que no puedes resolver con tus funciones (quejas, reembolsos, temas administrativos), llama a transferir_a_humano con el motivo.';
 
@@ -2366,6 +2369,11 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         );
         if ($rendimientoEstimado !== '') {
             $producto['rendimiento_estimado'] = $rendimientoEstimado;
+        } elseif (!empty($producto['en_oferta'])) {
+            // En prueba real, ante "¿cuanto me dura?" de una oferta SIN dosis capturada, Alex saco la duracion
+            // del nombre ("180 Caps" / 2 = ~90 dias) 1 de cada 3 veces aunque el prompt lo prohibia. Se le dice en el
+            // propio dato que lee.
+            $producto['duracion_envase'] = 'NO CAPTURADA: no la estimes ni la calcules a partir del nombre o del numero de capsulas; si preguntan cuanto dura, di que un asesor se lo confirma.';
         }
         if (!empty($relacionados[$idProducto])) {
             $producto['productos_relacionados'] = $relacionados[$idProducto];
@@ -4113,6 +4121,59 @@ function aiEsMensajeNoInterpretable(?string $messageKind, string $textoUsuario):
     return true;
 }
 
+/**
+ * Red de seguridad de codigo contra una duracion inventada. Si en este turno las herramientas dijeron
+ * que la duracion del envase NO esta capturada (duracion_envase / "No tenemos capturada la duracion") y
+ * NINGUNA trajo un rendimiento real (rendimiento_estimado / "Un envase rinde"), toda frase de la
+ * respuesta que afirme cuanto dura, rinde o alcanza un envase en dias/semanas/meses se quita: en prueba
+ * real Alex la saco del nombre ("180 Caps" / 2 = ~90 dias) 1 de cada 4 veces aunque el prompt y el dato
+ * se lo prohibian. Si quita algo, deja claro que un asesor lo confirma. No toca respuestas donde alguna
+ * herramienta si trajo el dato real (para no borrar una duracion legitima de otro producto).
+ */
+function aiQuitarDuracionInventada(string $respuesta, string $resultadosDelTurno): string
+{
+    $sinDato = str_contains($resultadosDelTurno, 'NO CAPTURADA') || str_contains($resultadosDelTurno, 'No tenemos capturada la duracion');
+    $conDato = str_contains($resultadosDelTurno, 'rendimiento_estimado') || str_contains($resultadosDelTurno, 'Un envase rinde');
+    if (!$sinDato || $conDato) {
+        return $respuesta;
+    }
+
+    $patron = '/(dura|duran|durar[aá]|rinde|rinden|rendir[aá]|alcanza|alcanzan|dosis|tratamiento)[^.\n!?]{0,80}\b\d+\s*(d[ií]as|semanas|mes(es)?)\b|\b(un|1|dos|2|tres|3)\s+mes(es)?\b[^.\n!?]{0,40}(dura|rinde|alcanza)|\bunos?\s+\d+\s*d[ií]as\s+de\s+(tratamiento|consumo)/iu';
+    $quitoAlgo = false;
+    $lineas = preg_split('/(?<=[.!?\n])\s+/u', $respuesta) ?: [$respuesta];
+    $limpias = [];
+    foreach ($lineas as $frase) {
+        if (preg_match($patron, $frase)) {
+            $quitoAlgo = true;
+            continue;
+        }
+        $limpias[] = $frase;
+    }
+    if (!$quitoAlgo) {
+        return $respuesta;
+    }
+
+    return rtrim(implode(' ', $limpias)) . "\n\nSobre cuanto te dura el envase, no tengo ese dato confirmado: un asesor te lo confirma con gusto.";
+}
+
+/**
+ * Red de seguridad de codigo: si el cliente menciona un metodo de pago que NO manejamos (tarjeta,
+ * debito, credito, PayPal, Mercado Pago, OXXO) y la respuesta no aclara que solo es efectivo o
+ * transferencia, se agrega el aviso. Visto en prueba real con el modelo: ante "¿puedo pagar con
+ * tarjeta? Quiero 1 X" Alex contesto solo lo del producto empezando con "¡Claro que si!" (suena a
+ * que acepta la tarjeta) 3 de 3 veces, aunque el prompt ya decia que solo se acepta efectivo o
+ * transferencia. Un cliente que cree que puede pagar con tarjeta al recibir es un problema real.
+ */
+function aiAsegurarAvisoDePago(string $textoUsuario, string $respuesta): string
+{
+    $mencionaOtroMetodo = (bool)preg_match('/\b(tarjeta|d[eé]bito|cr[eé]dito|paypal|mercado\s?pago|oxxo)\b/iu', $textoUsuario);
+    if (!$mencionaOtroMetodo || preg_match('/efectivo|transferencia/iu', $respuesta)) {
+        return $respuesta;
+    }
+
+    return rtrim($respuesta) . "\n\nSobre el pago: por ahora solo manejamos efectivo o transferencia, contra entrega. 😊";
+}
+
 function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUsuario, ?string $waMessageId = null, ?string $messageKind = null, ?DateTimeImmutable $ahora = null, ?PDO $pdo = null): array
 {
     $waId = trim($waId);
@@ -4264,6 +4325,7 @@ function aiGenerarRespuestaParaConversacion(
     // conversacion pausada -- la usa el re-chequeo de estado_bot al final de la funcion para
     // no confundir "yo la pause" con "un humano la pauso mientras yo generaba la respuesta".
     $pausadoPorEsteTurno = false;
+    $resultadosDelTurno = ''; // JSON de todas las herramientas de este turno (ver aiQuitarDuracionInventada())
 
     for ($i = 0; $i < AI_ASSISTANT_MAX_TOOL_LOOPS; $i++) {
         try {
@@ -4336,6 +4398,7 @@ function aiGenerarRespuestaParaConversacion(
 
             $toolResultJson = (string)json_encode($toolResult, JSON_UNESCAPED_UNICODE);
             aiAppendMessage($pdo, $idConversacion, 'tool', $toolResultJson, null, $toolCallId, $functionName);
+            $resultadosDelTurno .= $toolResultJson;
             $messages[] = ['role' => 'tool', 'tool_call_id' => $toolCallId, 'content' => $toolResultJson];
 
             if ($functionName === 'transferir_a_humano' && !empty($toolResult['ok'])) {
@@ -4395,6 +4458,10 @@ function aiGenerarRespuestaParaConversacion(
         aiLogDiagnosticError($pdo, $idConversacion, 'pase_a_humano_incertidumbre', $textoUsuario, ['respuesta_alex' => $finalText]);
         aiToolTransferirHumano($pdo, ['motivo' => 'Alex incluyo la bandera ' . AI_HANDOFF_TEXT_FLAG . ' en su respuesta (baja confianza o requiere atencion personalizada).'], $context);
         $yaTransferido = true;
+        // Esta pausa la causo ESTE turno (no un humano): sin esto el re-chequeo de mas abajo la tomaba por una
+        // intervencion humana y tiraba la respuesta -- el cliente se quedaba sin ningun mensaje. Visto en prueba
+        // real: ante un domicilio fuera de cobertura o un descuento, Alex redacto una buena respuesta y no salio.
+        $pausadoPorEsteTurno = true;
     }
 
     if ($yaTransferido && aiTextContainsHandoffFlag($finalText)) {
@@ -4403,6 +4470,10 @@ function aiGenerarRespuestaParaConversacion(
     }
 
     $finalText = aiSanitizePlainTextForWhatsapp($finalText);
+    $finalText = aiQuitarDuracionInventada($finalText, $resultadosDelTurno);
+    if (!$yaTransferido) {
+        $finalText = aiAsegurarAvisoDePago($textoUsuario, $finalText);
+    }
 
     // Re-chequeo de ultimo momento: generar la respuesta (DeepSeek + tool-calls) puede
     // tardar varios segundos, tiempo suficiente para que un asesor humano ya haya

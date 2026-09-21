@@ -80,6 +80,7 @@ final class OfertaCaducidadPricingTest extends TestCase
         $this->assertSame(3, $paquete['cantidad_maxima']);
         $this->assertSame(375.0, $paquete['precio_unitario']);
         $this->assertSame(50.0, $paquete['ahorro_por_pieza']);
+        $this->assertSame(125.0, $paquete['ahorro_vs_precio_normal_por_pieza']); // 500 - 375
     }
 
     public function testCadPaqueteNoPasaDelStockVendible(): void

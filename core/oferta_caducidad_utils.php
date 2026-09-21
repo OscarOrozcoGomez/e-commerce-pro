@@ -114,7 +114,7 @@ function ofertaCadArgumentoHonesto(array $resumen): string
  * maxima es lo que hay en riesgo: el precio de paquete es unitario para toda la linea, asi que
  * no se ofrece por encima de las piezas que de verdad hay que mover (FEFO vende esas primero).
  *
- * @return array{cantidad_minima:int,cantidad_maxima:int,precio_unitario:float,ahorro_por_pieza:float}|null
+ * @return array{cantidad_minima:int,cantidad_maxima:int,precio_unitario:float,ahorro_por_pieza:float,ahorro_vs_precio_normal_por_pieza:float}|null
  */
 function ofertaCadPaquete(float $precioVenta, float $precioCosto, float $precioOferta, int $piezasEnRiesgo, int $stockVendible): ?array
 {
@@ -132,7 +132,8 @@ function ofertaCadPaquete(float $precioVenta, float $precioCosto, float $precioO
         'cantidad_minima' => OFERTA_PAQUETE_MIN_PIEZAS,
         'cantidad_maxima' => $maximo,
         'precio_unitario' => $precio,
-        'ahorro_por_pieza' => round($precioOferta - $precio, 2),
+        'ahorro_por_pieza' => round($precioOferta - $precio, 2),                  // contra el precio de oferta
+        'ahorro_vs_precio_normal_por_pieza' => round($precioVenta - $precio, 2),   // contra el precio normal (visto: el modelo lo calculaba mal)
     ];
 }
 

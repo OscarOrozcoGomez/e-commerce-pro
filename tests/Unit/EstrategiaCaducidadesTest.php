@@ -305,6 +305,63 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertSame(5, $ofertas[0]['piezas_con_fecha_corta']);
     }
 
+    public function testDuracionInventadaSeQuitaCuandoNoHayDatoCapturado(): void
+    {
+        $resultados = '{"ok":true,"productos":[{"nombre":"Calcium 180 Caps","duracion_envase":"NO CAPTURADA: no la estimes"}]}';
+        $resp = "El Calcium esta en oferta a \$287. Un envase rinde aproximadamente 90 dias con la dosis sugerida. Caduca el 30 de marzo de 2027. ¿Te lo aparto?";
+
+        $r = aiQuitarDuracionInventada($resp, $resultados);
+
+        $this->assertStringNotContainsString('90 dias', $r);
+        $this->assertStringContainsString('esta en oferta a $287', $r);
+        $this->assertStringContainsString('Caduca el 30 de marzo de 2027', $r);
+        $this->assertStringContainsString('un asesor te lo confirma', $r);
+    }
+
+    public function testDuracionSeConservaSiAlgunaHerramientaTrajoElDatoReal(): void
+    {
+        $resultados = '{"productos":[{"nombre":"A","duracion_envase":"NO CAPTURADA"},{"nombre":"B","rendimiento_estimado":"90 dias"}]}';
+        $resp = 'El B rinde aproximadamente 90 dias con la dosis sugerida.';
+
+        $this->assertSame($resp, aiQuitarDuracionInventada($resp, $resultados));
+    }
+
+    public function testDuracionNoSeTocaSiNoHuboProductosSinDosis(): void
+    {
+        $resp = 'Un envase rinde unos 60 dias con la dosis sugerida.';
+
+        $this->assertSame($resp, aiQuitarDuracionInventada($resp, '{"ok":true}'));
+    }
+
+    public function testDuracionNoConfundeFechasDeCaducidadNiPlazosDeEntrega(): void
+    {
+        $resultados = '{"motivo":"No tenemos capturada la duracion de un envase de este producto"}';
+        $resp = 'Caduca el 11 de octubre de 2026 (en 20 dias). La entrega es el miercoles. Quedan 4 piezas.';
+
+        $this->assertSame($resp, aiQuitarDuracionInventada($resp, $resultados));
+    }
+
+    public function testAvisoDePagoSeAgregaCuandoPreguntanPorTarjetaYAlexNoLoAclara(): void
+    {
+        $r = aiAsegurarAvisoDePago('¿Puedo pagar con tarjeta de crédito? Quiero 1 Collagen', '¡Claro que sí! Aquí está el producto: $349.');
+
+        $this->assertStringContainsString('solo manejamos efectivo o transferencia', $r);
+        $this->assertStringStartsWith('¡Claro que sí!', $r);
+    }
+
+    public function testAvisoDePagoNoSeDuplicaSiAlexYaLoAclaro(): void
+    {
+        $resp = 'Por ahora solo manejamos efectivo o transferencia contra entrega.';
+
+        $this->assertSame($resp, aiAsegurarAvisoDePago('¿aceptan tarjeta?', $resp));
+    }
+
+    public function testAvisoDePagoNoTocaConversacionesQueNoHablanDeOtrosMetodos(): void
+    {
+        $this->assertSame('Hola', aiAsegurarAvisoDePago('¿Tienen ofertas?', 'Hola'));
+        $this->assertSame('Hola', aiAsegurarAvisoDePago('Pago en efectivo el miércoles', 'Hola'));
+    }
+
     public function testUnaOfertaSinDescuentoRealNoSeAdelantaNiLlevaMotivo(): void
     {
         // Caso real de la copia de produccion: precio_oferta (424) por ENCIMA del precio normal (399).
@@ -354,7 +411,7 @@ final class EstrategiaCaducidadesTest extends TestCase
         $porId = array_column(aiListarOfertasVigentes($this->pdo), null, 'id_producto');
 
         $this->assertSame(
-            ['cantidad_minima' => 2, 'cantidad_maxima' => 5, 'precio_unitario' => 300.0, 'ahorro_por_pieza' => 50.0],
+            ['cantidad_minima' => 2, 'cantidad_maxima' => 5, 'precio_unitario' => 300.0, 'ahorro_por_pieza' => 50.0, 'ahorro_vs_precio_normal_por_pieza' => 200.0],
             $porId[30]['paquete']
         );
         $this->assertArrayNotHasKey('paquete', $porId[31]);
@@ -374,6 +431,24 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertSame('media', $producto['urgencia_oferta']);
         $this->assertStringContainsString('fecha de caducidad corta', $producto['motivo_oferta']);
         $this->assertSame(300.0, $producto['paquete']['precio_unitario']);
+    }
+
+    public function testOfertaSinDosisCapturadaLeDiceAAlexQueNoEstimeLaDuracion(): void
+    {
+        $this->seedProducto(36, 'Sin Dosis 180 Caps', 500.0, 200.0, 350.0);          // sin capsulas/porcion capturadas
+        $this->seedProducto(37, 'Con Dosis', 500.0, 200.0, 350.0, 180, 2);
+        foreach ([36, 37] as $id) {
+            $this->ponerEnCategoria($id);
+            $this->seedInventario($id, 5);
+        }
+
+        $sinDosis = aiSearchInventory($this->pdo, 'Sin Dosis')[0];
+        $conDosis = aiSearchInventory($this->pdo, 'Con Dosis')[0];
+
+        $this->assertStringContainsString('NO CAPTURADA', $sinDosis['duracion_envase']);
+        $this->assertArrayNotHasKey('rendimiento_estimado', $sinDosis);
+        $this->assertArrayNotHasKey('duracion_envase', $conDosis);
+        $this->assertArrayHasKey('rendimiento_estimado', $conDosis);
     }
 
     public function testAgendarVentaAplicaElPrecioDePaqueteSoloDentroDelRangoAutorizado(): void
