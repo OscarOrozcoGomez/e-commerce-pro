@@ -40,6 +40,7 @@ require_once __DIR__ . '/../core/lote_ocr_utils.php';
 require_once __DIR__ . '/../core/caducidad_notificaciones_utils.php';
 require_once __DIR__ . '/../core/stock_prediction.php';
 require_once __DIR__ . '/../core/inventory_recommendations.php';
+require_once __DIR__ . '/../core/ai_foto_producto_utils.php';
 require_once __DIR__ . '/../core/ventas_features.php';
 require_once __DIR__ . '/../core/attribution.php';
 require_once __DIR__ . '/../core/referrals.php';

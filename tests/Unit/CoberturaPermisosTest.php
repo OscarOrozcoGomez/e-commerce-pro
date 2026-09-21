@@ -63,6 +63,7 @@ final class CoberturaPermisosTest extends TestCase
         'api/run_migrations.php' => 'token X-Migrations-Token del deploy',
         'api/whatsapp_confirmar_envio.php' => 'token del puente de WhatsApp',
         'api/whatsapp_webhook.php' => 'token del webhook',
+        'api/alex_ocr_imagen.php' => 'token del webhook (puente de WhatsApp): lee el texto de una foto con Google Vision',
         // (d) telemetria / landing acotada por rol dentro del propio codigo
         'api/dashboard_data.php' => 'landing del dashboard: cada rol recibe solo su bloque (admin/encargado/repartidor/vendedor), un cliente no recibe nada',
         'api/log_activity.php' => 'telemetria de navegacion (marca trafico interno)',

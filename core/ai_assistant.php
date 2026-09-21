@@ -13,6 +13,7 @@ require_once __DIR__ . '/whatsapp_link_utils.php';
 require_once __DIR__ . '/lote_caducidad_utils.php'; // loteDiasTratamiento() -- ver aiBuildRendimientoEstimadoTexto()
 require_once __DIR__ . '/oferta_pricing.php';       // ofertaPrecioEfectivo() -- precios de productos en la categoria "Ofertas"
 require_once __DIR__ . '/cliente_telefono_utils.php'; // telefonoResolverParaPedido() -- que telefono lleva el pedido de Alex
+require_once __DIR__ . '/ai_foto_producto_utils.php'; // aiFotoBuildContextLineParaMensaje() -- pista para fotos de frascos con OCR
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -169,7 +170,8 @@ function aiBuildSystemPrompt(
     ?bool $esLadaLocal = null,
     ?string $perfilClienteTexto = null,
     array $plantillasDisponibles = [],
-    ?string $telefonoChat = null
+    ?string $telefonoChat = null,
+    ?string $fotoProductoContexto = null
 ): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
@@ -258,6 +260,12 @@ function aiBuildSystemPrompt(
     $lineaTelefonoChat = aiBuildTelefonoChatContextLine($telefonoChat);
     if ($lineaTelefonoChat !== '') {
         $lines[] = $lineaTelefonoChat;
+    }
+    // Foto de un frasco/etiqueta con OCR en el mensaje de este turno: pista de que producto es, o
+    // instrucciones de NO buscar leyendas genericas ni ofrecer "similares" -- ver core/ai_foto_producto_utils.php.
+    $lineaFotoProducto = trim((string)($fotoProductoContexto ?? ''));
+    if ($lineaFotoProducto !== '') {
+        $lines[] = $lineaFotoProducto;
     }
     if ($horasInactividad !== null && $horasInactividad >= AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS) {
         $diasInactivo = max(1, (int)round($horasInactividad / 24));
@@ -348,6 +356,7 @@ function aiBuildSystemPrompt(
     $lines[] = '- Si agendar_venta (o consultar_inventario) te regresa que no hay suficiente existencia de un producto, di el numero disponible tal cual te lo regreso la funcion y ofrece opciones concretas: ajustar la cantidad a lo disponible, cambiar a otra presentacion si existe, o avisar cuando el cliente quiera que le confirmen la fecha de reabastecimiento (llama a transferir_a_humano si insiste en la cantidad original). Nunca dejes la conversacion en un punto muerto ni digas solo que "no hay" sin ofrecer una alternativa.';
     $lines[] = '';
     $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes con una nota de voz transcrita o texto detectado en una imagen (ej. "[Nota de voz transcrita, puede tener errores]: quiero 2 omega 3", "...Texto detectado en la imagen (puede tener errores de OCR): PAGO CONFIRMADO 349.00 MXN"), SI puedes usar ese contenido como si el cliente lo hubiera escrito -- es una transcripcion/OCR automatica. Puede traer errores (nombres de producto raros, numeros mal leidos), asi que si algo no tiene sentido o es un dato critico (direccion, cantidad, monto de un pago), confirmalo con el cliente en vez de asumirlo tal cual.';
+    $lines[] = 'Fotos de frascos o etiquetas: el OCR lee bien el texto chico de la etiqueta y muchas veces NO lee el nombre grande del producto. Leyendas como "Suplemento alimenticio", "Capsulas a base de...", "Contenido N capsulas", ingredientes o modo de uso vienen en todos los frascos y NO son el nombre del producto: nunca las busques en consultar_inventario como si lo fueran (un "Mento Alimentic" es "SUPLEMENTO ALIMENTICIO" mal leido). Si de la foto no se puede saber cual producto es, no ofrezcas productos "similares" ni des precios de algo que el cliente no nombro: transfiere a un asesor con lo que si se leyo. Si el sistema te da una linea "FOTO DE PRODUCTO", sigue esa linea.';
     $lines[] = 'Nota: cualquier otro tipo de mensaje que el sistema no pueda leer por su cuenta (foto sin texto legible, video, sticker, ubicacion, contacto, documento, etc.) ya se transfiere directo a un asesor humano por codigo, antes de que la conversacion llegue a ti -- nunca vas a ver ese caso ni tienes que pedirle al cliente que lo reescriba en texto.';
     $lines[] = 'En todos los casos, nunca ignores ese mensaje ni actues como si no hubiera llegado nada.';
     $lines[] = '';
@@ -3891,7 +3900,8 @@ function aiGenerarRespuestaParaConversacion(
         $esLadaLocal,
         $perfilClienteTexto,
         $plantillasDisponibles,
-        aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]) ?? ''
+        aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]) ?? '',
+        aiFotoBuildContextLineParaMensaje($pdo, $textoUsuario)
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],
