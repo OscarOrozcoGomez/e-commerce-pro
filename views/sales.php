@@ -1970,13 +1970,15 @@ include __DIR__ . '/includes/header.php';
         if (!hayBorradores) {
             nuevaVenta();
         }
-        preseleccionarClienteDesdeUrl(hayBorradores);
+        preseleccionarClienteDesdeUrl();
     });
 
     // Llegar con ?id_cliente=NN (p.ej. desde Administrar Clientes, justo despues de crear un cliente y
     // elegir "agendar venta") abre la venta con ese cliente ya seleccionado, con su telefono y su
-    // domicilio predeterminado. Si ya habia pestanas de venta en curso NO se tocan: se abre una nueva.
-    function preseleccionarClienteDesdeUrl(hayBorradores) {
+    // domicilio predeterminado. Si ya habia una venta EN CURSO (con datos) NO se toca: se abre una pestana nueva. Un
+    // borrador VACIO no es una venta en curso (basta haber abierto Ventas antes para que quede guardado): se reutiliza su
+    // pestana en vez de abrir otra y dejar la primera vacia.
+    function preseleccionarClienteDesdeUrl() {
         const idPreset = parseInt(new URLSearchParams(window.location.search).get('id_cliente') || '0', 10) || 0;
         if (idPreset <= 0) return;
 
@@ -1993,9 +1995,19 @@ include __DIR__ . '/includes/header.php';
             return;
         }
 
-        if (hayBorradores) nuevaVenta();
-        const idTab = 'v' + tabCount;
-        const context = document.getElementById('venta-' + idTab);
+        const contextos = Array.from(document.querySelectorAll('.venta-context'));
+        let idTab;
+        let context;
+        if (contextos.some((ctx) => hasVentaData(ctx))) {
+            nuevaVenta();
+            idTab = 'v' + tabCount;
+            context = document.getElementById('venta-' + idTab);
+        } else {
+            context = contextos[0] || null;
+            idTab = context ? String(context.id || '').replace('venta-', '') : '';
+            const tabsInstance = M.Tabs.getInstance(document.getElementById('ventas-tabs'));
+            if (tabsInstance && context) tabsInstance.select('venta-' + idTab);
+        }
         if (!context) return;
 
         setSelectedCustomer(context, {
