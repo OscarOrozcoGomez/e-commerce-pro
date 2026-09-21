@@ -400,6 +400,25 @@ function catalogResolveCardImageSrc(string $rawImagen, int $productId): string
     return $imgSrc;
 }
 
+/**
+ * Texto de nombre corto (etiqueta del pomo) que la card expone en data-short para el filtro en
+ * vivo del navegador: el del propio producto mas el de sus variantes (la columna
+ * nombres_cortos_variantes que agrega catalogBuildQueries()). En minusculas y sin espacios
+ * sobrantes; cadena vacia si nada tiene nombre corto.
+ */
+function catalogCardShortNames(array $p): string
+{
+    $partes = [];
+    foreach (['nombre_corto', 'nombres_cortos_variantes'] as $campo) {
+        $valor = trim((string) ($p[$campo] ?? ''));
+        if ($valor !== '') {
+            $partes[] = $valor;
+        }
+    }
+
+    return mb_strtolower(implode(' ', $partes), 'UTF-8');
+}
+
 function catalogRenderProductCard(array $p, bool $mostrarBotonCompartir = false): string
 {
     $groupKey = catalogGroupKey((string) ($p['nombre'] ?? ''));
@@ -413,7 +432,7 @@ function catalogRenderProductCard(array $p, bool $mostrarBotonCompartir = false)
 
     ob_start();
     ?>
-    <div class="col s12 m6 l4 product-card-container" data-group-key="<?php echo esc($groupKey); ?>" data-name="<?php echo esc(strtolower((string) ($p['nombre'] ?? ''))); ?>" data-sku="<?php echo esc(strtolower((string) ($p['sku'] ?? ''))); ?>">
+    <div class="col s12 m6 l4 product-card-container" data-group-key="<?php echo esc($groupKey); ?>" data-name="<?php echo esc(strtolower((string) ($p['nombre'] ?? ''))); ?>" data-sku="<?php echo esc(strtolower((string) ($p['sku'] ?? ''))); ?>" data-short="<?php echo esc(catalogCardShortNames($p)); ?>">
         <a href="<?php echo BASE_URL; ?>product_detail.php?id=<?php echo (int) ($p['id_producto'] ?? 0); ?>" class="card-link">
             <div class="card hoverable border-radius-8" style="height: 360px; display: flex; flex-direction: column;">
                 <div class="card-image waves-effect waves-block waves-light" style="height: 200px; background: #f9f9f9; display: flex; align-items: center; justify-content: center; position: relative;">
@@ -593,6 +612,7 @@ function catalogBuildQueries(PDO $pdo, string $categoriaSeleccionada, string $bu
             NULLIF(TRIM(p.imagen), ''),
             NULLIF(TRIM(p.imagen_url), '')
         ) AS imagen,
+        (SELECT GROUP_CONCAT(pv.nombre_corto SEPARATOR ' ') FROM productos pv WHERE pv.id_padre = p.id_producto AND pv.nombre_corto IS NOT NULL AND pv.nombre_corto <> '') AS nombres_cortos_variantes,
         fam.precio_desde,
         fam.precio_comparacion_desde,
         fam.total_variantes,
@@ -652,19 +672,23 @@ function catalogBuildQueries(PDO $pdo, string $categoriaSeleccionada, string $bu
     }
 
     if ($busqueda !== '') {
-        $whereClauses[] = "(p.nombre LIKE :search_name OR p.codigo_barras LIKE :search_code OR p.nombre_variante LIKE :search_variant OR EXISTS (
+        // Tambien se busca por nombre_corto (la etiqueta del pomo, p.ej. "3 Mag Blend"), igual que en
+        // views/products.php, tanto en el producto como en sus variantes.
+        $whereClauses[] = "(p.nombre LIKE :search_name OR p.codigo_barras LIKE :search_code OR p.nombre_variante LIKE :search_variant OR p.nombre_corto LIKE :search_short OR EXISTS (
             SELECT 1 FROM productos p_v
             WHERE p_v.id_padre = p.id_producto
-              AND (p_v.nombre LIKE :search_ex OR p_v.codigo_barras LIKE :search_ex_code OR p_v.nombre_variante LIKE :search_ex_variant)
+              AND (p_v.nombre LIKE :search_ex OR p_v.codigo_barras LIKE :search_ex_code OR p_v.nombre_variante LIKE :search_ex_variant OR p_v.nombre_corto LIKE :search_ex_short)
         ))";
 
         $term = '%' . $busqueda . '%';
         $params[':search_name'] = $term;
         $params[':search_code'] = $term;
         $params[':search_variant'] = $term;
+        $params[':search_short'] = $term;
         $params[':search_ex'] = $term;
         $params[':search_ex_code'] = $term;
         $params[':search_ex_variant'] = $term;
+        $params[':search_ex_short'] = $term;
     }
 
     $where = ' WHERE ' . implode(' AND ', $whereClauses);
