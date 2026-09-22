@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
+require_once __DIR__ . '/../core/oferta_pricing.php';
 
 requireAuth();
 // El permiso 'realizar_ventas' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
@@ -60,6 +61,9 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':almacen' => $id_almacen_actual]);
     $productos = $stmt->fetchAll();
+
+    // Los productos en Ofertas se precargan al precio de oferta (no al normal): ver ofertaAplicarPrecioEfectivoALista().
+    $productos = ofertaAplicarPrecioEfectivoALista($pdo, $productos);
 
     foreach ($productos as &$producto) {
         $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''), (int)($producto['id_producto'] ?? 0));
@@ -2481,7 +2485,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
                         <div class="producto-item-field-row">
-                            <span class="producto-item-field-label">Precio Unit.</span>
+                            <span class="producto-item-field-label">Precio Unit.${product.en_oferta ? ' <span style="background:#e53935;color:#fff;border-radius:3px;padding:0 5px;font-size:0.75em;" title="Precio normal: $' + Number(product.precio_normal).toFixed(2) + '">OFERTA</span>' : ''}</span>
                             <input type="number" class="precio-unitario producto-item-field-input" name="precio_${productoIndex}" value="${product.precio_venta}" min="0.01" step="0.01" oninput="actualizarTotal('${tabId}')">
                         </div>
                         <div class="producto-item-field-row">

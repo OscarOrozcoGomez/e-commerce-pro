@@ -80,6 +80,7 @@ Archivo grande (~2900 líneas). Helpers clave: `requireAuth()`, `hasPermission(s
 |---|---|---|
 | `ai_assistant.php` (~2800 líneas) | "Alex": asistente IA de WhatsApp/Telegram (backend DeepSeek, tool-calling, estado de conversación, reglas de aprendizaje) | `views/ai_assistant_settings.php`, `views/ai_diagnostics.php`, crons `scripts/whatsapp_*_cron.php` |
 | `lote_caducidad_utils.php` + `caducidad_notificaciones_utils.php` | Control de caducidades por lote: proyección FEFO vs velocidad de venta, severidad por "runway" (caducidad − duración de tratamiento) | `views/caducidades.php`, cron `scripts/caducidades_notificacion_cron.php` |
+| `oferta_pricing.php` + `oferta_caducidad_utils.php` + `alex_oferta_eventos_utils.php` | Estrategia de venta de productos por caducar: escalera de precio por urgencia (crítico = costo+$50, piso del negocio), precio de paquete "llévate 2", argumento honesto de por qué está en oferta (fecha real, margen de consumo), gestión automática de Ofertas (baja de escalón y sale sola; solo lo que el sistema puso desde Caducidades, tabla `oferta_caducidad_gestion`), bitácora `alex_oferta_eventos` + panel "Alex y las ofertas" | `views/caducidades.php`, cron `caducidades_notificacion_cron.php` (reconcilia Ofertas) |
 | `purchase_order_utils.php` | Órdenes de compra + importación de pedido de proveedor (pegar correo / OCR) | `views/purchase_orders.php` |
 | `stock_transfer_utils.php` | Transferencia de stock entre almacenes (multiproducto, lotes FEFO) | `views/transfer_stock.php` |
 | `cliente_scope_utils.php` | Alcance de clientes/ventas por almacén (`clientes.id_almacen`) | — |
@@ -141,6 +142,8 @@ cumpliéndolas**:
    varios mensajes reales a WhatsApp en una ráfaga, o que se sostenga un volumen alto de
    mensajes proactivos por muchas horas seguidas?* Si la respuesta no es un "no" claro y
    verificado, hay que agregar pausa/tope antes de considerarlo terminado.
+4. El seguimiento con oferta (`aiOfertaRelevanteParaConversacion()`) solo cambia el *texto* de un
+   mensaje del seguimiento de 24h que ya iba a salir: no agrega mensajes ni cupo aparte.
 
 Ver `private/HOWTO_VPS_BD.md` sección 8 para logs/edición del puente (`journalctl -u
 wa-bridge`, `/opt/wa-bridge/app/index.js`).

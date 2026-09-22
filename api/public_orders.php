@@ -3,6 +3,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/phone_utils.php';
 require_once __DIR__ . '/../core/api_security_utils.php';
+require_once __DIR__ . '/../core/oferta_pricing.php';
 
 function normalizePhoneDigitsCheckout(string $value): string {
     return normalizePhoneDigitsMx($value) ?? '';
@@ -129,6 +130,13 @@ if ($telefonoEntrada !== '') {
     } catch (Throwable $e) {
         error_log('No se pudo verificar teléfono del checkout: ' . $e->getMessage());
     }
+}
+
+// El precio de cada producto lo fija el servidor, nunca el navegador: un POST directo con
+// "precio" manipulado (ej. 1.00) no debe poder crear un pedido por debajo de lo que en
+// realidad cuesta. Se pisa siempre, tanto para invitados como para clientes con sesion.
+if (is_array($data['items'] ?? null)) {
+    $data['items'] = ofertaPreciosSeguros(getPDO(), $data['items']);
 }
 
 $result = dbCreatePublicOrder($data);
