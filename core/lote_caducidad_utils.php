@@ -1514,10 +1514,15 @@ function loteDescontarVentaFEFO(PDO $pdo, int $idProducto, ?int $idAlmacen, int 
             return $plan;
         }
 
+        // ORDEN IMPORTA: en MySQL/MariaDB las asignaciones del SET se evaluan de izquierda a derecha y ven
+        // el valor YA actualizado (SQLite/estandar usan el original). Con la cantidad primero, el CASE
+        // restaba dos veces: el lote pasaba a 'agotado' con 1 pieza todavia disponible y esa ultima pieza
+        // nunca se le asignaba a ningun lote. Visto en una prueba de concurrencia sobre MariaDB (los tests
+        // con SQLite no lo pueden ver). El estado va PRIMERO para leer la cantidad original.
         $updLote = $pdo->prepare(
             "UPDATE lotes_inventario
-             SET cantidad_restante = cantidad_restante - :c,
-                 estado = CASE WHEN cantidad_restante - :c2 <= 0 THEN 'agotado' ELSE estado END
+             SET estado = CASE WHEN cantidad_restante - :c2 <= 0 THEN 'agotado' ELSE estado END,
+                 cantidad_restante = cantidad_restante - :c
              WHERE id_lote = :id"
         );
         $registrarDetalle = $idDetallePedido > 0 && loteTablaExiste($pdo, 'detalle_pedido_lotes');

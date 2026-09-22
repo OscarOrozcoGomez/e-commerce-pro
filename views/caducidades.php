@@ -371,9 +371,7 @@ include __DIR__ . '/includes/header.php';
     // Desde ahí el catálogo, la ficha, el POS y Alex lo venden a ese precio; el cron de
     // caducidades lo baja al siguiente escalón y lo retira de Ofertas cuando ya no hay riesgo.
     window.ponerEnOferta = function (idLote, idProducto, nombre) {
-        if (!confirm('¿Poner "' + nombre + '" en Ofertas?\n\nSe agrega a la categoría Ofertas y se le fija el precio de oferta según qué tan cerca está de caducar (si es crítico, costo + $50) si aún no tiene uno capturado a mano.
-
-El precio baja solo conforme se acerca la fecha, y sale de Ofertas cuando ya no le queden lotes en riesgo.')) return;
+        if (!confirm('¿Poner "' + nombre + '" en Ofertas?\n\nSe agrega a la categoría Ofertas y se le fija el precio de oferta según qué tan cerca está de caducar (si es crítico, costo + $50) si aún no tiene uno capturado a mano.\n\nEl precio baja solo conforme se acerca la fecha, y sale de Ofertas cuando ya no le queden lotes en riesgo.')) return;
         postLote({ accion: 'poner_producto_en_oferta', id_lote: idLote, id_producto: idProducto }).then(tras);
     };
 
