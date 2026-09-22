@@ -158,7 +158,7 @@ if ($modoDetalle) {
                 </div>
             </div>
             <div class="modal-footer">
-                <a href="#!" class="modal-close btn-flat">Cancelar</a>
+                <a href="#!" id="btn-cancelar-feedback-alex" class="btn-flat">Cancelar</a>
                 <button type="button" id="btn-guardar-feedback-alex" class="btn orange darken-1">Guardar regla</button>
             </div>
         </div>
@@ -180,6 +180,11 @@ if ($modoDetalle) {
                     M.updateTextFields();
                     modalInstance.open();
                 });
+            });
+
+            document.getElementById('btn-cancelar-feedback-alex').addEventListener('click', function (e) {
+                e.preventDefault();
+                modalInstance.close();
             });
 
             document.getElementById('btn-guardar-feedback-alex').addEventListener('click', function () {
