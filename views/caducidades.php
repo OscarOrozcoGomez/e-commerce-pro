@@ -136,9 +136,6 @@ include __DIR__ . '/includes/header.php';
                     <?php if ((int) $metricasAlex['seguimiento']['enviados'] > 0): ?>
                         <span class="chip">Seguimientos con oferta: <strong><?php echo (int) $metricasAlex['seguimiento']['enviados']; ?></strong> (<?php echo (int) $metricasAlex['seguimiento']['convertidos']; ?> compraron)</span>
                     <?php endif; ?>
-                    <?php if ((int) $metricasAlex['recompra']['enviadas'] > 0): ?>
-                        <span class="chip">Recompras enviadas: <strong><?php echo (int) $metricasAlex['recompra']['enviadas']; ?></strong> (<?php echo (int) $metricasAlex['recompra']['convertidas']; ?> compraron)</span>
-                    <?php endif; ?>
                 </div>
                 <?php if (!empty($metricasAlex['top_productos'])): ?>
                     <div class="grey-text" style="margin-top:6px; font-size:0.9em;">

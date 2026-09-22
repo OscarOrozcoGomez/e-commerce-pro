@@ -1407,22 +1407,6 @@ function aiFindConversationsNeedingFollowup(PDO $pdo, int $horas = AI_FOLLOWUP_I
     // sola despues de estar pausada (AI_AUTO_REACTIVATE_INACTIVITY_HOURS), si ya se le
     // avisamos (o esta pendiente de que el equipo confirme) que no tenemos cobertura para
     // su zona, jamas se le vuelve a contactar de forma proactiva para intentar venderle algo.
-    //
-    // Y contra una recompra proactiva sin contestar (ver alex_recompra_utils.php): esa ya fue el
-    // contacto de esta conversacion -- si ademas le cayera el seguimiento de 24h, el cliente
-    // recibiria dos mensajes seguidos sin haber escrito nada. En cuanto el cliente escribe, la
-    // exclusion se levanta sola (el evento queda anterior a su ultimo mensaje).
-    $sinRecompraPendiente = '';
-    if (loteTablaExiste($pdo, 'alex_oferta_eventos')) {
-        $sinRecompraPendiente = " AND NOT EXISTS (
-               SELECT 1 FROM alex_oferta_eventos ev
-               WHERE ev.id_conversacion = c.id_conversacion AND ev.tipo = '" . ALEX_OFERTA_EVENTO_RECOMPRA . "'
-                 AND ev.creado_en >= COALESCE(
-                     (SELECT MAX(mu.creado_en) FROM whatsapp_mensajes mu WHERE mu.id_conversacion = c.id_conversacion AND mu.rol = 'user'),
-                     '1970-01-01 00:00:00')
-           )";
-    }
-
     $stmt = $pdo->prepare(
         "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil,
                 (SELECT MAX(m.creado_en) FROM whatsapp_mensajes m
@@ -1440,7 +1424,7 @@ function aiFindConversationsNeedingFollowup(PDO $pdo, int $horas = AI_FOLLOWUP_I
                SELECT 1 FROM whatsapp_conversacion_etiquetas ce
                INNER JOIN whatsapp_etiquetas e ON e.id_etiqueta = ce.id_etiqueta
                WHERE ce.id_conversacion = c.id_conversacion AND e.nombre = ?
-           )" . $sinRecompraPendiente
+           )"
     );
     $stmt->execute([AI_TAG_FUERA_COBERTURA]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];

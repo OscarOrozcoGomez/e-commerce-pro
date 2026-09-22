@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
  *  - "Poner en oferta" con escalera de precio y la gestion automatica (ofertaCadReconciliar).
  *  - Contexto que ve Alex (urgencia, motivo honesto, paquete) y precio de paquete al agendar.
  *  - Bitacora de eventos y metricas.
- *  - Gancho de oferta en el seguimiento de 24h y recompra proactiva.
+ *  - Gancho de oferta en el seguimiento de 24h.
  * Las reglas puras estan en OfertaCaducidadPricingTest.
  */
 final class EstrategiaCaducidadesTest extends TestCase
@@ -556,7 +556,7 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertFalse(alexOfertaMetricas($this->pdo)['disponible']);
     }
 
-    public function testMetricasCuentanVentasConversionPaqueteYRecompra(): void
+    public function testMetricasCuentanVentasConversionYPaquete(): void
     {
         $this->seedProducto(41, 'Omega', 500.0, 200.0);
         $this->seedProducto(42, 'Zinc', 300.0, 100.0);
@@ -572,8 +572,6 @@ final class EstrategiaCaducidadesTest extends TestCase
             'id_conversacion' => 1, 'id_cliente' => 5, 'id_pedido' => 100, 'cantidad' => 1,
             'precio_unitario' => 200.0, 'precio_normal' => 300.0, 'severidad' => 'planificar',
         ]);
-        // Recompra enviada al cliente 7 por el producto 41, y ese cliente compro despues.
-        $this->pdo->exec("INSERT INTO alex_oferta_eventos (tipo, id_cliente, id_conversacion, id_producto, creado_en) VALUES ('recompra_enviada', 7, 3, 41, '" . date('Y-m-d H:i:s', strtotime('-2 days')) . "')");
         alexOfertaRegistrarEvento($this->pdo, ALEX_OFERTA_EVENTO_VENDIDA, 41, [
             'id_conversacion' => 3, 'id_cliente' => 7, 'id_pedido' => 101, 'cantidad' => 1,
             'precio_unitario' => 300.0, 'precio_normal' => 500.0, 'severidad' => 'urgente',
@@ -590,7 +588,6 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertSame(2, $m['ventas']['unidades_paquete']);
         $this->assertSame(3, $m['ventas']['unidades_urgentes']);     // critico x2 + urgente x1
         $this->assertSame(50.0, $m['conversion_pct']);               // 1 de 2 conversaciones que vieron oferta
-        $this->assertSame(['enviadas' => 1, 'convertidas' => 1], $m['recompra']);
         $this->assertSame(41, $m['top_productos'][0]['id_producto']);
         $this->assertSame(3, $m['top_productos'][0]['unidades']);
     }
@@ -641,135 +638,6 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertStringContainsString('$500.00', $dato);
         $this->assertStringContainsString('fecha de caducidad corta', $dato);
         $this->assertStringContainsString('UNA sola vez', $dato);
-    }
-
-    public function testSeguimientoDe24hNoSeMandaSiYaSeLeHizoUnaRecompraSinContestar(): void
-    {
-        $idConv = $this->seedConversacion('5213312345010');
-        $this->seedMensaje($idConv, 'user', 'hola', '-10 days');
-        $this->seedMensaje($idConv, 'assistant', 'recompra', '-2 days', null, 1);
-        $this->pdo->exec("INSERT INTO alex_oferta_eventos (tipo, id_conversacion, id_cliente, id_producto, creado_en) VALUES ('recompra_enviada', {$idConv}, 1, 1, '" . date('Y-m-d H:i:s', strtotime('-2 days')) . "')");
-
-        $this->assertSame([], aiFindConversationsNeedingFollowup($this->pdo));
-
-        // El cliente contesta y despues Alex le responde: la exclusion se levanta sola.
-        $this->seedMensaje($idConv, 'user', 'si, apartamelo', '-40 hours');
-        $this->seedMensaje($idConv, 'assistant', 'listo', '-30 hours', null, 1);
-
-        $this->assertCount(1, aiFindConversationsNeedingFollowup($this->pdo));
-    }
-
-    /* ------------------------------------------------------------------
-     * Recompra proactiva
-     * ---------------------------------------------------------------- */
-
-    public function testFechaFinDeTratamientoYVentanaDeRecompra(): void
-    {
-        $this->assertSame('2026-09-30', aiRecompraFechaFinTratamiento('2026-08-31 10:00:00', 1, 30));
-        $this->assertSame('2026-10-30', aiRecompraFechaFinTratamiento('2026-08-31', 2, 30));
-
-        $fin = '2026-09-30';
-        $this->assertFalse(aiRecompraEnVentana($fin, new DateTimeImmutable('2026-09-19')));      // faltan 11 dias
-        $this->assertTrue(aiRecompraEnVentana($fin, new DateTimeImmutable('2026-09-20')));       // faltan 10
-        $this->assertTrue(aiRecompraEnVentana($fin, new DateTimeImmutable('2026-10-30 12:00'))); // 30 dias despues
-        $this->assertFalse(aiRecompraEnVentana($fin, new DateTimeImmutable('2026-10-31')));
-    }
-
-    public function testRecompraSoloEnHorarioDiurno(): void
-    {
-        $this->assertFalse(aiRecompraEnHorario(new DateTimeImmutable('2026-09-20 08:59')));
-        $this->assertTrue(aiRecompraEnHorario(new DateTimeImmutable('2026-09-20 09:00')));
-        $this->assertTrue(aiRecompraEnHorario(new DateTimeImmutable('2026-09-20 19:59')));
-        $this->assertFalse(aiRecompraEnHorario(new DateTimeImmutable('2026-09-20 20:00')));
-    }
-
-    public function testRecompraEncuentraAlClienteAQuienSeLeTerminaElEnvase(): void
-    {
-        $idConv = $this->escenarioRecompra();
-
-        $candidatos = aiFindRecompraCandidatos($this->pdo);
-
-        $this->assertCount(1, $candidatos);
-        $this->assertSame($idConv, $candidatos[0]['id_conversacion']);
-        $this->assertSame(10, $candidatos[0]['id_cliente']);
-        $this->assertSame(60, $candidatos[0]['oferta']['id_producto']);
-        $this->assertSame('media', $candidatos[0]['oferta']['urgencia']);
-    }
-
-    public function testRecompraNoLeEscribeAQuienSeLeHabloHaceMuyPoco(): void
-    {
-        $idConv = $this->escenarioRecompra();
-        $this->seedMensaje($idConv, 'user', 'gracias', '-2 days');
-
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-    }
-
-    public function testRecompraNoSeRepiteEnLosSiguientes45Dias(): void
-    {
-        $this->escenarioRecompra();
-        $this->pdo->exec("INSERT INTO alex_oferta_eventos (tipo, id_cliente, id_conversacion, id_producto, creado_en) VALUES ('recompra_enviada', 10, 1, 60, '" . date('Y-m-d H:i:s', strtotime('-10 days')) . "')");
-
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-    }
-
-    public function testRecompraExcluyeFueraDeCoberturaYForaneos(): void
-    {
-        $idConv = $this->escenarioRecompra();
-        $this->pdo->exec("INSERT INTO whatsapp_etiquetas (nombre) VALUES ('" . AI_TAG_FUERA_COBERTURA . "')");
-        $this->pdo->exec("INSERT INTO whatsapp_conversacion_etiquetas (id_conversacion, id_etiqueta) VALUES ({$idConv}, " . (int) $this->pdo->lastInsertId() . ')');
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-
-        $this->pdo->exec('DELETE FROM whatsapp_conversacion_etiquetas');
-        $this->pdo->exec("UPDATE whatsapp_conversaciones SET wa_id = '5215512345678' WHERE id_conversacion = {$idConv}"); // lada 55
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-    }
-
-    public function testRecompraIgnoraProductosSinDosisCapturada(): void
-    {
-        $this->escenarioRecompra();
-        $this->pdo->exec('UPDATE productos SET porcion_capsulas = NULL WHERE id_producto = 60');
-
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-    }
-
-    public function testRecompraIgnoraOfertasSinMotivoDeCaducidad(): void
-    {
-        $this->escenarioRecompra();
-        $this->pdo->exec("UPDATE lotes_inventario SET fecha_caducidad = '" . $this->enDias(600) . "' WHERE id_producto = 60"); // ya sin riesgo
-
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-    }
-
-    public function testRecompraIgnoraAQuienNoHaCompradoEsteProducto(): void
-    {
-        $this->escenarioRecompra();
-        $this->pdo->exec('DELETE FROM detalle_pedidos');
-
-        $this->assertSame([], aiFindRecompraCandidatos($this->pdo));
-    }
-
-    /* ------------------------------------------------------------------ */
-
-    /**
-     * Producto 60 en oferta con un lote urgente; el cliente 10 lo compro hace 35 dias (1 envase de
-     * 30 dias: se le acabo hace 5) y su conversacion lleva 20 dias en silencio. Regresa el id de
-     * la conversacion.
-     */
-    private function escenarioRecompra(): int
-    {
-        $this->seedProducto(60, 'Omega 3', 500.0, 200.0, 350.0, 60, 2);
-        $this->ponerEnCategoria(60);
-        $this->seedInventario(60, 10);
-        $this->seedLote(60, 'A', $this->enDias(100), 5);
-
-        $this->pdo->exec("INSERT INTO pedidos (id_pedido, id_cliente, estado, fecha_creacion) VALUES (1, 10, 'pagado', '" . date('Y-m-d H:i:s', strtotime('-35 days')) . "')");
-        $this->pdo->exec("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, estado_entrega) VALUES (1, 60, 1, 'entregado')");
-
-        $idConv = $this->seedConversacion('5213312345678', 10);
-        $this->seedMensaje($idConv, 'user', 'hola quiero omega', '-36 days');
-        $this->seedMensaje($idConv, 'assistant', 'claro', '-20 days', null, 1);
-
-        return $idConv;
     }
 
     private function seedConversacion(string $waId, ?int $idCliente = null): int

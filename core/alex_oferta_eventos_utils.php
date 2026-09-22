@@ -3,9 +3,8 @@ declare(strict_types=1);
 
 /**
  * Bitacora de lo que Alex hace con las ofertas (tabla alex_oferta_eventos) y las metricas que
- * salen de ella. Sirve para dos cosas: saber si la estrategia de productos por caducar
- * realmente vende (panel "Alex y las ofertas" en views/caducidades.php) y topar el ritmo de las
- * recompras proactivas (alexOfertaContarHoy()).
+ * salen de ella: saber si la estrategia de productos por caducar realmente vende (panel
+ * "Alex y las ofertas" en views/caducidades.php).
  *
  * Todo es "mejor esfuerzo": registrar un evento NUNCA debe tumbar una conversacion ni un
  * pedido, y si la tabla aun no existe (deploy en curso) no hace nada.
@@ -15,10 +14,9 @@ require_once __DIR__ . '/lote_caducidad_utils.php';
 
 const ALEX_OFERTA_EVENTO_CONSULTADA = 'consultada';
 const ALEX_OFERTA_EVENTO_VENDIDA = 'vendida';
-const ALEX_OFERTA_EVENTO_RECOMPRA = 'recompra_enviada';
 const ALEX_OFERTA_EVENTO_SEGUIMIENTO = 'seguimiento_con_oferta';
 
-/** Dias tras una recompra en los que una compra del mismo producto cuenta como conversion. */
+/** Dias tras un seguimiento con oferta en los que una compra cuenta como conversion. */
 const ALEX_OFERTA_VENTANA_CONVERSION_DIAS = 14;
 
 /**
@@ -96,7 +94,6 @@ function alexOfertaContarHoy(PDO $pdo, string $tipo): int
  *   consultas:array{conversaciones:int,productos:int},
  *   ventas:array{pedidos:int,unidades:int,ingreso:float,ahorro_clientes:float,unidades_paquete:int,unidades_urgentes:int},
  *   conversion_pct:?float,
- *   recompra:array{enviadas:int,convertidas:int},
  *   seguimiento:array{enviados:int,convertidos:int},
  *   top_productos:array<int,array{id_producto:int,nombre:string,unidades:int,ingreso:float}>
  * }
@@ -109,7 +106,6 @@ function alexOfertaMetricas(PDO $pdo, int $dias = 30): array
         'consultas' => ['conversaciones' => 0, 'productos' => 0],
         'ventas' => ['pedidos' => 0, 'unidades' => 0, 'ingreso' => 0.0, 'ahorro_clientes' => 0.0, 'unidades_paquete' => 0, 'unidades_urgentes' => 0],
         'conversion_pct' => null,
-        'recompra' => ['enviadas' => 0, 'convertidas' => 0],
         'seguimiento' => ['enviados' => 0, 'convertidos' => 0],
         'top_productos' => [],
     ];
@@ -144,7 +140,6 @@ function alexOfertaMetricas(PDO $pdo, int $dias = 30): array
     $ventas = [];
     $pedidos = [];
     $top = [];
-    $recompras = [];
     $seguimientos = [];
 
     foreach ($eventos as $ev) {
@@ -177,8 +172,6 @@ function alexOfertaMetricas(PDO $pdo, int $dias = 30): array
             $top[$idProducto] ??= ['id_producto' => $idProducto, 'nombre' => (string) ($ev['producto_nombre'] ?? ('#' . $idProducto)), 'unidades' => 0, 'ingreso' => 0.0];
             $top[$idProducto]['unidades'] += $cant;
             $top[$idProducto]['ingreso'] += $cant * $unit;
-        } elseif ($tipo === ALEX_OFERTA_EVENTO_RECOMPRA) {
-            $recompras[] = ['cliente' => (int) ($ev['id_cliente'] ?? 0), 'producto' => $idProducto, 'ts' => $ts];
         } elseif ($tipo === ALEX_OFERTA_EVENTO_SEGUIMIENTO) {
             $seguimientos[] = ['conv' => (int) ($ev['id_conversacion'] ?? 0), 'producto' => $idProducto, 'ts' => $ts];
         }
@@ -200,17 +193,6 @@ function alexOfertaMetricas(PDO $pdo, int $dias = 30): array
     }
 
     $ventana = ALEX_OFERTA_VENTANA_CONVERSION_DIAS * 86400;
-    $m['recompra']['enviadas'] = count($recompras);
-    foreach ($recompras as $r) {
-        foreach ($ventas as $v) {
-            if ($v['cliente'] === $r['cliente'] && $v['cliente'] > 0 && $v['producto'] === $r['producto']
-                && $v['ts'] >= $r['ts'] && $v['ts'] <= $r['ts'] + $ventana) {
-                $m['recompra']['convertidas']++;
-                break;
-            }
-        }
-    }
-
     $m['seguimiento']['enviados'] = count($seguimientos);
     foreach ($seguimientos as $s) {
         foreach ($ventas as $v) {

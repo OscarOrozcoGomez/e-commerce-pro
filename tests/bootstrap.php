@@ -38,7 +38,6 @@ require_once __DIR__ . '/../core/cliente_scope_utils.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 require_once __DIR__ . '/../core/oferta_caducidad_utils.php';
 require_once __DIR__ . '/../core/alex_oferta_eventos_utils.php';
-require_once __DIR__ . '/../core/alex_recompra_utils.php';
 require_once __DIR__ . '/../core/lote_ocr_utils.php';
 require_once __DIR__ . '/../core/caducidad_notificaciones_utils.php';
 require_once __DIR__ . '/../core/stock_prediction.php';
