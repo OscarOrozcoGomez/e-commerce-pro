@@ -2916,7 +2916,7 @@ function aiCorregirBusquedaPorTipeo(PDO $pdo, string $busqueda): ?string
     return $huboCorreccion ? implode(' ', $palabrasCorregidas) : null;
 }
 
-function aiToolConsultarInventario(PDO $pdo, array $args, array $context = []): array
+function aiToolConsultarInventario(PDO $pdo, array $args): array
 {
     $busqueda = trim((string)($args['busqueda_texto'] ?? ''));
     if ($busqueda === '') {
@@ -3672,11 +3672,32 @@ function aiToolQuitarEtiquetaCliente(PDO $pdo, array $args, array $context): arr
     return ['ok' => true, 'message' => "Etiqueta \"{$nombre}\" quitada."];
 }
 
+/**
+ * Bitacora (alex_oferta_eventos): a esta conversacion se le mostro un producto en oferta via
+ * consultar_inventario. Vive aqui y no dentro de aiToolConsultarInventario() para no tocar esa funcion.
+ */
+function aiRegistrarOfertasVistasEnInventario(PDO $pdo, array $resultado, array $context): void
+{
+    foreach (($resultado['productos'] ?? []) as $producto) {
+        if (!empty($producto['en_oferta'])) {
+            alexOfertaRegistrarEvento($pdo, ALEX_OFERTA_EVENTO_CONSULTADA, (int)$producto['id_producto'], [
+                'id_conversacion' => $context['id_conversacion'] ?? null,
+                'id_cliente' => $context['id_cliente'] ?? null,
+                'precio_unitario' => $producto['precio'],
+                'precio_normal' => $producto['precio_normal'] ?? null,
+            ]);
+        }
+    }
+}
+
 function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): array
 {
     switch ($name) {
         case 'consultar_inventario':
-            return aiToolConsultarInventario($pdo, $args, $context);
+            $resultado = aiToolConsultarInventario($pdo, $args);
+            aiRegistrarOfertasVistasEnInventario($pdo, $resultado, $context);
+
+            return $resultado;
         case 'agendar_venta':
             return aiToolAgendarVenta($pdo, $args, $context);
         case 'transferir_a_humano':
