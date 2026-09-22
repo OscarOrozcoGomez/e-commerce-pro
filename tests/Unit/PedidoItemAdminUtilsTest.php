@@ -78,6 +78,38 @@ final class PedidoItemAdminUtilsTest extends TestCase
         $this->assertEqualsWithDelta(240.00, (float) $this->pdo->query('SELECT precio_unitario FROM detalle_pedidos WHERE id_pedido = 121')->fetchColumn(), 0.001);
     }
 
+    public function testPreciosSegurosIgnoraElPrecioMandadoPorElNavegador(): void
+    {
+        // Producto 10: venta 200, costo 80, sin oferta -> el precio real es 200, sin importar
+        // lo que mande el checkout (ej. un POST manipulado con precio 1.00).
+        $items = ofertaPreciosSeguros($this->pdo, [
+            ['id_producto' => 10, 'quantity' => 2, 'precio' => 1.00],
+        ]);
+
+        $this->assertEqualsWithDelta(200.00, (float) $items[0]['precio'], 0.001);
+    }
+
+    public function testPreciosSegurosUsaElPrecioDeOfertaVigente(): void
+    {
+        $this->pdo->exec("INSERT INTO categorias (nombre) VALUES ('Oferta')");
+        $this->pdo->exec('INSERT INTO producto_categorias VALUES (10, ' . (int) $this->pdo->lastInsertId() . ')');
+
+        $items = ofertaPreciosSeguros($this->pdo, [
+            ['id_producto' => 10, 'quantity' => 1, 'precio' => 999.00],
+        ]);
+
+        $this->assertEqualsWithDelta(130.00, (float) $items[0]['precio'], 0.001); // costo 80 + 50
+    }
+
+    public function testPreciosSegurosDejaEnCeroUnProductoInexistente(): void
+    {
+        $items = ofertaPreciosSeguros($this->pdo, [
+            ['id_producto' => 999999, 'quantity' => 1, 'precio' => 50.00],
+        ]);
+
+        $this->assertSame(0.0, $items[0]['precio']);
+    }
+
     public function testAllowsAddingProductToAlreadyDeliveredOrder(): void
     {
         // Este es el caso clave del pedido del usuario: "reabrir" un pedido ya entregado

@@ -217,6 +217,42 @@ function ofertaAplicarPrecioEfectivoALista(PDO $pdo, array $productos): array
 }
 
 /**
+ * Recalcula, con el precio real de la BD, el "precio" de cada item de un pedido publico
+ * (checkout web: un POST anonimo puede mandar cualquier valor). Nunca confia en el precio
+ * que venga en $items; lo pisa siempre con el de venta o el de oferta vigente. Un item de un
+ * producto que ya no existe queda en precio 0 (dbCreatePublicOrder lo rechaza como invalido).
+ *
+ * @param array<int,array<string,mixed>> $items cada uno con id_producto y quantity
+ * @return array<int,array<string,mixed>> los mismos items, con "precio" sobrescrito
+ */
+function ofertaPreciosSeguros(PDO $pdo, array $items): array
+{
+    $ids = array_values(array_unique(array_filter(array_map(
+        static fn($i) => (int)($i['id_producto'] ?? 0),
+        $items
+    ), static fn(int $id): bool => $id > 0)));
+
+    $precios = [];
+    if ($ids !== []) {
+        $stmt = $pdo->prepare(
+            'SELECT id_producto, precio_venta, precio_costo, precio_oferta FROM productos WHERE id_producto IN ('
+            . implode(',', array_fill(0, count($ids), '?')) . ')'
+        );
+        $stmt->execute($ids);
+        foreach (ofertaAplicarPrecioEfectivoALista($pdo, $stmt->fetchAll(PDO::FETCH_ASSOC)) as $row) {
+            $precios[(int)$row['id_producto']] = (float)$row['precio_venta'];
+        }
+    }
+
+    foreach ($items as &$item) {
+        $item['precio'] = $precios[(int)($item['id_producto'] ?? 0)] ?? 0.0;
+    }
+    unset($item);
+
+    return $items;
+}
+
+/**
  * Devuelve el conjunto de ids (de la lista dada) que estan en la categoria de ofertas.
  * Una sola consulta para no hacer N checks al pintar variantes / resultados.
  *
