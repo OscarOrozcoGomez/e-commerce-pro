@@ -9,12 +9,6 @@ header('Content-Type: application/json');
 
 // Refresca permisos por si se revocaron/concedieron desde el panel hace poco.
 refreshSessionPermissions();
-// Permiso 'gestionar_asistente_ia' abre este endpoint; el admin entra siempre (short-circuit).
-if (!isAuthenticated() || (!hasPermission('gestionar_asistente_ia') && !isAdmin())) {
-    http_response_code(403);
-    echo json_encode(['success' => false, 'message' => 'No autorizado.']);
-    exit;
-}
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     http_response_code(405);
@@ -27,13 +21,28 @@ if (!is_array($data)) {
     $data = $_POST;
 }
 
+$action = (string)($data['action'] ?? '');
+
+// 'create_learning_rule' tambien lo puede hacer quien solo tiene 'dar_feedback_asistente_ia'
+// (p. ej. quien lee conversaciones de WhatsApp pero no administra todo el asistente); el
+// resto de las acciones de este endpoint siguen exigiendo 'gestionar_asistente_ia'. El admin
+// entra siempre (short-circuit).
+$autorizado = $action === 'create_learning_rule'
+    ? (hasPermission('gestionar_asistente_ia') || hasPermission('dar_feedback_asistente_ia') || isAdmin())
+    : (hasPermission('gestionar_asistente_ia') || isAdmin());
+
+if (!isAuthenticated() || !$autorizado) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'No autorizado.']);
+    exit;
+}
+
 if (!validateCsrfToken((string)($data['csrf_token'] ?? ''))) {
     http_response_code(419);
     echo json_encode(['success' => false, 'message' => 'Token de seguridad invalido, recarga la pagina e intenta de nuevo.']);
     exit;
 }
 
-$action = (string)($data['action'] ?? '');
 $pdo = getPDO();
 
 // Todas las acciones quedan detras de este try/catch: un fallo inesperado (ej. un valor

@@ -2236,7 +2236,9 @@ include __DIR__ . '/includes/header.php';
         aplicarModoEntrega(context);
 
         if (tabsInstance) tabsInstance.select(`venta-${id}`);
-        setTimeout(() => buscador.focus(), 200);
+        // Foco directo (sin setTimeout) para que el navegador aun lo cuente como parte
+        // del gesto del usuario que abrio la pestaña y abra el teclado solo en moviles.
+        clienteNombreInput?.focus();
         scheduleSalesDraftSave();
     }
 
