@@ -739,6 +739,16 @@ function canBulkAssignCategories(): bool
 }
 
 /**
+ * ¿Puede convertir una respuesta de Alex en regla de aprendizaje? Mismo permiso que ya
+ * exige api/ai_assistant_admin.php para la accion create_learning_rule -- si aqui dijera
+ * que si pero el endpoint lo rechaza, el boton se veria roto para ese usuario.
+ */
+function canGiveAlexFeedback(): bool
+{
+    return hasPermission('gestionar_asistente_ia') || isAdmin();
+}
+
+/**
  * Obtiene el ID del almacén del usuario actual.
  *
  * @return int|null
