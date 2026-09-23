@@ -46,7 +46,7 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             return ['success' => false, 'message' => 'El pedido no tiene un almacen valido.'];
         }
 
-        $stmtProducto = $pdo->prepare("SELECT nombre, precio_venta, precio_costo, estado FROM productos WHERE id_producto = :id_producto{$lockClause}");
+        $stmtProducto = $pdo->prepare("SELECT nombre, precio_venta, precio_costo, precio_oferta, estado FROM productos WHERE id_producto = :id_producto{$lockClause}");
         $stmtProducto->execute([':id_producto' => $idProducto]);
         $producto = $stmtProducto->fetch(PDO::FETCH_ASSOC) ?: null;
 
@@ -59,27 +59,16 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             return ['success' => false, 'message' => 'Este producto no esta activo para venta.'];
         }
 
-        $precioLista = round((float)($producto['precio_venta'] ?? 0), 2);
-        if ($precioLista <= 0) {
+        // Un producto en Ofertas se agrega al precio de oferta, no al normal (ver core/oferta_pricing.php).
+        $precioNormal = round((float)($producto['precio_venta'] ?? 0), 2);
+        $precioUnitario = $precioNormal > 0
+            ? round(ofertaPrecioEfectivo($precioNormal, (float)($producto['precio_costo'] ?? 0), $producto['precio_oferta'] ?? null, ofertaProductoEnOferta($pdo, $idProducto)), 2)
+            : $precioNormal;
+        if ($precioUnitario <= 0) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Este producto no tiene un precio de venta valido.'];
         }
         $costoUnitario = (float)($producto['precio_costo'] ?? 0);
-
-        // Si el producto esta en la categoria de Ofertas se cobra su precio de oferta (igual que
-        // catalogo/POS/Alex); precio_original guarda el de lista para que la tarjeta de entregas
-        // lo muestre tachado.
-        $precioUnitario = $precioLista;
-        if (ofertaProductoEnOferta($pdo, $idProducto)) {
-            try {
-                $stmtOf = $pdo->prepare('SELECT precio_oferta FROM productos WHERE id_producto = ?');
-                $stmtOf->execute([$idProducto]);
-                $precioOferta = $stmtOf->fetchColumn();
-            } catch (PDOException $e) {
-                $precioOferta = null; // esquema sin precio_oferta: costo + $50
-            }
-            $precioUnitario = ofertaPrecioEfectivo($precioLista, $costoUnitario, $precioOferta === false ? null : $precioOferta, true);
-        }
         $subtotalLinea = round($precioUnitario * $cantidad, 2);
 
         // Descuenta stock solo si hay suficiente disponible, igual que en una venta normal.
@@ -98,7 +87,7 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             ':pedido' => $idPedido,
             ':producto' => $idProducto,
             ':cantidad' => $cantidad,
-            ':precio' => $precioLista,
+            ':precio' => $precioUnitario,
             ':precio2' => $precioUnitario,
             ':costo' => $costoUnitario,
             ':subtotal' => $subtotalLinea,

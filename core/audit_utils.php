@@ -424,6 +424,8 @@ function auditMapaEtiquetasAccion(): array
         'PRODUCTO_EDITADO' => 'Producto editado',
         'PRODUCTO_ELIMINADO' => 'Producto desactivado',
         'PRODUCTO_EN_OFERTA' => 'Producto puesto en oferta (1 clic)',
+        'OFERTA_PRECIO_AUTOMATICO' => 'Precio de oferta bajado automáticamente (se acerca la caducidad)',
+        'OFERTA_RETIRADA_AUTOMATICA' => 'Producto retirado de Ofertas automáticamente (sin lotes en riesgo)',
         'PRODUCTO_STOCK_AJUSTADO' => 'Stock ajustado a mano',
         'PRODUCTO_IMAGENES_CAMBIADAS' => 'Imágenes de producto cambiadas',
         'PRODUCTO_LIBERADO' => 'Producto liberado del pedido',

@@ -1049,6 +1049,13 @@ include __DIR__ . '/includes/header.php';
                                         <input type="number" inputmode="decimal" min="0" step="0.50" id="cambio-paga-<?php echo (int)$ent['id_pedido']; ?>" class="cambio-paga" placeholder="0.00" autocomplete="off">
                                     </div>
                                     <div class="cambio-result" aria-live="polite"></div>
+                                    <?php $costoEnvioCambio = (float)($ent['costo_envio'] ?? 0); ?>
+                                    <?php if ($costoEnvioCambio > 0): ?>
+                                        <label style="display:block; margin-top:10px; font-size:0.8rem; color:#7a4e00;">
+                                            <input type="checkbox" class="cambio-quitar-envio" data-costo-envio="<?php echo esc(number_format($costoEnvioCambio, 2, '.', '')); ?>">
+                                            <span>No cobrar el envío de $<?php echo number_format($costoEnvioCambio, 2); ?> (cliente cerca del periférico)</span>
+                                        </label>
+                                    <?php endif; ?>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -1362,7 +1369,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.cambio-box').forEach((box) => {
         const input = box.querySelector('.cambio-paga');
         const result = box.querySelector('.cambio-result');
-        const total = parseFloat(box.getAttribute('data-total')) || 0;
+        const totalConEnvio = parseFloat(box.getAttribute('data-total')) || 0;
+        let total = totalConEnvio;
         if (!input || !result) return;
 
         const parseMonto = (txt) => {
@@ -1400,6 +1408,38 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         input.addEventListener('input', render);
+
+        // "No cobrar el envio": recalcula el total y se mantiene en sincronia con el checkbox
+        // del formulario de entrega de la misma tarjeta (el que de verdad quita el cargo en el
+        // servidor); ese checkbox tambien actualiza el "Cobrar al entregar".
+        const chkEnvio = box.querySelector('.cambio-quitar-envio');
+        if (chkEnvio) {
+            let card = box.parentElement;
+            while (card && !card.querySelector('.quitar-cargo-periferico')) card = card.parentElement;
+            const chkForm = card ? card.querySelector('.quitar-cargo-periferico') : null;
+            const totalEl = box.querySelector('.cambio-box-total');
+            const costoEnvio = parseFloat(chkEnvio.getAttribute('data-costo-envio')) || 0;
+            const aplicar = () => {
+                total = chkEnvio.checked ? Math.max(0, totalConEnvio - costoEnvio) : totalConEnvio;
+                if (totalEl) totalEl.textContent = 'Total $' + money(total);
+                render();
+            };
+            chkEnvio.addEventListener('change', () => {
+                if (chkForm && chkForm.checked !== chkEnvio.checked) {
+                    chkForm.checked = chkEnvio.checked;
+                    chkForm.dispatchEvent(new Event('change'));
+                }
+                aplicar();
+            });
+            if (chkForm) {
+                chkForm.addEventListener('change', () => {
+                    if (chkEnvio.checked !== chkForm.checked) {
+                        chkEnvio.checked = chkForm.checked;
+                        aplicar();
+                    }
+                });
+            }
+        }
     });
 
     document.querySelectorAll('form.cancel-entrega-form[data-cancel-form="1"]').forEach((formEl) => {
