@@ -1123,10 +1123,12 @@ function aiMarcarMensajeNoEnviado(PDO $pdo, int $idMensaje): void
 const AI_FOLLOWUP_INACTIVITY_HOURS = 24;
 const AI_FOLLOWUP_CLOSE_HOURS = 48;
 
-// Horario de atencion de Alex: fuera de [HORA_INICIO, HORA_FIN) el mensaje del cliente se
-// guarda (sigue visible/sin marcar como leido en WhatsApp) pero Alex no contesta en vivo --
-// un bot que responde a las 3am, siempre, es en si mismo una senal de automatizacion. Se
-// retoma con una respuesta real cuando abre el horario, ver AI_PROACTIVO_INTERVALO_MIN_MINUTOS.
+// Horario de atencion EN VIVO de Alex: fuera de [HORA_INICIO, HORA_FIN) el mensaje del cliente se
+// guarda (sigue visible/sin marcar como leido en WhatsApp) pero Alex no contesta en el momento
+// -- un bot que responde a las 3am, al instante y siempre igual, es en si mismo una senal de
+// automatizacion. Desde 2026-09-23 tampoco lo deja sin respuesta hasta las 7: lo contesta la
+// cola del cron (catch-up) con ritmo humano y mas lento de noche, ver AI_CATCHUP_RITMO. El
+// seguimiento de 24h (contacto NO solicitado) si sigue limitado a este horario.
 const AI_HORARIO_ATENCION_HORA_INICIO = 7;  // 7:00 am
 const AI_HORARIO_ATENCION_HORA_FIN = 22;    // 10:00 pm (exclusivo)
 
@@ -1222,51 +1224,86 @@ function aiRegistrarEnvioProactivo(PDO $pdo): void
     $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
 }
 
-// Cadencia del catch-up de horario -- contestar, con retraso, algo que el cliente YA
-// escribio mientras Alex estaba callado por politica (10pm-7am). No es contacto no
-// solicitado, asi que no necesita el tope de 1/hora del seguimiento de 24h, pero sigue
-// necesitando ALGUN espaciado -- nunca instantaneo -- para no contestar de golpe a todo el
-// backlog acumulado de la noche apenas abre el horario (eso SI seria un patron de rafaga,
-// aunque cada mensaje sea a un cliente distinto y con texto distinto). Decision del negocio
-// (2026-09-18): ~5 minutos entre cada catch-up es un ritmo creible de alguien checando la
-// bandeja de entrada en la manana, muy lejos del patron real del incidente de 2026-09-13
-// (~24 mensajes identicos en el mismo segundo).
-const AI_CATCHUP_INTERVALO_MIN_MINUTOS = 5;
+// Ritmo del catch-up -- contestar, con retraso, algo que el cliente YA escribio y que Alex no
+// contesto en vivo (de noche, o un mensaje que quedo sin contestar). No es contacto no
+// solicitado, pero sigue necesitando espaciado -- nunca instantaneo ni siempre igual -- para no
+// contestar de golpe a todo el backlog ni parecer un bot 24/7 con la misma latencia (eso SI seria
+// un patron de rafaga/automatizacion, aunque cada mensaje sea a un cliente distinto y con texto
+// distinto). Decision del negocio (2026-09-23): Alex tambien contesta de noche, pero mas lento.
+//
+// Por franja: 'edad' = minutos que debe llevar esperando el mensaje del cliente antes de
+// contestarlo (como alguien que tarda en ver el celular), 'espera' = minutos entre una respuesta
+// del catch-up y la siguiente. Cada valor sale de un rango, NUNCA fijo (ver aiValorEnRango()).
+// Maximo real: de dia ~1 cada 4-8 min, de noche 1 cada 6-12, de madrugada 1 cada 12-25, y el cron
+// nunca manda mas de un mensaje por corrida.
+const AI_CATCHUP_RITMO = [
+    'dia'       => ['edad' => [0, 0],  'espera' => [4, 8]],    // 7:00-22:00
+    'noche'     => ['edad' => [3, 8],  'espera' => [6, 12]],   // 22:00-1:00 y 5:00-7:00
+    'madrugada' => ['edad' => [8, 20], 'espera' => [12, 25]],  // 1:00-5:00
+];
 
-/**
- * True si Alex puede contestar un catch-up de horario AHORA MISMO (ver
- * aiFindConversationsPendingRespuesta()/aiRetomarConversacionPendiente()). Hay que estar en
- * horario de atencion Y que hayan pasado al menos AI_CATCHUP_INTERVALO_MIN_MINUTOS desde el
- * ultimo catch-up real -- timestamp propio (ultimo_envio_catchup_en), independiente del
- * ultimo_envio_proactivo_en que usa el seguimiento de 24h (aiPuedeEnviarProactivoAhora()).
- * Igual que ese, se basa en un timestamp persistido en ai_asistente_config, no en el reloj
- * del cron, para que la cadencia se cumpla sin importar cada cuanto dispare el cron.
- */
-function aiPuedeResponderCatchupAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
+/** Franja del catch-up ('dia', 'noche' o 'madrugada') para la hora dada. */
+function aiFranjaCatchup(?DateTimeImmutable $ahora = null): string
 {
-    if (!aiEstaEnHorarioAtencion($ahora)) {
-        return false;
+    if (aiEstaEnHorarioAtencion($ahora)) {
+        return 'dia';
     }
+    $hora = (int)($ahora ?? new DateTimeImmutable('now'))->format('G');
 
-    $config = aiGetConfig($pdo);
-
-    return aiPasoElIntervaloDesdeUltimoEnvio(
-        $config['ultimo_envio_catchup_en'] ?? null,
-        AI_CATCHUP_INTERVALO_MIN_MINUTOS,
-        $ahora
-    );
+    return ($hora >= 1 && $hora < 5) ? 'madrugada' : 'noche';
 }
 
 /**
- * Marca que Alex acaba de contestar un catch-up de horario, para que
- * aiPuedeResponderCatchupAhora() bloquee el siguiente hasta que pasen los 5 minutos. No se
- * usa para el seguimiento de 24h (ver aiRegistrarEnvioProactivo()) -- son cupos independientes.
+ * Numero entre $min y $max (incluidos) que se ve aleatorio pero es una funcion de la semilla:
+ * cada mensaje/envio da uno distinto (y por lo tanto cada dia), pero para el mismo la respuesta
+ * es siempre la misma -- hace falta porque el cron lo consulta una y otra vez cada 5 min y, si
+ * se volviera a sortear en cada consulta, el hueco efectivo tenderia siempre al minimo.
+ */
+function aiValorEnRango(string $semilla, int $min, int $max): int
+{
+    return $min + (crc32($semilla) % ($max - $min + 1));
+}
+
+/** Minutos que hay que esperar despues del ultimo catch-up (segun la franja de $ahora). */
+function aiCatchupEsperaMinutos(?string $ultimoEnvio, ?DateTimeImmutable $ahora = null): int
+{
+    [$min, $max] = AI_CATCHUP_RITMO[aiFranjaCatchup($ahora)]['espera'];
+
+    return aiValorEnRango('espera|' . trim((string)$ultimoEnvio), $min, $max);
+}
+
+/** Minutos que debe llevar esperando el mensaje $idMensaje del cliente antes de contestarlo. */
+function aiCatchupEdadMinimaMinutos(int $idMensaje, ?DateTimeImmutable $ahora = null): int
+{
+    [$min, $max] = AI_CATCHUP_RITMO[aiFranjaCatchup($ahora)]['edad'];
+
+    return aiValorEnRango('edad|' . $idMensaje, $min, $max);
+}
+
+/**
+ * True si Alex puede contestar un catch-up AHORA MISMO (ver aiSiguienteConversacionParaCatchup()):
+ * ya paso el hueco aleatorio de la franja actual desde el ultimo catch-up real -- timestamp propio
+ * (ultimo_envio_catchup_en), independiente del ultimo_envio_proactivo_en del seguimiento de 24h.
+ * Ya no exige estar en horario de atencion: de noche tambien contesta, pero con hueco mayor. Igual
+ * que el seguimiento, se basa en un timestamp persistido en ai_asistente_config, no en el reloj del
+ * cron, para que el ritmo se cumpla sin importar cada cuanto dispare el cron.
+ */
+function aiPuedeResponderCatchupAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
+{
+    $ultimo = aiGetConfig($pdo)['ultimo_envio_catchup_en'] ?? null;
+
+    return aiPasoElIntervaloDesdeUltimoEnvio($ultimo, aiCatchupEsperaMinutos($ultimo, $ahora), $ahora);
+}
+
+/**
+ * Marca que Alex acaba de contestar un catch-up, para que aiPuedeResponderCatchupAhora() bloquee
+ * el siguiente hasta que pase el hueco. No se usa para el seguimiento de 24h (ver
+ * aiRegistrarEnvioProactivo()) -- son cupos independientes.
  */
 function aiRegistrarEnvioCatchup(PDO $pdo): void
 {
     $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_catchup_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
 }
-
 /**
  * Ids de producto que ya se le mostraron a esta conversacion: resultados de consultar_inventario
  * y consultar_ofertas, que se guardan como mensajes 'tool' (ver aiRunAssistantTurn()). El mas
@@ -4342,9 +4379,9 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
 
     if (!aiEstaEnHorarioAtencion($ahora)) {
         // Fuera de horario: se guarda el mensaje (sigue visible y sin marcar como leido en
-        // WhatsApp -- eso no se toca) pero Alex no genera ni manda nada ahorita mismo. Se
-        // retoma con una respuesta real, pausada entre cada una, cuando abre el horario --
-        // ver aiFindConversationsPendingRespuesta()/aiRetomarConversacionPendiente(),
+        // WhatsApp -- eso no se toca) pero Alex no genera ni manda nada ahorita mismo. La cola del
+        // cron lo contesta con ritmo humano (mas lento de noche, ver AI_CATCHUP_RITMO) --
+        // ver aiSiguienteConversacionParaCatchup()/aiRetomarConversacionPendiente(),
         // corridas por whatsapp_followup_cron.php.
         aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
         return [];
@@ -4686,15 +4723,39 @@ function aiGenerarRespuestaParaConversacion(
 function aiFindConversationsPendingRespuesta(PDO $pdo): array
 {
     $stmt = $pdo->query(
-        "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente, ultimo.contenido AS ultimo_mensaje
+        "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente, ultimo.contenido AS ultimo_mensaje,
+                ultimo.id_mensaje AS ultimo_id, ultimo.creado_en AS ultimo_creado_en
          FROM whatsapp_conversaciones c
          JOIN whatsapp_mensajes ultimo ON ultimo.id_mensaje = (
              SELECT MAX(m2.id_mensaje) FROM whatsapp_mensajes m2 WHERE m2.id_conversacion = c.id_conversacion
          )
-         WHERE c.estado_bot = 'activo' AND ultimo.rol = 'user'"
+         WHERE c.estado_bot = 'activo' AND ultimo.rol = 'user'
+         ORDER BY ultimo.id_mensaje ASC" // primero el que lleva mas tiempo esperando
     );
 
     return $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+}
+
+/**
+ * La conversacion a la que le toca el catch-up: la que lleva mas tiempo esperando, pero solo si su
+ * ultimo mensaje ya tiene la "edad minima" de la franja (aiCatchupEdadMinimaMinutos(): de noche un
+ * mensaje no se contesta al instante). Null si nadie esta listo todavia.
+ *
+ * @return ?array{id_conversacion:int,wa_id:string,nombre_perfil:?string,id_cliente:?int,ultimo_mensaje:string}
+ */
+function aiSiguienteConversacionParaCatchup(PDO $pdo, ?DateTimeImmutable $ahora = null): ?array
+{
+    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
+
+    foreach (aiFindConversationsPendingRespuesta($pdo) as $fila) {
+        $tsMensaje = strtotime((string)($fila['ultimo_creado_en'] ?? ''));
+        $edadMin = aiCatchupEdadMinimaMinutos((int)($fila['ultimo_id'] ?? 0), $ahora);
+        if ($tsMensaje === false || ($tsAhora - $tsMensaje) >= $edadMin * 60) {
+            return $fila;
+        }
+    }
+
+    return null;
 }
 
 /**
