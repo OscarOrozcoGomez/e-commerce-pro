@@ -106,7 +106,7 @@ cumpliéndolas**:
 1. **El seguimiento de 24h de Alex (el cliente no escribió primero, es puro reenganche para
    rescatar una venta a medias) nunca pasa de UNO por hora**, sin importar qué tan grande sea
    el backlog ni cuántas veces corra el cron mientras tanto (`scripts/whatsapp_followup_cron.php`
-   corre cada 20 min, pero solo manda algo si `aiPuedeEnviarProactivoAhora()` lo permite — ver
+   corre cada 5 min, pero solo manda algo si `aiPuedeEnviarProactivoAhora()` lo permite — ver
    `AI_PROACTIVO_INTERVALO_MIN_MINUTOS` en `ai_assistant.php`). Un backlog grande se vacía a lo
    largo de varios días si hace falta, nunca de un jalón ni sostenido hora tras hora. El texto
    del seguimiento de 24h además se genera distinto cada vez (`aiGenerarTextoSeguimientoUnico()`,
@@ -114,19 +114,21 @@ cumpliéndolas**:
    destinatarios es en sí mismo un patrón detectable, aunque vaya espaciado. Cualquier futura
    funcionalidad de "mensaje a varios clientes" (campañas/broadcast) debe pasar por esta misma
    disciplina: cadencia de horas, no de segundos, y texto variado.
-   El **catch-up de horario** (contestar con retraso algo que el cliente YA escribió mientras
-   Alex estaba callado a propósito de 10pm a 7am, ver `aiEstaEnHorarioAtencion()`) es un cupo
-   **aparte** desde 2026-09-18 (`aiPuedeResponderCatchupAhora()`/`aiRegistrarEnvioCatchup()`,
-   timestamp propio `ultimo_envio_catchup_en`), con su propia cadencia de ~5 minutos
-   (`AI_CATCHUP_INTERVALO_MIN_MINUTOS`) — no comparte el tope de 1/hora del seguimiento: no es
-   contacto no solicitado, y antes de separarlos un cliente nuevo de madrugada podía esperar
-   horas su primerísima respuesta si el cupo compartido ya lo había gastado un seguimiento.
-   Sigue sin riesgo de ráfaga: nunca instantáneo para todo el backlog de la noche a la vez,
-   siempre espaciado ~5 min entre cada cliente distinto, muy por debajo del patrón real del
-   incidente de 2026-09-13 (~24 mensajes idénticos en el mismo segundo). Para que este ritmo
-   de 5 min se note de verdad hace falta que el cron mismo corra seguido (ver el crontab del
-   VPS, `*/N * * * * ... whatsapp_followup_cron.php`) — si corre cada 20 min, el catch-up en
-   la práctica sigue limitado a como mucho 1 cada 20 min aunque el código ya permita 1 cada 5.
+   El **catch-up** (contestar con retraso algo que el cliente YA escribió y que Alex no contestó en
+   vivo) es un cupo **aparte** (`aiPuedeResponderCatchupAhora()`/`aiRegistrarEnvioCatchup()`,
+   timestamp propio `ultimo_envio_catchup_en`), no comparte el tope de 1/hora del seguimiento: no es
+   contacto no solicitado. **Desde 2026-09-23 Alex también contesta de noche** (ya no calla de 10pm a
+   7am), pero **no en vivo**: `aiRunAssistantTurn()` sigue guardando el mensaje fuera de horario
+   (`aiEstaEnHorarioAtencion()`) y lo contesta la cola del cron con ritmo humano por franja
+   (`AI_CATCHUP_RITMO`): día (7-22) hueco de 4-8 min y sin espera previa; noche (22-1 y 5-7) el mensaje
+   debe llevar 3-8 min esperando y el hueco entre respuestas es de 6-12 min; madrugada (1-5) espera 8-20
+   min y hueco de 12-25 min. Cada valor sale de un rango **nunca fijo** (`aiValorEnRango()`, función de
+   la semilla: cambia en cada mensaje/envío y por lo tanto cada día, pero es estable entre las
+   consultas del cron) — una cadencia constante es en sí misma una huella de bot. Se atiende primero a
+   quien lleva más tiempo esperando (`aiSiguienteConversacionParaCatchup()`). El **seguimiento de 24h
+   (contacto no solicitado) sigue limitado al horario de 7 a 22**. El puente (`/opt/wa-bridge`) no tiene
+   lógica de horario ni se toca: el silencio y ahora el ritmo viven solo en PHP. El crontab del VPS corre
+   `whatsapp_followup_cron.php` cada 5 min (`*/5`), que es la granularidad real de esos huecos.
    "Cupos independientes" es solo la cadencia de cada uno **entre corridas** — `whatsapp_followup_cron.php`
    sigue mandando como máximo **un** mensaje real por corrida (si el catch-up tuvo algo que
    contestar, el seguimiento de 24h espera a la siguiente corrida), para que abrir el horario

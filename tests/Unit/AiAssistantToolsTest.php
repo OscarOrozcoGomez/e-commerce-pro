@@ -2008,10 +2008,9 @@ final class AiAssistantToolsTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // aiPuedeResponderCatchupAhora(): el catch-up de horario (contestar con retraso algo
-    // que el cliente YA escribio) tiene su propio cupo de ~5 min, sin el tope de 1/hora del
-    // seguimiento de 24h -- aclaracion del negocio 2026-09-18, ver el comentario junto a
-    // AI_CATCHUP_INTERVALO_MIN_MINUTOS en ai_assistant.php.
+    // aiPuedeResponderCatchupAhora(): el catch-up (contestar con retraso algo que el cliente
+    // YA escribio) tiene su propio cupo con hueco aleatorio por franja (dia/noche/madrugada), sin
+    // el tope de 1/hora del seguimiento de 24h -- ver AI_CATCHUP_RITMO en ai_assistant.php.
     // ------------------------------------------------------------------
 
     public function testPuedeResponderCatchupAhoraEsTrueLaPrimeraVezEnHorario(): void
@@ -2021,12 +2020,13 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00')));
     }
 
-    public function testPuedeResponderCatchupAhoraEsFalseFueraDeHorario(): void
+    public function testPuedeResponderCatchupAhoraTambienDeNocheLaPrimeraVez(): void
     {
+        // Desde 2026-09-23 Alex contesta de noche por la cola del catch-up (con mas hueco), ya no calla.
         $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
 
-        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 03:00:00')));
-        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 22:00:00')));
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 03:00:00')));
+        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 22:00:00')));
     }
 
     public function testPuedeResponderCatchupAhoraEsTrueApenasAbreElHorario(): void
@@ -2046,13 +2046,79 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00')));
     }
 
-    public function testPuedeResponderCatchupAhoraBloqueaAntesDeQuePasenCincoMinutos(): void
+    public function testPuedeResponderCatchupAhoraBloqueaHastaQuePaseElHuecoDeLaFranja(): void
     {
         $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
-        $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_catchup_en = '2026-09-14 12:00:00' WHERE id_config = 1");
 
-        $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:04:59')));
-        $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, new DateTimeImmutable('2026-09-14 12:05:00')));
+        foreach (['2026-09-14 12:00:00', '2026-09-14 23:00:00', '2026-09-14 03:00:00'] as $ultimo) {
+            $this->pdo->exec("UPDATE ai_asistente_config SET ultimo_envio_catchup_en = '{$ultimo}' WHERE id_config = 1");
+            $t0 = new DateTimeImmutable($ultimo);
+            $espera = aiCatchupEsperaMinutos($ultimo, $t0);
+
+            $this->assertFalse(aiPuedeResponderCatchupAhora($this->pdo, $t0->modify('+' . ($espera * 60 - 1) . ' seconds')), $ultimo);
+            $this->assertTrue(aiPuedeResponderCatchupAhora($this->pdo, $t0->modify('+' . ($espera * 60) . ' seconds')), $ultimo);
+        }
+    }
+
+    public function testElRitmoDelCatchupSeAlentaDeNocheYNuncaEsFijo(): void
+    {
+        $dia = new DateTimeImmutable('2026-09-14 12:00:00');
+        $noche = new DateTimeImmutable('2026-09-14 23:30:00');
+        $madrugada = new DateTimeImmutable('2026-09-14 03:00:00');
+        $this->assertSame(['dia', 'noche', 'noche', 'madrugada', 'madrugada', 'noche'], [
+            aiFranjaCatchup($dia), aiFranjaCatchup($noche), aiFranjaCatchup(new DateTimeImmutable('2026-09-14 00:59:00')),
+            aiFranjaCatchup(new DateTimeImmutable('2026-09-14 01:00:00')), aiFranjaCatchup($madrugada), aiFranjaCatchup(new DateTimeImmutable('2026-09-14 06:59:00')),
+        ]);
+
+        $esperas = ['dia' => [], 'noche' => [], 'madrugada' => []];
+        for ($i = 0; $i < 300; $i++) {
+            $ultimo = date('Y-m-d H:i:s', 1789000000 + $i * 977);
+            $esperas['dia'][] = aiCatchupEsperaMinutos($ultimo, $dia);
+            $esperas['noche'][] = aiCatchupEsperaMinutos($ultimo, $noche);
+            $esperas['madrugada'][] = aiCatchupEsperaMinutos($ultimo, $madrugada);
+        }
+        foreach ($esperas as $franja => $lista) {
+            [$min, $max] = AI_CATCHUP_RITMO[$franja]['espera'];
+            $this->assertGreaterThanOrEqual($min, min($lista), $franja);
+            $this->assertLessThanOrEqual($max, max($lista), $franja);
+            $this->assertGreaterThan(3, count(array_unique($lista)), "$franja: no debe ser un valor fijo");
+        }
+        // En promedio de noche es mas lento que de dia, y de madrugada mas que de noche.
+        $prom = static fn(array $l): float => array_sum($l) / count($l);
+        $this->assertGreaterThan($prom($esperas['dia']), $prom($esperas['noche']));
+        $this->assertGreaterThan($prom($esperas['noche']), $prom($esperas['madrugada']));
+        // Determinista: el cron lo consulta varias veces y no debe cambiar entre consultas.
+        $this->assertSame(aiCatchupEsperaMinutos('2026-09-14 23:30:00', $noche), aiCatchupEsperaMinutos('2026-09-14 23:30:00', $noche));
+    }
+
+    public function testUnMensajeNocturnoNoSeContestaAlInstanteSinoHastaTenerSuEdadMinima(): void
+    {
+        $this->pdo->exec('INSERT INTO ai_asistente_config (id_config, activo) VALUES (1, 1)');
+        $conv = aiGetOrCreateConversation($this->pdo, '5215500090001', null);
+        aiAppendMessage($this->pdo, (int) $conv['id_conversacion'], 'user', 'Hola, tienen colageno?');
+        $idMsg = (int) $this->pdo->query('SELECT MAX(id_mensaje) FROM whatsapp_mensajes')->fetchColumn();
+        $this->pdo->exec("UPDATE whatsapp_mensajes SET creado_en = '2026-09-14 02:00:00' WHERE id_mensaje = {$idMsg}");
+
+        $madrugada = new DateTimeImmutable('2026-09-14 02:00:00');
+        $edad = aiCatchupEdadMinimaMinutos($idMsg, $madrugada);
+        $this->assertGreaterThanOrEqual(AI_CATCHUP_RITMO['madrugada']['edad'][0], $edad);
+
+        $this->assertNull(aiSiguienteConversacionParaCatchup($this->pdo, $madrugada));
+        $this->assertNull(aiSiguienteConversacionParaCatchup($this->pdo, $madrugada->modify('+' . ($edad * 60 - 1) . ' seconds')));
+        $this->assertSame((int) $conv['id_conversacion'], (int) aiSiguienteConversacionParaCatchup($this->pdo, $madrugada->modify('+' . ($edad * 60) . ' seconds'))['id_conversacion']);
+    }
+
+    public function testDeDiaElCatchupNoExigeEdadMinimaYAtiendeAlMasAntiguoPrimero(): void
+    {
+        $viejo = aiGetOrCreateConversation($this->pdo, '5215500090002', null);
+        $nuevo = aiGetOrCreateConversation($this->pdo, '5215500090003', null);
+        aiAppendMessage($this->pdo, (int) $viejo['id_conversacion'], 'user', 'Primero yo');
+        aiAppendMessage($this->pdo, (int) $nuevo['id_conversacion'], 'user', 'Despues yo');
+        $this->pdo->exec("UPDATE whatsapp_mensajes SET creado_en = '2026-09-14 12:00:00'");
+
+        $siguiente = aiSiguienteConversacionParaCatchup($this->pdo, new DateTimeImmutable('2026-09-14 12:00:00'));
+
+        $this->assertSame((int) $viejo['id_conversacion'], (int) $siguiente['id_conversacion']);
     }
 
     public function testRegistrarEnvioCatchupActualizaSuPropioTimestampSinTocarElDeSeguimiento(): void

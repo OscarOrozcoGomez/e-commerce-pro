@@ -61,14 +61,14 @@ foreach (aiFindConversationsAwaitingFollowupReply($pdo) as $conversacion) {
     }
 }
 
-// 2) Catch-up de horario: contestar, con retraso, a alguien que YA escribio mientras Alex
-//    estaba callado por politica (fuera de horario, ver aiEstaEnHorarioAtencion()). No es
-//    contacto no solicitado -- por eso tiene su propio cupo (aiPuedeResponderCatchupAhora()),
-//    independiente del seguimiento de 24h (aclaracion del negocio, 2026-09-18: antes un
-//    cliente nuevo de madrugada podia esperar hasta 2 horas su primera respuesta si el cupo
-//    compartido ya lo habia usado un seguimiento). Cadencia propia de ~5 min entre cada uno
-//    (ver AI_CATCHUP_INTERVALO_MIN_MINUTOS) -- rapido para no dejar esperando al backlog de
-//    la noche, pero nunca instantaneo para todos a la vez.
+// 2) Catch-up: contestar, con retraso, a alguien que YA escribio y a quien Alex no contesto en
+//    vivo -- de noche (fuera del horario en vivo, ver aiEstaEnHorarioAtencion()) o por un mensaje
+//    que quedo sin contestar. Desde 2026-09-23 Alex tambien contesta de noche por esta cola, pero
+//    con ritmo humano y mas lento (ver AI_CATCHUP_RITMO): el mensaje debe llevar unos minutos
+//    esperando y entre una respuesta y la siguiente pasa un hueco aleatorio segun la franja
+//    (dia / noche / madrugada). No es contacto no solicitado -- por eso tiene su propio cupo
+//    (aiPuedeResponderCatchupAhora()), independiente del seguimiento de 24h. Se atiende primero
+//    a quien lleva mas tiempo esperando.
 //
 // "Independiente" es solo la CADENCIA de cada uno entre corridas -- dentro de UNA misma
 // corrida se sigue mandando como maximo un mensaje real, igual que antes de separar los
@@ -81,8 +81,8 @@ $retomadas = 0;
 $retomadasFallidas = 0;
 $huboCatchupEnEstaCorrida = false;
 
-if ($isDryRun ? aiEstaEnHorarioAtencion() : aiPuedeResponderCatchupAhora($pdo)) {
-    $pendienteCatchup = aiFindConversationsPendingRespuesta($pdo)[0] ?? null;
+if ($isDryRun || aiPuedeResponderCatchupAhora($pdo)) {
+    $pendienteCatchup = aiSiguienteConversacionParaCatchup($pdo);
 
     if ($pendienteCatchup !== null) {
         $huboCatchupEnEstaCorrida = true;
