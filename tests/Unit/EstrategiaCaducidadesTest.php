@@ -641,7 +641,7 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertStringNotContainsString('Es producto de fecha de caducidad corta', $dato);
     }
 
-    public function testLasHerramientasNoDelatanLaCaducidadSalvoQueSePida(): void
+    public function testLasHerramientasNuncaLeDanAlModeloDatosDeCaducidad(): void
     {
         $ofertas = ['ok' => true, 'ofertas' => [[
             'id_producto' => 1, 'precio_oferta' => 350.0, 'stock' => 4, 'urgencia' => 'alta',
@@ -650,14 +650,8 @@ final class EstrategiaCaducidadesTest extends TestCase
         ]]];
         $inventario = ['ok' => true, 'productos' => [['id_producto' => 1, 'precio' => 350.0, 'motivo_oferta' => 'Es producto de fecha de caducidad corta.', 'urgencia_oferta' => 'alta']]];
 
-        $sin = aiOcultarDatosDeCaducidad($ofertas, []);
-        $this->assertSame(['id_producto' => 1, 'precio_oferta' => 350.0, 'stock' => 4, 'urgencia' => 'alta'], $sin['ofertas'][0]);
-        $this->assertArrayNotHasKey('motivo_oferta', aiOcultarDatosDeCaducidad($inventario, ['incluir_motivo' => false])['productos'][0]);
-        $this->assertSame('alta', aiOcultarDatosDeCaducidad($inventario, [])['productos'][0]['urgencia_oferta']);
-
-        // Si el cliente pregunta por que esta en oferta o cuando caduca, el modelo lo pide y llega completo.
-        $this->assertSame($ofertas, aiOcultarDatosDeCaducidad($ofertas, ['incluir_motivo' => true]));
-        $this->assertSame($inventario, aiOcultarDatosDeCaducidad($inventario, ['incluir_motivo' => true]));
+        $this->assertSame(['id_producto' => 1, 'precio_oferta' => 350.0, 'stock' => 4, 'urgencia' => 'alta'], aiOcultarDatosDeCaducidad($ofertas)['ofertas'][0]);
+        $this->assertSame(['id_producto' => 1, 'precio' => 350.0, 'urgencia_oferta' => 'alta'], aiOcultarDatosDeCaducidad($inventario)['productos'][0]);
     }
 
     private function seedConversacion(string $waId, ?int $idCliente = null): int
