@@ -348,3 +348,71 @@ function entregaPreciosItem(int $cantidad, float $precioUnitario, float $precioO
         'con_descuento' => $precioUnitario > 0 && $listaTotal > $subtotalCobrado + 0.004,
     ];
 }
+
+/**
+ * Productos que siguen en pie en un pedido (excluye los marcados como rechazados/no entregados
+ * por el repartidor o por admin), con el nombre ya armado con su variante. Es lo que se le
+ * lista al cliente en el aviso de WhatsApp con la hora estimada (routeBuildWaMessage en
+ * views/entregas.php).
+ *
+ * @param array<int, array<string, mixed>> $detalles Filas de detalle_pedidos + nombre/nombre_variante.
+ * @return list<array{nombre: string, cantidad: int}>
+ */
+function entregaWaProductosVigentes(array $detalles): array
+{
+    $productos = [];
+    foreach ($detalles as $detalle) {
+        // Sin columna o en NULL = entregado (mismo criterio que la tarjeta de entregas.php).
+        if ((string)($detalle['estado_entrega'] ?? 'entregado') !== 'entregado') {
+            continue;
+        }
+        $nombre = trim((string)($detalle['nombre'] ?? ''));
+        $variante = trim((string)($detalle['nombre_variante'] ?? ''));
+        if ($variante !== '') {
+            $nombre .= ' - ' . $variante;
+        }
+        $productos[] = ['nombre' => $nombre, 'cantidad' => (int)($detalle['cantidad'] ?? 0)];
+    }
+    return $productos;
+}
+
+/**
+ * Datos ACTUALES de cada pedido listado en entregas.php para el aviso de WhatsApp de la ruta:
+ * la ruta guardada en localStorage trae los productos/total de cuando se genero, y desde
+ * entonces pudieron quitarse productos o el cargo de envio.
+ *
+ * @param array<int, array<string, mixed>> $entregas Filas de pedidos (id_pedido, total, costo_envio).
+ * @param array<int, array<int, array<string, mixed>>> $detallesPorPedido id_pedido => filas de detalle.
+ * @return array<int, array{productos: list<array{nombre: string, cantidad: int}>, total: float, costo_envio: float}>
+ */
+function entregaWaDatosVivos(array $entregas, array $detallesPorPedido): array
+{
+    $datos = [];
+    foreach ($entregas as $entrega) {
+        $idPedido = (int)($entrega['id_pedido'] ?? 0);
+        if ($idPedido <= 0) {
+            continue;
+        }
+        $datos[$idPedido] = [
+            'productos' => entregaWaProductosVigentes($detallesPorPedido[$idPedido] ?? []),
+            'total' => (float)($entrega['total'] ?? 0),
+            'costo_envio' => max(0.0, (float)($entrega['costo_envio'] ?? 0)),
+        ];
+    }
+    return $datos;
+}
+
+/**
+ * JSON de entregaWaDatosVivos() seguro para incrustar en un <script>: escapa < > & ' " (un
+ * nombre de producto con "</script>" no puede cerrar la etiqueta) y nunca devuelve algo que
+ * rompa la sintaxis del JS (UTF-8 invalido se sustituye; ante cualquier otro fallo, "{}" y el
+ * aviso cae a los datos guardados con la ruta).
+ */
+function entregaWaDatosVivosJson(array $datos): string
+{
+    $json = json_encode(
+        (object)$datos,
+        JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE
+    );
+    return $json === false ? '{}' : $json;
+}
