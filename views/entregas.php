@@ -1037,7 +1037,6 @@ include __DIR__ . '/includes/header.php';
 
                             <?php if ($isRepartidorView && ($ent['estado'] ?? '') !== 'entregado'): ?>
                                 <?php $cambioTotal = number_format((float)($ent['total'] ?? 0), 2, '.', ''); ?>
-                                <?php $costoEnvioCambio = (float)($ent["costo_envio"] ?? 0); ?>
                                 <div class="cambio-box" data-total="<?php echo esc($cambioTotal); ?>">
                                     <div class="cambio-box-head">
                                         <i class="material-icons tiny">payments</i>
@@ -1052,14 +1051,8 @@ include __DIR__ . '/includes/header.php';
                                     <div class="cambio-result" aria-live="polite"></div>
                                     <?php $costoEnvioCambio = (float)($ent['costo_envio'] ?? 0); ?>
                                     <?php if ($costoEnvioCambio > 0): ?>
-                                        <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer; font-size:0.8rem; color:#7a4e00;">
+                                        <label style="display:block; margin-top:10px; font-size:0.8rem; color:#7a4e00;">
                                             <input type="checkbox" class="cambio-quitar-envio" data-costo-envio="<?php echo esc(number_format($costoEnvioCambio, 2, '.', '')); ?>">
-                                            <span>No cobrar el envío de $<?php echo number_format($costoEnvioCambio, 2); ?> (cliente cerca del periférico)</span>
-                                        </label>
-                                    <?php endif; ?>
-                                    <?php if ($costoEnvioCambio > 0): ?>
-                                        <label class="cambio-quitar-envio-label" style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer; font-size:0.8rem; color:#7a4e00;">
-                                            <input type="checkbox" class="cambio-quitar-envio" data-costo-envio="<?php echo esc(number_format($costoEnvioCambio, 2, ".", "")); ?>" style="position:static; opacity:1; pointer-events:auto; width:auto; height:auto;">
                                             <span>No cobrar el envío de $<?php echo number_format($costoEnvioCambio, 2); ?> (cliente cerca del periférico)</span>
                                         </label>
                                     <?php endif; ?>
