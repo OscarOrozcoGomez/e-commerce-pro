@@ -257,3 +257,59 @@ function waConversacionMensajes(PDO $pdo, int $idConversacion): array
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+
+/**
+ * Normaliza el mes del filtro ('YYYY-MM'; invalido o vacio = el mes actual). Devuelve
+ * [mes, desde, hasta] con desde/hasta como 'Y-m-d H:i:s' del primer y ultimo instante del mes.
+ */
+function waSeguimientosRangoMes(?string $mes): array
+{
+    $mes = trim((string) $mes);
+    $d = preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $mes) ? DateTimeImmutable::createFromFormat('!Y-m', $mes) : false;
+    $d = $d ?: new DateTimeImmutable('first day of this month midnight');
+
+    return [$d->format('Y-m'), $d->format('Y-m-d 00:00:00'), $d->modify('last day of this month')->format('Y-m-d 23:59:59')];
+}
+
+/**
+ * Seguimientos de 24h que Alex mando en un mes, para revisarlos a mano a fin de mes (y ajustar la
+ * etiqueta en WhatsApp). Se reconstruyen del historial -- un mensaje de Alex ya enviado cuyo mensaje
+ * anterior tambien es de Alex y de hace >= 23 h -- y NO de whatsapp_conversaciones.seguimiento_enviado_en,
+ * porque esa marca se borra cuando el cliente contesta. "Respondio" = escribio dentro de las 48 h
+ * siguientes (AI_FOLLOWUP_CLOSE_HOURS); despues ya no es respuesta al seguimiento.
+ *
+ * @return array<int,array<string,mixed>> mas reciente primero
+ */
+function waSeguimientosDelMes(PDO $pdo, string $desde, string $hasta): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT a.id_conversacion, a.creado_en AS enviado_en, a.enviado_whatsapp AS salio, p.creado_en AS previo_en,
+                c.wa_id, c.telefono_resuelto, c.nombre_perfil, c.estado_bot, cl.nombre AS cliente_nombre_cifrado,
+                (SELECT MIN(u.creado_en) FROM whatsapp_mensajes u
+                 WHERE u.id_conversacion = a.id_conversacion AND u.rol = 'user' AND u.id_mensaje > a.id_mensaje) AS respondio_en
+         FROM whatsapp_mensajes a
+         JOIN whatsapp_mensajes p ON p.id_mensaje = (
+             SELECT MAX(x.id_mensaje) FROM whatsapp_mensajes x WHERE x.id_conversacion = a.id_conversacion AND x.id_mensaje < a.id_mensaje
+         )
+         JOIN whatsapp_conversaciones c ON c.id_conversacion = a.id_conversacion
+         LEFT JOIN clientes cl ON cl.id_cliente = c.id_cliente
+         WHERE a.rol = 'assistant' AND p.rol = 'assistant' AND p.enviado_whatsapp = 1
+           AND a.creado_en BETWEEN ? AND ?
+         ORDER BY a.creado_en DESC"
+    );
+    $stmt->execute([$desde, $hasta]);
+
+    $filas = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $f) {
+        $enviado = strtotime((string) $f['enviado_en']);
+        if ($enviado === false || $enviado - (int) strtotime((string) $f['previo_en']) < 23 * 3600) {
+            continue; // una respuesta normal de Alex, no un seguimiento
+        }
+        $resp = $f['respondio_en'] !== null ? strtotime((string) $f['respondio_en']) : false;
+        $f['salio'] = (int) $f['salio'] === 1;
+        $f['respondio'] = $resp !== false && ($resp - $enviado) <= 48 * 3600;
+        $filas[] = $f;
+    }
+
+    return $filas;
+}

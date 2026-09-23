@@ -283,6 +283,7 @@ include __DIR__ . '/includes/header.php';
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-top:20px;">
         <h4 style="margin:0;"><i class="material-icons left">chat</i> Contactos de WhatsApp por dia</h4>
         <div>
+            <a href="<?php echo esc(BASE_URL); ?>views/whatsapp_seguimientos.php" class="btn-flat waves-effect">Seguimientos del mes</a>
             <a href="<?php echo esc(BASE_URL); ?>views/ai_assistant_settings.php" class="btn-flat waves-effect">Asistente de IA</a>
             <a href="<?php echo esc(BASE_URL); ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Dashboard</a>
         </div>
