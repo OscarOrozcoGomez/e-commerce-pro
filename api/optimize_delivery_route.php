@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/google_secret_manager.php';
 require_once __DIR__ . '/../core/delivery_route_utils.php';
+require_once __DIR__ . '/../core/entrega_item_utils.php';
 
 header('Content-Type: application/json');
 
@@ -596,23 +597,20 @@ try {
     if (!empty($pedidoIds)) {
         $placeholdersProductos = implode(',', array_fill(0, count($pedidoIds), '?'));
         $stmtProductos = $pdo->prepare(
-            "SELECT dp.id_pedido, dp.cantidad, pr.nombre, pr.nombre_variante
+            "SELECT dp.id_pedido, dp.cantidad, dp.estado_entrega, pr.nombre, pr.nombre_variante
              FROM detalle_pedidos dp
              JOIN productos pr ON dp.id_producto = pr.id_producto
              WHERE dp.id_pedido IN ({$placeholdersProductos})
              ORDER BY dp.id_pedido ASC, dp.id_detalle ASC"
         );
         $stmtProductos->execute($pedidoIds);
+        $detallesRuta = [];
         foreach ($stmtProductos->fetchAll(PDO::FETCH_ASSOC) as $rowProducto) {
-            $pedidoIdProducto = (int)($rowProducto['id_pedido'] ?? 0);
-            $nombreProducto = (string)($rowProducto['nombre'] ?? '');
-            if (!empty($rowProducto['nombre_variante'])) {
-                $nombreProducto .= ' - ' . (string)$rowProducto['nombre_variante'];
-            }
-            $productosPorPedido[$pedidoIdProducto][] = [
-                'nombre' => $nombreProducto,
-                'cantidad' => (int)($rowProducto['cantidad'] ?? 0),
-            ];
+            $detallesRuta[(int)($rowProducto['id_pedido'] ?? 0)][] = $rowProducto;
+        }
+        // Sin los productos rechazados/quitados (el cliente ya no los recibe).
+        foreach ($detallesRuta as $pedidoIdProducto => $detallesPedido) {
+            $productosPorPedido[$pedidoIdProducto] = entregaWaProductosVigentes($detallesPedido);
         }
     }
 
