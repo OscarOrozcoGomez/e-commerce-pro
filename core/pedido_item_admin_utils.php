@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/oferta_pricing.php';
+
 /**
  * Agrega un producto a un pedido ya existente (asignado a repartidor, en reparto o incluso
  * ya entregado): descuenta el inventario del almacen del pedido, registra el movimiento y
@@ -57,12 +59,27 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             return ['success' => false, 'message' => 'Este producto no esta activo para venta.'];
         }
 
-        $precioUnitario = round((float)($producto['precio_venta'] ?? 0), 2);
-        if ($precioUnitario <= 0) {
+        $precioLista = round((float)($producto['precio_venta'] ?? 0), 2);
+        if ($precioLista <= 0) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Este producto no tiene un precio de venta valido.'];
         }
         $costoUnitario = (float)($producto['precio_costo'] ?? 0);
+
+        // Si el producto esta en la categoria de Ofertas se cobra su precio de oferta (igual que
+        // catalogo/POS/Alex); precio_original guarda el de lista para que la tarjeta de entregas
+        // lo muestre tachado.
+        $precioUnitario = $precioLista;
+        if (ofertaProductoEnOferta($pdo, $idProducto)) {
+            try {
+                $stmtOf = $pdo->prepare('SELECT precio_oferta FROM productos WHERE id_producto = ?');
+                $stmtOf->execute([$idProducto]);
+                $precioOferta = $stmtOf->fetchColumn();
+            } catch (PDOException $e) {
+                $precioOferta = null; // esquema sin precio_oferta: costo + $50
+            }
+            $precioUnitario = ofertaPrecioEfectivo($precioLista, $costoUnitario, $precioOferta === false ? null : $precioOferta, true);
+        }
         $subtotalLinea = round($precioUnitario * $cantidad, 2);
 
         // Descuenta stock solo si hay suficiente disponible, igual que en una venta normal.
@@ -81,7 +98,7 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             ':pedido' => $idPedido,
             ':producto' => $idProducto,
             ':cantidad' => $cantidad,
-            ':precio' => $precioUnitario,
+            ':precio' => $precioLista,
             ':precio2' => $precioUnitario,
             ':costo' => $costoUnitario,
             ':subtotal' => $subtotalLinea,
