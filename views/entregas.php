@@ -1020,8 +1020,11 @@ include __DIR__ . '/includes/header.php';
                                         </li>
                                     <?php endforeach; ?>
                                 </ul>
+                                <?php if ((float)($ent['costo_envio'] ?? 0) > 0): ?>
+                                    <p style="margin:8px 0 0; text-align:right;">Envío: <strong>$<?php echo number_format((float)$ent['costo_envio'], 2); ?></strong></p>
+                                <?php endif; ?>
                             </div>
-                            
+
                             <?php if ($ent['fecha_entrega_programada']): ?>
                                 <p class="orange-text" style="margin-top: 10px;">
                                     <i class="material-icons tiny">event</i> Programado para: <?php echo date('d/m/Y H:i', strtotime($ent['fecha_entrega_programada'])); ?>
