@@ -636,8 +636,28 @@ final class EstrategiaCaducidadesTest extends TestCase
         $this->assertStringContainsString('"Omega 3"', $dato);
         $this->assertStringContainsString('$350.00', $dato);
         $this->assertStringContainsString('$500.00', $dato);
-        $this->assertStringContainsString('fecha de caducidad corta', $dato);
         $this->assertStringContainsString('UNA sola vez', $dato);
+        // El motivo (caducidad) no viaja en un mensaje que el cliente no pidio.
+        $this->assertStringNotContainsString('Es producto de fecha de caducidad corta', $dato);
+    }
+
+    public function testLasHerramientasNoDelatanLaCaducidadSalvoQueSePida(): void
+    {
+        $ofertas = ['ok' => true, 'ofertas' => [[
+            'id_producto' => 1, 'precio_oferta' => 350.0, 'stock' => 4, 'urgencia' => 'alta',
+            'motivo' => 'Es producto de fecha de caducidad corta.', 'caduca_el' => '2027-03-01',
+            'dias_para_caducar' => 160, 'piezas_con_fecha_corta' => 4,
+        ]]];
+        $inventario = ['ok' => true, 'productos' => [['id_producto' => 1, 'precio' => 350.0, 'motivo_oferta' => 'Es producto de fecha de caducidad corta.', 'urgencia_oferta' => 'alta']]];
+
+        $sin = aiOcultarDatosDeCaducidad($ofertas, []);
+        $this->assertSame(['id_producto' => 1, 'precio_oferta' => 350.0, 'stock' => 4, 'urgencia' => 'alta'], $sin['ofertas'][0]);
+        $this->assertArrayNotHasKey('motivo_oferta', aiOcultarDatosDeCaducidad($inventario, ['incluir_motivo' => false])['productos'][0]);
+        $this->assertSame('alta', aiOcultarDatosDeCaducidad($inventario, [])['productos'][0]['urgencia_oferta']);
+
+        // Si el cliente pregunta por que esta en oferta o cuando caduca, el modelo lo pide y llega completo.
+        $this->assertSame($ofertas, aiOcultarDatosDeCaducidad($ofertas, ['incluir_motivo' => true]));
+        $this->assertSame($inventario, aiOcultarDatosDeCaducidad($inventario, ['incluir_motivo' => true]));
     }
 
     private function seedConversacion(string $waId, ?int $idCliente = null): int

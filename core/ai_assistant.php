@@ -210,7 +210,7 @@ function aiBuildSystemPrompt(
         $lines[] = '4. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
         $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
         $lines[] = '5b. Ofertas vigentes: llama a consultar_ofertas para saber que productos tienen descuento real ahorita -- ya viene filtrado para excluir cualquier producto cuyo stock restante este caducado o no alcance a consumirse a tiempo, asi que todo lo que te regrese esa funcion es seguro de ofrecer tal cual (precio de oferta, precio normal y ahorro). Vienen ordenadas de la mas urgente a la menos urgente ("urgencia": alta, media o baja; es dato INTERNO solo para que decidas el orden -- nunca le digas al cliente frases como "hay que mover este producto", "hay que liquidarlo" ni "es urgente venderlo"): al elegir cual mencionar, empieza por las de urgencia alta o media, pero SOLO si encajan con lo que el cliente busca -- nunca le ofrezcas algo que no tiene relacion con su necesidad solo por urgencia. Sugierelas de forma proactiva cuando encajen con naturalidad (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones. Nunca digas que algo esta en oferta ni inventes un descuento sin haber llamado antes a esta funcion.';
-        $lines[] = '5b-1. Honestidad sobre el motivo: cuando una oferta trae "motivo" (o consultar_inventario trae "motivo_oferta") es la razon REAL de la oferta: es producto de fecha de caducidad corta. Digaselo al cliente con naturalidad y sin drama -- por ejemplo "esta en oferta porque su fecha de caducidad es mas corta: caduca en marzo, y un envase rinde unos 60 dias con la dosis sugerida, asi que alcanza a terminarlo con margen" -- nunca lo escondas ni lo presentes como si fuera un descuento cualquiera. Usa SOLO los datos que trae "motivo" (fecha, dias, piezas): jamas inventes una fecha, un "ultimo lote" ni una urgencia mayor a la que trae el dato, y no presiones con "solo hoy" si el dato no lo dice. Si el motivo dice que no esta capturada la duracion del envase (o no trae rendimiento), NO estimes ni menciones cuanto dura, cuantos dias o meses rinde, ni si alcanza a terminarlo antes de la fecha -- ni siquiera aproximado; solo di la fecha y ofrece que un asesor se lo confirme si le preocupa. Y cuando si lo trae, di exactamente esos numeros: nunca calcules tu una duracion distinta.';
+        $lines[] = '5b-1. Motivo de la oferta: la razon REAL de una oferta suele ser que el producto tiene fecha de caducidad mas corta, y es dato INTERNO que por defecto NO recibes. NO lo menciones por tu cuenta: al presentar una oferta di solo el producto, el precio, el precio normal, cuanto ahorra y cuantas piezas quedan (si son pocas) -- sin explicar por que esta en oferta, sin decir "caducidad", "caduca", "vence", "fecha corta" ni que "alcanza a terminarse antes de caducar". SOLO si el cliente pregunta directamente por que esta en oferta, si esta por caducar o cuando caduca, llama a consultar_ofertas (o consultar_inventario) con incluir_motivo=true y contestale con la verdad usando exactamente los datos de "motivo" / "motivo_oferta" (nunca lo niegues, lo minimices ni inventes otra razon como "promocion de temporada" o "cierre de inventario"; si aun con incluir_motivo no trae ese dato, di que se lo confirmas con el equipo, sin inventar): por ejemplo "es una presentacion con fecha de caducidad mas proxima (caduca en marzo), completamente vigente". Usa SOLO los datos que trae "motivo" (fecha, dias, piezas): jamas inventes una fecha, un "ultimo lote" ni una urgencia mayor a la que trae el dato, y no presiones con "solo hoy" si el dato no lo dice. Si el motivo dice que no esta capturada la duracion del envase (o no trae rendimiento), NO estimes ni menciones cuanto dura, cuantos dias o meses rinde, ni si alcanza a terminarlo antes de la fecha -- ni siquiera aproximado; solo di la fecha y ofrece que un asesor se lo confirme si le preocupa. Y cuando si lo trae, di exactamente esos numeros: nunca calcules tu una duracion distinta.';
         $lines[] = '5b-2. Paquete: si una oferta trae "paquete" (cantidad_minima, cantidad_maxima y precio_unitario), puedes proponer UNA vez llevar esa cantidad con el precio de paquete ("si te llevas 2, cada uno te queda en $X"). Es un descuento real que se aplica solo al agendar la venta: no lo calculas ni lo prometes por tu cuenta, no lo ofrezcas por encima de cantidad_maxima y no lo confundas con un descuento que el cliente te pida (esos siguen siendo para transferir_a_humano).';
         $lines[] = '5b-3. Agregado al cierre: en cuanto el cliente confirme lo que quiere comprar (ANTES de pedirle o confirmarle los datos de envio y de llamar a agendar_venta), si en esta conversacion todavia no has llamado a consultar_ofertas, llamala. Si te regresa una oferta de urgencia alta o media que combine con lo que esta comprando y todavia no esta en su pedido, ofrecesela UNA sola vez como agregado ("por cierto, tengo X en oferta a $Y, ¿te lo agrego?") y despues sigue con el pedido. Esa oferta va como la UNICA pregunta de ese mensaje: nunca la juntes en el mismo mensaje con la pregunta del telefono, del resumen del pedido ni de ningun otro dato (el cliente contesta "si" y no se sabe a cual de las dos), y espera su respuesta antes de pedir o confirmar el resto. Si dice que no o no contesta al respecto, sigue sin volver a insistir. Si ninguna oferta es un complemento razonable de lo que compra, NO ofrezcas nada y NO comentes que revisaste las ofertas ni que "ninguna combina": simplemente sigue con el pedido.';
         $lines[] = '5b-4. Cuentas: si puedes multiplicar cantidad por el precio unitario que te dio la herramienta (y sumar lineas) para decirle un total, hazlo con cuidado y usa el total que regresa agendar_venta al confirmar; pero NUNCA calcules ahorros ni diferencias de precio por tu cuenta (ya viste que se te pueden ir mal): usa SOLO los ahorros que te entregan las herramientas (ahorro, y ahorro_por_pieza / ahorro_vs_precio_normal_por_pieza del paquete).';
@@ -381,13 +381,17 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_inventario',
-                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, perfil recomendado, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir. Tambien puede regresar beneficios y perfil_recomendado (referencia INTERNA, nunca citarlos tal cual) y productos_relacionados (venta cruzada, YA filtrada por stock real -- solo aparecen productos que de verdad hay en existencia). Si un producto esta en oferta por caducidad corta tambien trae motivo_oferta (la razon real, para explicarsela al cliente con honestidad) y, si aplica, paquete.',
+                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, perfil recomendado, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir. Tambien puede regresar beneficios y perfil_recomendado (referencia INTERNA, nunca citarlos tal cual) y productos_relacionados (venta cruzada, YA filtrada por stock real -- solo aparecen productos que de verdad hay en existencia). Si un producto esta en oferta por caducidad corta tambien trae motivo_oferta (la razon real: dato INTERNO, solo se le dice al cliente si el pregunta por que esta en oferta o cuando caduca) y, si aplica, paquete.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
                         'busqueda_texto' => [
                             'type' => 'string',
                             'description' => 'Texto de busqueda: nombre del producto, marca o palabra clave.',
+                        ],
+                        'incluir_motivo' => [
+                            'type' => 'boolean',
+                            'description' => 'Manda true SOLO si el cliente pregunto por que ese producto esta en oferta, si esta por caducar o cuando caduca: entonces el producto en oferta trae motivo_oferta. Por defecto (false) no viene.',
                         ],
                     ],
                     'required' => ['busqueda_texto'],
@@ -469,13 +473,17 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_ofertas',
-                'description' => 'Devuelve los productos que HOY estan en la categoria de Ofertas, con existencia real y que el sistema ya confirmo que se pueden vender a tiempo -- nunca incluye un producto cuyo unico stock restante ya caduco o cuyo envase no alcanza a consumirse antes de caducar, aunque siga capturado en la categoria de Ofertas. Cada resultado trae precio de oferta, precio normal y el ahorro, y cuando el producto tiene lotes proximos a caducar tambien la urgencia (alta/media/baja, ya ordenadas de la mas urgente), la fecha de caducidad, un texto factual de motivo para explicarle al cliente por que esta en oferta y, si aplica, un precio de paquete. Usala de forma proactiva cuando encaje con naturalidad en la conversacion (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones.',
+                'description' => 'Devuelve los productos que HOY estan en la categoria de Ofertas, con existencia real y que el sistema ya confirmo que se pueden vender a tiempo -- nunca incluye un producto cuyo unico stock restante ya caduco o cuyo envase no alcanza a consumirse antes de caducar, aunque siga capturado en la categoria de Ofertas. Cada resultado trae precio de oferta, precio normal y el ahorro, y cuando el producto tiene lotes proximos a caducar tambien la urgencia (alta/media/baja, ya ordenadas de la mas urgente), la fecha de caducidad, un texto factual de motivo (dato INTERNO: no se lo menciones al cliente salvo que el pregunte por que esta en oferta o cuando caduca) y, si aplica, un precio de paquete. Usala de forma proactiva cuando encaje con naturalidad en la conversacion (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
                         'busqueda_texto' => [
                             'type' => 'string',
                             'description' => 'Opcional: texto para acotar a un producto o palabra clave especifica. Deja vacio (o no lo mandes) para ver todas las ofertas vigentes.',
+                        ],
+                        'incluir_motivo' => [
+                            'type' => 'boolean',
+                            'description' => 'Manda true SOLO si el cliente pregunto por que ese producto esta en oferta, si esta por caducar o cuando caduca: entonces cada oferta trae motivo, caduca_el y dias_para_caducar. Por defecto (false) no vienen esos datos.',
                         ],
                     ],
                     'required' => [],
@@ -1333,11 +1341,10 @@ function aiBuildDatoOfertaParaMensaje(array $oferta): string
     $texto = ' Dato VERIFICADO por el sistema (usa solo esto, no inventes nada mas): el producto "' . $oferta['nombre']
         . '", que ya se le habia mostrado a este cliente, esta en oferta a $' . number_format((float)$oferta['precio_oferta'], 2, '.', '')
         . ' (precio normal $' . number_format((float)$oferta['precio_normal'], 2, '.', '') . ').';
-    if (!empty($oferta['motivo'])) {
-        $texto .= ' ' . $oferta['motivo'];
-    }
-
-    return $texto . ' Mencionalo UNA sola vez, con naturalidad y el precio, sin presionar ni inventar urgencia que no venga en este dato.';
+    // El "motivo" (caducidad) NO se le pasa al modelo aqui: en un mensaje que el cliente no pidio, decir
+    // "esta en oferta por fecha corta" espanta y hace ver mal al negocio. Si el cliente contesta y
+    // pregunta por que, la conversacion normal (consultar_ofertas) si trae el dato para decirlo con verdad.
+    return $texto . ' Mencionalo UNA sola vez, con naturalidad y el precio, sin presionar ni inventar urgencia que no venga en este dato. No expliques por que esta en oferta ni menciones fechas de caducidad.';
 }
 
 /**
@@ -3674,6 +3681,27 @@ function aiRegistrarOfertasVistasEnInventario(PDO $pdo, array $resultado, array 
     }
 }
 
+/**
+ * Quita del resultado de consultar_ofertas / consultar_inventario todo lo que delata que una oferta es por
+ * caducidad (motivo, fecha, dias, piezas "con fecha corta"), salvo que el modelo pida incluir_motivo=true
+ * (solo cuando el cliente pregunta por que esta en oferta o cuando caduca). Con solo el prompt el modelo
+ * a veces lo soltaba ("solo 5 con la fecha de oferta"): lo que no ve, no lo puede decir.
+ */
+function aiOcultarDatosDeCaducidad(array $resultado, array $args): array
+{
+    if (!empty($args['incluir_motivo'])) {
+        return $resultado;
+    }
+    foreach (($resultado['ofertas'] ?? []) as $i => $oferta) {
+        unset($resultado['ofertas'][$i]['motivo'], $resultado['ofertas'][$i]['caduca_el'], $resultado['ofertas'][$i]['dias_para_caducar'], $resultado['ofertas'][$i]['piezas_con_fecha_corta']);
+    }
+    foreach (($resultado['productos'] ?? []) as $i => $producto) {
+        unset($resultado['productos'][$i]['motivo_oferta']);
+    }
+
+    return $resultado;
+}
+
 function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): array
 {
     switch ($name) {
@@ -3681,7 +3709,7 @@ function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): arr
             $resultado = aiToolConsultarInventario($pdo, $args);
             aiRegistrarOfertasVistasEnInventario($pdo, $resultado, $context);
 
-            return $resultado;
+            return aiOcultarDatosDeCaducidad($resultado, $args);
         case 'agendar_venta':
             return aiToolAgendarVenta($pdo, $args, $context);
         case 'transferir_a_humano':
@@ -3691,7 +3719,7 @@ function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): arr
         case 'enviar_catalogo':
             return aiToolEnviarCatalogo($pdo);
         case 'consultar_ofertas':
-            return aiToolConsultarOfertas($pdo, $args, $context);
+            return aiOcultarDatosDeCaducidad(aiToolConsultarOfertas($pdo, $args, $context), $args);
         case 'confirmar_zona_entrega':
             return aiToolConfirmarZonaEntrega($pdo, $args, $context);
         case 'etiquetar_cliente':
