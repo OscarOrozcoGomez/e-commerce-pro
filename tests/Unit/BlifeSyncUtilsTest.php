@@ -315,8 +315,13 @@ final class BlifeSyncUtilsTest extends TestCase
             'con signos'               => ['Electroblend + Creatina B Life®. Electrolitos con creatina...', 'Electroblend + Creatina'],
             'signo suelto no cuenta'   => ['Coconut Oil D3 + K2 B Life®. Cada cápsula de 500 mg contiene...', 'Coconut Oil D3 + K2'],
             'entidad html'           => ['&iexcl;Pure Lysine B Life&reg;. Lisina pura de 1400 mg.', 'Pure Lysine'],
+            // Tras frase-gancho: las palabras con mayúscula pegadas a "B Life"
+            'gancho "Descubre ... con"' => ['¡Descubre el bienestar con Glycinate Mag B Life®!', 'Glycinate Mag'],
+            'gancho "Disfruta ... de"'  => ['¡Disfruta la formulación de Citrate MG B Life®! Nuestra fórmula...', 'Citrate MG'],
+            'gancho "Conoce" pegado'    => ['Conoce Pure Shatavari B Life®, elaborado con shatavari...', 'Pure Shatavari'],
+            'letra suelta no es nombre' => ['Mezcla de colágenos Tipo I, II, III, V y X B Life® con vitamina C.', ''],
+            'nombre partido por "del"'  => ['La Fruta del Monje Pura B Life en presentación de 500 g...', ''],
             // Negativos: frase de marketing, arranque genérico, o cuelga de preposición
-            'marketing "Descubre"'     => ['¡Descubre el bienestar con Glycinate Mag B Life®!', ''],
             'marketing "Conoce ... de"' => ['Conoce la formulación de Ferty Blend de B Life®...', ''],
             'arranque "Cada"'          => ['Cada cápsula de este producto B Life® aporta magnesio.', ''],
             'sin "B Life" pronto'      => ['Suplemento alimenticio a base de hierbas naturales seleccionadas.', ''],
@@ -324,6 +329,18 @@ final class BlifeSyncUtilsTest extends TestCase
             'vacío'                    => ['', ''],
             'solo tags'                => ['<p></p><br>', ''],
         ];
+    }
+
+    public function testShortNameFromTagThatStartsTheHandle(): void
+    {
+        $tags = ['4 Mag Element', 'Mezcla de 4 tipos de Magnesio', 'magnesio'];
+        $this->assertSame('4 Mag Element', blifeShortName('¡Optimiza tu vida con 4 Mag Element! Cada porción...', $tags, '4-mag-element'));
+        // products/<handle>.json trae los tags como texto separado por comas.
+        $this->assertSame('Omega Balance', blifeShortName('Omega para Perros y Gatos...', 'aceite pescado, Omega Balance, pelaje', 'omega-balance-suplemento-mascotas-omega-3-6-9-perros-gatos'));
+        // Un tag que no arranca el handle no es el nombre (ingrediente, beneficio...).
+        $this->assertSame('', blifeShortName('Fórmula con Colágeno Hidrolizado...', ['Colágeno Hidrolizado', 'Biotina'], 'womens-hr-suplemento-mujer'));
+        // Sin handle no se usan los tags.
+        $this->assertSame('', blifeShortName('Omega para Perros y Gatos...', ['Omega Balance']));
     }
 
     public function testShortNameCapsLengthAndWordCount(): void
