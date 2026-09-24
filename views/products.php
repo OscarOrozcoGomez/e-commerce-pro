@@ -573,9 +573,15 @@ include __DIR__ . '/includes/header.php';
 
                     // 3c. Nombre corto / etiqueta del pomo ("3 Mag Blend B Life®." -> "3 Mag Blend").
                     //     Lo calcula el backend del body_html; si no lo pudo sacar, se deja
-                    //     lo que ya haya para que lo captures a mano.
-                    if (fullData.producto.nombre_corto)
-                        document.getElementById('nombre_corto').value = fullData.producto.nombre_corto;
+                    //     lo que ya haya para que lo captures a mano -- salvo que lo que haya
+                    //     sea lo que puso un SINC anterior (otro producto): eso se borra.
+                    const inputNombreCorto = document.getElementById('nombre_corto');
+                    if (fullData.producto.nombre_corto) {
+                        inputNombreCorto.value = fullData.producto.nombre_corto;
+                    } else if (inputNombreCorto.value !== '' && inputNombreCorto.value === inputNombreCorto.dataset.sinc) {
+                        inputNombreCorto.value = '';
+                    }
+                    inputNombreCorto.dataset.sinc = inputNombreCorto.value;
 
                     // 4. SKU y código de barras (vienen de products.json y del JSON-LD de Shopify)
                     if (fullData.producto.sku)

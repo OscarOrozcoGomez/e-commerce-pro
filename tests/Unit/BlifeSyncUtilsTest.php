@@ -313,7 +313,8 @@ final class BlifeSyncUtilsTest extends TestCase
             'con número'              => ['Omega 3 Platinum B Life®. Cada cápsula de 1000 mg...', 'Omega 3 Platinum'],
             'B Life sin ®'            => ['Snoring Nasal Strips B Life. Bandas nasales para dormir mejor.', 'Snoring Nasal Strips'],
             'con signos'               => ['Electroblend + Creatina B Life®. Electrolitos con creatina...', 'Electroblend + Creatina'],
-            'entidad html'             => ['&iexcl;Pure Lysine B Life&reg;. Lisina pura de 1400 mg.', 'Pure Lysine'],
+            'signo suelto no cuenta'   => ['Coconut Oil D3 + K2 B Life®. Cada cápsula de 500 mg contiene...', 'Coconut Oil D3 + K2'],
+            'entidad html'           => ['&iexcl;Pure Lysine B Life&reg;. Lisina pura de 1400 mg.', 'Pure Lysine'],
             // Negativos: frase de marketing, arranque genérico, o cuelga de preposición
             'marketing "Descubre"'     => ['¡Descubre el bienestar con Glycinate Mag B Life®!', ''],
             'marketing "Conoce ... de"' => ['Conoce la formulación de Ferty Blend de B Life®...', ''],

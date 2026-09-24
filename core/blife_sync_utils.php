@@ -236,7 +236,8 @@ if (!function_exists('blifeShortName')) {
             return '';
         }
 
-        $palabras = count(array_filter(preg_split('~\s+~u', $cand) ?: []));
+        // Un signo suelto ("+", "&") no cuenta como palabra: "Coconut Oil D3 + K2" son 4.
+        $palabras = count(preg_grep('~[\p{L}\p{N}]~u', preg_split('~\s+~u', $cand) ?: []));
         return ($palabras >= 1 && $palabras <= 4 && mb_strlen($cand) <= 40) ? $cand : '';
     }
 }
