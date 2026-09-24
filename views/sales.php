@@ -185,6 +185,8 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="container">
+    <!-- Pedidos a domicilio recien agendados: se quedan aqui (aun tras recargar) hasta que los tocas y te llevan a asignarlos -->
+    <div id="ventas-por-asignar" style="margin-top:12px;"></div>
     <div class="row">
         <div class="col s12">
             <div class="sales-toolbar" style="display: flex; align-items: center; justify-content: space-between; margin-top: 15px; border-bottom: 2px solid #e0e0e0; padding-bottom: 5px;">
@@ -2683,6 +2685,51 @@ include __DIR__ . '/includes/header.php';
             });
     }
 
+    // Banner por cada pedido a domicilio recien agendado: no se va solo (ni al recargar, que pasa
+    // al cerrar la ultima pestaña) hasta que lo tocas; al tocarlo te lleva a Asignar Entregas con
+    // ese pedido resaltado. Se guarda en localStorage de este navegador.
+    const PEDIDOS_POR_ASIGNAR_KEY = 'ventas_pedidos_por_asignar';
+
+    function leerPedidosPorAsignar() {
+        try {
+            const lista = JSON.parse(localStorage.getItem(PEDIDOS_POR_ASIGNAR_KEY) || '[]');
+            return Array.isArray(lista) ? lista : [];
+        } catch (_) {
+            return [];
+        }
+    }
+
+    function guardarPedidosPorAsignar(lista) {
+        try { localStorage.setItem(PEDIDOS_POR_ASIGNAR_KEY, JSON.stringify(lista)); } catch (_) {}
+    }
+
+    function agregarPedidoPorAsignar(idPedido, numeroPedido) {
+        const lista = leerPedidosPorAsignar().filter((p) => p.id !== idPedido);
+        lista.push({ id: idPedido, numero: String(numeroPedido || idPedido) });
+        guardarPedidosPorAsignar(lista);
+        pintarPedidosPorAsignar(lista);
+    }
+
+    function pintarPedidosPorAsignar(lista) {
+        const cont = document.getElementById('ventas-por-asignar');
+        if (!cont) return;
+        cont.innerHTML = '';
+        lista.forEach((p) => {
+            const a = document.createElement('a');
+            a.href = <?php echo json_encode(BASE_URL . 'views/asignar_entregas.php?pedido=', JSON_UNESCAPED_SLASHES); ?> + encodeURIComponent(p.id);
+            a.className = 'card-panel orange darken-2 white-text';
+            a.style.cssText = 'display:flex; align-items:center; gap:10px; padding:12px 16px; margin:0 0 8px; font-weight:500;';
+            a.innerHTML = '<i class="material-icons">local_shipping</i><span></span><i class="material-icons" style="margin-left:auto;">chevron_right</i>';
+            a.querySelector('span').textContent = `Pedido ${p.numero} agendado sin repartidor. Toca aquí para asignarlo.`;
+            a.addEventListener('click', () => {
+                guardarPedidosPorAsignar(leerPedidosPorAsignar().filter((x) => x.id !== p.id));
+            });
+            cont.appendChild(a);
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => pintarPedidosPorAsignar(leerPedidosPorAsignar()));
+
     function enviarVentaAlServidor(form, context, tabId, submitButton, labelBoton, confirmoLotes) {
         submitButton.disabled = true;
         submitButton.innerHTML = 'Procesando...';
@@ -2695,6 +2742,9 @@ include __DIR__ . '/includes/header.php';
             .then((data) => {
                 if (data.success) {
                     M.toast({ html: data.message || 'Venta registrada con éxito', classes: 'green darken-2' });
+                    if (data.tipo_entrega === 'Domicilio' && data.id_pedido) {
+                        agregarPedidoPorAsignar(data.id_pedido, data.numero_pedido);
+                    }
                     document.getElementById(`tab-li-${tabId}`).remove();
                     context.remove();
                     saveSalesDraftNow();

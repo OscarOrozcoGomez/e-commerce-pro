@@ -93,14 +93,13 @@
             if (!phone) {
                 return;
             }
+            // Con y sin mensaje, el mismo intent whatsapp://send?phone=. El de sin mensaje usaba
+            // scheme=smsto (smsto://send/?phone=...): WhatsApp tomaba "send" como el numero y decia
+            // que no lo identificaba (Entregas 2026-09-23; "Avisar hora estimada", con mensaje, si abria).
             const text = link.getAttribute('data-wa-text') || '';
-            if (text) {
-                const fallback = encodeURIComponent('https://wa.me/' + phone + '?text=' + encodeURIComponent(text));
-                link.setAttribute('href', 'intent://send?phone=' + encodeURIComponent(phone) + '&text=' + encodeURIComponent(text) + '#Intent;scheme=whatsapp;package=com.whatsapp.w4b;S.browser_fallback_url=' + fallback + ';end');
-            } else {
-                const fallback = encodeURIComponent('https://wa.me/' + phone);
-                link.setAttribute('href', 'intent://send/?phone=' + encodeURIComponent(phone) + '#Intent;scheme=smsto;package=com.whatsapp.w4b;S.browser_fallback_url=' + fallback + ';end');
-            }
+            const query = 'phone=' + encodeURIComponent(phone) + (text ? '&text=' + encodeURIComponent(text) : '');
+            const fallback = encodeURIComponent('https://wa.me/' + phone + (text ? '?text=' + encodeURIComponent(text) : ''));
+            link.setAttribute('href', 'intent://send?' + query + '#Intent;scheme=whatsapp;package=com.whatsapp.w4b;S.browser_fallback_url=' + fallback + ';end');
         });
     }
     window.waApplyBusinessLinks = waApplyBusinessLinks;
