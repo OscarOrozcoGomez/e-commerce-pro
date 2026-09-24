@@ -411,6 +411,11 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Visor de la imagen del listado (toca la miniatura para abrirlo, toca en cualquier parte para cerrarlo) -->
+<div id="visor-imagen-producto" title="Cerrar" style="display:none; position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.85); align-items:center; justify-content:center; padding:16px; cursor:zoom-out;">
+    <img src="" alt="Imagen del producto" style="width:min(100%, 700px); height:auto; max-height:100%; object-fit:contain; background:#fff; border-radius:8px;">
+</div>
+
 <script>
     let cacheProductosPadre = [];
     let loteProductoActualId = null;
@@ -1048,6 +1053,23 @@ include __DIR__ . '/includes/header.php';
             });
     }
 
+    // Toca la miniatura del listado para verla grande (celular y compu). Delegado en el tbody:
+    // sigue sirviendo aunque la tabla se vuelva a pintar al filtrar o cambiar de almacen.
+    document.addEventListener('DOMContentLoaded', () => {
+        const visor = document.getElementById('visor-imagen-producto');
+        const tbody = document.getElementById('tabla-productos-body');
+        if (!visor || !tbody) return;
+        const cerrar = () => { visor.style.display = 'none'; visor.querySelector('img').src = ''; };
+        tbody.addEventListener('click', e => {
+            const thumb = e.target.closest('.producto-thumb');
+            if (!thumb) return;
+            visor.querySelector('img').src = thumb.src;
+            visor.style.display = 'flex';
+        });
+        visor.addEventListener('click', cerrar);
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && visor.style.display === 'flex') cerrar(); });
+    });
+
     function cargarProductos(almacenId) {
         const tbody = document.getElementById('tabla-productos-body');
         const stockWarehouseSelector = document.getElementById('id_almacen_stock');
@@ -1239,7 +1261,7 @@ include __DIR__ . '/includes/header.php';
 
         return `
             <tr data-codes="${((p.codigo_barras || '') + ' ' + (p.nombre_corto || '')).toLowerCase()}" data-has-image="${hasImg}">
-                <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
+                <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5; cursor: zoom-in;" class="circle shadow-1 producto-thumb" alt="" title="Ver imagen grande">` : ''}</td>
                 <td>${p.nombre} ${p.nombre_variante ? `<br><small class="blue-text">(${p.nombre_variante})</small>` : ''}${p.nombre_corto ? `<br><small class="grey-text">${p.nombre_corto}</small>` : ''}</td>
                 <td>
                     $${parseFloat(p.precio_venta).toFixed(2)}
@@ -1314,7 +1336,7 @@ include __DIR__ . '/includes/header.php';
 
         return `
             <tr class="product-group-row" data-codes="${allCodes.toLowerCase()}" data-has-image="${hasImg}">
-                <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5;" class="circle shadow-1">` : ''}</td>
+                <td>${imgSrc ? `<img src="${imgSrc}" style="width: 60px; height: 60px; object-fit: contain; background: #f5f5f5; cursor: zoom-in;" class="circle shadow-1 producto-thumb" alt="" title="Ver imagen grande">` : ''}</td>
                 <td>
                     <strong style="color: #1a237e; font-size: 1.1rem;">${p.nombre}</strong>${nombreCorto ? ` <small class="grey-text">· ${nombreCorto}</small>` : ''}<br>
                     <button type="button" class="btn-small blue darken-2 waves-effect waves-light" style="font-size:0.65rem; height:24px; line-height:24px; padding:0 8px; border-radius:4px; margin-top:4px;" onclick="toggleVariants('${groupId}')">
