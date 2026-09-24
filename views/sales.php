@@ -333,6 +333,7 @@ include __DIR__ . '/includes/header.php';
         <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light blue darken-2 compartir-link-facebook"><i class="fa-brands fa-facebook left"></i>Facebook</a>
         <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light grey darken-1 compartir-link-correo"><i class="material-icons left">email</i>Correo</a>
         <a href="#" target="_blank" rel="noopener noreferrer" class="btn waves-effect waves-light green darken-1 compartir-link-whatsapp"><i class="fa-brands fa-whatsapp left"></i>WhatsApp</a>
+        <button type="button" class="btn waves-effect waves-light teal darken-2 compartir-con-foto" style="display: none;"><i class="material-icons left">photo</i>Con foto</button>
     </div>
 </div>
 
@@ -802,6 +803,7 @@ include __DIR__ . '/includes/header.php';
     }
 </style>
 
+<script src="<?php echo BASE_URL; ?>assets/js/compartir_producto.js"></script>
 <script>
     const productosDisponibles = <?php echo json_encode($productos, JSON_UNESCAPED_UNICODE); ?>;
     const PRODUCTO_PUBLICO_BASE_URL = <?php echo json_encode($productoPublicoBaseUrl, JSON_UNESCAPED_SLASHES); ?>;
@@ -2426,8 +2428,56 @@ include __DIR__ . '/includes/header.php';
         if (linkCorreo) linkCorreo.href = `mailto:?subject=${encodeURIComponent(nombreCompleto)}&body=${encodeURIComponent(mensaje)}`;
         if (linkFacebook) linkFacebook.href = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(urlPublica)}`;
 
+        prepararCompartirConFoto(modal, product, nombreCompleto, mensaje);
+
         const modalInstance = M.Modal.getInstance(modal) || M.Modal.init(modal);
         modalInstance.open();
+    }
+
+    // "Con foto": abre el menu de compartir del celular con la foto del producto YA adjunta y el
+    // mensaje como texto (Android lo pone de pie de foto en WhatsApp). La foto se prepara al abrir
+    // el modal para que el toque abra el menu al instante (el navegador exige que share() salga
+    // directo del toque). Se convierte a JPG: WhatsApp manda los .webp como sticker. Si el
+    // navegador no puede compartir archivos (casi todas las compus), el boton no aparece.
+    let compartirConFotoArchivo = null;
+    let compartirConFotoTurno = 0; // si abres otro producto antes de que cargue la foto, la vieja se ignora
+
+    function prepararCompartirConFoto(modal, product, nombreCompleto, mensaje) {
+        const boton = modal.querySelector('.compartir-con-foto');
+        if (!boton) return;
+        boton.style.display = 'none';
+        compartirConFotoArchivo = null;
+        const turno = ++compartirConFotoTurno;
+        const imgSrc = resolveProductImageSrc(product.imagen_resuelta || product.imagen_fuente || product.imagen || product.imagen_url);
+        if (!compartirPuedeArchivos(navigator) || !compartirImagenUsable(imgSrc)) return;
+
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            if (turno !== compartirConFotoTurno) return;
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff'; // fondo blanco para PNG/WebP con transparencia
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((blob) => {
+                if (!blob || turno !== compartirConFotoTurno) return;
+                const archivo = new File([blob], compartirNombreArchivo(nombreCompleto), { type: 'image/jpeg' });
+                if (!navigator.canShare({ files: [archivo] })) return;
+                compartirConFotoArchivo = archivo;
+                boton.style.display = '';
+                boton.onclick = () => {
+                    navigator.share({ files: [compartirConFotoArchivo], text: mensaje }).catch((err) => {
+                        if (err && err.name !== 'AbortError') {
+                            M.toast({ html: 'No se pudo compartir la foto. Usa el botón de WhatsApp.', classes: 'orange darken-2' });
+                        }
+                    });
+                };
+            }, 'image/jpeg', 0.9);
+        };
+        img.src = imgSrc;
     }
 
     function escHtmlBeneficios(txt) {
