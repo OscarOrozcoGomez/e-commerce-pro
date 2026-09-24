@@ -270,6 +270,20 @@ test.describe('Agendar pedido (sales.php): edge cases', () => {
     await expect(formRecargado.locator('.producto-item')).toHaveCount(1);
   });
 
+  // Commit d8302ad: el foco se da SIN setTimeout para que cuente como parte del gesto del usuario (en móviles abre el teclado solo)
+  // y va al NOMBRE DEL CLIENTE, que es lo primero que se captura, no al buscador de producto.
+  test('al abrir una pestaña de venta (la inicial y las nuevas con "+") el foco va al nombre del cliente, no al buscador de producto', async ({ page }) => {
+    await loginAsStaff(page, 'encargado');
+    await page.goto('views/sales.php');
+    await expect(page.locator('#venta-v1 .cliente_nombre')).toBeFocused();
+    await expect(page.locator('#venta-v1 .buscador-producto')).not.toBeFocused();
+
+    await page.getByRole('button', { name: 'add' }).click();
+    await expect(page.locator('.venta-context')).toHaveCount(2);
+    await expect(page.locator('#venta-v2 .cliente_nombre')).toBeFocused();
+    await expect(page.locator('#venta-v2 .buscador-producto')).not.toBeFocused();
+  });
+
   test('un repartidor no puede acceder a agendar pedido', async ({ page }) => {
     await loginAsStaff(page, 'repartidor');
     await page.goto('views/sales.php');

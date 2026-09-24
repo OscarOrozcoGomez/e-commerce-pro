@@ -43,6 +43,8 @@ const PERSONAS_STAFF: Persona[] = [
   personaStaff('auditor', 'auditor (encargado + ver_auditoria)'),
   personaStaff('encargadoSinVentas', 'encargado sin realizar_ventas'),
   personaStaff('encargadoSinAgendar', 'encargado sin asignar_entregas'),
+  personaStaff('whatsappLector', 'lector de WhatsApp (encargado + ver_conversaciones_whatsapp)'),
+  personaStaff('whatsappFeedback', 'WhatsApp con feedback (+ dar_feedback_asistente_ia)'),
 ];
 
 /** Bloqueado = redireccion / 401 / 403, o el mensaje de "no autorizado" que devuelven los endpoints JSON. */
@@ -53,8 +55,11 @@ async function estaBloqueada(res: APIResponse): Promise<boolean> {
   return /no autorizado|no autenticad|no tienes permiso|acceso denegado|sin permiso/i.test(cuerpo);
 }
 
-async function pedir(page: Page, ruta: string): Promise<APIResponse> {
-  return page.request.get(ruta, { failOnStatusCode: false, maxRedirects: 0, timeout: 60_000 });
+async function pedir(page: Page, endpoint: Endpoint): Promise<APIResponse> {
+  const opciones = { failOnStatusCode: false, maxRedirects: 0, timeout: 60_000 };
+  return endpoint.metodo === 'POST'
+    ? page.request.post(endpoint.ruta, { ...opciones, data: endpoint.cuerpo ?? {} })
+    : page.request.get(endpoint.ruta, opciones);
 }
 
 async function desajustesPaginas(page: Page, efectivos: string[], vistas: Vista[], esCliente = false): Promise<string[]> {
@@ -79,13 +84,16 @@ async function desajustesEndpoints(page: Page, efectivos: string[], endpoints: E
   const fallos: string[] = [];
   for (const endpoint of endpoints) {
     const debeAbrir = esCliente ? endpoint.paraCliente === true : tienePermiso(efectivos, endpoint.anyOf);
-    const res = await pedir(page, endpoint.ruta);
+    const res = await pedir(page, endpoint);
     const estado = res.status();
     const bloqueada = await estaBloqueada(res);
+    // Un POST sin token CSRF que ya pasó el permiso responde "Token de seguridad invalido": el 419 no estándar que usa la app
+    // este Apache local lo vuelve 500, así que se reconoce por el mensaje (el permiso sí pasó).
+    const rechazoCsrf = /token de seguridad|token csrf/i.test((await res.text()).slice(0, 2000));
 
     if (estado === 429) {
       fallos.push(`RATE LIMIT (429) en ${endpoint.ruta}: no se puede saber si el permiso se aplicó`);
-    } else if (estado >= 500) {
+    } else if (estado >= 500 && !rechazoCsrf) {
       fallos.push(`ERROR ${estado} en ${endpoint.ruta} (${debeAbrir ? 'debía abrir' : 'debía bloquear'})`);
     } else if (debeAbrir && bloqueada) {
       fallos.push(`DEBIA ABRIR y lo bloqueó: ${endpoint.ruta} (necesita ${endpoint.anyOf.join(' | ')}) [HTTP ${estado}]`);

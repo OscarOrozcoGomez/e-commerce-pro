@@ -22,6 +22,9 @@ export interface Endpoint {
   ruta: string;
   anyOf: string[];
   paraCliente?: boolean;
+  /** Endpoints que validan el metodo ANTES que el permiso (un GET da 405 a todos): se prueban con POST y este cuerpo. */
+  metodo?: 'POST';
+  cuerpo?: Record<string, unknown>;
 }
 
 export interface CuentaPermisos {
@@ -78,13 +81,17 @@ export const VISTAS: Vista[] = [
   { ruta: 'views/users.php', anyOf: ['gestionar_usuarios'] },
   { ruta: 'views/ventas_features_config.php', anyOf: ['configurar_iniciativas_ventas'] },
   { ruta: 'views/whatsapp_contactos.php', anyOf: ['ver_conversaciones_whatsapp'] },
+  { ruta: 'views/whatsapp_seguimientos.php', anyOf: ['ver_conversaciones_whatsapp'] },
 ];
 
 // Endpoints de api/ y la clave que los abre. Se llaman con GET SIN parametros: en todos los que se
 // revisaron el permiso se valida ANTES que el CSRF y que cualquier accion, asi que un GET vacio nunca
 // escribe nada (a lo sumo devuelve una lista, un error de validacion o 405).
 export const ENDPOINTS: Endpoint[] = [
-  { ruta: 'api/ai_assistant_admin.php', anyOf: ['gestionar_asistente_ia'] },
+  // Valida el metodo antes que el permiso (commit 7f91778): se prueba con POST sin token CSRF, que es inerte (autorizado -> 419,
+  // sin permiso -> 403). create_learning_rule tambien la puede hacer quien solo tiene dar_feedback_asistente_ia.
+  { ruta: 'api/ai_assistant_admin.php', anyOf: ['gestionar_asistente_ia'], metodo: 'POST' },
+  { ruta: 'api/ai_assistant_admin.php', anyOf: ['gestionar_asistente_ia', 'dar_feedback_asistente_ia'], metodo: 'POST', cuerpo: { action: 'create_learning_rule' } },
   { ruta: 'api/alex_playground.php', anyOf: ['gestionar_asistente_ia'] },
   { ruta: 'api/analytics_data.php', anyOf: ['ver_analitica_negocio'] },
   { ruta: 'api/batch_inbound.php', anyOf: ['inventario'] },
@@ -140,6 +147,7 @@ export const CLAVES_SOLO_ADMIN = [
   'ver_salud_sistema',
   'gestionar_asistente_ia',
   'ver_conversaciones_whatsapp',
+  'dar_feedback_asistente_ia',
   'ver_insights_ia',
   'ver_analitica_negocio',
   'ver_trafico_campanas',

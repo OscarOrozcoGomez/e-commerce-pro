@@ -42,6 +42,10 @@ $staffAccounts = [
     // la oferta dice "registrar" en vez de "agendar" (puede_agendar).
     ['rol' => 'encargado', 'nombre' => 'Playwright E2E Encargado Sin Ventas', 'email' => 'e2e-encargado-sin-ventas@playwright.test', 'almacen' => 'default'],
     ['rol' => 'encargado', 'nombre' => 'Playwright E2E Encargado Sin Agendar', 'email' => 'e2e-encargado-sin-agendar@playwright.test', 'almacen' => 'default'],
+    // WhatsApp (encargado + override): el lector solo ve Contactos/Seguimientos (ver_conversaciones_whatsapp); el de feedback
+    // ademas puede convertir una respuesta de Alex en regla de aprendizaje (dar_feedback_asistente_ia).
+    ['rol' => 'encargado', 'nombre' => 'Playwright E2E WhatsApp Lector', 'email' => 'e2e-whatsapp-lector@playwright.test', 'almacen' => 'default'],
+    ['rol' => 'encargado', 'nombre' => 'Playwright E2E WhatsApp Feedback', 'email' => 'e2e-whatsapp-feedback@playwright.test', 'almacen' => 'default'],
 ];
 
 $pdo = getPDO();
@@ -122,6 +126,9 @@ try {
         ['e2e-auditor@playwright.test', 'ver_auditoria', 'conceder'],
         ['e2e-encargado-sin-ventas@playwright.test', 'realizar_ventas', 'denegar'],
         ['e2e-encargado-sin-agendar@playwright.test', 'asignar_entregas', 'denegar'],
+        ['e2e-whatsapp-lector@playwright.test', 'ver_conversaciones_whatsapp', 'conceder'],
+        ['e2e-whatsapp-feedback@playwright.test', 'ver_conversaciones_whatsapp', 'conceder'],
+        ['e2e-whatsapp-feedback@playwright.test', 'dar_feedback_asistente_ia', 'conceder'],
         // El encargado normal NO debe abrir Movimientos (el rol encargado no lo trae; se fija por si alguien se lo dio).
         ['e2e-encargado@playwright.test', 'ver_auditoria', 'denegar'],
     ];

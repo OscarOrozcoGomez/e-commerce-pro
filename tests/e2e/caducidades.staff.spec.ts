@@ -121,15 +121,16 @@ test.describe('Control de Caducidades: tablero cruzado (caducidades.php)', () =>
     await expect(page.locator('#tab-caducidades table')).toHaveCount(0);
   });
 
-  // "Poner en oferta" (1 clic, botón verde "sell"): agrega el producto a la categoría
-  // Ofertas y fija precio_oferta = costo + $50 si aún no tiene uno manual. Ver
-  // core/lote_caducidad_utils.php::lotePonerProductoEnOferta.
-  test('poner en oferta desde el tablero fija precio_oferta = costo + $50 y lo refleja en products.php', async ({ page }) => {
+  // "Poner en oferta" (1 clic, botón verde "sell"): agrega el producto a la categoría Ofertas y fija precio_oferta con la
+  // ESCALERA por urgencia (core/oferta_pricing.php::ofertaPrecioEscalera, PR #213), que nunca baja del piso costo+$50 ni sube
+  // sobre el precio normal. Aquí el costo es 10 y el precio 19.99: el piso (60) supera el precio normal, así que la oferta se
+  // queda EN el precio normal (19.99). La escalera con precios reales se prueba en caducidades-oferta.staff.spec.ts.
+  test('poner en oferta cuando costo+$50 supera el precio normal deja la oferta en el precio normal (nunca lo sube) y lo refleja en products.php', async ({ page }) => {
     await loginAsStaff(page, 'admin');
 
     const nombre = 'Playwright Caducidades Oferta ' + Date.now();
     const codigoLote = 'LOTE-OFERTA-' + Date.now();
-    // precio_costo = 10.00 -> precio_oferta esperado = 60.00.
+    // precio_costo = 10.00, precio_venta = 19.99 -> el piso (60.00) queda por encima del precio: precio_oferta = 19.99.
     await crearProductoConLote(page, nombre, codigoLote);
 
     await page.goto(`views/caducidades.php?q=${encodeURIComponent(nombre)}`);
@@ -140,20 +141,20 @@ test.describe('Control de Caducidades: tablero cruzado (caducidades.php)', () =>
 
     page.once('dialog', (dialog) => dialog.accept());
     await fila.locator('a[title^="Poner en oferta"]').click();
-    await expect(page.getByText(nombre + ' en Ofertas a $60.00')).toBeVisible();
+    await expect(page.getByText(nombre + ' en Ofertas a $19.99')).toBeVisible();
 
     // Se refleja en la ficha del producto (products.php), no solo en la respuesta de la API.
     await page.goto('views/products.php');
     const filaProducto = page.locator('#tabla-productos-body tr').filter({ hasText: nombre });
     await filaProducto.locator('button.blue').click();
-    await expect(page.locator('#precio_oferta')).toHaveValue('60.00');
+    await expect(page.locator('#precio_oferta')).toHaveValue('19.99');
 
     // Un segundo clic no debe pisar el precio ya fijado (aunque aquí siga siendo el mismo
     // valor sugerido) -- el mensaje cambia a "Ya estaba en Ofertas".
     await page.goto(`views/caducidades.php?q=${encodeURIComponent(nombre)}`);
     page.once('dialog', (dialog) => dialog.accept());
     await page.locator('#tab-caducidades table tbody tr').filter({ hasText: nombre }).locator('a[title^="Poner en oferta"]').click();
-    await expect(page.getByText('Ya estaba en Ofertas. Precio de oferta: $60.00')).toBeVisible();
+    await expect(page.getByText('Ya estaba en Ofertas. Precio de oferta: $19.99')).toBeVisible();
 
     await eliminarProducto(page, nombre);
   });

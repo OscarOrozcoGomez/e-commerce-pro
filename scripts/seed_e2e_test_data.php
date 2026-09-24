@@ -484,6 +484,22 @@ try {
 
     echo 'Seed OK: ' . E2E_CLEANUP_PRODUCT_NAME . " -> id_producto={$idProductoCleanup}, id_almacen={$idAlmacen}, stock=500\n";
 
+    // Producto con nombre_corto (la etiqueta del pomo) para catalogo-nombre-corto.spec.ts: el catalogo debe encontrarlo por
+    // ese nombre aunque el nombre largo no lo contenga. La etiqueta es una palabra inventada que ningun producto real tiene.
+    $stmt = $pdo->prepare(
+        'INSERT INTO productos (nombre, nombre_corto, codigo_barras, precio_venta, estado)
+         VALUES (:nombre, :corto, :codigo_barras, 25.00, "activo")
+         ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), nombre_corto = VALUES(nombre_corto), precio_venta = VALUES(precio_venta), estado = "activo"'
+    );
+    $stmt->execute(['nombre' => 'Playwright E2E Producto Con Etiqueta', 'corto' => 'Zorbamag Pomo', 'codigo_barras' => 'E2E-PLAYWRIGHT-TEST-0010']);
+    $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE codigo_barras = :codigo_barras');
+    $stmt->execute(['codigo_barras' => 'E2E-PLAYWRIGHT-TEST-0010']);
+    $idProductoEtiqueta = (int) $stmt->fetchColumn();
+    $pdo->prepare(
+        'INSERT INTO inventario_almacen (id_producto, id_almacen, cantidad_actual) VALUES (:p, :a, 500) ON DUPLICATE KEY UPDATE cantidad_actual = 500'
+    )->execute(['p' => $idProductoEtiqueta, 'a' => $idAlmacen]);
+    echo "Seed OK: Playwright E2E Producto Con Etiqueta -> id_producto={$idProductoEtiqueta}, nombre_corto='Zorbamag Pomo'\n";
+
     // Producto deliberadamente incompleto (sin precio_venta/precio_costo/sku/codigo_barras
     // ni fila en inventario_almacen). Se busca por nombre porque no tiene codigo_barras.
     $stmt = $pdo->prepare('SELECT id_producto FROM productos WHERE nombre = :nombre AND id_padre IS NULL LIMIT 1');

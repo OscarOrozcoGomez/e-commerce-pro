@@ -134,6 +134,9 @@ export const E2E_STAFF_EMAILS = {
   // Encargados con un permiso menos por override individual (ver scripts/seed_e2e_staff_accounts.php).
   encargadoSinVentas: 'e2e-encargado-sin-ventas@playwright.test',
   encargadoSinAgendar: 'e2e-encargado-sin-agendar@playwright.test',
+  // Encargados con override de WhatsApp: lector (solo ver_conversaciones_whatsapp) y feedback (+ dar_feedback_asistente_ia).
+  whatsappLector: 'e2e-whatsapp-lector@playwright.test',
+  whatsappFeedback: 'e2e-whatsapp-feedback@playwright.test',
 } as const;
 
 /**
