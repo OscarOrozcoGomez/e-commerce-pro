@@ -12,6 +12,10 @@ function waBuildBusinessLinkPhone(?string $telefono): string
     if ($digits === '') {
         return '';
     }
+    // Ya trae lada ("+52 33...", "521 33..."): no duplicarla (5252...).
+    if (preg_match('/^521?(\d{10})$/', $digits, $m) === 1) {
+        return '52' . $m[1];
+    }
 
     return '52' . $digits;
 }

@@ -15,6 +15,12 @@ final class WhatsAppLinkUtilsTest extends TestCase
         $this->assertSame('523311458245', waBuildBusinessLinkPhone('3311458245'));
     }
 
+    public function testWaBuildBusinessLinkPhoneNoDuplicaLada(): void
+    {
+        $this->assertSame('523311119215', waBuildBusinessLinkPhone('+52 33 1111 9215'));
+        $this->assertSame('523311119215', waBuildBusinessLinkPhone('521 331 111 9215'));
+    }
+
     public function testWaBuildBusinessLinkPhoneReturnsEmptyStringForNoDigits(): void
     {
         $this->assertSame('', waBuildBusinessLinkPhone(''));

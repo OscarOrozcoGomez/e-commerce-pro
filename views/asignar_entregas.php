@@ -978,6 +978,18 @@ include __DIR__ . '/includes/header.php';
 </style>
 
 <script>
+// ?pedido=ID (viene del banner de Ventas tras agendar un pedido): lleva a su tarjeta de
+// "Por asignar", la resalta y deja el selector de repartidor listo.
+document.addEventListener('DOMContentLoaded', function () {
+    var idPedido = parseInt(new URLSearchParams(location.search).get('pedido') || '0', 10);
+    var select = idPedido > 0 ? document.getElementById('repartidor-' + idPedido) : null;
+    var card = select ? select.closest('.assign-delivery-card') : null;
+    if (!card) return;
+    card.style.boxShadow = '0 0 0 3px #ff9800';
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    select.focus({ preventScroll: true });
+});
+
 // Buscador de productos para "Agregar producto" en la pestaña Asignadas. El catalogo se
 // envia una sola vez como arreglo JS y cada tarjeta lo filtra al escribir (sin acentos,
 // sin distinguir mayusculas). El id elegido va en el input hidden name="id_producto".

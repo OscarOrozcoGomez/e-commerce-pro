@@ -1965,7 +1965,8 @@ function routeSafeText(value) {
 
 function routeBuildWaPhone(telefono) {
     const digits = routeSafeText(telefono).replace(/\D/g, '');
-    return digits ? ('52' + digits) : '';
+    const conLada = /^521?(\d{10})$/.exec(digits); // igual que waBuildBusinessLinkPhone(): sin 5252...
+    return conLada ? ('52' + conLada[1]) : (digits ? ('52' + digits) : '');
 }
 
 function routeFormatEtaHora(eta) {
