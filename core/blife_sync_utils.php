@@ -212,32 +212,84 @@ if (!function_exists('blifeShortName')) {
     /**
      * Deriva el "nombre corto" / nombre de la etiqueta del pomo ("3 Mag Blend",
      * "Clarity Platinum") del body_html de Shopify, que casi siempre empieza con
-     * "<Nombre> B Life(R). ...". A veces va tras una frase-gancho ("¡Descubre el
-     * bienestar con Glycinate Mag B Life®!"). Si no se puede aislar con confianza
-     * devuelve '' (se captura a mano en la ficha).
+     * "<Nombre> B Life(R). ...". Si no, se busca en este orden:
+     *  - tras una frase-gancho: las palabras con mayúscula justo antes de "B Life"
+     *    ("¡Disfruta la formulación de Citrate MG B Life®!" -> "Citrate MG");
+     *  - en las etiquetas (tags) de Shopify, la que coincide con el arranque del handle
+     *    (tag "4 Mag Element" + handle "4-mag-element"; tag "Omega Balance" + handle
+     *    "omega-balance-suplemento-mascotas-...").
+     * Si no se puede aislar con confianza devuelve '' (se captura a mano en la ficha).
+     *
+     * @param string[]|string $tags Tags del producto (arreglo en products.json, "a, b" en products/<handle>.json).
      */
-    function blifeShortName(string $bodyHtml): string
+    function blifeShortName(string $bodyHtml, array|string $tags = [], string $handle = ''): string
     {
         $t = trim((string) preg_replace('~\s+~u', ' ', strip_tags(html_entity_decode($bodyHtml, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
         $t = ltrim($t, "¡¿ \t\"'");
 
+        $marketing = '~^(?:descubre|conoce|explora|disfruta|prueba|impulsa|eleva|experimenta|renueva|dale|potencia|mejora|transforma|incorpora|aprovecha|a[ñn]ade|suma|integra|optimiza|cada|nuestr[ao]s?|este|esta|el|la|los|las|un|una|con|de)$~ui';
+        // Un signo suelto ("+", "&") no cuenta como palabra: "Coconut Oil D3 + K2" son 4.
+        $valido = static function (string $cand): bool {
+            $palabras = count(preg_grep('~[\p{L}\p{N}]~u', preg_split('~\s+~u', $cand) ?: []));
+            return $palabras >= 1 && $palabras <= 4 && mb_strlen($cand) >= 3 && mb_strlen($cand) <= 40;
+        };
+
         // Caso LIMPIO: el body arranca directo con "<Nombre> B Life(R). ...".
         // <Nombre> = 1-5 tokens; el 1º empieza con mayúscula o dígito.
-        if (!preg_match('~^([\p{Lu}0-9][\p{L}\p{N}&.\+\-]*(?:\s+[\p{L}\p{N}&.\+\-]{1,20}){0,4})\s+B\s*Life\b~u', $t, $m)) {
-            return '';
-        }
-        $cand = trim($m[1], " .·-–—|\"'");
-
-        // Descarta si es en realidad una frase de marketing o queda colgando de una preposición.
-        if (preg_match('~^(?:descubre|conoce|explora|disfruta|prueba|impulsa|eleva|experimenta|renueva|dale|potencia|mejora|transforma|incorpora|aprovecha|a[ñn]ade|suma|integra|cada|nuestr[ao]s?|este|esta|el|la|los|las|un|una|con|de)\b~ui', $cand)) {
-            return '';
-        }
-        if (preg_match('~\b(?:de|con|y|para|del|sin)$~ui', $cand)) {
-            return '';
+        if (preg_match('~^([\p{Lu}0-9][\p{L}\p{N}&.\+\-]*(?:\s+[\p{L}\p{N}&.\+\-]{1,20}){0,4})\s+B\s*Life\b~u', $t, $m)) {
+            $cand = trim($m[1], " .·-–—|\"'");
+            $primera = (string) strtok($cand, ' ');
+            // Descarta si es en realidad una frase de marketing o queda colgando de una preposición.
+            if (!preg_match($marketing, $primera) && !preg_match('~\b(?:de|con|y|para|del|sin)$~ui', $cand) && $valido($cand)) {
+                return $cand;
+            }
         }
 
-        $palabras = count(array_filter(preg_split('~\s+~u', $cand) ?: []));
-        return ($palabras >= 1 && $palabras <= 4 && mb_strlen($cand) <= 40) ? $cand : '';
+        // Tras una frase-gancho: palabras con mayúscula (o dígito, "+", "&") pegadas antes de "B Life".
+        if (preg_match_all('~B\s*Life\b~u', $t, $ms, PREG_OFFSET_CAPTURE)) {
+            foreach ($ms[0] as [, $offset]) {
+                $tokens = preg_split('~\s+~u', trim(substr($t, 0, $offset))) ?: [];
+                $run = [];
+                while ($tokens !== []) {
+                    $tok = trim((string) end($tokens), "¡¿\"'");
+                    if (!preg_match('~^(?:[\p{Lu}0-9][\p{L}\p{N}&.\+\-]*|[+&])$~u', $tok)) {
+                        break;
+                    }
+                    array_pop($tokens);
+                    array_unshift($run, $tok);
+                }
+                while ($run !== [] && preg_match($marketing, $run[0])) {
+                    array_shift($run);
+                }
+                // "La Fruta del Monje Pura B Life": el nombre sigue antes de "del" -> no es un nombre aislado.
+                $n = count($tokens);
+                $partido = $n >= 2 && preg_match('~^(?:de|del|y)$~ui', $tokens[$n - 1]) && preg_match('~^\p{Lu}~u', $tokens[$n - 2]);
+                $cand = implode(' ', $run);
+                if ($cand !== '' && !$partido && !preg_match('~^[+&]|[+&]$~', $cand) && $valido($cand)) {
+                    return $cand;
+                }
+            }
+        }
+
+        // Tags: el que coincide con el arranque del handle (el nombre de producto de la tienda).
+        $slug = static fn(string $s): string => trim((string) preg_replace('~[^a-z0-9]+~', '-', blifeNormalizeText($s)), '-');
+        $handle = $slug($handle);
+        if ($handle !== '') {
+            // Si varios tags arrancan el handle ("NAD" y "NAD Synergy"), gana el más largo.
+            $mejor = '';
+            $lista = is_array($tags) ? $tags : explode(',', $tags);
+            foreach ($lista as $tag) {
+                $tag = trim((string) $tag);
+                $s = $slug($tag);
+                if ($s !== '' && ($handle === $s || str_starts_with($handle, $s . '-'))
+                    && preg_match('~^[\p{Lu}0-9]~u', $tag) && $valido($tag) && mb_strlen($tag) > mb_strlen($mejor)) {
+                    $mejor = $tag;
+                }
+            }
+            return $mejor;
+        }
+
+        return '';
     }
 }
 

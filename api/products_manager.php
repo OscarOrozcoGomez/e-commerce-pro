@@ -165,7 +165,7 @@ try {
             $blife_data = [
                 'producto' => [
                     'title'       => (string)($prod['title'] ?? ''),
-                    'nombre_corto' => blifeShortName((string)($prod['body_html'] ?? '')),
+                    'nombre_corto' => blifeShortName((string)($prod['body_html'] ?? ''), $prod['tags'] ?? [], (string)($prod['handle'] ?? '')),
                     'description' => blifeHtmlToText((string)($prod['body_html'] ?? '')),
                     'ingredients' => $ingredientes,
                     'mode_use'    => $modoUso,
