@@ -51,6 +51,7 @@ if ($host !== '') {
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+require_once __DIR__ . '/../core/oferta_caducidad_utils.php';
 require_once __DIR__ . '/../core/caducidad_notificaciones_utils.php';
 
 $pdo = getPDO();
@@ -83,6 +84,53 @@ fwrite(STDOUT, sprintf(
     $mantenimiento['agotados'],
     $mantenimiento['caducados'],
     $mantenimiento['purgados'],
+    PHP_EOL
+));
+
+// Ofertas por caducidad: baja al siguiente escalon el precio de los productos que el sistema puso
+// en Ofertas desde Caducidades (conforme se acerca la fecha) y saca de Ofertas los que ya no
+// tienen ningun lote en riesgo, para que un precio rebajado no se quede de por vida sobre lotes
+// frescos. Los productos que el equipo metio a mano no se tocan (ver ofertaCadReconciliar()).
+// Despues del mantenimiento (los lotes ya estan al dia) y antes de notificar. Se audita DESPUES
+// de aplicar, nunca dentro de la transaccion de negocio.
+$accionesOfertas = ofertaCadReconciliar($pdo, $isDryRun);
+$contadorOfertas = ['precio_bajado' => 0, 'retirado' => 0, 'liberado' => 0, 'precio_manual' => 0];
+foreach ($accionesOfertas as $a) {
+    $contadorOfertas[$a['accion']] = ($contadorOfertas[$a['accion']] ?? 0) + 1;
+    if ($isDryRun) {
+        continue;
+    }
+    if ($a['accion'] === 'precio_bajado') {
+        logAudit(
+            'OFERTA_PRECIO_AUTOMATICO',
+            'productos',
+            $a['id_producto'],
+            $a['nombre'] . ' | precio de oferta baja de $' . number_format((float) $a['precio_anterior'], 2) . ' a $' . number_format((float) $a['precio_nuevo'], 2)
+                . ' (lote ' . ($a['severidad'] ?? '?') . ', se acerca la fecha de caducidad)',
+            ['precio_oferta' => $a['precio_anterior']],
+            ['precio_oferta' => $a['precio_nuevo']],
+            ['severidad' => 'aviso', 'usuario_nombre' => 'Cron de caducidades']
+        );
+    } elseif ($a['accion'] === 'retirado') {
+        logAudit(
+            'OFERTA_RETIRADA_AUTOMATICA',
+            'productos',
+            $a['id_producto'],
+            $a['nombre'] . ' | sale de la categoría Ofertas: ya no le queda ningún lote en riesgo de caducar (volvió a su precio normal)',
+            ['precio_oferta' => $a['precio_anterior']],
+            null,
+            ['severidad' => 'aviso', 'usuario_nombre' => 'Cron de caducidades']
+        );
+    }
+}
+fwrite(STDOUT, sprintf(
+    'RUN %s | dry-run=%s | ofertas: %d precios bajados, %d retiradas de Ofertas, %d liberadas, %d con precio manual%s',
+    date('Y-m-d H:i:s'),
+    $isDryRun ? 'si' : 'no',
+    $contadorOfertas['precio_bajado'],
+    $contadorOfertas['retirado'],
+    $contadorOfertas['liberado'],
+    $contadorOfertas['precio_manual'],
     PHP_EOL
 ));
 

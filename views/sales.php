@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
+require_once __DIR__ . '/../core/oferta_pricing.php';
 
 requireAuth();
 // El permiso 'realizar_ventas' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
@@ -60,6 +61,9 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':almacen' => $id_almacen_actual]);
     $productos = $stmt->fetchAll();
+
+    // Los productos en Ofertas se precargan al precio de oferta (no al normal): ver ofertaAplicarPrecioEfectivoALista().
+    $productos = ofertaAplicarPrecioEfectivoALista($pdo, $productos);
 
     foreach ($productos as &$producto) {
         $producto['imagen_resuelta'] = getProductImageUrl((string)($producto['imagen_fuente'] ?? ''), (int)($producto['id_producto'] ?? 0));
@@ -1970,13 +1974,15 @@ include __DIR__ . '/includes/header.php';
         if (!hayBorradores) {
             nuevaVenta();
         }
-        preseleccionarClienteDesdeUrl(hayBorradores);
+        preseleccionarClienteDesdeUrl();
     });
 
     // Llegar con ?id_cliente=NN (p.ej. desde Administrar Clientes, justo despues de crear un cliente y
     // elegir "agendar venta") abre la venta con ese cliente ya seleccionado, con su telefono y su
-    // domicilio predeterminado. Si ya habia pestanas de venta en curso NO se tocan: se abre una nueva.
-    function preseleccionarClienteDesdeUrl(hayBorradores) {
+    // domicilio predeterminado. Si ya habia una venta EN CURSO (con datos) NO se toca: se abre una pestana nueva. Un
+    // borrador VACIO no es una venta en curso (basta haber abierto Ventas antes para que quede guardado): se reutiliza su
+    // pestana en vez de abrir otra y dejar la primera vacia.
+    function preseleccionarClienteDesdeUrl() {
         const idPreset = parseInt(new URLSearchParams(window.location.search).get('id_cliente') || '0', 10) || 0;
         if (idPreset <= 0) return;
 
@@ -1993,9 +1999,19 @@ include __DIR__ . '/includes/header.php';
             return;
         }
 
-        if (hayBorradores) nuevaVenta();
-        const idTab = 'v' + tabCount;
-        const context = document.getElementById('venta-' + idTab);
+        const contextos = Array.from(document.querySelectorAll('.venta-context'));
+        let idTab;
+        let context;
+        if (contextos.some((ctx) => hasVentaData(ctx))) {
+            nuevaVenta();
+            idTab = 'v' + tabCount;
+            context = document.getElementById('venta-' + idTab);
+        } else {
+            context = contextos[0] || null;
+            idTab = context ? String(context.id || '').replace('venta-', '') : '';
+            const tabsInstance = M.Tabs.getInstance(document.getElementById('ventas-tabs'));
+            if (tabsInstance && context) tabsInstance.select('venta-' + idTab);
+        }
         if (!context) return;
 
         setSelectedCustomer(context, {
@@ -2220,7 +2236,9 @@ include __DIR__ . '/includes/header.php';
         aplicarModoEntrega(context);
 
         if (tabsInstance) tabsInstance.select(`venta-${id}`);
-        setTimeout(() => buscador.focus(), 200);
+        // Foco directo (sin setTimeout) para que el navegador aun lo cuente como parte
+        // del gesto del usuario que abrio la pestaña y abra el teclado solo en moviles.
+        clienteNombreInput?.focus();
         scheduleSalesDraftSave();
     }
 
@@ -2469,7 +2487,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         </div>
                         <div class="producto-item-field-row">
-                            <span class="producto-item-field-label">Precio Unit.</span>
+                            <span class="producto-item-field-label">Precio Unit.${product.en_oferta ? ' <span style="background:#e53935;color:#fff;border-radius:3px;padding:0 5px;font-size:0.75em;" title="Precio normal: $' + Number(product.precio_normal).toFixed(2) + '">OFERTA</span>' : ''}</span>
                             <input type="number" class="precio-unitario producto-item-field-input" name="precio_${productoIndex}" value="${product.precio_venta}" min="0.01" step="0.01" oninput="actualizarTotal('${tabId}')">
                         </div>
                         <div class="producto-item-field-row">

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+require_once __DIR__ . '/../core/alex_oferta_eventos_utils.php';
 
 requireAuth();
 // Permiso 'gestionar_caducidades' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
@@ -51,6 +52,10 @@ $lotes = $proy['lotes'];
 $fTipoDescuadre = trim((string) ($_GET['d_tipo'] ?? ''));
 
 $resumen = loteResumenSeveridad($pdo);
+
+// Panel "Alex y las ofertas": ¿la estrategia de productos por caducar realmente vende? (bitácora
+// alex_oferta_eventos; sin la tabla todavía, el panel simplemente no se muestra).
+$metricasAlex = alexOfertaMetricas($pdo, 30);
 
 // Catálogos para los filtros.
 $almacenes = [];
@@ -112,6 +117,40 @@ include __DIR__ . '/includes/header.php';
                 Lotes ordenados por los días que faltan para caducar. El "excedente proyectado" son las unidades que —a la velocidad de venta de los últimos <?php echo (int) ($proy['ventana_dias'] ?? 90); ?> días— <strong>no</strong> se alcanzarían a vender antes de caducar. Ponlos en oferta a tiempo.
             </p>
 
+            <?php if (!empty($metricasAlex['disponible'])): ?>
+            <?php $mv = $metricasAlex['ventas']; $mc = $metricasAlex['consultas']; ?>
+            <div class="card-panel" style="padding:12px 16px; margin:0 0 12px;">
+                <strong>Alex y las ofertas</strong> <span class="grey-text">· últimos <?php echo (int) $metricasAlex['dias']; ?> días</span>
+                <div style="margin-top:6px; line-height:1.7;">
+                    <span class="chip">Conversaciones con oferta mostrada: <strong><?php echo (int) $mc['conversaciones']; ?></strong></span>
+                    <span class="chip">Pedidos con productos en oferta: <strong><?php echo (int) $mv['pedidos']; ?></strong></span>
+                    <span class="chip">Piezas vendidas: <strong><?php echo (int) $mv['unidades']; ?></strong></span>
+                    <span class="chip">Ingreso: <strong>$<?php echo number_format((float) $mv['ingreso'], 2); ?></strong></span>
+                    <?php if ($metricasAlex['conversion_pct'] !== null): ?>
+                        <span class="chip">Conversión: <strong><?php echo esc((string) $metricasAlex['conversion_pct']); ?>%</strong></span>
+                    <?php endif; ?>
+                    <span class="chip red lighten-4">Piezas de lotes críticos/urgentes: <strong><?php echo (int) $mv['unidades_urgentes']; ?></strong></span>
+                    <?php if ((int) $mv['unidades_paquete'] > 0): ?>
+                        <span class="chip">Vendidas en paquete: <strong><?php echo (int) $mv['unidades_paquete']; ?></strong></span>
+                    <?php endif; ?>
+                    <?php if ((int) $metricasAlex['seguimiento']['enviados'] > 0): ?>
+                        <span class="chip">Seguimientos con oferta: <strong><?php echo (int) $metricasAlex['seguimiento']['enviados']; ?></strong> (<?php echo (int) $metricasAlex['seguimiento']['convertidos']; ?> compraron)</span>
+                    <?php endif; ?>
+                </div>
+                <?php if (!empty($metricasAlex['top_productos'])): ?>
+                    <div class="grey-text" style="margin-top:6px; font-size:0.9em;">
+                        Más vendidos por Alex en oferta:
+                        <?php echo esc(implode(' · ', array_map(
+                            static fn(array $t): string => $t['nombre'] . ' (' . $t['unidades'] . ')',
+                            $metricasAlex['top_productos']
+                        ))); ?>
+                    </div>
+                <?php endif; ?>
+                <?php if ((int) $mc['conversaciones'] === 0 && (int) $mv['pedidos'] === 0): ?>
+                    <div class="grey-text" style="margin-top:6px; font-size:0.9em;">Todavía no hay datos: se llenará conforme Alex muestre y venda productos en oferta.</div>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
             <div style="margin-bottom:10px;">
                 <?php
                 $chips = [
@@ -243,7 +282,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td style="white-space:nowrap;">
-                                    <a class="btn-flat btn-small green-text text-darken-2" title="Poner en oferta (1 clic): agrega el producto a la categoría Ofertas y le fija precio costo + $50" onclick="ponerEnOferta(<?php echo (int) $l['id_lote']; ?>, <?php echo (int) $l['id_producto']; ?>, '<?php echo addslashes(esc((string) ($l['producto_nombre'] ?? ''))); ?>')"><i class="material-icons">sell</i></a>
+                                    <a class="btn-flat btn-small green-text text-darken-2" title="Poner en oferta (1 clic): agrega el producto a la categoría Ofertas con el precio que toca según qué tan cerca está de caducar (críticos: costo + $50). Después el precio baja solo conforme se acerca la fecha y sale de Ofertas cuando ya no queden lotes en riesgo." onclick="ponerEnOferta(<?php echo (int) $l['id_lote']; ?>, <?php echo (int) $l['id_producto']; ?>, '<?php echo addslashes(esc((string) ($l['producto_nombre'] ?? ''))); ?>')"><i class="material-icons">sell</i></a>
                                     <a class="btn-flat btn-small" title="Marcar en oferta / atendida" onclick="marcarOferta(<?php echo (int) $l['id_lote']; ?>)"><i class="material-icons">local_offer</i></a>
                                     <a class="btn-flat btn-small" title="Ver producto" href="<?php echo BASE_URL; ?>views/products.php?id_producto=<?php echo (int) $l['id_producto']; ?>&from=caducidades"><i class="material-icons">open_in_new</i></a>
                                     <a class="btn-flat btn-small red-text" title="Retirar lote" onclick="retirarLote(<?php echo (int) $l['id_lote']; ?>)"><i class="material-icons">block</i></a>
@@ -325,10 +364,11 @@ include __DIR__ . '/includes/header.php';
     };
 
     // Un clic: mete el producto a la categoría "Ofertas" y le fija el precio de
-    // oferta (costo + $50) si no tiene uno manual. Desde ahí el catálogo, la ficha,
-    // el POS y Alex lo venden a ese precio.
+    // oferta que toca por urgencia (escalera; crítico = costo + $50) si no tiene uno manual.
+    // Desde ahí el catálogo, la ficha, el POS y Alex lo venden a ese precio; el cron de
+    // caducidades lo baja al siguiente escalón y lo retira de Ofertas cuando ya no hay riesgo.
     window.ponerEnOferta = function (idLote, idProducto, nombre) {
-        if (!confirm('¿Poner "' + nombre + '" en Ofertas?\n\nSe agrega a la categoría Ofertas y se le fija el precio de oferta (costo + $50) si aún no tiene uno capturado a mano.')) return;
+        if (!confirm('¿Poner "' + nombre + '" en Ofertas?\n\nSe agrega a la categoría Ofertas y se le fija el precio de oferta según qué tan cerca está de caducar (si es crítico, costo + $50) si aún no tiene uno capturado a mano.\n\nEl precio baja solo conforme se acerca la fecha, y sale de Ofertas cuando ya no le queden lotes en riesgo.')) return;
         postLote({ accion: 'poner_producto_en_oferta', id_lote: idLote, id_producto: idProducto }).then(tras);
     };
 

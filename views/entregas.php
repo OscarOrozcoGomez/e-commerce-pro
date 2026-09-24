@@ -954,11 +954,18 @@ include __DIR__ . '/includes/header.php';
                                             $esUltimoItemTarjeta = $indexItemTarjeta === array_key_last($itemsPedidoTarjeta);
                                             // Foto y precio de cada producto: el repartidor confirma que lleva el correcto y
                                             // cuanto cuesta cada cosa (por si el cliente pregunta o rechaza una).
-                                            $cantidadItem = max(1, (int)($d['cantidad'] ?? 1));
-                                            $precioUnitarioItem = (float)($d['precio_unitario'] ?? 0);
-                                            $subtotalItem = isset($d['subtotal']) && $d['subtotal'] !== null ? (float)$d['subtotal'] : $precioUnitarioItem * $cantidadItem;
-                                            $precioOriginalItem = (float)($d['precio_original'] ?? 0);
-                                            $itemConDescuento = $precioUnitarioItem > 0 && $precioOriginalItem > $precioUnitarioItem + 0.004;
+                                            // Oferta (precio_original > unitario) y descuento de linea del POS (subtotal ya rebajado):
+                                            // ver entregaPreciosItem() en core/entrega_item_utils.php.
+                                            $preciosItem = entregaPreciosItem(
+                                                (int)($d['cantidad'] ?? 1),
+                                                (float)($d['precio_unitario'] ?? 0),
+                                                (float)($d['precio_original'] ?? 0),
+                                                isset($d['subtotal']) && $d['subtotal'] !== null ? (float)$d['subtotal'] : null
+                                            );
+                                            $cantidadItem = $preciosItem['cantidad'];
+                                            $precioUnitarioItem = $preciosItem['unitario'];
+                                            $subtotalItem = $preciosItem['subtotal'];
+                                            $itemConDescuento = $preciosItem['con_descuento'];
                                             $imagenItemSrc = catalogResolveCardImageSrc((string)($d['imagen_producto'] ?? ''), (int)($d['id_producto'] ?? 0));
                                         ?>
                                         <li style="padding:8px 0;<?php echo $esUltimoItemTarjeta ? '' : ' border-bottom:1px solid #e0e0e0;'; ?>">
@@ -968,11 +975,11 @@ include __DIR__ . '/includes/header.php';
                                                     <?php echo $cantidadItem; ?>x <?php echo esc($pName); ?>
                                                     <span class="entrega-item-precio">
                                                         <strong>$<?php echo number_format($subtotalItem, 2); ?></strong>
-                                                        <?php if ($cantidadItem > 1 && $precioUnitarioItem > 0): ?>
+                                                        <?php if ($preciosItem['mostrar_unitario']): ?>
                                                             <span class="grey-text">(<?php echo $cantidadItem; ?> &times; $<?php echo number_format($precioUnitarioItem, 2); ?> c/u)</span>
                                                         <?php endif; ?>
                                                         <?php if ($itemConDescuento): ?>
-                                                            <span class="grey-text"><s>$<?php echo number_format($precioOriginalItem * $cantidadItem, 2); ?></s></span>
+                                                            <span class="grey-text"><s>$<?php echo number_format($preciosItem['lista_total'], 2); ?></s></span>
                                                         <?php endif; ?>
                                                     </span>
                                                 </span>
@@ -1013,8 +1020,11 @@ include __DIR__ . '/includes/header.php';
                                         </li>
                                     <?php endforeach; ?>
                                 </ul>
+                                <?php if ((float)($ent['costo_envio'] ?? 0) > 0): ?>
+                                    <p style="margin:8px 0 0; text-align:right;">Envío: <strong>$<?php echo number_format((float)$ent['costo_envio'], 2); ?></strong></p>
+                                <?php endif; ?>
                             </div>
-                            
+
                             <?php if ($ent['fecha_entrega_programada']): ?>
                                 <p class="orange-text" style="margin-top: 10px;">
                                     <i class="material-icons tiny">event</i> Programado para: <?php echo date('d/m/Y H:i', strtotime($ent['fecha_entrega_programada'])); ?>
@@ -1039,6 +1049,13 @@ include __DIR__ . '/includes/header.php';
                                         <input type="number" inputmode="decimal" min="0" step="0.50" id="cambio-paga-<?php echo (int)$ent['id_pedido']; ?>" class="cambio-paga" placeholder="0.00" autocomplete="off">
                                     </div>
                                     <div class="cambio-result" aria-live="polite"></div>
+                                    <?php $costoEnvioCambio = (float)($ent['costo_envio'] ?? 0); ?>
+                                    <?php if ($costoEnvioCambio > 0): ?>
+                                        <label style="display:block; margin-top:10px; font-size:0.8rem; color:#7a4e00;">
+                                            <input type="checkbox" class="cambio-quitar-envio" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioCambio, 2, '.', '')); ?>">
+                                            <span>No cobrar el envío de $<?php echo number_format($costoEnvioCambio, 2); ?> (cliente cerca del periférico)</span>
+                                        </label>
+                                    <?php endif; ?>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -1177,7 +1194,7 @@ include __DIR__ . '/includes/header.php';
                                         <input type="text" name="motivo_sin_evidencia_otro" data-omitir-other="1" maxlength="180" placeholder="Especifica el motivo" style="display:none; width:100%; height:40px; margin-bottom:8px; padding:0 10px; border:1px solid #cfd8dc; border-radius:4px; box-sizing:border-box;">
                                         <?php if ($costoEnvioPedido > 0): ?>
                                             <label class="quitar-cargo-periferico-label" style="display:flex; align-items:flex-start; gap:8px; background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px 10px; margin-bottom:10px; cursor:pointer;">
-                                                <input type="checkbox" class="quitar-cargo-periferico" name="quitar_cargo_periferico" value="1" data-total="<?php echo esc(number_format((float)$ent['total'], 2, '.', '')); ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioPedido, 2, '.', '')); ?>" data-cobrar-target="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:3px;">
+                                                <input type="checkbox" class="quitar-cargo-periferico" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" name="quitar_cargo_periferico" value="1" data-total="<?php echo esc(number_format((float)$ent['total'], 2, '.', '')); ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioPedido, 2, '.', '')); ?>" data-cobrar-target="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:3px;">
                                                 <span style="font-size:0.78rem; color:#7a4e00;">Este pedido trae un cargo de <strong>$<?php echo number_format($costoEnvioPedido, 2); ?></strong> por entrega fuera del periférico. Si el cliente esta cerca, puedes quitarlo.</span>
                                             </label>
                                         <?php endif; ?>
@@ -1195,7 +1212,7 @@ include __DIR__ . '/includes/header.php';
                                         </p>
                                         <?php if ($costoEnvioPedido > 0): ?>
                                             <label class="quitar-cargo-periferico-label" style="display:flex; align-items:flex-start; gap:8px; background:#fff8e1; border:1px solid #ffcc80; border-radius:4px; padding:8px 10px; margin-bottom:8px; cursor:pointer;">
-                                                <input type="checkbox" class="quitar-cargo-periferico" name="quitar_cargo_periferico" value="1" data-total="<?php echo esc(number_format((float)$ent['total'], 2, '.', '')); ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioPedido, 2, '.', '')); ?>" data-cobrar-target="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:3px;">
+                                                <input type="checkbox" class="quitar-cargo-periferico" data-id-pedido="<?php echo (int)$ent['id_pedido']; ?>" name="quitar_cargo_periferico" value="1" data-total="<?php echo esc(number_format((float)$ent['total'], 2, '.', '')); ?>" data-costo-envio="<?php echo esc(number_format($costoEnvioPedido, 2, '.', '')); ?>" data-cobrar-target="cobrar-monto-<?php echo (int)$ent['id_pedido']; ?>" style="margin-top:3px;">
                                                 <span style="font-size:0.78rem; color:#7a4e00;">Este pedido trae un cargo de <strong>$<?php echo number_format($costoEnvioPedido, 2); ?></strong> por entrega fuera del periférico. Si el cliente esta cerca, puedes quitarlo.</span>
                                             </label>
                                         <?php endif; ?>
@@ -1352,7 +1369,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.cambio-box').forEach((box) => {
         const input = box.querySelector('.cambio-paga');
         const result = box.querySelector('.cambio-result');
-        const total = parseFloat(box.getAttribute('data-total')) || 0;
+        const totalConEnvio = parseFloat(box.getAttribute('data-total')) || 0;
+        let total = totalConEnvio;
         if (!input || !result) return;
 
         const parseMonto = (txt) => {
@@ -1390,6 +1408,38 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         input.addEventListener('input', render);
+
+        // "No cobrar el envio": recalcula el total y se mantiene en sincronia con el checkbox
+        // del formulario de entrega de la misma tarjeta (el que de verdad quita el cargo en el
+        // servidor); ese checkbox tambien actualiza el "Cobrar al entregar".
+        const chkEnvio = box.querySelector('.cambio-quitar-envio');
+        if (chkEnvio) {
+            let card = box.parentElement;
+            while (card && !card.querySelector('.quitar-cargo-periferico')) card = card.parentElement;
+            const chkForm = card ? card.querySelector('.quitar-cargo-periferico') : null;
+            const totalEl = box.querySelector('.cambio-box-total');
+            const costoEnvio = parseFloat(chkEnvio.getAttribute('data-costo-envio')) || 0;
+            const aplicar = () => {
+                total = chkEnvio.checked ? Math.max(0, totalConEnvio - costoEnvio) : totalConEnvio;
+                if (totalEl) totalEl.textContent = 'Total $' + money(total);
+                render();
+            };
+            chkEnvio.addEventListener('change', () => {
+                if (chkForm && chkForm.checked !== chkEnvio.checked) {
+                    chkForm.checked = chkEnvio.checked;
+                    chkForm.dispatchEvent(new Event('change'));
+                }
+                aplicar();
+            });
+            if (chkForm) {
+                chkForm.addEventListener('change', () => {
+                    if (chkEnvio.checked !== chkForm.checked) {
+                        chkEnvio.checked = chkForm.checked;
+                        aplicar();
+                    }
+                });
+            }
+        }
     });
 
     document.querySelectorAll('form.cancel-entrega-form[data-cancel-form="1"]').forEach((formEl) => {
@@ -1783,6 +1833,13 @@ const routeDefaultOrigin = { lat: 20.6596988, lng: -103.3496092 };
 const routeSelectedDate = <?php echo json_encode($selectedFechaEntrega, JSON_UNESCAPED_UNICODE); ?>;
 const routeTodayDate = <?php echo json_encode(date('Y-m-d'), JSON_UNESCAPED_UNICODE); ?>;
 const routeStorageKey = <?php echo json_encode('deliveryRoute_' . (int)($usuario['id_usuario'] ?? 0) . ($isAdminView ? '_rep' . $selectedRepartidorId : ''), JSON_UNESCAPED_UNICODE); ?>;
+// Productos (solo los que siguen en pie) y total ACTUALES de cada pedido de la lista. La ruta
+// guardada en localStorage trae los de cuando se genero; el aviso de WhatsApp usa estos para no
+// mandar un producto que ya se quito/rechazo ni un total viejo (ver routeBuildWaMessage).
+const routeDatosVivos = <?php echo entregaWaDatosVivosJson(entregaWaDatosVivos($entregas, $detallesPorPedido)); ?>;
+// Pedidos a los que el repartidor les palomeo "no cobrar el envio" en su tarjeta.
+const routeEnvioQuitado = {};
+let routeUltimasParadas = {};
 let routeOriginSource = 'none';
 let routeGeoPermissionState = 'unknown';
 
@@ -1959,10 +2016,35 @@ function routeFormatMoney(value) {
     return Number.isFinite(num) ? num.toFixed(2) : null;
 }
 
+// Al palomear/despalomear "no cobrar el envio" en la tarjeta, se rehace el link de WhatsApp de
+// esa parada para que el total del aviso cuadre con lo que de verdad se va a cobrar.
+function routeActualizarWaPorEnvio(ev) {
+    const chk = ev.target;
+    if (!chk.matches || !chk.matches('.cambio-quitar-envio, .quitar-cargo-periferico')) return;
+    const idPedido = chk.getAttribute('data-id-pedido') || '';
+    routeEnvioQuitado[idPedido] = chk.checked;
+    const stop = routeUltimasParadas[idPedido];
+    const link = document.querySelector(`#route-result-content a[data-route-pedido="${CSS.escape(idPedido)}"]`);
+    if (!stop || !link) return;
+    const msg = routeBuildWaMessage(stop);
+    const phone = link.getAttribute('data-wa-phone') || '';
+    link.setAttribute('data-wa-text', msg);
+    link.setAttribute('href', `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`);
+    if (typeof window.waApplyBusinessLinks === 'function') {
+        window.waApplyBusinessLinks(link.parentElement);
+    }
+}
+document.addEventListener('change', routeActualizarWaPorEnvio);
+
 function routeBuildWaMessage(stop) {
     const hora = routeFormatEtaHora(stop.eta_estimada);
-    const productos = Array.isArray(stop.productos) ? stop.productos : [];
-    const totalTexto = routeFormatMoney(stop.total);
+    const vivo = routeDatosVivos[String(stop.id_pedido)] || null;
+    const productos = vivo ? vivo.productos : (Array.isArray(stop.productos) ? stop.productos : []);
+    let total = vivo ? vivo.total : stop.total;
+    if (vivo && routeEnvioQuitado[String(stop.id_pedido)] && vivo.costo_envio > 0) {
+        total = Math.max(0, vivo.total - vivo.costo_envio);
+    }
+    const totalTexto = routeFormatMoney(total);
 
     let msg = 'Hola! Tu pedido es el siguiente';
     if (productos.length > 0) {
@@ -2275,6 +2357,8 @@ function routeRenderResult(data, options = {}) {
     const fallbackNotice = typeof data.fallback_notice === 'string' ? data.fallback_notice.trim() : '';
     const provider = String(data.routing_provider || 'google_routes');
 
+    routeUltimasParadas = {};
+    stops.forEach((stop) => { routeUltimasParadas[String(stop.id_pedido)] = stop; });
     const stopsHtml = stops.map((stop, index) => {
         const warningClass = stop.en_riesgo ? 'route-stop-risk' : '';
         const limitText = stop.fecha_limite_entrega ? `<div><strong>Limite:</strong> ${routeEscapeHtml(stop.fecha_limite_entrega)}</div>` : '';
@@ -2283,7 +2367,7 @@ function routeRenderResult(data, options = {}) {
         const waPhone = routeBuildWaPhone(stop.telefono);
         const waMessage = routeBuildWaMessage(stop);
         const waLink = waPhone
-            ? `<div style="margin-top:4px;"><a href="https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}" target="_blank" class="green-text whatsapp-business-link" data-wa-phone="${waPhone}" data-wa-text="${routeEscapeHtml(waMessage)}"><i class="material-icons tiny">chat</i> Avisar hora estimada por WhatsApp</a></div>`
+            ? `<div style="margin-top:4px;"><a href="https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}" target="_blank" class="green-text whatsapp-business-link" data-route-pedido="${routeEscapeHtml(String(stop.id_pedido))}" data-wa-phone="${waPhone}" data-wa-text="${routeEscapeHtml(waMessage)}"><i class="material-icons tiny">chat</i> Avisar hora estimada por WhatsApp</a></div>`
             : '';
 
         return `

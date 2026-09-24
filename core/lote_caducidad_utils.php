@@ -1145,15 +1145,149 @@ function loteMarcarAtendida(PDO $pdo, int $idLote, bool $enOferta, ?string $nota
 }
 
 /**
+ * Severidades que cuentan como "en riesgo de caducar": el producto sigue justificando estar en
+ * Ofertas mientras le quede al menos un lote vendible en alguna de ellas. 'vigilar', 'ok' y
+ * 'sin_historico' no cuentan (mucho margen o dato insuficiente); 'caducado' tampoco: eso ya
+ * es merma, no se puede ofrecer.
+ */
+const LOTE_SEVERIDADES_EN_RIESGO = ['sin_rotacion', 'planificar', 'urgente', 'critico'];
+
+/**
+ * True si un lote (fila de loteFetchProyecciones()) todavia se puede vender a tiempo: ni ya
+ * caduco ni "no_vendible" (el envase no alcanza a consumirse antes de caducar, aunque la
+ * fecha todavia no llegue).
+ */
+function loteEsVendible(array $lote): bool
+{
+    return ($lote['severidad'] ?? null) !== 'caducado' && empty($lote['no_vendible']);
+}
+
+/**
+ * Resume el riesgo de caducidad por producto a partir de filas de loteFetchProyecciones().
+ * Solo cuenta lotes vendibles con existencia. Pura (sin DB) para poder probarse.
+ *
+ * - severidad: la PEOR entre sus lotes vendibles (null si no le queda ninguno vendible).
+ * - en_riesgo: esa severidad esta en LOTE_SEVERIDADES_EN_RIESGO.
+ * - piezas_en_riesgo: unidades en lotes vendibles en riesgo (lo que "hay que mover").
+ * - fecha_caducidad / dias_para_caducar: del lote en riesgo que caduca primero (el que FEFO
+ *   vende primero); dias_tratamiento solo si el producto tiene capsulas por envase Y porcion
+ *   capturadas (nunca se asume una dosis que nadie capturo).
+ *
+ * Con $incluirNoVendibles (lo usa la limpieza automatica de Ofertas, no Alex) un lote no_vendible
+ * que todavia no caduco cuenta como en riesgo (critico): su envase ya no se alcanza a consumir, asi
+ * que hay que seguir liquidandolo al piso -- sacarlo de Ofertas lo devolveria a precio completo
+ * justo cuando mas urge venderlo. Alex sigue sin ofrecerlos (aiLoteEsVendible()).
+ *
+ * @param array<int,array<string,mixed>> $lotes
+ * @return array<int,array{severidad:?string,en_riesgo:bool,piezas_en_riesgo:int,stock_vendible:int,fecha_caducidad:?string,dias_para_caducar:?int,dias_tratamiento:?int}>
+ */
+function loteResumenRiesgoPorProducto(array $lotes, bool $incluirNoVendibles = false): array
+{
+    $out = [];
+
+    foreach ($lotes as $lote) {
+        $idProducto = (int) ($lote['id_producto'] ?? 0);
+        if ($idProducto <= 0) {
+            continue;
+        }
+        if (!isset($out[$idProducto])) {
+            $out[$idProducto] = [
+                'severidad' => null,
+                'en_riesgo' => false,
+                'piezas_en_riesgo' => 0,
+                'stock_vendible' => 0,
+                'fecha_caducidad' => null,
+                'dias_para_caducar' => null,
+                'dias_tratamiento' => null,
+            ];
+        }
+
+        $restante = max(0, (int) ($lote['cantidad_restante'] ?? 0));
+        $vendible = loteEsVendible($lote);
+        // no_vendible pero sin caducar (loteEsVendible() ya excluye 'caducado'): solo entra en modo limpieza.
+        $liquidable = !$vendible && $incluirNoVendibles && ($lote['severidad'] ?? '') !== 'caducado';
+        if ($restante <= 0 || (!$vendible && !$liquidable)) {
+            continue;
+        }
+
+        $sev = $liquidable ? 'critico' : (string) ($lote['severidad'] ?? 'ok');
+        $r = &$out[$idProducto];
+        if ($vendible) {
+            $r['stock_vendible'] += $restante;
+        }
+        $r['severidad'] = $r['severidad'] === null ? $sev : loteSeveridadPeor($r['severidad'], $sev);
+
+        if (in_array($sev, LOTE_SEVERIDADES_EN_RIESGO, true)) {
+            $r['piezas_en_riesgo'] += $restante;
+            $fecha = substr((string) ($lote['fecha_caducidad'] ?? ''), 0, 10);
+            if ($fecha !== '' && ($r['fecha_caducidad'] === null || strcmp($fecha, $r['fecha_caducidad']) < 0)) {
+                $r['fecha_caducidad'] = $fecha;
+                $r['dias_para_caducar'] = isset($lote['dias_hasta_caducar']) ? (int) $lote['dias_hasta_caducar'] : null;
+                $caps = isset($lote['capsulas_por_envase']) ? (int) $lote['capsulas_por_envase'] : 0;
+                $porcion = isset($lote['porcion_capsulas']) ? (int) $lote['porcion_capsulas'] : 0;
+                $r['dias_tratamiento'] = ($caps > 0 && $porcion > 0) ? intdiv($caps, $porcion) : null;
+            }
+        }
+        unset($r);
+    }
+
+    foreach ($out as &$r) {
+        $r['en_riesgo'] = $r['severidad'] !== null && in_array($r['severidad'], LOTE_SEVERIDADES_EN_RIESGO, true);
+    }
+    unset($r);
+
+    return $out;
+}
+
+/**
+ * Registra (o actualiza) que un producto en Ofertas lo gestiona el sistema: solo esos
+ * productos se ajustan/retiran solos (ver ofertaCadReconciliar()). Un producto que el equipo
+ * metio a la categoria a mano NO entra aqui y nunca se toca. No hace nada si la tabla aun no
+ * existe (deploy en curso).
+ */
+function loteRegistrarGestionOferta(PDO $pdo, int $idProducto, string $severidad, bool $gestionaPrecio, ?float $precioAplicado): void
+{
+    if (!loteTablaExiste($pdo, 'oferta_caducidad_gestion')) {
+        return;
+    }
+
+    $existe = $pdo->prepare('SELECT 1 FROM oferta_caducidad_gestion WHERE id_producto = ?');
+    $existe->execute([$idProducto]);
+
+    if ($existe->fetchColumn() !== false) {
+        $pdo->prepare(
+            'UPDATE oferta_caducidad_gestion
+             SET severidad = ?, gestiona_precio = ?, precio_aplicado = ?, actualizado_en = CURRENT_TIMESTAMP
+             WHERE id_producto = ?'
+        )->execute([$severidad, $gestionaPrecio ? 1 : 0, $precioAplicado, $idProducto]);
+
+        return;
+    }
+
+    $pdo->prepare(
+        'INSERT INTO oferta_caducidad_gestion (id_producto, severidad, gestiona_precio, precio_aplicado)
+         VALUES (?, ?, ?, ?)'
+    )->execute([$idProducto, $severidad, $gestionaPrecio ? 1 : 0, $precioAplicado]);
+}
+
+/**
  * Pone un producto "en oferta" desde el panel de Caducidades, de un clic:
  *  - lo agrega a la categoria de ofertas (la crea como "Oferta" si no existe),
- *  - le fija precio_oferta = costo + $50 si aun no tiene un override manual,
+ *  - le fija precio_oferta si aun no tiene un override manual: el escalon de la escalera
+ *    que corresponde a la urgencia de sus lotes (ofertaPrecioEscalera(); un lote critico
+ *    queda directo en costo + $50, como siempre),
  *  - marca el lote como atendido y en_oferta (cuando se pasa un id_lote > 0).
+ *
+ * Si el producto NO estaba en Ofertas, ademas queda "gestionado": el cron de caducidades
+ * (ofertaCadReconciliar()) le baja el precio al siguiente escalon conforme se acerca la fecha
+ * y lo saca de Ofertas cuando ya no le quede ningun lote en riesgo -- asi el precio rebajado
+ * no se queda de por vida sobre lotes frescos. Uno que ya estaba en la categoria (curado a
+ * mano) se conserva tal cual, con el comportamiento de siempre (costo + $50 si no tenia precio).
  *
  * El catalogo, la ficha, el POS y Alex ya leen ese precio efectivo, asi que con
  * este unico paso el producto pasa a venderse al precio de oferta en todos lados.
  *
- * @return array{nombre:string, precio_costo:float, precio_oferta:float, precio_venta:float, ya_estaba:bool, precio_fijado:bool}
+ * @return array{nombre:string, precio_costo:float, precio_oferta:float, precio_venta:float, ya_estaba:bool, precio_fijado:bool, severidad:?string, gestionada:bool}
  */
 function lotePonerProductoEnOferta(PDO $pdo, int $idProducto, int $idLote, int $userId): array
 {
@@ -1182,15 +1316,56 @@ function lotePonerProductoEnOferta(PDO $pdo, int $idProducto, int $idLote, int $
             ->execute([':p' => $idProducto, ':c' => $catId]);
     }
 
-    // El precio sugerido solo se escribe si no hay un override manual todavia
-    // (no pisar un precio que alguien ya bajo a mano desde la ficha del producto).
+    // Urgencia real del producto (peor severidad entre sus lotes vendibles). Si la proyeccion no
+    // se puede calcular (esquema a medio migrar) queda null y se usa el escalon inicial.
+    $severidad = null;
+    try {
+        $lotesProducto = loteFetchProyecciones($pdo, ['id_producto' => $idProducto])['lotes'];
+        $severidad = loteResumenRiesgoPorProducto($lotesProducto)[$idProducto]['severidad'] ?? null;
+    } catch (Throwable $e) {
+        $severidad = null;
+    }
+
+    $gestionActual = null;
+    if (loteTablaExiste($pdo, 'oferta_caducidad_gestion')) {
+        $stmtG = $pdo->prepare('SELECT gestiona_precio, precio_aplicado FROM oferta_caducidad_gestion WHERE id_producto = ?');
+        $stmtG->execute([$idProducto]);
+        $gestionActual = $stmtG->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    // El precio solo se escribe si no hay un override manual todavia (no pisar un precio que
+    // alguien ya bajo a mano desde la ficha del producto).
     $tienePrecio = $prod['precio_oferta'] !== null && (float) $prod['precio_oferta'] > 0;
-    $precioOferta = $tienePrecio
-        ? round((float) $prod['precio_oferta'], 2)
-        : ofertaPrecioSugerido((float) $prod['precio_costo']);
-    if (!$tienePrecio) {
+    $precioVenta = (float) $prod['precio_venta'];
+    $precioCosto = (float) $prod['precio_costo'];
+    $gestionada = !$yaEstaba || $gestionActual !== null;
+    $gestionaPrecio = false;
+
+    if ($yaEstaba && $gestionActual === null) {
+        // Curado a mano antes de esta funcion: comportamiento de siempre (costo + $50), sin gestion.
+        $precioOferta = $tienePrecio ? round((float) $prod['precio_oferta'], 2) : ofertaPrecioSugerido($precioCosto);
+        $precioFijado = !$tienePrecio;
+    } elseif ($tienePrecio && !($gestionActual !== null && (int) $gestionActual['gestiona_precio'] === 1)) {
+        // Override manual: se respeta, y el producto solo queda gestionado en cuanto a su
+        // permanencia en Ofertas (el precio sigue siendo el de la persona).
+        $precioOferta = round((float) $prod['precio_oferta'], 2);
+        $precioFijado = false;
+    } else {
+        // Precio gestionado por la escalera. Una segunda pulsacion nunca sube un precio ya bajado.
+        $objetivo = ofertaPrecioEscalera($precioVenta, $precioCosto, $severidad);
+        $actual = $tienePrecio ? round((float) $prod['precio_oferta'], 2) : null;
+        $precioOferta = $actual !== null ? min($actual, $objetivo) : $objetivo;
+        $precioFijado = $actual === null || $precioOferta < $actual;
+        $gestionaPrecio = true;
+    }
+
+    if ($precioFijado) {
         $pdo->prepare('UPDATE productos SET precio_oferta = :po WHERE id_producto = :id')
             ->execute([':po' => $precioOferta, ':id' => $idProducto]);
+    }
+
+    if ($gestionada) {
+        loteRegistrarGestionOferta($pdo, $idProducto, $severidad ?? '', $gestionaPrecio, $gestionaPrecio ? $precioOferta : null);
     }
 
     if ($idLote > 0) {
@@ -1199,11 +1374,13 @@ function lotePonerProductoEnOferta(PDO $pdo, int $idProducto, int $idLote, int $
 
     return [
         'nombre'        => (string) $prod['nombre'],
-        'precio_costo'  => round((float) $prod['precio_costo'], 2),
+        'precio_costo'  => round($precioCosto, 2),
         'precio_oferta' => $precioOferta,
-        'precio_venta'  => round((float) $prod['precio_venta'], 2),
+        'precio_venta'  => round($precioVenta, 2),
         'ya_estaba'     => $yaEstaba,
-        'precio_fijado' => !$tienePrecio,
+        'precio_fijado' => $precioFijado,
+        'severidad'     => $severidad,
+        'gestionada'    => $gestionada,
     ];
 }
 
@@ -1337,10 +1514,15 @@ function loteDescontarVentaFEFO(PDO $pdo, int $idProducto, ?int $idAlmacen, int 
             return $plan;
         }
 
+        // ORDEN IMPORTA: en MySQL/MariaDB las asignaciones del SET se evaluan de izquierda a derecha y ven
+        // el valor YA actualizado (SQLite/estandar usan el original). Con la cantidad primero, el CASE
+        // restaba dos veces: el lote pasaba a 'agotado' con 1 pieza todavia disponible y esa ultima pieza
+        // nunca se le asignaba a ningun lote. Visto en una prueba de concurrencia sobre MariaDB (los tests
+        // con SQLite no lo pueden ver). El estado va PRIMERO para leer la cantidad original.
         $updLote = $pdo->prepare(
             "UPDATE lotes_inventario
-             SET cantidad_restante = cantidad_restante - :c,
-                 estado = CASE WHEN cantidad_restante - :c2 <= 0 THEN 'agotado' ELSE estado END
+             SET estado = CASE WHEN cantidad_restante - :c2 <= 0 THEN 'agotado' ELSE estado END,
+                 cantidad_restante = cantidad_restante - :c
              WHERE id_lote = :id"
         );
         $registrarDetalle = $idDetallePedido > 0 && loteTablaExiste($pdo, 'detalle_pedido_lotes');

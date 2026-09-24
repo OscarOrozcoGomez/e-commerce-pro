@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/oferta_pricing.php';
+
 /**
  * Agrega un producto a un pedido ya existente (asignado a repartidor, en reparto o incluso
  * ya entregado): descuenta el inventario del almacen del pedido, registra el movimiento y
@@ -44,7 +46,7 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             return ['success' => false, 'message' => 'El pedido no tiene un almacen valido.'];
         }
 
-        $stmtProducto = $pdo->prepare("SELECT nombre, precio_venta, precio_costo, estado FROM productos WHERE id_producto = :id_producto{$lockClause}");
+        $stmtProducto = $pdo->prepare("SELECT nombre, precio_venta, precio_costo, precio_oferta, estado FROM productos WHERE id_producto = :id_producto{$lockClause}");
         $stmtProducto->execute([':id_producto' => $idProducto]);
         $producto = $stmtProducto->fetch(PDO::FETCH_ASSOC) ?: null;
 
@@ -57,7 +59,11 @@ function dbAdminAgregarProductoPedido(PDO $pdo, int $idPedido, int $idProducto, 
             return ['success' => false, 'message' => 'Este producto no esta activo para venta.'];
         }
 
-        $precioUnitario = round((float)($producto['precio_venta'] ?? 0), 2);
+        // Un producto en Ofertas se agrega al precio de oferta, no al normal (ver core/oferta_pricing.php).
+        $precioNormal = round((float)($producto['precio_venta'] ?? 0), 2);
+        $precioUnitario = $precioNormal > 0
+            ? round(ofertaPrecioEfectivo($precioNormal, (float)($producto['precio_costo'] ?? 0), $producto['precio_oferta'] ?? null, ofertaProductoEnOferta($pdo, $idProducto)), 2)
+            : $precioNormal;
         if ($precioUnitario <= 0) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Este producto no tiene un precio de venta valido.'];

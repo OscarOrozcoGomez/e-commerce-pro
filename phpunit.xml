@@ -22,6 +22,7 @@
     <php>
         <env name="APP_ENV" value="qa"/>
         <env name="DISABLE_GSM" value="1"/>
+        <env name="AI_AGRUPAR_MENSAJES_SEGUNDOS" value="0"/>
         <env name="ALLOW_GSM_LOCAL" value="0"/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_NAME" value="test_db"/>

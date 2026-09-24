@@ -45,6 +45,7 @@ if ($modoDetalle) {
     $linkPhoneContacto = waWhatsAppLinkPhone((string) $info['wa_id'], $info['telefono_resuelto'] ?? null);
     $mensajes = waConversacionMensajes($pdo, $idConversacion);
     $tags = aiGetConversationTags($pdo, $idConversacion);
+    $puedeCrearReglas = canGiveAlexFeedback();
 
     include __DIR__ . '/includes/header.php';
     ?>
@@ -87,6 +88,7 @@ if ($modoDetalle) {
                     <p class="grey-text">Sin mensajes registrados.</p>
                 <?php else: ?>
                     <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+                        <?php $ultimoMensajeCliente = ''; ?>
                         <?php foreach ($mensajes as $msg): ?>
                             <?php
                                 $rol = (string) $msg['rol'];
@@ -104,6 +106,9 @@ if ($modoDetalle) {
                                     continue;
                                 }
                                 $esCliente = waRolEsCliente($rol);
+                                if ($esCliente) {
+                                    $ultimoMensajeCliente = $contenido;
+                                }
                                 $align = $esCliente ? 'flex-start' : 'flex-end';
                                 $bg = $esCliente ? '#eceff1' : ($rol === 'humano' ? '#e1f5fe' : '#e8f5e9');
                             ?>
@@ -117,6 +122,15 @@ if ($modoDetalle) {
                                         <?php endif; ?>
                                     </div>
                                     <div style="white-space:pre-wrap; font-size:14px; color:#263238;"><?php echo esc($contenido); ?></div>
+                                    <?php if ($rol === 'assistant' && $puedeCrearReglas): ?>
+                                        <div style="text-align:right; margin-top:4px;">
+                                            <a href="#!" class="btn-flat btn-small orange-text text-darken-2 btn-feedback-alex" style="padding:0 6px; height:auto; line-height:1.6;"
+                                               data-contexto="<?php echo esc($ultimoMensajeCliente); ?>"
+                                               data-respuesta-actual="<?php echo esc($contenido); ?>">
+                                                <i class="material-icons tiny left" style="margin-right:2px;">flag</i>Dar feedback
+                                            </a>
+                                        </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -124,6 +138,95 @@ if ($modoDetalle) {
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php if ($puedeCrearReglas): ?>
+        <div id="modal-feedback-alex" class="modal" style="max-width:560px;">
+            <div class="modal-content">
+                <h5>Feedback para Alex</h5>
+                <p class="grey-text" style="margin-top:0;">Esto crea una regla de aprendizaje: se le muestra a Alex como ejemplo en conversaciones futuras. No corrige ni reenvia este mensaje ya mandado.</p>
+                <div class="input-field">
+                    <textarea class="materialize-textarea" id="fb-contexto" rows="2"></textarea>
+                    <label for="fb-contexto" class="active">Situacion / pregunta del cliente</label>
+                </div>
+                <div class="input-field">
+                    <textarea class="materialize-textarea" id="fb-respuesta-actual" rows="2" readonly style="opacity:0.7;"></textarea>
+                    <label for="fb-respuesta-actual" class="active">Lo que Alex respondio</label>
+                </div>
+                <div class="input-field">
+                    <textarea class="materialize-textarea" id="fb-respuesta-esperada" rows="3"></textarea>
+                    <label for="fb-respuesta-esperada" class="active">Como debio responder/actuar Alex</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a href="#!" id="btn-cancelar-feedback-alex" class="btn-flat">Cancelar</a>
+                <button type="button" id="btn-guardar-feedback-alex" class="btn orange darken-1">Guardar regla</button>
+            </div>
+        </div>
+        <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var csrfToken = <?php echo json_encode(getCsrfToken()); ?>;
+            var modalElem = document.getElementById('modal-feedback-alex');
+            var modalInstance = M.Modal.init(modalElem);
+
+            document.querySelectorAll('.btn-feedback-alex').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    document.getElementById('fb-contexto').value = btn.getAttribute('data-contexto') || '';
+                    document.getElementById('fb-respuesta-actual').value = btn.getAttribute('data-respuesta-actual') || '';
+                    document.getElementById('fb-respuesta-esperada').value = '';
+                    ['fb-contexto', 'fb-respuesta-actual', 'fb-respuesta-esperada'].forEach(function (id) {
+                        M.textareaAutoResize(document.getElementById(id));
+                    });
+                    M.updateTextFields();
+                    modalInstance.open();
+                });
+            });
+
+            document.getElementById('btn-cancelar-feedback-alex').addEventListener('click', function (e) {
+                e.preventDefault();
+                modalInstance.close();
+            });
+
+            document.getElementById('btn-guardar-feedback-alex').addEventListener('click', function () {
+                var contexto = document.getElementById('fb-contexto').value.trim();
+                var respuesta = document.getElementById('fb-respuesta-esperada').value.trim();
+
+                if (!contexto || !respuesta) {
+                    alert('Completa la situacion y como debio responder Alex.');
+                    return;
+                }
+
+                var btn = this;
+                btn.disabled = true;
+
+                fetch('<?php echo esc(BASE_URL); ?>api/ai_assistant_admin.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'create_learning_rule',
+                        contexto_o_pregunta: contexto,
+                        respuesta_o_accion_esperada: respuesta,
+                        csrf_token: csrfToken
+                    })
+                })
+                    .then(function (res) { return res.json(); })
+                    .then(function (data) {
+                        btn.disabled = false;
+                        if (data.success) {
+                            modalInstance.close();
+                            M.toast({html: 'Regla guardada. Se le mostrara a Alex como ejemplo.', classes: 'green darken-1'});
+                        } else {
+                            alert(data.message || 'No se pudo guardar la regla.');
+                        }
+                    })
+                    .catch(function () {
+                        btn.disabled = false;
+                        alert('Error de conexion al guardar la regla.');
+                    });
+            });
+        });
+        </script>
+        <?php endif; ?>
     </div>
     <?php
     include __DIR__ . '/includes/footer.php';
@@ -180,6 +283,7 @@ include __DIR__ . '/includes/header.php';
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-top:20px;">
         <h4 style="margin:0;"><i class="material-icons left">chat</i> Contactos de WhatsApp por dia</h4>
         <div>
+            <a href="<?php echo esc(BASE_URL); ?>views/whatsapp_seguimientos.php" class="btn-flat waves-effect">Seguimientos del mes</a>
             <a href="<?php echo esc(BASE_URL); ?>views/ai_assistant_settings.php" class="btn-flat waves-effect">Asistente de IA</a>
             <a href="<?php echo esc(BASE_URL); ?>views/dashboard.php" class="btn blue darken-4 waves-effect waves-light"><i class="material-icons left">dashboard</i> Dashboard</a>
         </div>

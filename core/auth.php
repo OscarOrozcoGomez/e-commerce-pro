@@ -49,6 +49,7 @@ const PERMISOS_EN_USO = [
     'gestionar_asistente_ia',
     'ver_insights_ia',
     'ver_conversaciones_whatsapp',
+    'dar_feedback_asistente_ia',
     'ver_notificaciones_pickup',
     // Control de caducidades por lote (views/caducidades.php + api/lotes_manager.php).
     'gestionar_caducidades',
@@ -736,6 +737,18 @@ function isSupportChatStaff(): bool
 function canBulkAssignCategories(): bool
 {
     return hasPermission('asignar_categorias_masivo') || hasPermission('gestionar_productos');
+}
+
+/**
+ * ¿Puede convertir una respuesta de Alex en regla de aprendizaje? Clave propia
+ * 'dar_feedback_asistente_ia' (mas angosta, para quien solo lee conversaciones de
+ * WhatsApp) o, como siempre, si ya administra todo el asistente. api/ai_assistant_admin.php
+ * exige exactamente el mismo OR para la accion create_learning_rule -- si aqui dijera que
+ * si pero el endpoint lo rechaza, el boton se veria roto para ese usuario.
+ */
+function canGiveAlexFeedback(): bool
+{
+    return hasPermission('gestionar_asistente_ia') || hasPermission('dar_feedback_asistente_ia') || isAdmin();
 }
 
 /**

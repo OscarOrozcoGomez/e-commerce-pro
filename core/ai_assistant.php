@@ -12,7 +12,10 @@ require_once __DIR__ . '/whatsapp_helper.php';
 require_once __DIR__ . '/whatsapp_link_utils.php';
 require_once __DIR__ . '/lote_caducidad_utils.php'; // loteDiasTratamiento() -- ver aiBuildRendimientoEstimadoTexto()
 require_once __DIR__ . '/oferta_pricing.php';       // ofertaPrecioEfectivo() -- precios de productos en la categoria "Ofertas"
+require_once __DIR__ . '/oferta_caducidad_utils.php'; // ofertaCadPaquete()/ofertaCadArgumentoHonesto() -- estrategia de productos por caducar
+require_once __DIR__ . '/alex_oferta_eventos_utils.php'; // alexOfertaRegistrarEvento() -- bitacora de ofertas de Alex
 require_once __DIR__ . '/cliente_telefono_utils.php'; // telefonoResolverParaPedido() -- que telefono lleva el pedido de Alex
+require_once __DIR__ . '/ai_foto_producto_utils.php'; // aiFotoBuildContextLineParaMensaje() -- pista para fotos de frascos con OCR
 
 // Fallback para cuando este archivo se carga sin config.php (ej. bootstrap de PHPUnit,
 // igual que el fallback de esc() en tests/bootstrap.php). En produccion config.php ya
@@ -169,7 +172,8 @@ function aiBuildSystemPrompt(
     ?bool $esLadaLocal = null,
     ?string $perfilClienteTexto = null,
     array $plantillasDisponibles = [],
-    ?string $telefonoChat = null
+    ?string $telefonoChat = null,
+    ?string $fotoProductoContexto = null
 ): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
@@ -193,24 +197,31 @@ function aiBuildSystemPrompt(
         $lines[] = '';
         $lines[] = 'REGLA MAS IMPORTANTE: jamas menciones un precio, existencia o caracteristica de un producto sin haber llamado antes a la funcion consultar_inventario. Si no tienes el dato, dile amablemente al cliente que lo vas a verificar con el equipo.';
         $lines[] = 'No inventes productos, precios ni promociones que no vengan de tus funciones.';
+        $lines[] = 'Un dato de un producto (cuantas capsulas trae el envase, dosis, ingredientes, tamano) solo lo puedes decir si viene explicito en lo que consultar_inventario te regreso para ESE producto. Si no viene, NO lo deduzcas ni lo recuerdes de memoria (aunque creas saberlo): omitelo, y si el cliente lo pidio dile con naturalidad que lo confirmas con el equipo y agrega la bandera ' . AI_HANDOFF_TEXT_FLAG . '.';
         $lines[] = '';
         $lines[] = 'Flujo de atencion:';
         $lines[] = '1. Saluda y da seguimiento a lo que el cliente ya pregunto antes en esta conversacion (tienes el historial completo).';
         $lines[] = '2. Cuando pregunte por un producto, llama a consultar_inventario y comparte precio y disponibilidad reales. El catalogo tiene productos de varias categorias (vitaminas, minerales, suplementos, etc.) y muchos vienen en varias presentaciones/tamanos (por ejemplo 120, 240 o 500 capsulas) a precios distintos -- si consultar_inventario te regresa varias presentaciones del mismo producto, mencionalas todas para que el cliente elija la que le convenga, no asumas una sola. Si el stock es bajo (menos de 5 piezas), mencionalo como motivo para decidirse pronto.';
         $lines[] = '2b. Si un producto que te regreso consultar_inventario trae "en_oferta": true, el precio que ya te dio ("precio") YA es el precio rebajado -- nunca lo presentes como si fuera el precio de siempre. Dile al cliente explicitamente que esta en oferta y cuanto ahorra comparando contra "precio_normal" (ej. "esta en oferta a $X, antes $Y"), aunque el cliente no haya preguntado por ofertas ni descuentos -- no depende de que llames a consultar_ofertas por separado para mencionarlo.';
-        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental/rendimiento_estimado que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla). Preséntalo bonito y facil de leer, con iconos por seccion (🌿 para ingredientes, 📊 para informacion nutrimental, y dentro de la tabla usa el icono que mejor represente cada nutriente: ⚡ energetico/calorias, 🥑 grasas, 🍞 carbohidratos, 💪 proteinas, 🧂 sodio, etc.), no como parrafo corrido ni como JSON. Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
-        $lines[] = '3b. Si el producto es en capsulas y consultar_inventario te regreso rendimiento_estimado, mencionalo cuando el cliente pregunte cuanto le dura o le rinde, o al confirmar la compra de ese producto -- deja claro que esa es la dosis SUGERIDA por la marca, no una regla obligatoria. Si el cliente pregunta que pasa si toma menos o mas capsulas al dia de lo sugerido, respondele que es completamente su criterio, pero reitera la dosis sugerida por la marca y que el producto tiene fecha de caducidad -- nunca le prometas ni le garantices cuanto le va a rendir si decide tomar una dosis distinta a la sugerida.';
+        $lines[] = '3. Si el cliente pregunta que contiene un producto, sus ingredientes, modo de uso o informacion nutrimental, usa los campos ingredientes/modo_uso/tabla_nutrimental/rendimiento_estimado/capsulas_por_envase que ya te regreso consultar_inventario para ese producto (no hace falta volver a llamarla, EXCEPTO si el dato que te piden no venia en el resultado anterior: el equipo lo captura de a poco, asi que vuelve a llamarla antes de decir que no lo tienes; y nunca prometas que "sigues checando" un dato -- no tienes forma de hacerlo). Preséntalo bonito y facil de leer, con iconos por seccion (🌿 para ingredientes, 📊 para informacion nutrimental, y dentro de la tabla usa el icono que mejor represente cada nutriente: ⚡ energetico/calorias, 🥑 grasas, 🍞 carbohidratos, 💪 proteinas, 🧂 sodio, etc.), no como parrafo corrido ni como JSON. Todavia no todos los productos tienen esta ficha capturada -- si consultar_inventario no te regreso esos campos para ese producto, dile con naturalidad que no tienes ese detalle a la mano y que lo confirmas con el equipo; nunca inventes ingredientes ni valores nutrimentales.';
+        $lines[] = '3b. Si el producto es en capsulas y consultar_inventario te regreso rendimiento_estimado, mencionalo cuando el cliente pregunte cuanto le dura o le rinde, o al confirmar la compra de ese producto -- deja claro que esa es la dosis SUGERIDA por la marca, no una regla obligatoria. Si el cliente pregunta que pasa si toma menos o mas capsulas al dia de lo sugerido, respondele que es completamente su criterio, pero reitera la dosis sugerida por la marca -- nunca le prometas ni le garantices cuanto le va a rendir si decide tomar una dosis distinta a la sugerida.';
         $lines[] = '3c. Cuando platiques de ingredientes, beneficios, para que sirve o modo de uso de un producto (no en cada mensaje, solo cuando el tema salga), incluye de forma natural esta leyenda LEGAL tal cual, sin cambiarle ni una palabra: "' . AI_LEYENDA_NO_MEDICAMENTO . '"';
         $lines[] = '3d. Si consultar_inventario te regreso beneficios y/o perfil_recomendado para un producto, son referencia INTERNA para que tu decidas que sugerir y como platicar del producto -- nunca los recites tal cual ni los enumeres como lista al cliente (son tags cortos, no estan redactados para leerse directo). Parafrasealos con tus palabras, en tono conversacional. Si perfil_recomendado trae un aviso de "embarazo y lactancia: no recomendado" (o similar) y el cliente menciona que esta embarazada, en periodo de lactancia, o pregunta directamente por eso, dilo de forma clara y explicita para ESE producto en concreto -- no te quedes en un consejo generico de "consulta a tu medico" cuando ya tienes la bandera especifica de ese producto.';
         $lines[] = '4. Si la busqueda es amplia (una categoria o necesidad general, ej. "vitaminas" o "algo para dormir") y consultar_inventario te dice que hay mas productos de los que te mostro, no los enumeres todos de golpe: platica brevemente 2-3 opciones destacadas y pregunta algo puntual (para que lo necesitas, que presentacion prefieres, tienes alguna marca en mente) para acotar antes de seguir listando.';
         $lines[] = '5. Si el cliente pide el catalogo o la lista de productos, llama a enviar_catalogo. Para otras plantillas (fotos de producto, notas de pedido), llama a enviar_plantilla con el codigo correspondiente.';
-        $lines[] = '5b. Ofertas vigentes: llama a consultar_ofertas para saber que productos tienen descuento real ahorita -- ya viene filtrado para excluir cualquier producto cuyo stock restante este caducado o no alcance a consumirse a tiempo, asi que todo lo que te regrese esa funcion es seguro de ofrecer tal cual (precio de oferta, precio normal y ahorro). Sugierelas de forma proactiva cuando encajen con naturalidad (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones. Nunca digas que algo esta en oferta ni inventes un descuento sin haber llamado antes a esta funcion.';
+        $lines[] = '5b. Ofertas vigentes: llama a consultar_ofertas para saber que productos tienen descuento real ahorita -- ya viene filtrado para excluir cualquier producto cuyo stock restante este caducado o no alcance a consumirse a tiempo, asi que todo lo que te regrese esa funcion es seguro de ofrecer tal cual (precio de oferta, precio normal y ahorro). Vienen ordenadas de la mas urgente a la menos urgente ("urgencia": alta, media o baja; es dato INTERNO solo para que decidas el orden -- nunca le digas al cliente frases como "hay que mover este producto", "hay que liquidarlo" ni "es urgente venderlo"): al elegir cual mencionar, empieza por las de urgencia alta o media, pero SOLO si encajan con lo que el cliente busca -- nunca le ofrezcas algo que no tiene relacion con su necesidad solo por urgencia. Sugierelas de forma proactiva cuando encajen con naturalidad (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones. Nunca digas que algo esta en oferta ni inventes un descuento sin haber llamado antes a esta funcion.';
+        $lines[] = '5b-1. Caducidad y motivo de la oferta: NUNCA compartas datos de caducidad (fechas, dias, lotes, "ultimo lote", cuanto le queda de vida) ni expliques por que un producto esta en oferta, y no los recibes. Al presentar una oferta di solo el producto, el precio, el precio normal, cuanto ahorra y cuantas piezas quedan (si son pocas) -- sin decir "caducidad", "caduca", "vence" ni "fecha corta". Si el cliente pregunta por que esta tan barato o en oferta, si esta por caducar, cuando caduca, si es el ultimo lote o cuanto tiempo de vida le queda, NO contestes eso: llama a transferir_a_humano (motivo: el cliente pregunta por la caducidad / el motivo de la oferta de tal producto) y dile con naturalidad que un asesor le confirma ese detalle enseguida. No lo niegues, no lo minimices y no inventes otra razon ("promocion de temporada", "cierre de inventario"); tampoco estimes cuanto tiempo le dura o si alcanza a terminarlo antes de una fecha.';
+        $lines[] = '5b-2. Paquete: si una oferta trae "paquete" (cantidad_minima, cantidad_maxima y precio_unitario), puedes proponer UNA vez llevar esa cantidad con el precio de paquete ("si te llevas 2, cada uno te queda en $X"). Es un descuento real que se aplica solo al agendar la venta: no lo calculas ni lo prometes por tu cuenta, no lo ofrezcas por encima de cantidad_maxima y no lo confundas con un descuento que el cliente te pida (esos siguen siendo para transferir_a_humano).';
+        $lines[] = '5b-3. Agregado al cierre: en cuanto el cliente confirme lo que quiere comprar (ANTES de pedirle o confirmarle los datos de envio y de llamar a agendar_venta), si en esta conversacion todavia no has llamado a consultar_ofertas, llamala. Si te regresa una oferta de urgencia alta o media que combine con lo que esta comprando y todavia no esta en su pedido, ofrecesela UNA sola vez como agregado ("por cierto, tengo X en oferta a $Y, ¿te lo agrego?") y despues sigue con el pedido. Esa oferta va como la UNICA pregunta de ese mensaje: nunca la juntes en el mismo mensaje con la pregunta del telefono, del resumen del pedido ni de ningun otro dato (el cliente contesta "si" y no se sabe a cual de las dos), y espera su respuesta antes de pedir o confirmar el resto. Si dice que no o no contesta al respecto, sigue sin volver a insistir. Si ninguna oferta es un complemento razonable de lo que compra, NO ofrezcas nada y NO comentes que revisaste las ofertas ni que "ninguna combina": simplemente sigue con el pedido.';
+        $lines[] = '5b-4. Cuentas: si puedes multiplicar cantidad por el precio unitario que te dio la herramienta (y sumar lineas) para decirle un total, hazlo con cuidado y usa el total que regresa agendar_venta al confirmar; pero NUNCA calcules ahorros ni diferencias de precio por tu cuenta (ya viste que se te pueden ir mal): usa SOLO los ahorros que te entregan las herramientas (ahorro, y ahorro_por_pieza / ahorro_vs_precio_normal_por_pieza del paquete).';
         $lines[] = '5c. Venta cruzada: si consultar_inventario te regreso productos_relacionados para un producto, ya vienen con stock verificado -- son seguros de ofrecer tal cual (nombre, precio, stock). Sugierelos de forma natural una vez que el cliente ya mostro interes real en el producto principal (por ejemplo justo despues de que pregunte precio/detalles, o al ir cerrando el pedido), como una sugerencia breve, no como lista aparte ni en cada mensaje. Nunca sugieras un producto que no venga en productos_relacionados ni menciones existencia de algo que no hayas consultado -- si consultar_inventario no te regreso productos_relacionados para ese producto, simplemente no hay sugerencia de venta cruzada esta vez, no inventes una.';
         $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad), dia de entrega y metodo de pago preferido.';
         $lines[] = '6b. Dias de entrega: hacemos entregas UNICAMENTE los miercoles y los sabados -- el cliente se adapta a nuestro itinerario (asi ahorramos combustible al repartir varios pedidos juntos), no al reves. Nunca preguntes "que dia te gustaria" de forma abierta -- ofrece tu mismo estas dos opciones de forma proactiva, por ejemplo: "Hacemos entregas los miercoles y los sabados, ¿cual se le acomoda mejor?". Si el cliente insiste en otro dia, no se lo niegues ni le prometas nada tu mismo -- respondele con calidez que lo vas a checar con el equipo y llama a transferir_a_humano.';
         $lines[] = '6c. Metodo de pago: SOLO aceptamos efectivo o transferencia, contra entrega -- nunca ofrezcas ni aceptes tarjeta ni ningun otro metodo. Si el cliente pregunta por pagar con tarjeta o algo distinto, explicale con naturalidad que por ahora solo manejamos efectivo o transferencia contra entrega.';
         $lines[] = '7. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
         $lines[] = '';
+        $lines[] = 'Nunca le digas al cliente "el sistema", "la base de datos" ni "mi programacion": habla de "nuestro catalogo" o de "lo que tenemos registrado". Y no uses la palabra "recomendar" ni siquiera para citarla o rechazar lo que el cliente pidio: en vez de "no puedo recomendartelo" di "no puedo darte sugerencias de salud personalizadas".';
+        $lines[] = 'Responde TODAS las preguntas que traiga el mensaje del cliente, en ese mismo mensaje: si ademas de un producto pregunta por el pago (tarjeta, transferencia), por el envio o por otra cosa, contestale tambien eso -- nunca contestes solo una parte ni empieces con un "claro que si" que pueda sonar a que aceptas algo que no manejamos (por ejemplo pagar con tarjeta).';
         $lines[] = 'Cierre de venta: eres habil y educado para conducir la conversacion hacia la compra, sin presionar ni sonar como script. Cada respuesta debe invitar al siguiente paso concreto (nunca dejes la conversacion en un punto muerto): si el cliente ya pregunto precio, ofrece apartarlo o pasar a los datos de envio; si duda entre opciones, ayudalo a decidir con una pregunta puntual o mostrandole una opcion concreta del catalogo en vez de solo esperar; si menciona una necesidad (para dormir, energia, digestion, etc.), menciona tu mismo el producto mas adecuado del inventario real como una opcion disponible, en vez de esperar a que el cliente lo pida por nombre. Se calido y genuino, no insistas si el cliente ya dijo que no.';
         $lines[] = 'Si el cliente pide hablar con una persona, muestra molestia fuerte, o tiene una duda que no puedes resolver con tus funciones (quejas, reembolsos, temas administrativos), llama a transferir_a_humano con el motivo.';
 
@@ -258,6 +269,12 @@ function aiBuildSystemPrompt(
     $lineaTelefonoChat = aiBuildTelefonoChatContextLine($telefonoChat);
     if ($lineaTelefonoChat !== '') {
         $lines[] = $lineaTelefonoChat;
+    }
+    // Foto de un frasco/etiqueta con OCR en el mensaje de este turno: pista de que producto es, o
+    // instrucciones de NO buscar leyendas genericas ni ofrecer "similares" -- ver core/ai_foto_producto_utils.php.
+    $lineaFotoProducto = trim((string)($fotoProductoContexto ?? ''));
+    if ($lineaFotoProducto !== '') {
+        $lines[] = $lineaFotoProducto;
     }
     if ($horasInactividad !== null && $horasInactividad >= AI_ASSISTANT_REACTIVATION_INACTIVITY_HOURS) {
         $diasInactivo = max(1, (int)round($horasInactividad / 24));
@@ -348,6 +365,7 @@ function aiBuildSystemPrompt(
     $lines[] = '- Si agendar_venta (o consultar_inventario) te regresa que no hay suficiente existencia de un producto, di el numero disponible tal cual te lo regreso la funcion y ofrece opciones concretas: ajustar la cantidad a lo disponible, cambiar a otra presentacion si existe, o avisar cuando el cliente quiera que le confirmen la fecha de reabastecimiento (llama a transferir_a_humano si insiste en la cantidad original). Nunca dejes la conversacion en un punto muerto ni digas solo que "no hay" sin ofrecer una alternativa.';
     $lines[] = '';
     $lines[] = 'Mensajes que no son texto: si el mensaje del cliente llega entre corchetes con una nota de voz transcrita o texto detectado en una imagen (ej. "[Nota de voz transcrita, puede tener errores]: quiero 2 omega 3", "...Texto detectado en la imagen (puede tener errores de OCR): PAGO CONFIRMADO 349.00 MXN"), SI puedes usar ese contenido como si el cliente lo hubiera escrito -- es una transcripcion/OCR automatica. Puede traer errores (nombres de producto raros, numeros mal leidos), asi que si algo no tiene sentido o es un dato critico (direccion, cantidad, monto de un pago), confirmalo con el cliente en vez de asumirlo tal cual.';
+    $lines[] = 'Fotos de frascos o etiquetas: el OCR lee bien el texto chico de la etiqueta y muchas veces NO lee el nombre grande del producto. Leyendas como "Suplemento alimenticio", "Capsulas a base de...", "Contenido N capsulas", ingredientes o modo de uso vienen en todos los frascos y NO son el nombre del producto: nunca las busques en consultar_inventario como si lo fueran (un "Mento Alimentic" es "SUPLEMENTO ALIMENTICIO" mal leido). Si de la foto no se puede saber cual producto es, no ofrezcas productos "similares" ni des precios de algo que el cliente no nombro: transfiere a un asesor con lo que si se leyo. Si el sistema te da una linea "FOTO DE PRODUCTO", sigue esa linea.';
     $lines[] = 'Nota: cualquier otro tipo de mensaje que el sistema no pueda leer por su cuenta (foto sin texto legible, video, sticker, ubicacion, contacto, documento, etc.) ya se transfiere directo a un asesor humano por codigo, antes de que la conversacion llegue a ti -- nunca vas a ver ese caso ni tienes que pedirle al cliente que lo reescriba en texto.';
     $lines[] = 'En todos los casos, nunca ignores ese mensaje ni actues como si no hubiera llegado nada.';
     $lines[] = '';
@@ -363,7 +381,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_inventario',
-                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, perfil recomendado, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir. Tambien puede regresar beneficios y perfil_recomendado (referencia INTERNA, nunca citarlos tal cual) y productos_relacionados (venta cruzada, YA filtrada por stock real -- solo aparecen productos que de verdad hay en existencia).',
+                'description' => 'Busca productos reales en el catalogo por texto (nombre, ingredientes, beneficios, perfil recomendado, presentacion) y regresa su id, nombre, precio y existencia actual. Si hay varias presentaciones del mismo producto, cada una se regresa por separado. Si la busqueda es amplia, el resultado incluye el total real de coincidencias aunque la lista este acotada. Cuando el producto tiene la ficha capturada, tambien regresa ingredientes, modo_uso, tabla_nutrimental y/o rendimiento_estimado (cuantos dias/meses alcanza un envase en capsulas segun la dosis sugerida por la marca) -- cada uno solo si el dato existe para ese producto -- usalos para contestar cuando el cliente pregunte que contiene, que ingredientes tiene, su informacion nutrimental, o cuanto le va a durar/rendir. Tambien puede regresar beneficios y perfil_recomendado (referencia INTERNA, nunca citarlos tal cual) y productos_relacionados (venta cruzada, YA filtrada por stock real -- solo aparecen productos que de verdad hay en existencia). Si un producto esta en oferta por caducidad corta tambien trae, si aplica, paquete. Si el cliente pregunta por que esta en oferta o por su caducidad, no lo contestes tu: transfiere a un humano.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -451,7 +469,7 @@ function aiGetToolDefinitions(): array
             'type' => 'function',
             'function' => [
                 'name' => 'consultar_ofertas',
-                'description' => 'Devuelve los productos que HOY estan en la categoria de Ofertas, con existencia real y que el sistema ya confirmo que se pueden vender a tiempo -- nunca incluye un producto cuyo unico stock restante ya caduco o cuyo envase no alcanza a consumirse antes de caducar, aunque siga capturado en la categoria de Ofertas. Cada resultado trae precio de oferta, precio normal y el ahorro. Usala de forma proactiva cuando encaje con naturalidad en la conversacion (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones.',
+                'description' => 'Devuelve los productos que HOY estan en la categoria de Ofertas, con existencia real y que el sistema ya confirmo que se pueden vender a tiempo -- nunca incluye un producto cuyo unico stock restante ya caduco o cuyo envase no alcanza a consumirse antes de caducar, aunque siga capturado en la categoria de Ofertas. Cada resultado trae precio de oferta, precio normal y el ahorro, y cuando el producto tiene lotes proximos a caducar tambien la urgencia (alta/media/baja, dato INTERNO solo para ordenar; ya vienen ordenadas de la mas urgente) y, si aplica, un precio de paquete. Si el cliente pregunta por que esta en oferta o por su caducidad, no lo contestes tu: transfiere a un humano. Usala de forma proactiva cuando encaje con naturalidad en la conversacion (por ejemplo si el producto que pide el cliente tambien tiene una presentacion en oferta, o como sugerencia extra antes de cerrar el pedido) y siempre que el cliente pregunte por ofertas, descuentos o promociones.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -534,6 +552,17 @@ function aiTextContainsHandoffFlag(string $text): bool
 function aiStripHandoffFlag(string $text): string
 {
     return trim((string)str_ireplace(AI_HANDOFF_TEXT_FLAG, '', $text));
+}
+
+/**
+ * Red de seguridad de la bandera: Alex a veces le promete al cliente "lo confirmo con el
+ * equipo" en texto libre sin llamar a transferir_a_humano ni poner la bandera -- el cliente
+ * queda esperando y a Telegram no llega ninguna alerta (caso real 2026-09-21: "Déjame
+ * confirmarte ese dato exacto con el equipo"). Detecta esa promesa por la forma de la frase.
+ */
+function aiTextoPrometeConsultarEquipo(string $texto): bool
+{
+    return preg_match('/\b(confirm|verific|chec|revis|consult)\w*[^.!?\n]{0,60}\bcon (el equipo|mi equipo|un compa|el area)/iu', $texto) === 1;
 }
 
 /* ---------------------------------------------------------------------
@@ -1094,10 +1123,12 @@ function aiMarcarMensajeNoEnviado(PDO $pdo, int $idMensaje): void
 const AI_FOLLOWUP_INACTIVITY_HOURS = 24;
 const AI_FOLLOWUP_CLOSE_HOURS = 48;
 
-// Horario de atencion de Alex: fuera de [HORA_INICIO, HORA_FIN) el mensaje del cliente se
-// guarda (sigue visible/sin marcar como leido en WhatsApp) pero Alex no contesta en vivo --
-// un bot que responde a las 3am, siempre, es en si mismo una senal de automatizacion. Se
-// retoma con una respuesta real cuando abre el horario, ver AI_PROACTIVO_INTERVALO_MIN_MINUTOS.
+// Horario de atencion EN VIVO de Alex: fuera de [HORA_INICIO, HORA_FIN) el mensaje del cliente se
+// guarda (sigue visible/sin marcar como leido en WhatsApp) pero Alex no contesta en el momento
+// -- un bot que responde a las 3am, al instante y siempre igual, es en si mismo una senal de
+// automatizacion. Desde 2026-09-23 tampoco lo deja sin respuesta hasta las 7: lo contesta la
+// cola del cron (catch-up) con ritmo humano y mas lento de noche, ver AI_CATCHUP_RITMO. El
+// seguimiento de 24h (contacto NO solicitado) si sigue limitado a este horario.
 const AI_HORARIO_ATENCION_HORA_INICIO = 7;  // 7:00 am
 const AI_HORARIO_ATENCION_HORA_FIN = 22;    // 10:00 pm (exclusivo)
 
@@ -1193,49 +1224,156 @@ function aiRegistrarEnvioProactivo(PDO $pdo): void
     $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_proactivo_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
 }
 
-// Cadencia del catch-up de horario -- contestar, con retraso, algo que el cliente YA
-// escribio mientras Alex estaba callado por politica (10pm-7am). No es contacto no
-// solicitado, asi que no necesita el tope de 1/hora del seguimiento de 24h, pero sigue
-// necesitando ALGUN espaciado -- nunca instantaneo -- para no contestar de golpe a todo el
-// backlog acumulado de la noche apenas abre el horario (eso SI seria un patron de rafaga,
-// aunque cada mensaje sea a un cliente distinto y con texto distinto). Decision del negocio
-// (2026-09-18): ~5 minutos entre cada catch-up es un ritmo creible de alguien checando la
-// bandeja de entrada en la manana, muy lejos del patron real del incidente de 2026-09-13
-// (~24 mensajes identicos en el mismo segundo).
-const AI_CATCHUP_INTERVALO_MIN_MINUTOS = 5;
+// Ritmo del catch-up -- contestar, con retraso, algo que el cliente YA escribio y que Alex no
+// contesto en vivo (de noche, o un mensaje que quedo sin contestar). No es contacto no
+// solicitado, pero sigue necesitando espaciado -- nunca instantaneo ni siempre igual -- para no
+// contestar de golpe a todo el backlog ni parecer un bot 24/7 con la misma latencia (eso SI seria
+// un patron de rafaga/automatizacion, aunque cada mensaje sea a un cliente distinto y con texto
+// distinto). Decision del negocio (2026-09-23): Alex tambien contesta de noche, pero mas lento.
+//
+// Por franja: 'edad' = minutos que debe llevar esperando el mensaje del cliente antes de
+// contestarlo (como alguien que tarda en ver el celular), 'espera' = minutos entre una respuesta
+// del catch-up y la siguiente. Cada valor sale de un rango, NUNCA fijo (ver aiValorEnRango()).
+// Maximo real: de dia ~1 cada 4-8 min, de noche 1 cada 6-12, de madrugada 1 cada 12-25, y el cron
+// nunca manda mas de un mensaje por corrida.
+const AI_CATCHUP_RITMO = [
+    'dia'       => ['edad' => [0, 0],  'espera' => [4, 8]],    // 7:00-22:00
+    'noche'     => ['edad' => [3, 8],  'espera' => [6, 12]],   // 22:00-1:00 y 5:00-7:00
+    'madrugada' => ['edad' => [8, 20], 'espera' => [12, 25]],  // 1:00-5:00
+];
 
-/**
- * True si Alex puede contestar un catch-up de horario AHORA MISMO (ver
- * aiFindConversationsPendingRespuesta()/aiRetomarConversacionPendiente()). Hay que estar en
- * horario de atencion Y que hayan pasado al menos AI_CATCHUP_INTERVALO_MIN_MINUTOS desde el
- * ultimo catch-up real -- timestamp propio (ultimo_envio_catchup_en), independiente del
- * ultimo_envio_proactivo_en que usa el seguimiento de 24h (aiPuedeEnviarProactivoAhora()).
- * Igual que ese, se basa en un timestamp persistido en ai_asistente_config, no en el reloj
- * del cron, para que la cadencia se cumpla sin importar cada cuanto dispare el cron.
- */
-function aiPuedeResponderCatchupAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
+/** Franja del catch-up ('dia', 'noche' o 'madrugada') para la hora dada. */
+function aiFranjaCatchup(?DateTimeImmutable $ahora = null): string
 {
-    if (!aiEstaEnHorarioAtencion($ahora)) {
-        return false;
+    if (aiEstaEnHorarioAtencion($ahora)) {
+        return 'dia';
     }
+    $hora = (int)($ahora ?? new DateTimeImmutable('now'))->format('G');
 
-    $config = aiGetConfig($pdo);
-
-    return aiPasoElIntervaloDesdeUltimoEnvio(
-        $config['ultimo_envio_catchup_en'] ?? null,
-        AI_CATCHUP_INTERVALO_MIN_MINUTOS,
-        $ahora
-    );
+    return ($hora >= 1 && $hora < 5) ? 'madrugada' : 'noche';
 }
 
 /**
- * Marca que Alex acaba de contestar un catch-up de horario, para que
- * aiPuedeResponderCatchupAhora() bloquee el siguiente hasta que pasen los 5 minutos. No se
- * usa para el seguimiento de 24h (ver aiRegistrarEnvioProactivo()) -- son cupos independientes.
+ * Numero entre $min y $max (incluidos) que se ve aleatorio pero es una funcion de la semilla:
+ * cada mensaje/envio da uno distinto (y por lo tanto cada dia), pero para el mismo la respuesta
+ * es siempre la misma -- hace falta porque el cron lo consulta una y otra vez cada 5 min y, si
+ * se volviera a sortear en cada consulta, el hueco efectivo tenderia siempre al minimo.
+ */
+function aiValorEnRango(string $semilla, int $min, int $max): int
+{
+    return $min + (crc32($semilla) % ($max - $min + 1));
+}
+
+/** Minutos que hay que esperar despues del ultimo catch-up (segun la franja de $ahora). */
+function aiCatchupEsperaMinutos(?string $ultimoEnvio, ?DateTimeImmutable $ahora = null): int
+{
+    [$min, $max] = AI_CATCHUP_RITMO[aiFranjaCatchup($ahora)]['espera'];
+
+    return aiValorEnRango('espera|' . trim((string)$ultimoEnvio), $min, $max);
+}
+
+/** Minutos que debe llevar esperando el mensaje $idMensaje del cliente antes de contestarlo. */
+function aiCatchupEdadMinimaMinutos(int $idMensaje, ?DateTimeImmutable $ahora = null): int
+{
+    [$min, $max] = AI_CATCHUP_RITMO[aiFranjaCatchup($ahora)]['edad'];
+
+    return aiValorEnRango('edad|' . $idMensaje, $min, $max);
+}
+
+/**
+ * True si Alex puede contestar un catch-up AHORA MISMO (ver aiSiguienteConversacionParaCatchup()):
+ * ya paso el hueco aleatorio de la franja actual desde el ultimo catch-up real -- timestamp propio
+ * (ultimo_envio_catchup_en), independiente del ultimo_envio_proactivo_en del seguimiento de 24h.
+ * Ya no exige estar en horario de atencion: de noche tambien contesta, pero con hueco mayor. Igual
+ * que el seguimiento, se basa en un timestamp persistido en ai_asistente_config, no en el reloj del
+ * cron, para que el ritmo se cumpla sin importar cada cuanto dispare el cron.
+ */
+function aiPuedeResponderCatchupAhora(PDO $pdo, ?DateTimeImmutable $ahora = null): bool
+{
+    $ultimo = aiGetConfig($pdo)['ultimo_envio_catchup_en'] ?? null;
+
+    return aiPasoElIntervaloDesdeUltimoEnvio($ultimo, aiCatchupEsperaMinutos($ultimo, $ahora), $ahora);
+}
+
+/**
+ * Marca que Alex acaba de contestar un catch-up, para que aiPuedeResponderCatchupAhora() bloquee
+ * el siguiente hasta que pase el hueco. No se usa para el seguimiento de 24h (ver
+ * aiRegistrarEnvioProactivo()) -- son cupos independientes.
  */
 function aiRegistrarEnvioCatchup(PDO $pdo): void
 {
     $pdo->prepare('UPDATE ai_asistente_config SET ultimo_envio_catchup_en = CURRENT_TIMESTAMP WHERE id_config = 1')->execute();
+}
+/**
+ * Ids de producto que ya se le mostraron a esta conversacion: resultados de consultar_inventario
+ * y consultar_ofertas, que se guardan como mensajes 'tool' (ver aiRunAssistantTurn()). El mas
+ * reciente primero.
+ *
+ * @return int[]
+ */
+function aiProductosMencionadosEnConversacion(PDO $pdo, int $idConversacion, int $maxMensajes = 30): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT contenido FROM whatsapp_mensajes
+         WHERE id_conversacion = ? AND rol = 'tool' AND tool_name IN ('consultar_inventario', 'consultar_ofertas')
+         ORDER BY id_mensaje DESC LIMIT " . max(1, $maxMensajes)
+    );
+    $stmt->execute([$idConversacion]);
+
+    $ids = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $contenido) {
+        $json = json_decode((string)$contenido, true);
+        if (!is_array($json)) {
+            continue;
+        }
+        foreach (['productos', 'ofertas'] as $llave) {
+            foreach (is_array($json[$llave] ?? null) ? $json[$llave] : [] as $item) {
+                $id = is_array($item) ? (int)($item['id_producto'] ?? 0) : 0;
+                if ($id > 0) {
+                    $ids[$id] = true;
+                }
+            }
+        }
+    }
+
+    return array_keys($ids);
+}
+
+/**
+ * La oferta vigente mas urgente entre los productos que este cliente ya vio (misma lista que
+ * consultar_ofertas: con stock vendible real y sin lotes caducados), o null si ninguno esta en
+ * oferta hoy. Nunca busca "una oferta cualquiera": si el cliente nunca vio el producto, no hay
+ * gancho natural para retomar la charla y el seguimiento sigue siendo el de siempre.
+ */
+function aiOfertaRelevanteParaConversacion(PDO $pdo, int $idConversacion): ?array
+{
+    $vistos = aiProductosMencionadosEnConversacion($pdo, $idConversacion);
+    if ($vistos === []) {
+        return null;
+    }
+
+    foreach (aiListarOfertasVigentes($pdo) as $oferta) { // ya viene ordenada por urgencia
+        if (in_array((int)$oferta['id_producto'], $vistos, true)) {
+            return $oferta;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Bloque de "dato verificado" que se agrega a la instruccion de un mensaje proactivo cuando hay
+ * una oferta real que mencionar. Solo trae hechos calculados por el codigo (precio, motivo).
+ */
+function aiBuildDatoOfertaParaMensaje(array $oferta): string
+{
+    $texto = ' Dato VERIFICADO por el sistema (usa solo esto, no inventes nada mas): el producto "' . $oferta['nombre']
+        . '", que ya se le habia mostrado a este cliente, esta en oferta a $' . number_format((float)$oferta['precio_oferta'], 2, '.', '')
+        . ' (precio normal $' . number_format((float)$oferta['precio_normal'], 2, '.', '') . ').';
+    // El "motivo" (caducidad) NO se le pasa al modelo aqui: en un mensaje que el cliente no pidio, decir
+    // "esta en oferta por fecha corta" espanta y hace ver mal al negocio. Si el cliente contesta y
+    // pregunta por que, la conversacion normal (consultar_ofertas) si trae el dato para decirlo con verdad.
+    return $texto . ' Mencionalo UNA sola vez, con naturalidad y el precio, sin presionar ni inventar urgencia que no venga en este dato. No expliques por que esta en oferta ni menciones fechas de caducidad.';
 }
 
 /**
@@ -1246,8 +1384,10 @@ function aiRegistrarEnvioCatchup(PDO $pdo): void
  * al texto fijo de siempre (aiGetFollowupTemplateText()) como respaldo seguro -- nunca se
  * queda sin mandar el seguimiento solo porque la generacion fallo.
  */
-function aiGenerarTextoSeguimientoUnico(PDO $pdo, int $idConversacion, array $config): string
+function aiGenerarTextoSeguimientoUnico(PDO $pdo, int $idConversacion, array $config, ?array &$ofertaMencionada = null): string
 {
+    $ofertaMencionada = null;
+
     try {
         $historial = aiLoadConversationHistory($pdo, $idConversacion);
         if ($historial === []) {
@@ -1258,14 +1398,25 @@ function aiGenerarTextoSeguimientoUnico(PDO $pdo, int $idConversacion, array $co
         $apiKeyVariable = trim((string)($config['api_key_variable'] ?? '')) !== '' ? (string)$config['api_key_variable'] : 'DEEPSEEK_AI_ASSISTANT';
         $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
 
+        // Si el producto que este cliente ya vio tiene hoy una oferta real, el seguimiento la
+        // puede mencionar. NO agrega mensajes: es el mismo seguimiento de 24h (mismo cupo de 1
+        // por hora) con un mejor motivo para retomar la charla.
+        $oferta = aiOfertaRelevanteParaConversacion($pdo, $idConversacion);
+        $datoOferta = $oferta !== null ? aiBuildDatoOfertaParaMensaje($oferta) : '';
+
         $instruccion = [
             'role' => 'system',
-            'content' => "Eres {$persona}, asistente de ventas de WhatsApp. Han pasado mas de 24 horas sin que este cliente responda desde tu ultimo mensaje. Escribe UN mensaje breve (1-2 lineas), calido y natural retomando el tema real de la conversacion (el producto o duda que menciono), invitandolo a seguir. Nunca repitas siempre la misma frase -- varia la redaccion cada vez que se te pida esto. No uses markdown web ni firmes el mensaje. Responde SOLO con el texto del mensaje, nada mas.",
+            'content' => "Eres {$persona}, asistente de ventas de WhatsApp. Han pasado mas de 24 horas sin que este cliente responda desde tu ultimo mensaje. Escribe UN mensaje breve (1-2 lineas), calido y natural retomando el tema real de la conversacion (el producto o duda que menciono), invitandolo a seguir. Nunca repitas siempre la misma frase -- varia la redaccion cada vez que se te pida esto. Nunca uses las palabras \"recomendar\" ni \"te recomiendo\". No uses markdown web ni firmes el mensaje. Responde SOLO con el texto del mensaje, nada mas." . $datoOferta,
         ];
 
         $respuesta = aiCallDeepSeek(array_merge([$instruccion], $historial), [], $modelo, 0.9, $apiKeyVariable);
         $texto = trim((string)($respuesta['message']['content'] ?? ''));
         if ($texto !== '') {
+            // Solo cuenta como "seguimiento con oferta" si el texto de verdad menciona el precio.
+            if ($oferta !== null && mb_strpos($texto, (string)(int)round((float)$oferta['precio_oferta'])) !== false) {
+                $ofertaMencionada = $oferta;
+            }
+
             return aiSanitizePlainTextForWhatsapp($texto);
         }
     } catch (Throwable $e) {
@@ -1514,8 +1665,19 @@ function aiSendFollowupMessage(PDO $pdo, array $conversacion): bool
     }
 
     $config = aiGetConfig($pdo);
-    $texto = aiGenerarTextoSeguimientoUnico($pdo, $idConversacion, $config);
+    $ofertaMencionada = null;
+    $texto = aiGenerarTextoSeguimientoUnico($pdo, $idConversacion, $config, $ofertaMencionada);
     $resultado = waSendOutboundMessage($waId, [['type' => 'text', 'text' => $texto]]);
+
+    if ($ofertaMencionada !== null && !empty($resultado['ok'])) {
+        alexOfertaRegistrarEvento($pdo, ALEX_OFERTA_EVENTO_SEGUIMIENTO, (int)$ofertaMencionada['id_producto'], [
+            'id_conversacion' => $idConversacion,
+            'id_cliente' => $conversacion['id_cliente'] ?? null,
+            'precio_unitario' => $ofertaMencionada['precio_oferta'],
+            'precio_normal' => $ofertaMencionada['precio_normal'],
+            'severidad' => $ofertaMencionada['_severidad'] ?? null,
+        ]);
+    }
 
     // enviado_whatsapp debe reflejar si de verdad salio, no darlo por hecho: si
     // waSendOutboundMessage() fallo (puente caido, red), aiLoadConversationHistory() debe
@@ -1701,7 +1863,8 @@ function aiCallDeepSeek(array $messages, array $tools, string $model, float $tem
 {
     if (aiIsTestMode()) {
         return [
-            'message' => ['role' => 'assistant', 'content' => '[TEST MODE] Respuesta simulada de DeepSeek.'],
+            // $GLOBALS['ai_test_respuesta_deepseek']: solo tests, para simular lo que "dice" el modelo.
+            'message' => ['role' => 'assistant', 'content' => (string)($GLOBALS['ai_test_respuesta_deepseek'] ?? '[TEST MODE] Respuesta simulada de DeepSeek.')],
             'finish_reason' => 'stop',
         ];
     }
@@ -1874,6 +2037,84 @@ function aiResolverPreciosOferta(PDO $pdo, array $idsProducto): array
 }
 
 /**
+ * Contexto comercial de los productos que estan HOY en Ofertas: precio normal y de oferta,
+ * urgencia real de sus lotes, un argumento factual de "por que esta en oferta" (fecha de
+ * caducidad, margen de consumo, piezas) y el precio de paquete si aplica. Todo lo calcula el
+ * codigo -- el modelo solo lo parafrasea, nunca decide un precio ni inventa una fecha.
+ *
+ * Solo trae entrada para ids que esten en la categoria de Ofertas. Un producto en Ofertas sin
+ * lotes registrados trae urgencia null y sin paquete (no hay dato de caducidad que afirmar).
+ *
+ * @param int[] $idsProducto
+ * @param array<int,array<string,mixed>>|null $lotes filas ya calculadas de loteFetchProyecciones()
+ *   (evita repetir la proyeccion cuando el llamador ya la tiene)
+ * @return array<int,array{precio_normal:float,precio_oferta:float,severidad:?string,urgencia:?string,piezas_en_riesgo:int,stock_vendible:?int,fecha_caducidad:?string,dias_para_caducar:?int,argumento:string,paquete:?array}>
+ */
+function aiContextoOfertasPorProducto(PDO $pdo, array $idsProducto, ?array $lotes = null): array
+{
+    $enOferta = ofertaFiltrarEnOferta($pdo, $idsProducto);
+    if (empty($enOferta)) {
+        return [];
+    }
+
+    $ids = array_keys($enOferta);
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+
+    try {
+        $stmt = $pdo->prepare("SELECT id_producto, precio_venta, precio_costo, precio_oferta FROM productos WHERE id_producto IN ($ph)");
+        $stmt->execute($ids);
+        $filas = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (PDOException $e) {
+        return [];
+    }
+
+    $lotes ??= loteFetchProyecciones($pdo, ['ids_producto' => $ids])['lotes'];
+    $resumenes = loteResumenRiesgoPorProducto($lotes);
+
+    $contextos = [];
+    foreach ($filas as $f) {
+        $idProducto = (int)$f['id_producto'];
+        $venta = round((float)$f['precio_venta'], 2);
+        $costo = (float)($f['precio_costo'] ?? 0);
+        $precioOferta = ofertaPrecioEfectivo($venta, $costo, $f['precio_oferta'] ?? null, true);
+        $res = $resumenes[$idProducto] ?? null;
+
+        $ctx = [
+            'precio_normal' => $venta,
+            'precio_oferta' => $precioOferta,
+            'severidad' => null,
+            'urgencia' => null,
+            'piezas_en_riesgo' => 0,
+            'stock_vendible' => null,
+            'fecha_caducidad' => null,
+            'dias_para_caducar' => null,
+            'argumento' => '',
+            'paquete' => null,
+        ];
+
+        if ($res !== null) {
+            $ctx['stock_vendible'] = $res['stock_vendible'];
+            if ($res['en_riesgo']) {
+                $ctx['severidad'] = $res['severidad'];
+                $ctx['urgencia'] = ofertaCadUrgencia($res['severidad']);
+                $ctx['piezas_en_riesgo'] = $res['piezas_en_riesgo'];
+                $ctx['fecha_caducidad'] = $res['fecha_caducidad'];
+                $ctx['dias_para_caducar'] = $res['dias_para_caducar'];
+                $ctx['argumento'] = ofertaCadArgumentoHonesto($res);
+                // Solo hay paquete si la oferta es un descuento real y de verdad sobra producto por caducar.
+                if ($precioOferta < $venta) {
+                    $ctx['paquete'] = ofertaCadPaquete($venta, $costo, $precioOferta, $res['piezas_en_riesgo'], $res['stock_vendible']);
+                }
+            }
+        }
+
+        $contextos[$idProducto] = $ctx;
+    }
+
+    return $contextos;
+}
+
+/**
  * True si un lote (fila de loteFetchProyecciones()) todavia se puede vender a tiempo:
  * ni ya caduco ni "no_vendible" (el envase no alcanza a consumirse antes de caducar,
  * aunque la fecha todavia no llegue). Predicado compartido por aiStockVendible(),
@@ -1882,7 +2123,31 @@ function aiResolverPreciosOferta(PDO $pdo, array $idsProducto): array
  */
 function aiLoteEsVendible(array $lote): bool
 {
-    return ($lote['severidad'] ?? null) !== 'caducado' && empty($lote['no_vendible']);
+    return loteEsVendible($lote);
+}
+
+/**
+ * Stock vendible por producto a partir de filas ya calculadas de loteFetchProyecciones()
+ * (mismo resultado que aiStockVendiblePorLotesBatch(), sin volver a consultar la BD). Solo
+ * trae entrada para los productos que tienen lotes en $lotes.
+ *
+ * @param array<int,array<string,mixed>> $lotes
+ * @return array<int,int>
+ */
+function aiStockVendibleDesdeLotes(array $lotes): array
+{
+    $vendible = [];
+    foreach ($lotes as $lote) {
+        $idProducto = (int)$lote['id_producto'];
+        if (!array_key_exists($idProducto, $vendible)) {
+            $vendible[$idProducto] = 0;
+        }
+        if (aiLoteEsVendible($lote)) {
+            $vendible[$idProducto] += max(0, (int)$lote['cantidad_restante']);
+        }
+    }
+
+    return $vendible;
 }
 
 /**
@@ -1904,20 +2169,7 @@ function aiStockVendiblePorLotesBatch(PDO $pdo, array $idsProducto): array
         return [];
     }
 
-    $proyeccion = loteFetchProyecciones($pdo, ['ids_producto' => $ids]);
-
-    $vendible = [];
-    foreach ($proyeccion['lotes'] as $lote) {
-        $idProducto = (int)$lote['id_producto'];
-        if (!array_key_exists($idProducto, $vendible)) {
-            $vendible[$idProducto] = 0;
-        }
-        if (aiLoteEsVendible($lote)) {
-            $vendible[$idProducto] += max(0, (int)$lote['cantidad_restante']);
-        }
-    }
-
-    return $vendible;
+    return aiStockVendibleDesdeLotes(loteFetchProyecciones($pdo, ['ids_producto' => $ids])['lotes']);
 }
 
 /**
@@ -2005,7 +2257,60 @@ function aiGetProductosRelacionadosConStock(PDO $pdo, array $idsProducto): array
     return $resultado;
 }
 
-function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): array
+// Palabras que estorban al buscar por terminos sueltos (aiInventoryAlternativasDeBusqueda):
+// el catalogo escribe "180 Caps" o "Capsulas" segun el producto, asi que exigirlas rompe la busqueda.
+const AI_BUSQUEDA_PALABRAS_RELLENO = ['de', 'del', 'con', 'la', 'el', 'los', 'las', 'en', 'para', 'y', 'un', 'una', 'capsula', 'capsulas', 'caps', 'cap', 'pastillas', 'precio', 'presentacion'];
+
+/**
+ * Condicion SQL "cada termino aparece en alguno de los campos buscables" (terminos unidos
+ * con AND). Con un solo termino es la busqueda de frase completa de siempre.
+ */
+function aiInventoryCondicionTerminos(array $terminos, array &$params): string
+{
+    $campos = ['nombre', 'codigo_barras', 'nombre_variante', 'descripcion', 'ingredientes', 'beneficios', 'perfil_recomendado', 'nombre_corto'];
+    $partes = [];
+    foreach (array_values($terminos) as $i => $termino) {
+        $ors = [];
+        foreach ($campos as $k => $campo) {
+            $ors[] = "p.{$campo} LIKE :t{$i}_{$k} ESCAPE '!'";
+            $params[":t{$i}_{$k}"] = '%' . aiEscapeLikeTerm((string)$termino) . '%';
+        }
+        $partes[] = '(' . implode(' OR ', $ors) . ')';
+    }
+
+    return implode(' AND ', $partes);
+}
+
+/**
+ * Cuando la frase completa no coincide con nada ("resveratrol de 180 capsulas" no aparece
+ * literal: el nombre esta en un campo y "180 Caps" en otro), lista de intentos por palabras
+ * sueltas, del mas estricto al mas laxo: todas las palabras utiles y luego sin los numeros
+ * (para poder ofrecer otras presentaciones del mismo producto). Cada intento es una lista
+ * de terminos para aiSearchInventory().
+ *
+ * @return list<list<string>>
+ */
+function aiInventoryAlternativasDeBusqueda(string $busqueda): array
+{
+    $palabras = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower(trim($busqueda)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $palabras = array_values(array_unique(array_filter(
+        $palabras,
+        static fn(string $w): bool => mb_strlen($w) >= 2 && !in_array(aiStripAccentsLower($w), AI_BUSQUEDA_PALABRAS_RELLENO, true)
+    )));
+
+    $intentos = [];
+    if (count($palabras) >= 2) {
+        $intentos[] = $palabras;
+    }
+    $sinNumeros = array_values(array_filter($palabras, static fn(string $w): bool => !ctype_digit($w)));
+    if ($sinNumeros !== [] && $sinNumeros !== $palabras) {
+        $intentos[] = $sinNumeros;
+    }
+
+    return $intentos;
+}
+
+function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8, ?array $terminos = null): array
 {
     $busqueda = trim($busquedaTexto);
     $safeLimit = max(1, min(20, $limit));
@@ -2026,18 +2331,7 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         // nombre_corto entra a la busqueda para que un cliente que pregunta por la
         // etiqueta del pomo ("tienen Maca Blend?") si lo encuentre -- antes solo se
         // buscaba en el nombre largo sincronizado de Shopify.
-        $sql .= " AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
-                       OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
-                       OR p.perfil_recomendado LIKE :term7 ESCAPE '!' OR p.nombre_corto LIKE :term8 ESCAPE '!')";
-        $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
-        $params[':term1'] = $term;
-        $params[':term2'] = $term;
-        $params[':term3'] = $term;
-        $params[':term4'] = $term;
-        $params[':term5'] = $term;
-        $params[':term6'] = $term;
-        $params[':term7'] = $term;
-        $params[':term8'] = $term;
+        $sql .= ' AND ' . aiInventoryCondicionTerminos($terminos ?? [$busqueda], $params);
     }
     $sql .= ' GROUP BY p.id_producto, p.nombre, p.nombre_corto, p.nombre_variante, p.precio_venta,
                        p.ingredientes, p.modo_uso, p.tabla_nutrimental,
@@ -2058,13 +2352,19 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
     // El stock que se le muestra a Alex nunca cuenta unidades atrapadas en un lote ya
     // caducado o no_vendible, aunque inventario_almacen todavia no se haya reconciliado
     // (descuadre real observado en produccion) -- misma regla que consultar_ofertas.
-    $stockVendible = aiStockVendiblePorLotesBatch($pdo, array_column($rows, 'id_producto'));
+    $idsRows = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'id_producto')), static fn(int $id): bool => $id > 0)));
+    $lotesRows = $idsRows === [] ? [] : loteFetchProyecciones($pdo, ['ids_producto' => $idsRows])['lotes'];
+    $stockVendible = aiStockVendibleDesdeLotes($lotesRows);
+
+    // Por que esta en oferta (fecha real, margen de consumo, paquete): solo para los que estan
+    // en la categoria de Ofertas, con la misma proyeccion de lotes de arriba.
+    $contextosOferta = $preciosOferta === [] ? [] : aiContextoOfertasPorProducto($pdo, array_keys($preciosOferta), $lotesRows);
 
     // Venta cruzada: ya viene pre-filtrada por stock vendible real (ver
     // aiGetProductosRelacionadosConStock) -- lo que llegue aqui es seguro de sugerir tal cual.
     $relacionados = aiGetProductosRelacionadosConStock($pdo, array_column($rows, 'id_producto'));
 
-    return array_map(static function (array $row) use ($preciosOferta, $stockVendible, $relacionados): array {
+    return array_map(static function (array $row) use ($preciosOferta, $stockVendible, $relacionados, $contextosOferta): array {
         $idProducto = (int)$row['id_producto'];
         $stock = max(0, (int)$row['stock_total']);
         if (array_key_exists($idProducto, $stockVendible)) {
@@ -2097,6 +2397,21 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         if ($precioOfertaProducto !== null && $precioOfertaProducto < $precioVentaNormal) {
             $producto['en_oferta'] = true;
             $producto['precio_normal'] = $precioVentaNormal;
+            // Calculado aqui: en prueba real el modelo restaba mal de cabeza ("ahorras $180"
+            // cuando eran $220). consultar_ofertas ya lo traia; ahora tambien este.
+            $producto['ahorro'] = round($precioVentaNormal - $precioOfertaProducto, 2);
+
+            // Motivo real de la oferta y precio de paquete (solo si el producto tiene un lote
+            // en riesgo): mismos datos que consultar_ofertas, para no depender de que el modelo
+            // llame a las dos herramientas.
+            $ctxOferta = $contextosOferta[$idProducto] ?? null;
+            if ($ctxOferta !== null && $ctxOferta['argumento'] !== '') {
+                $producto['motivo_oferta'] = $ctxOferta['argumento'];
+                $producto['urgencia_oferta'] = $ctxOferta['urgencia'];
+            }
+            if ($ctxOferta !== null && $ctxOferta['paquete'] !== null) {
+                $producto['paquete'] = $ctxOferta['paquete'];
+            }
         }
 
         // Solo unos cuantos productos tienen esta ficha capturada todavia (ver
@@ -2123,12 +2438,22 @@ function aiSearchInventory(PDO $pdo, string $busquedaTexto, int $limit = 8): arr
         if ($tablaNutrimental !== '') {
             $producto['tabla_nutrimental'] = $tablaNutrimental;
         }
+        // Solo el conteo del envase, sin exigir la dosis: "cuantas capsulas trae" no depende
+        // de porcion_capsulas y antes solo llegaba a Alex dentro de rendimiento_estimado.
+        if ((int)($row['capsulas_por_envase'] ?? 0) > 0) {
+            $producto['capsulas_por_envase'] = (int)$row['capsulas_por_envase'];
+        }
         $rendimientoEstimado = aiBuildRendimientoEstimadoTexto(
             isset($row['capsulas_por_envase']) && $row['capsulas_por_envase'] !== null ? (int)$row['capsulas_por_envase'] : null,
             isset($row['porcion_capsulas']) && $row['porcion_capsulas'] !== null ? (int)$row['porcion_capsulas'] : null
         );
         if ($rendimientoEstimado !== '') {
             $producto['rendimiento_estimado'] = $rendimientoEstimado;
+        } elseif (!empty($producto['en_oferta'])) {
+            // En prueba real, ante "¿cuanto me dura?" de una oferta SIN dosis capturada, Alex saco la duracion
+            // del nombre ("180 Caps" / 2 = ~90 dias) 1 de cada 3 veces aunque el prompt lo prohibia. Se le dice en el
+            // propio dato que lee.
+            $producto['duracion_envase'] = 'NO CAPTURADA: no la estimes ni la calcules a partir del nombre o del numero de capsulas; si preguntan cuanto dura, di que un asesor se lo confirma.';
         }
         if (!empty($relacionados[$idProducto])) {
             $producto['productos_relacionados'] = $relacionados[$idProducto];
@@ -2278,7 +2603,7 @@ function aiFormatTablaNutrimentalGrilla(array $columnas, array $filas): string
  * que le manda este acotada -- probado contra datos reales, busquedas como "vitamina"
  * superan las 60 coincidencias.
  */
-function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
+function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto, ?array $terminos = null): int
 {
     $busqueda = trim($busquedaTexto);
     if ($busqueda === '') {
@@ -2287,23 +2612,12 @@ function aiCountInventoryMatches(PDO $pdo, string $busquedaTexto): int
         return $stmt ? (int)$stmt->fetchColumn() : 0;
     }
 
+    $params = [];
     $sql = "SELECT COUNT(*) FROM productos p
             WHERE p.estado = 'activo'
-              AND (p.nombre LIKE :term1 ESCAPE '!' OR p.codigo_barras LIKE :term2 ESCAPE '!' OR p.nombre_variante LIKE :term3 ESCAPE '!'
-                   OR p.descripcion LIKE :term4 ESCAPE '!' OR p.ingredientes LIKE :term5 ESCAPE '!' OR p.beneficios LIKE :term6 ESCAPE '!'
-                   OR p.perfil_recomendado LIKE :term7 ESCAPE '!' OR p.nombre_corto LIKE :term8 ESCAPE '!')";
-    $term = '%' . aiEscapeLikeTerm($busqueda) . '%';
+              AND " . aiInventoryCondicionTerminos($terminos ?? [$busqueda], $params);
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        ':term1' => $term,
-        ':term2' => $term,
-        ':term3' => $term,
-        ':term4' => $term,
-        ':term5' => $term,
-        ':term6' => $term,
-        ':term7' => $term,
-        ':term8' => $term,
-    ]);
+    $stmt->execute($params);
 
     return (int)$stmt->fetchColumn();
 }
@@ -2362,7 +2676,11 @@ function aiListarOfertasVigentes(PDO $pdo, string $busqueda = ''): array
         return [];
     }
 
-    $stockVendiblePorProducto = aiStockVendiblePorLotesBatch($pdo, array_column($rows, 'id_producto'));
+    // Una sola proyeccion de lotes para las dos cosas: cuanto stock es vendible y que tan
+    // urgente es venderlo (contexto de caducidad de cada oferta).
+    $lotes = loteFetchProyecciones($pdo, ['ids_producto' => array_column($rows, 'id_producto')])['lotes'];
+    $stockVendiblePorProducto = aiStockVendibleDesdeLotes($lotes);
+    $contextos = aiContextoOfertasPorProducto($pdo, array_column($rows, 'id_producto'), $lotes);
 
     $ofertas = [];
     foreach ($rows as $row) {
@@ -2379,7 +2697,7 @@ function aiListarOfertasVigentes(PDO $pdo, string $busqueda = ''): array
         $precioNormal = round((float)$row['precio_venta'], 2);
         $precioOferta = ofertaPrecioEfectivo($precioNormal, (float)($row['precio_costo'] ?? 0), $row['precio_oferta'] ?? null, true);
 
-        $ofertas[] = [
+        $oferta = [
             'id_producto' => $idProducto,
             'nombre' => aiNombreParaCliente((string)$row['nombre'], $row['nombre_corto'] ?? null, $row['nombre_variante'] ?? null),
             'precio_oferta' => $precioOferta,
@@ -2387,12 +2705,41 @@ function aiListarOfertasVigentes(PDO $pdo, string $busqueda = ''): array
             'ahorro' => round(max(0.0, $precioNormal - $precioOferta), 2),
             'stock' => $stock,
         ];
+
+        // Por que esta en oferta, con datos reales (ver aiContextoOfertasPorProducto()): sin
+        // esto Alex solo sabe "hay descuento" y no puede contestar con honestidad la duda
+        // natural de "¿por que esta mas barato?".
+        $ctx = $contextos[$idProducto] ?? null;
+        // Solo si la oferta es un descuento REAL. Dato real de la copia de produccion: un producto con
+        // precio_oferta capturado por ENCIMA del precio normal (Aloe Vera: oferta $424, normal $399)
+        // queda cobrandose al precio normal; sin este corte Alex lo pondria primero por su urgencia y
+        // le diria al cliente "esta en oferta" a precio completo.
+        if ($ctx !== null && $oferta['ahorro'] <= 0) {
+            $ctx = null;
+        }
+        if ($ctx !== null && $ctx['urgencia'] !== null) {
+            $oferta['urgencia'] = $ctx['urgencia'];
+            $oferta['caduca_el'] = $ctx['fecha_caducidad'];
+            $oferta['dias_para_caducar'] = $ctx['dias_para_caducar'];
+            $oferta['piezas_con_fecha_corta'] = min($ctx['piezas_en_riesgo'], $stock);
+            $oferta['motivo'] = $ctx['argumento'];
+            // Para el registro de eventos de aiExecuteTool() (no viaja al modelo, ver aiToolConsultarOfertas()).
+            $oferta['_severidad'] = $ctx['severidad'];
+        }
+        if ($ctx !== null && $ctx['paquete'] !== null) {
+            $oferta['paquete'] = $ctx['paquete'];
+        }
+
+        $ofertas[] = $oferta;
     }
+
+    // Lo mas urgente primero (empate: se conserva el orden alfabetico de la consulta).
+    usort($ofertas, static fn(array $a, array $b): int => ofertaCadUrgenciaRank($b['urgencia'] ?? null) <=> ofertaCadUrgenciaRank($a['urgencia'] ?? null));
 
     return $ofertas;
 }
 
-function aiToolConsultarOfertas(PDO $pdo, array $args): array
+function aiToolConsultarOfertas(PDO $pdo, array $args, array $context = []): array
 {
     $busqueda = trim((string)($args['busqueda_texto'] ?? ''));
     $ofertas = aiListarOfertasVigentes($pdo, $busqueda);
@@ -2409,6 +2756,21 @@ function aiToolConsultarOfertas(PDO $pdo, array $args): array
     }
 
     $mostradas = array_slice($ofertas, 0, AI_OFERTAS_SEARCH_LIMIT);
+
+    // Bitacora de "a que conversacion se le mostro que oferta" (mide la estrategia, ver
+    // alex_oferta_eventos_utils.php). La severidad es dato interno: no viaja al modelo.
+    foreach ($mostradas as &$oferta) {
+        alexOfertaRegistrarEvento($pdo, ALEX_OFERTA_EVENTO_CONSULTADA, (int)$oferta['id_producto'], [
+            'id_conversacion' => $context['id_conversacion'] ?? null,
+            'id_cliente' => $context['id_cliente'] ?? null,
+            'precio_unitario' => $oferta['precio_oferta'],
+            'precio_normal' => $oferta['precio_normal'],
+            'severidad' => $oferta['_severidad'] ?? null,
+        ]);
+        unset($oferta['_severidad']);
+    }
+    unset($oferta);
+
     $result = ['ok' => true, 'ofertas' => $mostradas, 'total_encontradas' => $total];
 
     if ($total > count($mostradas)) {
@@ -2582,6 +2944,21 @@ function aiToolConsultarInventario(PDO $pdo, array $args): array
     }
 
     $resultados = aiSearchInventory($pdo, $busqueda, AI_INVENTORY_SEARCH_LIMIT);
+    $terminos = null;
+    $sinCoincidenciaExacta = false;
+    if (empty($resultados)) {
+        // La frase completa no coincidio: prueba por palabras sueltas (ej. "resveratrol de 180
+        // capsulas" -> resveratrol + 180 -> "180 Caps"). Si solo coincide quitando los numeros,
+        // se avisa abajo para que Alex no afirme que existe la presentacion pedida.
+        foreach (aiInventoryAlternativasDeBusqueda($busqueda) as $intento) {
+            $resultados = aiSearchInventory($pdo, $busqueda, AI_INVENTORY_SEARCH_LIMIT, $intento);
+            if (!empty($resultados)) {
+                $terminos = $intento;
+                $sinCoincidenciaExacta = preg_match('/\d/', $busqueda) === 1 && !array_filter($intento, 'ctype_digit');
+                break;
+            }
+        }
+    }
     if (empty($resultados)) {
         // Sin resultados exactos: intenta una correccion de tipeo 100% por codigo antes de
         // rendirse. Si encuentra algo, usa el termino corregido tambien para el conteo total
@@ -2599,10 +2976,12 @@ function aiToolConsultarInventario(PDO $pdo, array $args): array
         return ['ok' => true, 'productos' => [], 'total_encontrados' => 0, 'message' => 'No se encontraron productos activos que coincidan con esa busqueda.'];
     }
 
-    $total = aiCountInventoryMatches($pdo, $busqueda);
+    $total = aiCountInventoryMatches($pdo, $busqueda, $terminos);
     $result = ['ok' => true, 'productos' => $resultados, 'total_encontrados' => $total];
 
-    if ($total > count($resultados)) {
+    if ($sinCoincidenciaExacta) {
+        $result['message'] = 'Ningun producto coincide con la cantidad/presentacion exacta que pidio el cliente; estos son los del mismo nombre con otras presentaciones. Ofrecele lo que si hay, diciendo claramente cual presentacion es cada uno.';
+    } elseif ($total > count($resultados)) {
         $result['message'] = "Se encontraron {$total} productos en total; aqui se muestran los primeros " . count($resultados) . ". Si es una busqueda amplia, no los listes todos de golpe: destaca 2-3 opciones y pregunta algo puntual para acotar antes de seguir.";
     }
 
@@ -2657,12 +3036,33 @@ function aiResolveOrderItems(PDO $pdo, array $listaProductos): array
         // El pedido de Alex re-resuelve el precio contra la BD (el LLM nunca lo decide);
         // si el producto esta en la categoria "Ofertas" se cobra el precio de oferta.
         $preciosOferta = aiResolverPreciosOferta($pdo, [$idProducto]);
+        $precioNormal = round((float)$producto['precio_venta'], 2);
+        $precioUnitario = $preciosOferta[$idProducto] ?? $precioNormal;
+
+        // Precio de paquete ("llevate 2"): lo decide el codigo, nunca el modelo -- solo aplica si
+        // el producto esta en oferta, tiene piezas por caducar y la cantidad pedida cae dentro
+        // del rango que ofertaCadPaquete() autoriza (ver ahi por que hay un maximo).
+        $esPaquete = false;
+        $severidadOferta = null;
+        if (isset($preciosOferta[$idProducto]) && $precioUnitario < $precioNormal) {
+            $ctxOferta = aiContextoOfertasPorProducto($pdo, [$idProducto])[$idProducto] ?? null;
+            $severidadOferta = $ctxOferta['severidad'] ?? null;
+            $paquete = $ctxOferta['paquete'] ?? null;
+            if ($paquete !== null && $cantidad >= $paquete['cantidad_minima'] && $cantidad <= $paquete['cantidad_maxima']) {
+                $precioUnitario = $paquete['precio_unitario'];
+                $esPaquete = true;
+            }
+        }
 
         $items[] = [
             'id_producto' => (int)$producto['id_producto'],
             'quantity' => $cantidad,
-            'precio' => $preciosOferta[$idProducto] ?? round((float)$producto['precio_venta'], 2),
+            'precio' => $precioUnitario,
             'nombre' => $nombreParaCliente,
+            'precio_normal' => $precioNormal,
+            'en_oferta' => $precioUnitario < $precioNormal,
+            'paquete' => $esPaquete,
+            'severidad' => $severidadOferta,
         ];
     }
 
@@ -2915,6 +3315,24 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         }
     }
 
+    // Bitacora de ventas de productos en oferta (mide la estrategia de caducidades): despues
+    // de confirmado el pedido, nunca antes. Ver alex_oferta_eventos_utils.php.
+    foreach ($resolved['items'] as $itemVendido) {
+        if (empty($itemVendido['en_oferta'])) {
+            continue;
+        }
+        alexOfertaRegistrarEvento($pdo, ALEX_OFERTA_EVENTO_VENDIDA, (int)$itemVendido['id_producto'], [
+            'id_conversacion' => $context['id_conversacion'] ?? null,
+            'id_cliente' => (!empty($idCliente) && $idCliente > 0) ? $idCliente : null,
+            'id_pedido' => $result['id_pedido'] ?? null,
+            'cantidad' => $itemVendido['quantity'],
+            'precio_unitario' => $itemVendido['precio'],
+            'precio_normal' => $itemVendido['precio_normal'],
+            'severidad' => $itemVendido['severidad'],
+            'paquete' => !empty($itemVendido['paquete']),
+        ]);
+    }
+
     // Marcador de "esta conversacion cerro un pedido real". Se pone AQUI (despues de
     // que dbCreatePublicOrder confirmo el pedido), nunca por criterio de Alex ni antes
     // de tener el pedido -- justamente lo que se pedia evitar.
@@ -3027,6 +3445,13 @@ function aiToolAgendarVenta(PDO $pdo, array $args, array $context): array
         $mensajeRespuesta .= " La direccion esta fuera de la Zona Metropolitana de Guadalajara, asi que se agrego un cargo de envio de \$" . number_format($cargoEnvio, 2) . " MXN (total actualizado: \${$totalPedido} MXN). Menciona este cargo y el total final al cliente.";
     } elseif ($zonaEntrega === 'foraneo') {
         $mensajeRespuesta .= ' La direccion esta fuera de la Zona Metropolitana de Guadalajara, pero el pedido incluye 2 o mas productos distintos, asi que el envio sigue siendo gratis por la promocion vigente -- puedes mencionarselo al cliente.';
+    }
+    $nombresPaquete = array_map(
+        static fn(array $i): string => (string)$i['nombre'],
+        array_values(array_filter($resolved['items'], static fn(array $i): bool => !empty($i['paquete'])))
+    );
+    if ($nombresPaquete !== []) {
+        $mensajeRespuesta .= ' El total ya incluye el precio de paquete de: ' . implode(', ', $nombresPaquete) . '. Mencionaselo al cliente como un ahorro extra por llevar varias piezas.';
     }
     $mensajeRespuesta .= ' ' . aiTelefonoConfirmacionMensaje($telefono, $origenTelefono);
     $mensajeRespuesta .= ' Incluye tambien esta leyenda LEGAL tal cual, sin cambiarle ni una palabra (puedes introducirla con naturalidad, pero el texto de la leyenda en si no se parafrasea): "' . AI_LEYENDA_NO_MEDICAMENTO . '"';
@@ -3267,11 +3692,50 @@ function aiToolQuitarEtiquetaCliente(PDO $pdo, array $args, array $context): arr
     return ['ok' => true, 'message' => "Etiqueta \"{$nombre}\" quitada."];
 }
 
+/**
+ * Bitacora (alex_oferta_eventos): a esta conversacion se le mostro un producto en oferta via
+ * consultar_inventario. Vive aqui y no dentro de aiToolConsultarInventario() para no tocar esa funcion.
+ */
+function aiRegistrarOfertasVistasEnInventario(PDO $pdo, array $resultado, array $context): void
+{
+    foreach (($resultado['productos'] ?? []) as $producto) {
+        if (!empty($producto['en_oferta'])) {
+            alexOfertaRegistrarEvento($pdo, ALEX_OFERTA_EVENTO_CONSULTADA, (int)$producto['id_producto'], [
+                'id_conversacion' => $context['id_conversacion'] ?? null,
+                'id_cliente' => $context['id_cliente'] ?? null,
+                'precio_unitario' => $producto['precio'],
+                'precio_normal' => $producto['precio_normal'] ?? null,
+            ]);
+        }
+    }
+}
+
+/**
+ * Quita del resultado de consultar_ofertas / consultar_inventario todo lo que delata que una oferta es por
+ * caducidad (motivo, fecha, dias, piezas "con fecha corta"). Alex NUNCA comparte datos de caducidad: si el
+ * cliente pregunta, pasa a un humano (prompt 5b-1). Con solo el prompt el modelo a veces lo soltaba
+ * ("solo 5 con la fecha de oferta"): lo que no ve, no lo puede decir.
+ */
+function aiOcultarDatosDeCaducidad(array $resultado): array
+{
+    foreach (($resultado['ofertas'] ?? []) as $i => $oferta) {
+        unset($resultado['ofertas'][$i]['motivo'], $resultado['ofertas'][$i]['caduca_el'], $resultado['ofertas'][$i]['dias_para_caducar'], $resultado['ofertas'][$i]['piezas_con_fecha_corta']);
+    }
+    foreach (($resultado['productos'] ?? []) as $i => $producto) {
+        unset($resultado['productos'][$i]['motivo_oferta']);
+    }
+
+    return $resultado;
+}
+
 function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): array
 {
     switch ($name) {
         case 'consultar_inventario':
-            return aiToolConsultarInventario($pdo, $args);
+            $resultado = aiToolConsultarInventario($pdo, $args);
+            aiRegistrarOfertasVistasEnInventario($pdo, $resultado, $context);
+
+            return aiOcultarDatosDeCaducidad($resultado);
         case 'agendar_venta':
             return aiToolAgendarVenta($pdo, $args, $context);
         case 'transferir_a_humano':
@@ -3281,7 +3745,7 @@ function aiExecuteTool(PDO $pdo, string $name, array $args, array $context): arr
         case 'enviar_catalogo':
             return aiToolEnviarCatalogo($pdo);
         case 'consultar_ofertas':
-            return aiToolConsultarOfertas($pdo, $args);
+            return aiOcultarDatosDeCaducidad(aiToolConsultarOfertas($pdo, $args, $context));
         case 'confirmar_zona_entrega':
             return aiToolConfirmarZonaEntrega($pdo, $args, $context);
         case 'etiquetar_cliente':
@@ -3770,6 +4234,116 @@ function aiEsMensajeNoInterpretable(?string $messageKind, string $textoUsuario):
     return true;
 }
 
+/**
+ * Red de seguridad de codigo contra una duracion inventada. Si en este turno las herramientas dijeron
+ * que la duracion del envase NO esta capturada (duracion_envase / "No tenemos capturada la duracion") y
+ * NINGUNA trajo un rendimiento real (rendimiento_estimado / "Un envase rinde"), toda frase de la
+ * respuesta que afirme cuanto dura, rinde o alcanza un envase en dias/semanas/meses se quita: en prueba
+ * real Alex la saco del nombre ("180 Caps" / 2 = ~90 dias) 1 de cada 4 veces aunque el prompt y el dato
+ * se lo prohibian. Si quita algo, deja claro que un asesor lo confirma. No toca respuestas donde alguna
+ * herramienta si trajo el dato real (para no borrar una duracion legitima de otro producto).
+ */
+function aiQuitarDuracionInventada(string $respuesta, string $resultadosDelTurno): string
+{
+    $sinDato = str_contains($resultadosDelTurno, 'NO CAPTURADA') || str_contains($resultadosDelTurno, 'No tenemos capturada la duracion');
+    $conDato = str_contains($resultadosDelTurno, 'rendimiento_estimado') || str_contains($resultadosDelTurno, 'Un envase rinde');
+    if (!$sinDato || $conDato) {
+        return $respuesta;
+    }
+
+    $patron = '/(dura|duran|durar[aá]|rinde|rinden|rendir[aá]|alcanza|alcanzan|dosis|tratamiento)[^.\n!?]{0,80}\b\d+\s*(d[ií]as|semanas|mes(es)?)\b|\b(un|1|dos|2|tres|3)\s+mes(es)?\b[^.\n!?]{0,40}(dura|rinde|alcanza)|\bunos?\s+\d+\s*d[ií]as\s+de\s+(tratamiento|consumo)/iu';
+    $quitoAlgo = false;
+    $lineas = preg_split('/(?<=[.!?\n])\s+/u', $respuesta) ?: [$respuesta];
+    $limpias = [];
+    foreach ($lineas as $frase) {
+        if (preg_match($patron, $frase)) {
+            $quitoAlgo = true;
+            continue;
+        }
+        $limpias[] = $frase;
+    }
+    if (!$quitoAlgo) {
+        return $respuesta;
+    }
+
+    return rtrim(implode(' ', $limpias)) . "\n\nSobre cuanto te dura el envase, no tengo ese dato confirmado: un asesor te lo confirma con gusto.";
+}
+
+/**
+ * Red de seguridad de codigo: si el cliente menciona un metodo de pago que NO manejamos (tarjeta,
+ * debito, credito, PayPal, Mercado Pago, OXXO) y la respuesta no aclara que solo es efectivo o
+ * transferencia, se agrega el aviso. Visto en prueba real con el modelo: ante "¿puedo pagar con
+ * tarjeta? Quiero 1 X" Alex contesto solo lo del producto empezando con "¡Claro que si!" (suena a
+ * que acepta la tarjeta) 3 de 3 veces, aunque el prompt ya decia que solo se acepta efectivo o
+ * transferencia. Un cliente que cree que puede pagar con tarjeta al recibir es un problema real.
+ */
+function aiAsegurarAvisoDePago(string $textoUsuario, string $respuesta): string
+{
+    $mencionaOtroMetodo = (bool)preg_match('/\b(tarjeta|d[eé]bito|cr[eé]dito|paypal|mercado\s?pago|oxxo)\b/iu', $textoUsuario);
+    if (!$mencionaOtroMetodo || preg_match('/efectivo|transferencia/iu', $respuesta)) {
+        return $respuesta;
+    }
+
+    return rtrim($respuesta) . "\n\nSobre el pago: por ahora solo manejamos efectivo o transferencia, contra entrega. 😊";
+}
+
+/**
+ * Mensaje del cliente que la respuesta debe citar (reply de WhatsApp), o null si no hace falta.
+ * Solo se cita cuando desde la ultima respuesta de Alex el cliente escribio 2 o mas mensajes
+ * (rafaga agrupada por aiEsperarYVerSiHayMensajeNuevo): ahi la cita deja claro a cual contesta,
+ * y citar TODAS las respuestas seria raro. Se cita el ultimo mensaje con id de WhatsApp.
+ *
+ * @return array{wa_message_id:string, texto:string}|null
+ */
+function aiMensajeAResponderConCita(PDO $pdo, int $idConversacion): ?array
+{
+    // Las filas 'assistant' con tool_calls_json son pasos intermedios de este mismo turno, no respuestas.
+    $stmt = $pdo->prepare(
+        "SELECT rol, wa_message_id, contenido FROM whatsapp_mensajes
+         WHERE id_conversacion = ? AND (rol = 'user' OR (rol = 'assistant' AND tool_calls_json IS NULL))
+         ORDER BY id_mensaje DESC LIMIT 20"
+    );
+    $stmt->execute([$idConversacion]);
+
+    $cita = null;
+    $mensajesDelCliente = 0;
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fila) {
+        if ($fila['rol'] === 'assistant') {
+            break;
+        }
+        $mensajesDelCliente++;
+        if ($cita === null && trim((string)$fila['wa_message_id']) !== '') {
+            $cita = ['wa_message_id' => trim((string)$fila['wa_message_id']), 'texto' => mb_substr(trim((string)$fila['contenido']), 0, 200)];
+        }
+    }
+
+    return $mensajesDelCliente >= 2 ? $cita : null;
+}
+
+// Segundos que espera un turno en vivo antes de responder, por si el cliente sigue escribiendo
+// (ver aiEsperarYVerSiHayMensajeNuevo). Se puede ajustar con AI_AGRUPAR_MENSAJES_SEGUNDOS
+// (0 = sin espera; phpunit.xml lo pone en 0). Ojo: el puente espera esta llamada HTTP completa,
+// asi que no conviene subirlo mucho (suma al tiempo de DeepSeek).
+const AI_AGRUPAR_MENSAJES_SEGUNDOS = 8;
+
+/**
+ * Espera unos segundos y regresa true si el cliente escribio otro mensaje despues de
+ * $idMensajeUsuario en la misma conversacion -- entonces el turno de ese mensaje mas nuevo es
+ * el que debe contestar todo junto, y este debe quedarse callado.
+ */
+function aiEsperarYVerSiHayMensajeNuevo(PDO $pdo, int $idConversacion, int $idMensajeUsuario, ?int $segundos = null): bool
+{
+    $segundos ??= (int)(getEnvVar('AI_AGRUPAR_MENSAJES_SEGUNDOS', (string)AI_AGRUPAR_MENSAJES_SEGUNDOS) ?? AI_AGRUPAR_MENSAJES_SEGUNDOS);
+    if ($segundos > 0) {
+        sleep($segundos);
+    }
+
+    $stmt = $pdo->prepare("SELECT 1 FROM whatsapp_mensajes WHERE id_conversacion = ? AND rol = 'user' AND id_mensaje > ? LIMIT 1");
+    $stmt->execute([$idConversacion, $idMensajeUsuario]);
+
+    return $stmt->fetchColumn() !== false;
+}
+
 function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUsuario, ?string $waMessageId = null, ?string $messageKind = null, ?DateTimeImmutable $ahora = null, ?PDO $pdo = null): array
 {
     $waId = trim($waId);
@@ -3805,9 +4379,9 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
 
     if (!aiEstaEnHorarioAtencion($ahora)) {
         // Fuera de horario: se guarda el mensaje (sigue visible y sin marcar como leido en
-        // WhatsApp -- eso no se toca) pero Alex no genera ni manda nada ahorita mismo. Se
-        // retoma con una respuesta real, pausada entre cada una, cuando abre el horario --
-        // ver aiFindConversationsPendingRespuesta()/aiRetomarConversacionPendiente(),
+        // WhatsApp -- eso no se toca) pero Alex no genera ni manda nada ahorita mismo. La cola del
+        // cron lo contesta con ritmo humano (mas lento de noche, ver AI_CATCHUP_RITMO) --
+        // ver aiSiguienteConversacionParaCatchup()/aiRetomarConversacionPendiente(),
         // corridas por whatsapp_followup_cron.php.
         aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
         return [];
@@ -3818,7 +4392,16 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
     $horasInactividad = aiHoursSinceLastMessage($pdo, $idConversacion);
     $esLadaLocal = aiPhoneHasLocalLada($waId);
 
-    aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
+    $idMensajeUsuario = aiAppendMessage($pdo, $idConversacion, 'user', $textoUsuario, null, null, null, $waMessageId);
+
+    // El puente manda cada mensaje del cliente en su propia llamada: si escribe 2-3 seguidos
+    // ("Hola" / "buenos dias" / "precio de X") sin esto salen 2-3 respuestas pegadas (y con el
+    // retraso humano del puente corriendo en paralelo, casi al mismo segundo) -- patron de
+    // automatizacion que ademas suena robotico. Solo responde el turno del ULTIMO mensaje, con
+    // todo el historial ya guardado; los anteriores se quedan callados.
+    if (aiEsperarYVerSiHayMensajeNuevo($pdo, $idConversacion, $idMensajeUsuario, aiEsConversacionDePrueba($waId) ? 0 : null)) {
+        return [];
+    }
 
     return aiGenerarRespuestaParaConversacion(
         $pdo,
@@ -3891,7 +4474,8 @@ function aiGenerarRespuestaParaConversacion(
         $esLadaLocal,
         $perfilClienteTexto,
         $plantillasDisponibles,
-        aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]) ?? ''
+        aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]) ?? '',
+        aiFotoBuildContextLineParaMensaje($pdo, $textoUsuario)
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],
@@ -3920,6 +4504,7 @@ function aiGenerarRespuestaParaConversacion(
     // conversacion pausada -- la usa el re-chequeo de estado_bot al final de la funcion para
     // no confundir "yo la pause" con "un humano la pauso mientras yo generaba la respuesta".
     $pausadoPorEsteTurno = false;
+    $resultadosDelTurno = ''; // JSON de todas las herramientas de este turno (ver aiQuitarDuracionInventada())
 
     for ($i = 0; $i < AI_ASSISTANT_MAX_TOOL_LOOPS; $i++) {
         try {
@@ -3992,6 +4577,7 @@ function aiGenerarRespuestaParaConversacion(
 
             $toolResultJson = (string)json_encode($toolResult, JSON_UNESCAPED_UNICODE);
             aiAppendMessage($pdo, $idConversacion, 'tool', $toolResultJson, null, $toolCallId, $functionName);
+            $resultadosDelTurno .= $toolResultJson;
             $messages[] = ['role' => 'tool', 'tool_call_id' => $toolCallId, 'content' => $toolResultJson];
 
             if ($functionName === 'transferir_a_humano' && !empty($toolResult['ok'])) {
@@ -4051,6 +4637,13 @@ function aiGenerarRespuestaParaConversacion(
         aiLogDiagnosticError($pdo, $idConversacion, 'pase_a_humano_incertidumbre', $textoUsuario, ['respuesta_alex' => $finalText]);
         aiToolTransferirHumano($pdo, ['motivo' => 'Alex incluyo la bandera ' . AI_HANDOFF_TEXT_FLAG . ' en su respuesta (baja confianza o requiere atencion personalizada).'], $context);
         $yaTransferido = true;
+        $pausadoPorEsteTurno = true; // sin esto el re-chequeo de estado_bot de abajo suprime la respuesta
+    } elseif (!$yaTransferido && !$pausadoPorEsteTurno && aiTextoPrometeConsultarEquipo($finalText)) {
+        // Prometio "confirmarlo con el equipo" sin avisar a nadie: se avisa por el.
+        aiLogDiagnosticError($pdo, $idConversacion, 'promesa_equipo_sin_transferir', $textoUsuario, ['respuesta_alex' => $finalText]);
+        aiToolTransferirHumano($pdo, ['motivo' => 'Alex le prometio al cliente confirmar un dato con el equipo. Cliente escribio: "' . mb_substr($textoUsuario, 0, 200) . '"'], $context);
+        $yaTransferido = true;
+        $pausadoPorEsteTurno = true;
     }
 
     if ($yaTransferido && aiTextContainsHandoffFlag($finalText)) {
@@ -4059,6 +4652,10 @@ function aiGenerarRespuestaParaConversacion(
     }
 
     $finalText = aiSanitizePlainTextForWhatsapp($finalText);
+    $finalText = aiQuitarDuracionInventada($finalText, $resultadosDelTurno);
+    if (!$yaTransferido) {
+        $finalText = aiAsegurarAvisoDePago($textoUsuario, $finalText);
+    }
 
     // Re-chequeo de ultimo momento: generar la respuesta (DeepSeek + tool-calls) puede
     // tardar varios segundos, tiempo suficiente para que un asesor humano ya haya
@@ -4087,6 +4684,8 @@ function aiGenerarRespuestaParaConversacion(
         }
     }
 
+    // Antes de guardar la respuesta: despues, esa fila 'assistant' cortaria el conteo de mensajes del cliente.
+    $cita = aiMensajeAResponderConCita($pdo, $idConversacion);
     $idMensajeAsistente = aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
 
     $replyParts = [];
@@ -4095,7 +4694,14 @@ function aiGenerarRespuestaParaConversacion(
         // aiConfirmarEnvioWhatsapp() DESPUES del delay humanizado de 60-120s, justo antes
         // de mandar de verdad -- este re-chequeo de aqui arriba no cubre esa espera (ver
         // el comentario de aiConfirmarEnvioWhatsapp()).
-        $replyParts[] = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
+        $parteTexto = ['type' => 'text', 'text' => $finalText, 'id_mensaje' => $idMensajeAsistente];
+        // Si el cliente mando varios mensajes seguidos, se contesta citando el ultimo (el puente
+        // usa quoted_* para responder "directamente" a ese mensaje; si no lo soporta, los ignora).
+        if ($cita !== null) {
+            $parteTexto['quoted_wa_message_id'] = $cita['wa_message_id'];
+            $parteTexto['quoted_text'] = $cita['texto'];
+        }
+        $replyParts[] = $parteTexto;
     }
     foreach ($mediaParts as $media) {
         $replyParts[] = $media;
@@ -4117,15 +4723,39 @@ function aiGenerarRespuestaParaConversacion(
 function aiFindConversationsPendingRespuesta(PDO $pdo): array
 {
     $stmt = $pdo->query(
-        "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente, ultimo.contenido AS ultimo_mensaje
+        "SELECT c.id_conversacion, c.wa_id, c.nombre_perfil, c.id_cliente, ultimo.contenido AS ultimo_mensaje,
+                ultimo.id_mensaje AS ultimo_id, ultimo.creado_en AS ultimo_creado_en
          FROM whatsapp_conversaciones c
          JOIN whatsapp_mensajes ultimo ON ultimo.id_mensaje = (
              SELECT MAX(m2.id_mensaje) FROM whatsapp_mensajes m2 WHERE m2.id_conversacion = c.id_conversacion
          )
-         WHERE c.estado_bot = 'activo' AND ultimo.rol = 'user'"
+         WHERE c.estado_bot = 'activo' AND ultimo.rol = 'user'
+         ORDER BY ultimo.id_mensaje ASC" // primero el que lleva mas tiempo esperando
     );
 
     return $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+}
+
+/**
+ * La conversacion a la que le toca el catch-up: la que lleva mas tiempo esperando, pero solo si su
+ * ultimo mensaje ya tiene la "edad minima" de la franja (aiCatchupEdadMinimaMinutos(): de noche un
+ * mensaje no se contesta al instante). Null si nadie esta listo todavia.
+ *
+ * @return ?array{id_conversacion:int,wa_id:string,nombre_perfil:?string,id_cliente:?int,ultimo_mensaje:string}
+ */
+function aiSiguienteConversacionParaCatchup(PDO $pdo, ?DateTimeImmutable $ahora = null): ?array
+{
+    $tsAhora = ($ahora ?? new DateTimeImmutable('now'))->getTimestamp();
+
+    foreach (aiFindConversationsPendingRespuesta($pdo) as $fila) {
+        $tsMensaje = strtotime((string)($fila['ultimo_creado_en'] ?? ''));
+        $edadMin = aiCatchupEdadMinimaMinutos((int)($fila['ultimo_id'] ?? 0), $ahora);
+        if ($tsMensaje === false || ($tsAhora - $tsMensaje) >= $edadMin * 60) {
+            return $fila;
+        }
+    }
+
+    return null;
 }
 
 /**
