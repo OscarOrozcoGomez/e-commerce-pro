@@ -5,6 +5,7 @@ import {
   E2E_PRODUCT_NAME,
   addProductToCartByName,
   completeDomicilioCheckout,
+  fechaFutura,
   fijarUbicacionEntrega,
   getNumeroPedido,
   loginAsStaff,
@@ -170,7 +171,7 @@ test.describe('Poner en oferta: del tablero de Caducidades a todos los canales',
     await page.goto('views/asignar_entregas.php');
     const select = page.locator(`#repartidor-${idPedido}`);
     await select.selectOption({ label: 'Playwright E2E Repartidor' });
-    await page.locator(`#fecha-${idPedido}`).fill(new Date().toISOString().slice(0, 10));
+    await page.locator(`#fecha-${idPedido}`).fill(fechaFutura(0));
     await page.locator('.assign-delivery-card').filter({ has: select }).getByRole('button', { name: 'Asignar' }).click();
     await expect(page.getByText('Pedido asignado correctamente.')).toBeVisible();
 

@@ -10,6 +10,12 @@ if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
     exit(1);
 }
 
+// Escribe/borra datos de prueba: NUNCA contra produccion (APP_ENV=production es el valor por defecto en el VPS).
+if (IS_PRODUCTION) {
+    fwrite(STDERR, "Rechazado: este script de pruebas no corre con APP_ENV=production." . PHP_EOL);
+    exit(1);
+}
+
 // Cuentas fijas que los specs de tests/e2e/*.staff.spec.ts referencian por email.
 // Idempotente: correr varias veces (local o CI) solo actualiza el hash de password,
 // no duplica filas ni acumula cuentas basura como las de cliente (que sí son

@@ -19,6 +19,12 @@ if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
     exit(1);
 }
 
+// Escribe/borra datos de prueba: NUNCA contra produccion (APP_ENV=production es el valor por defecto en el VPS).
+if (IS_PRODUCTION) {
+    fwrite(STDERR, "Rechazado: este script de pruebas no corre con APP_ENV=production." . PHP_EOL);
+    exit(1);
+}
+
 $pdo = getPDO();
 $pdo->beginTransaction();
 try {

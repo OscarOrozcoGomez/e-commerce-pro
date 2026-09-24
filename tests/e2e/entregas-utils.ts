@@ -3,6 +3,7 @@ import { expect } from './fixtures';
 import {
   E2E_DIRECCION_ENTREGA,
   addSeededProductToCart,
+  fechaFutura,
   fijarUbicacionEntrega,
   loginAsStaff,
   registerAndLogin,
@@ -40,7 +41,7 @@ export async function asignarYAbrirComoRepartidor(page: Page, idPedido: number) 
   const select = page.locator(`#repartidor-${idPedido}`);
   await expect(select).toBeVisible();
   await select.selectOption({ label: 'Playwright E2E Repartidor' });
-  await page.locator(`#fecha-${idPedido}`).fill(new Date().toISOString().slice(0, 10));
+  await page.locator(`#fecha-${idPedido}`).fill(fechaFutura(0));
   await page.locator('.assign-delivery-card').filter({ has: select }).getByRole('button', { name: 'Asignar' }).click();
   await expect(page.getByText('Pedido asignado correctamente.')).toBeVisible();
 
@@ -51,5 +52,5 @@ export async function asignarYAbrirComoRepartidor(page: Page, idPedido: number) 
   return tarjeta;
 }
 
-export const dinero = async (loc: Locator) => Number(((await loc.textContent()) ?? '').replace(/[^0-9.]/g, ''));
+export const dinero = async (loc: Locator) => Number(((await loc.textContent()) ?? '').replace(/[^0-9.-]/g, ''));
 

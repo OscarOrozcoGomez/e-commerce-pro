@@ -89,7 +89,9 @@ async function desajustesEndpoints(page: Page, efectivos: string[], endpoints: E
     const bloqueada = await estaBloqueada(res);
     // Un POST sin token CSRF que ya pasó el permiso responde "Token de seguridad invalido": el 419 no estándar que usa la app
     // este Apache local lo vuelve 500, así que se reconoce por el mensaje (el permiso sí pasó).
-    const rechazoCsrf = /token de seguridad|token csrf/i.test((await res.text()).slice(0, 2000));
+    // Solo cuenta en los endpoints que se prueban con POST y con la forma JSON del rechazo, para que un 500 real que
+    // casualmente mencione "token" no se tome por un permiso que pasó.
+    const rechazoCsrf = endpoint.metodo === 'POST' && /"success"\s*:\s*false[^}]*token de seguridad/i.test((await res.text()).slice(0, 2000));
 
     if (estado === 429) {
       fallos.push(`RATE LIMIT (429) en ${endpoint.ruta}: no se puede saber si el permiso se aplicó`);

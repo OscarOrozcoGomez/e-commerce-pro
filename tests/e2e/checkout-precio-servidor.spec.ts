@@ -25,7 +25,12 @@ function cuerpoPedido(idProducto: number, item: Record<string, unknown>, extra: 
 }
 
 test.describe('Checkout público: el precio lo fija el servidor', () => {
-  const producto = consultaProducto(E2E_PRODUCT_NAME);
+  // En beforeAll (no al cargar el archivo): si aun no se sembro, el error dice que falta el seed y no rompe la carga de la spec.
+  let producto: ReturnType<typeof consultaProducto>;
+  test.beforeAll(() => {
+    producto = consultaProducto(E2E_PRODUCT_NAME);
+    if (!producto) throw new Error('Falta el producto sembrado "' + E2E_PRODUCT_NAME + '": corre scripts/seed_e2e_test_data.php');
+  });
 
   test('un invitado que manda precio 1.00 por POST directo paga el precio real, no $1', async ({ request }) => {
     expect(producto, 'falta el producto sembrado (seed_e2e_test_data.php)').not.toBeNull();
