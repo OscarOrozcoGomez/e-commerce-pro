@@ -3374,6 +3374,45 @@ final class AiAssistantToolsTest extends TestCase
         });
     }
 
+    public function testAiSaveClienteDireccionNoDuplicaUnaDireccionYaGuardada(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->seedCliente(11, '3310000002');
+
+            aiSaveClienteDireccion($this->pdo, 11, 'Calle Pino #5, Col. Centro, Tlajomulco');
+            aiSaveClienteDireccion($this->pdo, 11, 'calle pino 5 col centro tlajomulco');
+
+            $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM cliente_direcciones WHERE id_cliente = 11')->fetchColumn());
+        });
+    }
+
+    public function testAiGetDatosClienteConocidoDescifraYOrdenaDirecciones(): void
+    {
+        $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
+            $this->pdo->prepare('INSERT INTO clientes (id_cliente, nombre, telefono) VALUES (?, ?, ?)')
+                ->execute([12, piiEncryptValue('Margarita Lopez'), piiEncryptValue('(331) - 497 - 2545')]);
+            aiSaveClienteDireccion($this->pdo, 12, 'Casa: Calle Uno 1, Tlajomulco'); // default
+            aiSaveClienteDireccion($this->pdo, 12, 'Trabajo: Av. Dos 2, Guadalajara');
+
+            $datos = aiGetDatosClienteConocido($this->pdo, 12);
+
+            $this->assertSame('Margarita Lopez', $datos['nombre']);
+            $this->assertSame('3314972545', $datos['telefono']);
+            $this->assertSame(['Casa: Calle Uno 1, Tlajomulco', 'Trabajo: Av. Dos 2, Guadalajara'], $datos['direcciones']);
+        });
+    }
+
+    public function testAiResolverClienteDeConversacionEnlazaPorTelefonoDelChat(): void
+    {
+        $conversacion = aiGetOrCreateConversation($this->pdo, '5213314972545', 'Magui');
+        $this->assertNull($conversacion['id_cliente']); // la conversacion es anterior a la ficha
+        $this->seedCliente(13, '3314972545');
+
+        $this->assertSame(13, aiResolverClienteDeConversacion($this->pdo, $conversacion, '5213314972545'));
+        $enlazado = $this->pdo->query('SELECT id_cliente FROM whatsapp_conversaciones WHERE id_conversacion = ' . (int) $conversacion['id_conversacion'])->fetchColumn();
+        $this->assertSame(13, (int) $enlazado);
+    }
+
     public function testAiToolAgendarVentaCreatesClienteAndTransfersWhenDireccionMissing(): void
     {
         $this->withPiiEncryptionKey('test-key-1234567890', function (): void {
