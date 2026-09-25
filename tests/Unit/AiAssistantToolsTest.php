@@ -201,7 +201,7 @@ final class AiAssistantToolsTest extends TestCase
         $this->assertSame('WAMSG-2', aiMensajeAResponderConCita($this->pdo, $conv)['wa_message_id']);
 
         // Ya contestada la rafaga, un mensaje suelto no se cita.
-        aiAppendMessage($this->pdo, $conv, 'assistant', 'Hola!');
+        aiAppendMessage($this->pdo, $conv, 'assistant', 'Hola!', null, null, null, null, true);
         aiAppendMessage($this->pdo, $conv, 'user', 'Gracias', null, null, null, 'WAMSG-3');
         $this->assertNull(aiMensajeAResponderConCita($this->pdo, $conv));
     }
@@ -224,6 +224,99 @@ final class AiAssistantToolsTest extends TestCase
 
         $this->assertSame('WAMSG-B', $reply[0]['quoted_wa_message_id']);
         $this->assertSame('Donde se encuentran?', $reply[0]['quoted_text']);
+    }
+
+    /** Respuesta de Alex guardada como si un turno en vivo la hubiera dejado esperando al puente. */
+    private function respuestaEnVuelo(int $conv, string $texto, string $creadoEn = '2026-09-25 10:47:30'): int
+    {
+        $id = aiAppendMessage($this->pdo, $conv, 'assistant', $texto, null, null, null, null, true);
+        aiMarcarRespuestaEnVuelo($this->pdo, $id);
+        $this->pdo->prepare('UPDATE whatsapp_mensajes SET creado_en = ? WHERE id_mensaje = ?')->execute([$creadoEn, $id]);
+
+        return $id;
+    }
+
+    private function enviadoWhatsapp(int $idMensaje): int
+    {
+        return (int)$this->pdo->query("SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = {$idMensaje}")->fetchColumn();
+    }
+
+    public function testMensajeNuevoCancelaLaRespuestaEnVueloYSeContestaTodoJunto(): void
+    {
+        // Caso real 2026-09-25 (Margarita): "Omega 90 capsulas" ya tenia respuesta esperando el
+        // retraso del puente cuando llego "Solo una pieza" -- salieron 2 respuestas que se repetian.
+        $ahora = new DateTimeImmutable('2026-09-25 10:48:00');
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500090001', 'Margarita')['id_conversacion'];
+        aiAppendMessage($this->pdo, $conv, 'user', 'Omega 90 capsulas', null, null, null, 'WAMSG-O');
+        $r1 = $this->respuestaEnVuelo($conv, 'Por cierto, tengo una oferta de Calcium & D3...');
+        $b = aiAppendMessage($this->pdo, $conv, 'user', 'Solo una pieza', null, null, null, 'WAMSG-P');
+
+        $this->assertSame(1, aiCancelarRespuestasEnVuelo($this->pdo, $conv, $b, $ahora));
+        $this->assertSame(0, $this->enviadoWhatsapp($r1));
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500090001', $r1), 'el puente ya no debe mandarla');
+
+        // El turno nuevo no la "recuerda" y contesta los 2 mensajes citando el ultimo.
+        $contenidos = array_column(aiLoadConversationHistory($this->pdo, $conv), 'content');
+        $this->assertNotContains('Por cierto, tengo una oferta de Calcium & D3...', $contenidos);
+        $this->assertSame('WAMSG-P', aiMensajeAResponderConCita($this->pdo, $conv)['wa_message_id']);
+    }
+
+    public function testRespuestaYaConfirmadaPorElPuenteNoSeCancela(): void
+    {
+        $ahora = new DateTimeImmutable('2026-09-25 10:48:00');
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500090002', 'Cliente')['id_conversacion'];
+        aiAppendMessage($this->pdo, $conv, 'user', 'Hola');
+        $r1 = $this->respuestaEnVuelo($conv, 'Hola, ¿en qué te ayudo?');
+
+        // El puente confirmo primero (ya salio): el turno siguiente la conserva.
+        $this->assertTrue(aiConfirmarEnvioWhatsapp($this->pdo, '5215500090002', $r1));
+        $b = aiAppendMessage($this->pdo, $conv, 'user', 'Precio del omega');
+        $this->assertSame(0, aiCancelarRespuestasEnVuelo($this->pdo, $conv, $b, $ahora));
+        $this->assertSame(1, $this->enviadoWhatsapp($r1));
+        $this->assertTrue(aiConfirmarEnvioWhatsapp($this->pdo, '5215500090002', $r1), 'reintento del puente');
+    }
+
+    public function testSoloSeCancelanRespuestasEnVivoRecientes(): void
+    {
+        $ahora = new DateTimeImmutable('2026-09-25 10:48:00');
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500090003', 'Cliente')['id_conversacion'];
+        // Seguimiento de 24h / catch-up: sale sin retraso ni confirmacion, nunca "en vuelo".
+        $seguimiento = aiAppendMessage($this->pdo, $conv, 'assistant', '¿Pudiste revisar lo del pedido?', null, null, null, null, true);
+        // En vuelo, pero de hace mas de AI_RESPUESTA_EN_VUELO_MAX_MINUTOS: el puente nunca confirmo, se asume enviada.
+        $vieja = $this->respuestaEnVuelo($conv, 'Respuesta vieja', '2026-09-25 10:40:00');
+        $b = aiAppendMessage($this->pdo, $conv, 'user', 'Si, lo quiero');
+
+        $this->assertSame(0, aiCancelarRespuestasEnVuelo($this->pdo, $conv, $b, $ahora));
+        $this->assertSame(1, $this->enviadoWhatsapp($seguimiento));
+        $this->assertSame(1, $this->enviadoWhatsapp($vieja));
+    }
+
+    public function testTurnoSeCallaSiElClienteEscribioMientrasSeGeneraba(): void
+    {
+        $conv = (int)aiGetOrCreateConversation($this->pdo, '5215500090004', 'Cliente')['id_conversacion'];
+        $a = aiAppendMessage($this->pdo, $conv, 'user', 'Omega 90 capsulas');
+
+        $this->assertFalse(aiTurnoQuedoViejo($this->pdo, $conv, $a, false, false, []));
+        aiAppendMessage($this->pdo, $conv, 'user', 'Solo una pieza');
+        $this->assertTrue(aiTurnoQuedoViejo($this->pdo, $conv, $a, false, false, []), 'no gasta mas DeepSeek ni manda respuesta doble');
+
+        // Si ya transfirio/pauso o junto una plantilla, su mensaje si debe salir.
+        $this->assertFalse(aiTurnoQuedoViejo($this->pdo, $conv, $a, true, false, []));
+        $this->assertFalse(aiTurnoQuedoViejo($this->pdo, $conv, $a, false, true, []));
+        $this->assertFalse(aiTurnoQuedoViejo($this->pdo, $conv, $a, false, false, [['type' => 'image']]));
+    }
+
+    public function testTurnoEnVivoDejaSuRespuestaEnVueloYCancelaLaAnterior(): void
+    {
+        [$reply1] = $this->turnoConModeloDiciendo('5215500090005', 'Omega 90 capsulas', 'Claro, ¿cuántas piezas?');
+        $r1 = (int)$reply1[0]['id_mensaje'];
+
+        [$reply2] = $this->turnoConModeloDiciendo('5215500090005', 'Solo una pieza', 'Listo, 1 Omega 90 caps.');
+
+        $this->assertSame(0, $this->enviadoWhatsapp($r1), 'la primera ya no sale');
+        $this->assertFalse(aiConfirmarEnvioWhatsapp($this->pdo, '5215500090005', $r1));
+        $this->assertSame('Listo, 1 Omega 90 caps.', $reply2[0]['text']);
+        $this->assertTrue(aiConfirmarEnvioWhatsapp($this->pdo, '5215500090005', (int)$reply2[0]['id_mensaje']));
     }
 
     public function testTurnoRespuestaNormalNoPausaLaConversacion(): void
@@ -3175,6 +3268,7 @@ final class AiAssistantToolsTest extends TestCase
                 tool_call_id TEXT NULL,
                 tool_name TEXT NULL,
                 enviado_whatsapp INTEGER NOT NULL DEFAULT 0,
+                esperando_confirmacion_envio INTEGER NOT NULL DEFAULT 0,
                 creado_en TEXT DEFAULT CURRENT_TIMESTAMP
             )'
         );

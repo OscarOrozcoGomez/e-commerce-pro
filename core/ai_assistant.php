@@ -1102,7 +1102,77 @@ function aiConfirmarEnvioWhatsapp(PDO $pdo, string $waId, int $idMensaje): bool
         return false;
     }
 
+    // Cierra la ventana "en vuelo" y mira si mientras esperaba un turno mas nuevo la cancelo
+    // (ver aiCancelarRespuestasEnVuelo()). Ambos UPDATE filtran por esperando_confirmacion_envio=1,
+    // asi que gana el que llegue primero a la fila: o sale esta respuesta y el turno nuevo la
+    // conserva en su historial, o se cancela y el turno nuevo contesta todo en un solo mensaje.
+    try {
+        $pdo->prepare(
+            'UPDATE whatsapp_mensajes SET esperando_confirmacion_envio = 0
+             WHERE id_mensaje = ? AND esperando_confirmacion_envio = 1 AND enviado_whatsapp = 1'
+        )->execute([$idMensaje]);
+        $stmtEnviado = $pdo->prepare('SELECT enviado_whatsapp FROM whatsapp_mensajes WHERE id_mensaje = ?');
+        $stmtEnviado->execute([$idMensaje]);
+        if ((int)$stmtEnviado->fetchColumn() === 0) {
+            return false;
+        }
+    } catch (PDOException $e) {
+        // Columna aun no migrada (deploy en curso): se comporta como antes.
+    }
+
     return true;
+}
+
+/**
+ * Minutos que una respuesta en vivo puede seguir "en vuelo" (8s de agrupacion + DeepSeek +
+ * 60-120s de retraso del puente, con holgura). Pasado eso, si el puente nunca confirmo, se asume
+ * que ya salio y ningun turno nuevo la cancela.
+ */
+const AI_RESPUESTA_EN_VUELO_MAX_MINUTOS = 5;
+
+/**
+ * Cancela las respuestas de Alex que se generaron en vivo ANTES de $idMensajeUsuario y que el
+ * puente todavia no confirma (siguen en su retraso humano de 60-120s). Caso real 2026-09-25
+ * (Margarita): "Omega 90 capsulas" / "Solo una pieza" -- el primer mensaje ya tenia respuesta
+ * esperando salir cuando llego el segundo; el turno del segundo la vio en el historial y la
+ * repitio ("solo confirmame si te agrego el Calcium..."), y salieron las dos pegadas. Asi, el
+ * turno nuevo la quita del historial (enviado_whatsapp=0) y contesta TODO en un solo mensaje:
+ * nunca agrega mensajes, solo quita uno.
+ *
+ * @return int respuestas canceladas
+ */
+function aiCancelarRespuestasEnVuelo(PDO $pdo, int $idConversacion, int $idMensajeUsuario, ?DateTimeImmutable $ahora = null): int
+{
+    $ahora ??= new DateTimeImmutable('now');
+    $desde = $ahora->modify('-' . AI_RESPUESTA_EN_VUELO_MAX_MINUTOS . ' minutes')->format('Y-m-d H:i:s');
+
+    try {
+        $stmt = $pdo->prepare(
+            "UPDATE whatsapp_mensajes SET enviado_whatsapp = 0, esperando_confirmacion_envio = 0
+             WHERE id_conversacion = ? AND id_mensaje < ? AND rol = 'assistant' AND tool_calls_json IS NULL
+               AND enviado_whatsapp = 1 AND esperando_confirmacion_envio = 1 AND creado_en >= ?"
+        );
+        $stmt->execute([$idConversacion, $idMensajeUsuario, $desde]);
+
+        return $stmt->rowCount();
+    } catch (PDOException $e) {
+        return 0; // Columna aun no migrada: comportamiento anterior.
+    }
+}
+
+/**
+ * Marca la respuesta recien guardada como "en vuelo" (esperando que el puente la confirme tras
+ * su retraso humano). Solo el flujo en vivo: el catch-up y el seguimiento de 24h salen sin ese
+ * retraso ni confirmacion, y cancelarlos despues borraria del historial algo que el cliente si vio.
+ */
+function aiMarcarRespuestaEnVuelo(PDO $pdo, int $idMensaje): void
+{
+    try {
+        $pdo->prepare('UPDATE whatsapp_mensajes SET esperando_confirmacion_envio = 1 WHERE id_mensaje = ?')
+            ->execute([$idMensaje]);
+    } catch (PDOException $e) {
+        // Columna aun no migrada: la respuesta sale como antes, sin poder cancelarse.
+    }
 }
 
 /**
@@ -4459,6 +4529,7 @@ function aiAsegurarAvisoDePago(string $textoUsuario, string $respuesta): string
  * Solo se cita cuando desde la ultima respuesta de Alex el cliente escribio 2 o mas mensajes
  * (rafaga agrupada por aiEsperarYVerSiHayMensajeNuevo): ahi la cita deja claro a cual contesta,
  * y citar TODAS las respuestas seria raro. Se cita el ultimo mensaje con id de WhatsApp.
+ * Una respuesta que nunca salio (enviado_whatsapp=0, p.ej. cancelada en vuelo) no corta el conteo.
  *
  * @return array{wa_message_id:string, texto:string}|null
  */
@@ -4467,7 +4538,7 @@ function aiMensajeAResponderConCita(PDO $pdo, int $idConversacion): ?array
     // Las filas 'assistant' con tool_calls_json son pasos intermedios de este mismo turno, no respuestas.
     $stmt = $pdo->prepare(
         "SELECT rol, wa_message_id, contenido FROM whatsapp_mensajes
-         WHERE id_conversacion = ? AND (rol = 'user' OR (rol = 'assistant' AND tool_calls_json IS NULL))
+         WHERE id_conversacion = ? AND (rol = 'user' OR (rol = 'assistant' AND tool_calls_json IS NULL AND enviado_whatsapp = 1))
          ORDER BY id_mensaje DESC LIMIT 20"
     );
     $stmt->execute([$idConversacion]);
@@ -4485,6 +4556,23 @@ function aiMensajeAResponderConCita(PDO $pdo, int $idConversacion): ?array
     }
 
     return $mensajesDelCliente >= 2 ? $cita : null;
+}
+
+/**
+ * True si este turno ya no debe contestar porque el cliente escribio otro mensaje despues de
+ * $idUltimoMensajeCliente (el turno de ese mensaje contesta todo junto). No aplica si este turno
+ * ya transfirio/pauso la conversacion (su despedida si debe salir) ni si ya junto una plantilla o
+ * catalogo para mandar (la tool ya quedo registrada como enviada en el historial).
+ *
+ * @param array<int,array<string,mixed>> $mediaParts
+ */
+function aiTurnoQuedoViejo(PDO $pdo, int $idConversacion, int $idUltimoMensajeCliente, bool $yaTransferido, bool $pausadoPorEsteTurno, array $mediaParts): bool
+{
+    if ($yaTransferido || $pausadoPorEsteTurno || $mediaParts !== [] || $idUltimoMensajeCliente <= 0) {
+        return false;
+    }
+
+    return aiEsperarYVerSiHayMensajeNuevo($pdo, $idConversacion, $idUltimoMensajeCliente, 0);
 }
 
 // Segundos que espera un turno en vivo antes de responder, por si el cliente sigue escribiendo
@@ -4570,6 +4658,10 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         return [];
     }
 
+    // Si la respuesta al mensaje anterior sigue en el retraso humano del puente (el cliente
+    // escribio de nuevo antes de que le llegara), se cancela y este turno contesta todo junto.
+    aiCancelarRespuestasEnVuelo($pdo, $idConversacion, $idMensajeUsuario);
+
     return aiGenerarRespuestaParaConversacion(
         $pdo,
         $idConversacion,
@@ -4580,7 +4672,8 @@ function aiRunAssistantTurn(string $waId, ?string $perfilNombre, string $textoUs
         $perfilNombre,
         $config,
         $horasInactividad,
-        $esLadaLocal
+        $esLadaLocal,
+        true
     );
 }
 
@@ -4602,7 +4695,8 @@ function aiGenerarRespuestaParaConversacion(
     ?string $perfilNombre,
     array $config,
     ?float $horasInactividad,
-    ?bool $esLadaLocal
+    ?bool $esLadaLocal,
+    bool $enVivo = false
 ): array {
     if (aiEsMensajeNoInterpretable($messageKind, $textoUsuario)) {
         aiToolTransferirHumano(
@@ -4681,7 +4775,18 @@ function aiGenerarRespuestaParaConversacion(
     $pausadoPorEsteTurno = false;
     $resultadosDelTurno = ''; // JSON de todas las herramientas de este turno (ver aiQuitarDuracionInventada())
 
+    // Ultimo mensaje del cliente que este turno ya tiene en su historial. Si llega otro mientras
+    // se genera, el turno de ese mensaje nuevo contesta todo junto y este se calla (ver
+    // aiTurnoQuedoViejo()): se evita la respuesta doble y las llamadas a DeepSeek que sobran.
+    $stmtUltimoCliente = $pdo->prepare("SELECT MAX(id_mensaje) FROM whatsapp_mensajes WHERE id_conversacion = ? AND rol = 'user'");
+    $stmtUltimoCliente->execute([$idConversacion]);
+    $idUltimoMensajeCliente = (int)$stmtUltimoCliente->fetchColumn();
+
     for ($i = 0; $i < AI_ASSISTANT_MAX_TOOL_LOOPS; $i++) {
+        if (aiTurnoQuedoViejo($pdo, $idConversacion, $idUltimoMensajeCliente, $yaTransferido, $pausadoPorEsteTurno, $mediaParts)) {
+            return [];
+        }
+
         try {
             $response = aiCallDeepSeek($messages, $tools, $modelo, $temperatura, $apiKeyVariable);
         } catch (Throwable $e) {
@@ -4859,9 +4964,20 @@ function aiGenerarRespuestaParaConversacion(
         }
     }
 
+    // Ultimo chequeo antes de guardar: DeepSeek tarda, y si el cliente escribio mientras tanto
+    // su turno ya viene en camino con todo el historial.
+    if (aiTurnoQuedoViejo($pdo, $idConversacion, $idUltimoMensajeCliente, $yaTransferido, $pausadoPorEsteTurno, $mediaParts)) {
+        return [];
+    }
+
     // Antes de guardar la respuesta: despues, esa fila 'assistant' cortaria el conteo de mensajes del cliente.
     $cita = aiMensajeAResponderConCita($pdo, $idConversacion);
     $idMensajeAsistente = aiAppendMessage($pdo, $idConversacion, 'assistant', $finalText, null, null, null, null, true);
+    // Con plantilla/catalogo adjunto no se marca: la parte de media podria salir aunque el texto
+    // se cancelara, y el historial quedaria incoherente.
+    if ($enVivo && $mediaParts === []) {
+        aiMarcarRespuestaEnVuelo($pdo, $idMensajeAsistente);
+    }
 
     $replyParts = [];
     if ($finalText !== '') {
