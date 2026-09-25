@@ -396,4 +396,49 @@ final class AiAssistantPromptTest extends TestCase
         $this->assertStringContainsString('Mayoreo', $prompt);
         $this->assertStringNotContainsString(AI_TAG_PEDIDO_AGENDADO, $prompt);
     }
+    public function testDatosClienteConocidoConUnaDireccionPideConfirmarlaSinPedirNombre(): void
+    {
+        $linea = aiBuildDatosClienteConocidoContextLine(
+            ['nombre' => 'Margarita Lopez', 'telefono' => '3314972545', 'direcciones' => ['Calle Uno 1, Tlajomulco']],
+            '3314972545'
+        );
+
+        $this->assertStringContainsString('NO le pidas su nombre ni su telefono', $linea);
+        $this->assertStringContainsString('"Margarita Lopez"', $linea);
+        $this->assertStringContainsString('no se lo digas', $linea);
+        $this->assertStringContainsString('Calle Uno 1, Tlajomulco', $linea);
+        $this->assertStringContainsString('(331) - 497 - 2545', $linea);
+    }
+
+    public function testDatosClienteConocidoConVariasDireccionesLasEnlistaYNoElige(): void
+    {
+        $linea = aiBuildDatosClienteConocidoContextLine(
+            ['nombre' => 'Margarita', 'telefono' => '3314972545', 'direcciones' => ['Casa 1', 'Trabajo 2']],
+            '3314972545'
+        );
+
+        $this->assertStringContainsString('2 direcciones', $linea);
+        $this->assertStringContainsString('1) Casa 1 | 2) Trabajo 2', $linea);
+        $this->assertStringContainsString('Nunca elijas tu la direccion', $linea);
+    }
+
+    public function testDatosClienteConocidoNoMuestraDireccionSiElTelefonoNoEsElDelChat(): void
+    {
+        // Ficha enlazada por un numero dictado: la direccion podria ser de otra persona.
+        $linea = aiBuildDatosClienteConocidoContextLine(
+            ['nombre' => 'Otra Persona', 'telefono' => '3311112222', 'direcciones' => ['Calle Secreta 9']],
+            '3314972545'
+        );
+
+        $this->assertStringNotContainsString('Calle Secreta 9', $linea);
+        $this->assertStringContainsString('pidesela completa', $linea);
+        $this->assertSame('', aiBuildDatosClienteConocidoContextLine(['nombre' => '', 'telefono' => null, 'direcciones' => []], '3314972545'));
+    }
+
+    public function testSystemPromptIncluyeDatosClienteConocido(): void
+    {
+        $prompt = aiBuildSystemPrompt($this->baseConfig(), null, [], [], null, null, null, [], '3314972545', null, 'Cliente YA REGISTRADO con nosotros: prueba.');
+
+        $this->assertStringContainsString('Cliente YA REGISTRADO con nosotros: prueba.', $prompt);
+    }
 }

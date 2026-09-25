@@ -173,7 +173,8 @@ function aiBuildSystemPrompt(
     ?string $perfilClienteTexto = null,
     array $plantillasDisponibles = [],
     ?string $telefonoChat = null,
-    ?string $fotoProductoContexto = null
+    ?string $fotoProductoContexto = null,
+    ?string $datosClienteTexto = null
 ): string {
     $persona = trim((string)($config['nombre_persona'] ?? '')) !== '' ? trim((string)$config['nombre_persona']) : 'Alex';
     $fecha = date('Y-m-d');
@@ -215,7 +216,7 @@ function aiBuildSystemPrompt(
         $lines[] = '5b-3. Agregado al cierre: en cuanto el cliente confirme lo que quiere comprar (ANTES de pedirle o confirmarle los datos de envio y de llamar a agendar_venta), si en esta conversacion todavia no has llamado a consultar_ofertas, llamala. Si te regresa una oferta de urgencia alta o media que combine con lo que esta comprando y todavia no esta en su pedido, ofrecesela UNA sola vez como agregado ("por cierto, tengo X en oferta a $Y, ¿te lo agrego?") y despues sigue con el pedido. Esa oferta va como la UNICA pregunta de ese mensaje: nunca la juntes en el mismo mensaje con la pregunta del telefono, del resumen del pedido ni de ningun otro dato (el cliente contesta "si" y no se sabe a cual de las dos), y espera su respuesta antes de pedir o confirmar el resto. Si dice que no o no contesta al respecto, sigue sin volver a insistir. Si ninguna oferta es un complemento razonable de lo que compra, NO ofrezcas nada y NO comentes que revisaste las ofertas ni que "ninguna combina": simplemente sigue con el pedido.';
         $lines[] = '5b-4. Cuentas: si puedes multiplicar cantidad por el precio unitario que te dio la herramienta (y sumar lineas) para decirle un total, hazlo con cuidado y usa el total que regresa agendar_venta al confirmar; pero NUNCA calcules ahorros ni diferencias de precio por tu cuenta (ya viste que se te pueden ir mal): usa SOLO los ahorros que te entregan las herramientas (ahorro, y ahorro_por_pieza / ahorro_vs_precio_normal_por_pieza del paquete).';
         $lines[] = '5c. Venta cruzada: si consultar_inventario te regreso productos_relacionados para un producto, ya vienen con stock verificado -- son seguros de ofrecer tal cual (nombre, precio, stock). Sugierelos de forma natural una vez que el cliente ya mostro interes real en el producto principal (por ejemplo justo despues de que pregunte precio/detalles, o al ir cerrando el pedido), como una sugerencia breve, no como lista aparte ni en cada mensaje. Nunca sugieras un producto que no venga en productos_relacionados ni menciones existencia de algo que no hayas consultado -- si consultar_inventario no te regreso productos_relacionados para ese producto, simplemente no hay sugerencia de venta cruzada esta vez, no inventes una.';
-        $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad), dia de entrega y metodo de pago preferido.';
+        $lines[] = '6. Cuando el cliente quiera comprar, junta en orden: nombre completo, direccion de entrega completa (calle, numero, colonia, codigo postal y ciudad), dia de entrega y metodo de pago preferido. Si mas abajo se indica que es un cliente YA REGISTRADO, no le vuelvas a pedir lo que ya tienes: sigue esas instrucciones y solo confirma su direccion.';
         $lines[] = '6b. Dias de entrega: hacemos entregas UNICAMENTE los miercoles y los sabados -- el cliente se adapta a nuestro itinerario (asi ahorramos combustible al repartir varios pedidos juntos), no al reves. Nunca preguntes "que dia te gustaria" de forma abierta -- ofrece tu mismo estas dos opciones de forma proactiva, por ejemplo: "Hacemos entregas los miercoles y los sabados, ¿cual se le acomoda mejor?". Si el cliente insiste en otro dia, no se lo niegues ni le prometas nada tu mismo -- respondele con calidez que lo vas a checar con el equipo y llama a transferir_a_humano.';
         $lines[] = '6c. Metodo de pago: SOLO aceptamos efectivo o transferencia, contra entrega -- nunca ofrezcas ni aceptes tarjeta ni ningun otro metodo. Si el cliente pregunta por pagar con tarjeta o algo distinto, explicale con naturalidad que por ahora solo manejamos efectivo o transferencia contra entrega.';
         $lines[] = '7. Con esos datos, llama a agendar_venta usando los id_producto que ya te dio consultar_inventario. Confirma el pedido con el numero generado y agradece la compra.';
@@ -269,6 +270,12 @@ function aiBuildSystemPrompt(
     $lineaTelefonoChat = aiBuildTelefonoChatContextLine($telefonoChat);
     if ($lineaTelefonoChat !== '') {
         $lines[] = $lineaTelefonoChat;
+    }
+    // Cliente ya registrado: no se le vuelven a pedir nombre/telefono y solo se le confirma la
+    // direccion guardada -- ver aiBuildDatosClienteConocidoContextLine().
+    $lineaDatosCliente = trim((string)($datosClienteTexto ?? ''));
+    if ($lineaDatosCliente !== '') {
+        $lines[] = $lineaDatosCliente;
     }
     // Foto de un frasco/etiqueta con OCR en el mensaje de este turno: pista de que producto es, o
     // instrucciones de NO buscar leyendas genericas ni ofrecer "similares" -- ver core/ai_foto_producto_utils.php.
@@ -3124,9 +3131,18 @@ function aiSaveClienteDireccion(PDO $pdo, int $idCliente, string $direccion, str
     }
 
     try {
-        $stmtExiste = $pdo->prepare('SELECT COUNT(*) FROM cliente_direcciones WHERE id_cliente = ?');
+        // Si el cliente confirmo una direccion que ya tenia guardada (Alex se la ofrecio, ver
+        // aiBuildDatosClienteConocidoContextLine()), no se duplica.
+        $stmtExiste = $pdo->prepare('SELECT direccion FROM cliente_direcciones WHERE id_cliente = ?');
         $stmtExiste->execute([$idCliente]);
-        $esPrimera = ((int)$stmtExiste->fetchColumn()) === 0;
+        $existentes = $stmtExiste->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        $claveNueva = aiDireccionClaveComparacion($direccion);
+        foreach ($existentes as $existente) {
+            if (aiDireccionClaveComparacion(telefonoDescifrar((string)$existente)) === $claveNueva) {
+                return;
+            }
+        }
+        $esPrimera = count($existentes) === 0;
 
         $latitud = null;
         $longitud = null;
@@ -4197,6 +4213,157 @@ function aiBuildClientProfileContextLine(array $compras, array $temas): string
 }
 
 /* ---------------------------------------------------------------------
+ * Cliente ya registrado: no volver a pedirle sus datos.
+ *
+ * Un cliente que ya existe (lo dio de alta el staff, la web o un pedido anterior con Alex)
+ * no deberia contestar otra vez nombre, telefono y direccion. Alex recibe esos datos en el
+ * prompt y solo le CONFIRMA la direccion (o le pide elegir si tiene varias).
+ * ------------------------------------------------------------------- */
+
+const AI_DATOS_CLIENTE_MAX_DIRECCIONES = 3;
+
+/**
+ * Id del cliente ligado a la conversacion. Si aun no hay enlace (la conversacion es anterior a la
+ * ficha del cliente, o el wa_id era un LID y el telefono se resolvio despues), lo busca por el
+ * telefono REAL del chat y deja la conversacion enlazada. Nunca por un numero dictado.
+ */
+function aiResolverClienteDeConversacion(PDO $pdo, array $conversacion, string $waId): int
+{
+    $idCliente = (int)($conversacion['id_cliente'] ?? 0);
+    if ($idCliente > 0) {
+        return $idCliente;
+    }
+
+    $telefonoChat = aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]);
+    if ($telefonoChat === null) {
+        return 0;
+    }
+
+    try {
+        $match = findClienteByPhone($pdo, $telefonoChat);
+        $idCliente = is_array($match) ? (int)($match['id_cliente'] ?? 0) : 0;
+        if ($idCliente > 0 && !empty($conversacion['id_conversacion'])) {
+            $pdo->prepare('UPDATE whatsapp_conversaciones SET id_cliente = ? WHERE id_conversacion = ? AND id_cliente IS NULL')
+                ->execute([$idCliente, (int)$conversacion['id_conversacion']]);
+        }
+    } catch (Throwable $e) {
+        error_log('WARNING: no se pudo resolver el cliente de la conversacion por telefono: ' . $e->getMessage());
+        return 0;
+    }
+
+    return max(0, $idCliente);
+}
+
+/**
+ * Clave para comparar dos direcciones escritas distinto ("Calle 5 #10, Col. Centro" vs
+ * "calle 5 10 col centro"): sin acentos, mayusculas, espacios ni signos.
+ */
+function aiDireccionClaveComparacion(string $direccion): string
+{
+    return (string)preg_replace('/[^a-z0-9]+/', '', aiStripAccentsLower($direccion));
+}
+
+/**
+ * Nombre, telefono y direcciones guardadas (descifradas) de un cliente, para que Alex no se los
+ * vuelva a pedir. Direcciones: la predeterminada primero y luego las mas recientes, sin repetidas,
+ * maximo AI_DATOS_CLIENTE_MAX_DIRECCIONES. Nunca lanza excepcion.
+ *
+ * @return array{nombre:string, telefono:?string, direcciones:list<string>}
+ */
+function aiGetDatosClienteConocido(PDO $pdo, int $idCliente): array
+{
+    $datos = ['nombre' => '', 'telefono' => null, 'direcciones' => []];
+    if ($idCliente <= 0) {
+        return $datos;
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT nombre, telefono FROM clientes WHERE id_cliente = ? LIMIT 1');
+        $stmt->execute([$idCliente]);
+        $fila = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($fila)) {
+            return $datos;
+        }
+        $datos['nombre'] = telefonoDescifrar((string)($fila['nombre'] ?? ''));
+        $datos['telefono'] = telefonoDigitos10(telefonoDescifrar((string)($fila['telefono'] ?? '')));
+
+        $stmtDir = $pdo->prepare('SELECT direccion FROM cliente_direcciones WHERE id_cliente = ? ORDER BY es_default DESC, id_direccion DESC');
+        $stmtDir->execute([$idCliente]);
+        $vistas = [];
+        while (($dir = $stmtDir->fetchColumn()) !== false) {
+            $texto = trim(telefonoDescifrar((string)$dir));
+            $clave = aiDireccionClaveComparacion($texto);
+            if ($texto === '' || $clave === '' || isset($vistas[$clave])) {
+                continue;
+            }
+            $vistas[$clave] = true;
+            $datos['direcciones'][] = $texto;
+            if (count($datos['direcciones']) >= AI_DATOS_CLIENTE_MAX_DIRECCIONES) {
+                break;
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('WARNING: no se pudieron leer los datos del cliente #' . $idCliente . ' para Alex: ' . $e->getMessage());
+    }
+
+    return $datos;
+}
+
+/**
+ * Pura: linea de contexto para el prompt con los datos del cliente ya registrado.
+ *
+ * - El nombre registrado es de uso INTERNO (asi lo capturo el equipo; al cliente puede no
+ *   hacerle sentido): solo va en nombre_cliente de agendar_venta, nunca se le dice.
+ * - Las direcciones solo se le muestran al cliente si el telefono de su ficha es el MISMO que el
+ *   del chat (verificado por WhatsApp): si el enlace vino de un numero dictado, podria ser la
+ *   direccion de otra persona.
+ */
+function aiBuildDatosClienteConocidoContextLine(array $datos, ?string $telefonoChat): string
+{
+    $nombre = trim((string)($datos['nombre'] ?? ''));
+    $telefonoCliente = telefonoDigitos10((string)($datos['telefono'] ?? ''));
+    $chat = telefonoDigitos10((string)($telefonoChat ?? ''));
+    if ($nombre === '' && $telefonoCliente === null) {
+        return '';
+    }
+
+    $lineas = [];
+    $lineas[] = 'Cliente YA REGISTRADO con nosotros: cuando quiera comprar (paso 6) NO le pidas su nombre ni su telefono otra vez.'
+        . ($nombre !== ''
+            ? " Para nombre_cliente de agendar_venta usa el nombre registrado \"{$nombre}\" -- es dato interno del equipo: no se lo digas ni se lo pidas confirmar (para saludarlo usa su nombre de perfil o como el se presente)."
+            : ' Si no te ha dicho su nombre, usa su nombre de perfil de WhatsApp en nombre_cliente.');
+
+    $direcciones = array_values(array_filter(
+        array_map(static fn($d): string => mb_substr(trim((string)$d), 0, 200), (array)($datos['direcciones'] ?? [])),
+        static fn(string $d): bool => $d !== ''
+    ));
+    $puedeVerDirecciones = $chat !== null && $telefonoCliente !== null && $chat === $telefonoCliente;
+
+    if (!$puedeVerDirecciones || empty($direcciones)) {
+        $lineas[] = 'No tienes una direccion suya que puedas usar: pidesela completa como siempre.';
+        return implode(' ', $lineas);
+    }
+
+    $telefonoLegible = formatPhoneMxDigits($chat);
+    if (count($direcciones) === 1) {
+        $lineas[] = "Tiene registrada esta direccion de entrega: \"{$direcciones[0]}\".";
+        $lineas[] = 'En vez de pedirle la direccion, en UN solo mensaje confirmale sus datos, por ejemplo: "Deja veo si tengo tus datos... ¡Si! Te lo llevamos a ' . $direcciones[0] . ' y te avisamos de tu entrega a este mismo numero, ' . $telefonoLegible . '. ¿Todo correcto o hay que cambiar algo?".';
+        $lineas[] = 'Si confirma, manda esa direccion tal cual en direccion_envio. Si te da otra direccion o numero, usa lo nuevo.';
+    } else {
+        $opciones = [];
+        foreach ($direcciones as $i => $dir) {
+            $opciones[] = ($i + 1) . ') ' . $dir;
+        }
+        $lineas[] = 'Tiene registradas ' . count($direcciones) . ' direcciones de entrega: ' . implode(' | ', $opciones) . '.';
+        $lineas[] = 'En vez de pedirle la direccion, en UN solo mensaje dile que ya tienes sus datos, enlistale estas direcciones numeradas y preguntale a cual se lo llevas (o si es otra); menciona de paso que el aviso de entrega ira a este mismo numero, ' . $telefonoLegible . ', salvo que prefiera otro.';
+        $lineas[] = 'Nunca elijas tu la direccion: espera a que el cliente diga cual y manda ESA tal cual en direccion_envio (si te da una nueva, usa la nueva).';
+    }
+    $lineas[] = 'Ese mensaje de "deja veo si tengo tus datos" va junto con la confirmacion, nunca solo ni esperando respuesta. Despues solo te falta el dia de entrega y el metodo de pago.';
+
+    return implode(' ', $lineas);
+}
+
+/* ---------------------------------------------------------------------
  * Orquestacion de un turno de conversacion.
  *
  * El puente de DigitalOcean es sincrono: hace POST del mensaje entrante y espera la
@@ -4459,7 +4626,14 @@ function aiGenerarRespuestaParaConversacion(
     // Perfil de cliente generado por codigo (compras reales + temas detectados por
     // coincidencia de texto) -- no cuesta ningun token extra, viaja dentro del mismo
     // prompt de este turno. Ver aiGetClientPurchaseProfile()/aiGetTopHistorialTemas().
-    $idClienteConocido = (int)($conversacion['id_cliente'] ?? 0);
+    $idClienteConocido = aiResolverClienteDeConversacion($pdo, $conversacion, $waId);
+    if ($idClienteConocido > 0) {
+        $conversacion['id_cliente'] = $idClienteConocido;
+    }
+    $telefonoChat = aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]);
+    $datosClienteTexto = $idClienteConocido > 0
+        ? aiBuildDatosClienteConocidoContextLine(aiGetDatosClienteConocido($pdo, $idClienteConocido), $telefonoChat)
+        : '';
     $perfilClienteTexto = aiBuildClientProfileContextLine(
         $idClienteConocido > 0 ? aiGetClientPurchaseProfile($pdo, $idClienteConocido) : [],
         aiGetTopHistorialTemas($pdo, $waId)
@@ -4474,8 +4648,9 @@ function aiGenerarRespuestaParaConversacion(
         $esLadaLocal,
         $perfilClienteTexto,
         $plantillasDisponibles,
-        aiTelefonoRealDelChat(['wa_id' => $waId, 'telefono_resuelto' => $conversacion['telefono_resuelto'] ?? null]) ?? '',
-        aiFotoBuildContextLineParaMensaje($pdo, $textoUsuario)
+        $telefonoChat ?? '',
+        aiFotoBuildContextLineParaMensaje($pdo, $textoUsuario),
+        $datosClienteTexto
     );
     $messages = array_merge(
         [['role' => 'system', 'content' => $systemPrompt]],
