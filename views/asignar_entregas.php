@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 require_once __DIR__ . '/../core/entrega_item_utils.php';
 require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/pedido_item_admin_utils.php';
@@ -449,7 +450,7 @@ try {
     if (!empty($pedidosAsignados)) {
         $idsPedidosAsignados = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $pedidosAsignados)));
         $placeholdersAsignados = implode(',', array_fill(0, count($idsPedidosAsignados), '?'));
-        $sqlDetallesAsignados = "SELECT dp.id_pedido, dp.id_detalle, dp.cantidad, dp.estado_entrega, dp.motivo_rechazo, pr.nombre, pr.nombre_variante
+        $sqlDetallesAsignados = "SELECT dp.id_pedido, dp.id_detalle, dp.cantidad, dp.estado_entrega, dp.motivo_rechazo, " . articuloLibreSqlNombreLinea($pdo, 'dp', 'pr') . " AS nombre, " . articuloLibreSqlVarianteLinea($pdo, 'dp', 'pr') . " AS nombre_variante
                                   FROM detalle_pedidos dp
                                   JOIN productos pr ON dp.id_producto = pr.id_producto
                                   WHERE dp.id_pedido IN ({$placeholdersAsignados})

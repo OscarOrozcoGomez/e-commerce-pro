@@ -6,6 +6,7 @@ require_once __DIR__ . '/../core/auth.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
 require_once __DIR__ . '/../core/oferta_pricing.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 
 requireAuth();
 // El permiso 'realizar_ventas' abre esta vista (sin respaldo por rol: el panel de Roles y Permisos manda).
@@ -21,6 +22,10 @@ $pageTitle = $puedeAgendarDomicilio ? 'Registrar Venta / Pedido' : 'Registrar Ve
 $pdo = getPDO();
 $error = '';
 $canManageCustomers = hasPermission('gestionar_clientes');
+// Articulo libre: vender algo fuera de catalogo (otras marcas) capturando marca, descripcion,
+// costo y precio. Solo con el permiso y si la migracion ya creo el producto interno.
+$puedeArticuloLibre = hasPermission('vender_articulo_libre') && articuloLibreIdProducto($pdo) !== null;
+$marcasArticuloLibre = $puedeArticuloLibre ? articuloLibreMarcasUsadas($pdo) : [];
 
 // URL absoluta (con dominio) para el boton "Compartir" -- WhatsApp/Facebook/correo la usan
 // tal cual, no pueden resolver una ruta relativa como BASE_URL.
@@ -198,6 +203,11 @@ include __DIR__ . '/includes/header.php';
                 <button type="button" onclick="nuevaVenta()" class="btn-floating btn-small waves-effect waves-light indigo sales-new-tab-btn" title="Atender otro cliente" style="margin-left: 10px;">
                     <i class="material-icons">add</i>
                 </button>
+<?php if ($puedeArticuloLibre): ?>
+                <a href="<?php echo BASE_URL; ?>views/articulos_libres.php" class="btn-flat waves-effect deep-purple-text" title="Ventas y ganancia de artículos libres (otras marcas)" style="margin-left: 10px; white-space: nowrap;">
+                    <i class="material-icons left">add_box</i>Artículos libres
+                </a>
+<?php endif; ?>
                 <a href="<?php echo BASE_URL; ?>views/dashboard.php" class="btn waves-effect waves-light blue darken-3 z-depth-1 sales-back-dashboard-btn" title="Volver al dashboard" style="margin-left: 10px;">
                     <i class="material-icons left">dashboard</i>Volver al Dashboard
                 </a>
@@ -223,6 +233,49 @@ include __DIR__ . '/includes/header.php';
         <a href="#!" id="btn-confirmar-cerrar-venta" class="waves-effect waves-light btn red darken-2">Sí, cerrar pestaña</a>
     </div>
 </div>
+
+<?php if ($puedeArticuloLibre): ?>
+<div id="modal-articulo-libre" class="modal" style="max-width: 560px;">
+    <div class="modal-content">
+        <h5 style="margin-top: 0;"><i class="material-icons left">add_box</i>Artículo libre</h5>
+        <p class="grey-text text-darken-1" style="margin-top:-8px;">Para vender algo que no está en el catálogo (p. ej. de otra marca). No afecta inventario; cuenta en las ventas y la ganancia del mes.</p>
+        <div class="row" style="margin-bottom:0;">
+            <div class="input-field col s12 m6">
+                <input type="text" id="articulo-libre-marca" maxlength="<?php echo ARTICULO_LIBRE_MARCA_MAX; ?>" list="articulo-libre-marcas" autocomplete="off">
+                <label for="articulo-libre-marca">Marca</label>
+                <datalist id="articulo-libre-marcas">
+<?php foreach ($marcasArticuloLibre as $marcaUsada): ?>
+                    <option value="<?php echo esc($marcaUsada); ?>"></option>
+<?php endforeach; ?>
+                </datalist>
+            </div>
+            <div class="input-field col s12 m6">
+                <input type="text" id="articulo-libre-descripcion" maxlength="<?php echo ARTICULO_LIBRE_DESCRIPCION_MAX; ?>" autocomplete="off">
+                <label for="articulo-libre-descripcion">Descripción</label>
+            </div>
+            <div class="input-field col s4">
+                <input type="number" id="articulo-libre-costo" min="0" step="0.01" inputmode="decimal">
+                <label for="articulo-libre-costo">Costo c/u $</label>
+            </div>
+            <div class="input-field col s4">
+                <input type="number" id="articulo-libre-precio" min="0.01" step="0.01" inputmode="decimal">
+                <label for="articulo-libre-precio">Precio c/u $</label>
+            </div>
+            <div class="input-field col s4">
+                <input type="number" id="articulo-libre-cantidad" min="1" step="1" value="1" inputmode="numeric">
+                <label for="articulo-libre-cantidad" class="active">Cantidad</label>
+            </div>
+            <div class="col s12">
+                <p id="articulo-libre-ganancia" class="grey-text text-darken-2" style="margin:0;">Ganancia: $0.00</p>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <a href="#!" class="modal-close waves-effect waves-grey btn-flat">Cancelar</a>
+        <a href="#!" id="btn-agregar-articulo-libre" class="waves-effect waves-light btn deep-purple darken-1">Agregar al pedido</a>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($canManageCustomers): ?>
 <div id="modal-nuevo-cliente" class="modal" style="max-width: 560px;">
@@ -457,6 +510,14 @@ include __DIR__ . '/includes/header.php';
                                 <span class="helper-text">Presiona Enter para agregar por código de barras</span>
                                 <div class="producto-dropdown"></div>
                             </div>
+<?php if ($puedeArticuloLibre): ?>
+                            <div class="col s12" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;">
+                                <button type="button" class="btn-small waves-effect waves-light deep-purple darken-1 btn-articulo-libre" onclick="abrirModalArticuloLibre('{{id}}')" title="Vender algo que no está en el catálogo (otra marca)">
+                                    <i class="material-icons left">add_box</i>Artículo libre
+                                </button>
+                                <span class="grey-text" style="font-size:0.85rem;">¿No está en el catálogo (otra marca)? Captura marca, descripción, costo y precio.</span>
+                            </div>
+<?php endif; ?>
                         </div>
 
                         <div class="carrito-items"></div>
@@ -1151,6 +1212,14 @@ include __DIR__ . '/includes/header.php';
                 precio_unitario: parseFloat(item.querySelector('.precio-unitario')?.value || '0') || 0,
                 descuento_linea: parseFloat(item.querySelector('.descuento-linea')?.value || '0') || 0,
             })).filter((p) => p.id_producto > 0 && p.cantidad > 0);
+            const libres = Array.from(context.querySelectorAll('.producto-item--libre')).map((item) => ({
+                marca: item.querySelector('.libre-marca')?.value || '',
+                descripcion: item.querySelector('.libre-descripcion')?.value || '',
+                costo: parseFloat(item.querySelector('.libre-costo')?.value || '0') || 0,
+                precio_unitario: parseFloat(item.querySelector('.precio-unitario')?.value || '0') || 0,
+                cantidad: parseInt(item.querySelector('.cantidad')?.value || '0', 10) || 0,
+                descuento_linea: parseFloat(item.querySelector('.descuento-linea')?.value || '0') || 0,
+            })).filter((l) => l.descripcion !== '' && l.cantidad > 0);
 
             tabs.push({
                 id,
@@ -1164,6 +1233,7 @@ include __DIR__ . '/includes/header.php';
                 id_metodo_pago: String(context.querySelector('select[name="id_metodo_pago"]')?.value || ''),
                 observaciones: (context.querySelector('.observaciones')?.value || '').trim(),
                 productos,
+                libres,
             });
         });
 
@@ -1954,6 +2024,8 @@ include __DIR__ . '/includes/header.php';
 
         const verificarLotesModalNode = document.getElementById('modal-verificar-lotes');
         if (verificarLotesModalNode) M.Modal.init(verificarLotesModalNode, { dismissible: false });
+        const articuloLibreModalNode = document.getElementById('modal-articulo-libre');
+        if (articuloLibreModalNode) M.Modal.init(articuloLibreModalNode, { dismissible: true });
         // Hay una sola instancia del modal compartida entre todas las pestanas de venta
         // (SALES_TABS_STORAGE_KEY permite varias abiertas a la vez); resolverModalLotesActual
         // siempre apunta a la confirmacion pendiente que esta VISIBLE ahora mismo.
@@ -2214,6 +2286,9 @@ include __DIR__ . '/includes/header.php';
                     if (priceInput) priceInput.value = String(parseFloat(prodDraft.precio_unitario || product.precio_venta || 0) || 0);
                     if (discountInput) discountInput.value = String(parseFloat(prodDraft.descuento_linea || 0) || 0);
                 });
+            }
+            if (Array.isArray(draftTab.libres) && typeof agregarArticuloLibreALista === 'function') {
+                draftTab.libres.forEach((libreDraft) => agregarArticuloLibreALista(id, libreDraft, { silent: true }));
             }
 
             if (clienteIdInput && clienteIdInput.value !== '') {
@@ -2566,6 +2641,141 @@ include __DIR__ . '/includes/header.php';
         if (!silent) M.toast({ html: `Agregado: ${product.nombre}`, classes: 'green' });
     }
 
+<?php if ($puedeArticuloLibre): ?>
+    // ---- Articulo libre (fuera de catalogo) -------------------------------------------------
+    // La linea viaja como libre_{i}_marca / _descripcion / _costo / _precio / _cantidad /
+    // _descuento (ver api/ventas.php). data-id no es numerico a proposito: asi queda fuera
+    // del plan de lotes, del borrador de productos de catalogo y del tope de stock.
+    let articuloLibreTabActual = null;
+
+    function abrirModalArticuloLibre(tabId) {
+        articuloLibreTabActual = tabId;
+        ['articulo-libre-marca', 'articulo-libre-descripcion', 'articulo-libre-costo', 'articulo-libre-precio'].forEach((idCampo) => {
+            const campo = document.getElementById(idCampo);
+            if (campo) campo.value = '';
+        });
+        const cantidad = document.getElementById('articulo-libre-cantidad');
+        if (cantidad) cantidad.value = '1';
+        actualizarGananciaArticuloLibre();
+        M.updateTextFields();
+        getModalInstance('modal-articulo-libre')?.open();
+        setTimeout(() => document.getElementById('articulo-libre-marca')?.focus(), 150);
+    }
+
+    function actualizarGananciaArticuloLibre() {
+        const costo = parseFloat(document.getElementById('articulo-libre-costo')?.value || '0') || 0;
+        const precio = parseFloat(document.getElementById('articulo-libre-precio')?.value || '0') || 0;
+        const cantidad = parseInt(document.getElementById('articulo-libre-cantidad')?.value || '1', 10) || 1;
+        const ganancia = (precio - costo) * cantidad;
+        const nodo = document.getElementById('articulo-libre-ganancia');
+        if (!nodo) return;
+        nodo.textContent = `Ganancia: $${ganancia.toFixed(2)}` + (precio > 0 && precio < costo ? ' — ojo: el precio está por debajo del costo' : '');
+        nodo.className = ganancia < 0 ? 'red-text text-darken-2' : 'green-text text-darken-2';
+    }
+
+    function confirmarArticuloLibre() {
+        const marca = (document.getElementById('articulo-libre-marca')?.value || '').trim();
+        const descripcion = (document.getElementById('articulo-libre-descripcion')?.value || '').trim();
+        const costoRaw = (document.getElementById('articulo-libre-costo')?.value || '').trim();
+        const precio = parseFloat(document.getElementById('articulo-libre-precio')?.value || '0') || 0;
+        const cantidad = parseInt(document.getElementById('articulo-libre-cantidad')?.value || '0', 10) || 0;
+        const costo = parseFloat(costoRaw || 'NaN');
+        if (marca === '') { M.toast({ html: 'Captura la marca.', classes: 'red darken-2' }); return; }
+        if (descripcion === '') { M.toast({ html: 'Captura la descripción.', classes: 'red darken-2' }); return; }
+        if (costoRaw === '' || !Number.isFinite(costo) || costo < 0) { M.toast({ html: 'Captura el costo (puede ser 0).', classes: 'red darken-2' }); return; }
+        if (precio <= 0) { M.toast({ html: 'El precio debe ser mayor a 0.', classes: 'red darken-2' }); return; }
+        if (cantidad <= 0) { M.toast({ html: 'La cantidad debe ser al menos 1.', classes: 'red darken-2' }); return; }
+        if (!articuloLibreTabActual) return;
+        agregarArticuloLibreALista(articuloLibreTabActual, { marca, descripcion, costo, precio_unitario: precio, cantidad });
+        getModalInstance('modal-articulo-libre')?.close();
+    }
+
+    function agregarArticuloLibreALista(tabId, datos, options = {}) {
+        const context = document.getElementById(`venta-${tabId}`);
+        if (!context) return;
+        const marca = String(datos.marca || '').trim();
+        const descripcion = String(datos.descripcion || '').trim();
+        if (descripcion === '') return;
+        const costo = Math.max(0, parseFloat(datos.costo || 0) || 0);
+        const precio = Math.max(0.01, parseFloat(datos.precio_unitario || 0) || 0);
+        const cantidad = Math.max(1, parseInt(datos.cantidad || 1, 10) || 1);
+        const descuento = Math.max(0, parseFloat(datos.descuento_linea || 0) || 0);
+        const idx = productoIndex++;
+        context.querySelector('.sin-productos').style.display = 'none';
+        const html = `
+            <div class="producto-item producto-item--libre animated fadeIn" data-id="libre-${idx}" style="border-left: 4px solid #5e35b1;">
+                <input type="hidden" class="libre-marca" name="libre_${idx}_marca" value="${escapeHtml(marca)}">
+                <input type="hidden" class="libre-descripcion" name="libre_${idx}_descripcion" value="${escapeHtml(descripcion)}">
+                <div class="producto-item-layout">
+                    <div class="producto-item-media" style="display:flex; align-items:center; justify-content:center; background:#ede7f6; border-radius:4px;">
+                        <i class="material-icons deep-purple-text" style="font-size:2.2rem;">add_box</i>
+                    </div>
+                    <div class="producto-item-info">
+                        <p style="margin: 0; font-weight: bold; font-size: 1.1rem;">${escapeHtml(descripcion)}</p>
+                        <small class="deep-purple-text">Artículo libre · ${escapeHtml(marca)}</small>
+                        <div><small class="grey-text libre-ganancia"></small></div>
+                    </div>
+                    <div class="producto-item-fields">
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Cant.</span>
+                            <div class="sales-qty-control">
+                                <button type="button" class="btn-small grey lighten-1 black-text waves-effect" onclick="decrementarCantidad(this, '${tabId}')">-</button>
+                                <input type="number" class="cantidad" name="libre_${idx}_cantidad" value="${cantidad}" min="1" oninput="actualizarTotal('${tabId}')">
+                                <button type="button" class="btn-small grey lighten-1 black-text waves-effect" onclick="incrementarCantidad(this, '${tabId}')">+</button>
+                            </div>
+                        </div>
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Costo c/u</span>
+                            <input type="number" class="libre-costo producto-item-field-input" name="libre_${idx}_costo" value="${costo.toFixed(2)}" min="0" step="0.01" oninput="actualizarTotal('${tabId}')">
+                        </div>
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Precio Unit.</span>
+                            <input type="number" class="precio-unitario producto-item-field-input" name="libre_${idx}_precio" value="${precio.toFixed(2)}" min="0.01" step="0.01" oninput="actualizarTotal('${tabId}')">
+                        </div>
+                        <div class="producto-item-field-row">
+                            <span class="producto-item-field-label">Desc. $</span>
+                            <input type="number" class="descuento-linea producto-item-field-input producto-item-field-input--desc" name="libre_${idx}_descuento" value="${descuento.toFixed(2)}" min="0" step="0.01" oninput="actualizarTotal('${tabId}')">
+                        </div>
+                    </div>
+                    <div class="producto-item-totals">
+                        <div class="sales-line-total">$<span class="line-subtotal">0.00</span></div>
+                        <button type="button" class="btn-floating btn-small waves-effect waves-light red" onclick="eliminarProducto(this, '${tabId}')"><i class="material-icons">delete</i></button>
+                    </div>
+                </div>
+            </div>
+        `;
+        context.querySelector('.carrito-items').insertAdjacentHTML('afterbegin', html);
+        actualizarTotal(tabId);
+        if (!options.silent) M.toast({ html: `Agregado: ${escapeHtml(descripcion)} (${escapeHtml(marca)})`, classes: 'deep-purple' });
+    }
+
+    function actualizarGananciasLibres(context) {
+        context.querySelectorAll('.producto-item--libre').forEach((item) => {
+            const cantidad = parseInt(item.querySelector('.cantidad')?.value || '0', 10) || 0;
+            const costo = parseFloat(item.querySelector('.libre-costo')?.value || '0') || 0;
+            const subtotal = parseFloat(item.querySelector('.line-subtotal')?.textContent || '0') || 0;
+            const ganancia = subtotal - (costo * cantidad);
+            const nodo = item.querySelector('.libre-ganancia');
+            if (!nodo) return;
+            nodo.textContent = `Ganancia: $${ganancia.toFixed(2)}`;
+            nodo.className = 'libre-ganancia ' + (ganancia < 0 ? 'red-text text-darken-2' : 'green-text text-darken-2');
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        ['articulo-libre-costo', 'articulo-libre-precio', 'articulo-libre-cantidad'].forEach((idCampo) => {
+            document.getElementById(idCampo)?.addEventListener('input', actualizarGananciaArticuloLibre);
+        });
+        document.getElementById('btn-agregar-articulo-libre')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            confirmarArticuloLibre();
+        });
+        document.getElementById('articulo-libre-cantidad')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); confirmarArticuloLibre(); }
+        });
+    });
+<?php endif; ?>
+
     function incrementarCantidad(btn, tabId) {
         const item = btn.closest('.producto-item');
         if (!item) return;
@@ -2639,6 +2849,7 @@ include __DIR__ . '/includes/header.php';
         context.querySelector('.subtotal-val').textContent = subtotal.toFixed(2);
         context.querySelector('.descuento-total-val').textContent = descuentoManual.toFixed(2);
         context.querySelector('.total-venta-val').textContent = total.toFixed(2);
+        if (typeof actualizarGananciasLibres === 'function') actualizarGananciasLibres(context);
 
         actualizarTituloTab(tabId, context.querySelector('.cliente_nombre').value);
         scheduleSalesDraftSave();

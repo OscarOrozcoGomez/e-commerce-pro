@@ -64,6 +64,9 @@ const PERMISOS_EN_USO = [
     'crear_categorias',
     'asignar_categorias_masivo',
     'declarar_liquidacion',
+    // POS: articulos fuera de catalogo (otras marcas) con costo/precio capturados por linea
+    // + su reporte de ganancia (core/articulo_libre_utils.php, views/articulos_libres.php).
+    'vender_articulo_libre',
 ];
 
 /**

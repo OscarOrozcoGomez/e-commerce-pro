@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 
 requireAuth();
 
@@ -154,7 +155,7 @@ include __DIR__ . '/includes/header.php';
                                         <ul class="collection" style="border: none;">
                                             <?php
                                             // Obtener detalles del pedido
-                                            $stmtD = $pdo->prepare("SELECT dp.cantidad, dp.precio_unitario, p.nombre, p.nombre_variante 
+                                            $stmtD = $pdo->prepare("SELECT dp.cantidad, dp.precio_unitario, " . articuloLibreSqlNombreLinea($pdo, 'dp', 'p') . " AS nombre, " . articuloLibreSqlVarianteLinea($pdo, 'dp', 'p') . " AS nombre_variante 
                                                                    FROM detalle_pedidos dp 
                                                                    JOIN productos p ON dp.id_producto = p.id_producto 
                                                                    WHERE dp.id_pedido = ?");

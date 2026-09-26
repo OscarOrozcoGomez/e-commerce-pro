@@ -84,6 +84,7 @@ Archivo grande (~2900 líneas). Helpers clave: `requireAuth()`, `hasPermission(s
 | `purchase_order_utils.php` | Órdenes de compra + importación de pedido de proveedor (pegar correo / OCR) | `views/purchase_orders.php` |
 | `stock_transfer_utils.php` | Transferencia de stock entre almacenes (multiproducto, lotes FEFO) | `views/transfer_stock.php` |
 | `cliente_scope_utils.php` | Alcance de clientes/ventas por almacén (`clientes.id_almacen`) | — |
+| `articulo_libre_utils.php` | "Artículo libre": vender en el POS algo fuera de catálogo (otras marcas) capturando marca, descripción, costo y precio por línea (`detalle_pedidos.marca_libre/descripcion_libre`). Un producto interno archivado (`SYS-ARTICULO-LIBRE`) cumple la FK; sin inventario ni lotes; cuenta en ventas/ganancia del mes. Permiso `vender_articulo_libre` | `views/sales.php`, `api/ventas.php`, `views/articulos_libres.php` (reporte por marca) |
 | `sale_delivery_mode.php` | Modo de venta "en sucursal" / mostrador (folio `MOS-`) | `views/sales.php`, `api/ventas.php` |
 | `pii_crypto.php` | Cifrado de PII de clientes (`piiEncryptValue`/`piiDecryptValue`, prefijo `ENCv1:`) | `scripts/encrypt_customer_pii.php` |
 | `delivery_route_utils.php` / `delivery_zone_utils.php` | Optimización de ruta (Google Maps + fallback local) y clasificación de zona / costo de envío | `api/optimize_delivery_route.php`, `api/delivery_zone_quote.php` |

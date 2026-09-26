@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/articulo_libre_utils.php';
+
 /**
  * Estados de pedido en los que el repartidor todavia puede editar la lista de productos
  * (marcar uno como no entregado sin cancelar todo el pedido).
@@ -101,7 +103,8 @@ function dbMarkProductoNoEntregado(PDO $pdo, int $idPedido, int $idDetalle, ?int
         $descuentoItem = (float)($item['monto_descuento'] ?? 0);
         $subtotalBaseItem = round($subtotalItem + $descuentoItem, 2);
 
-        if ($idProducto > 0 && $cantidad > 0 && $idAlmacenPedido > 0) {
+        // Un articulo libre (fuera de catalogo) nunca tuvo inventario: no hay nada que regresar.
+        if ($idProducto > 0 && $cantidad > 0 && $idAlmacenPedido > 0 && !articuloLibreEsProducto($pdo, $idProducto)) {
             if ($isMysql) {
                 // Mismo patron de resurtido que 'cancelar_entrega' (dbCancelOrderByCustomer
                 // usa UPDATE simple porque ahi la fila ya existe; aqui puede no existir si
@@ -263,6 +266,9 @@ function dbCancelarPedidoCompleto(PDO $pdo, int $idPedido, ?int $idRepartidorFil
             $cantidad = max(0, (int)($it['cantidad'] ?? 0));
             if ($idProducto <= 0 || $cantidad <= 0 || $idAlmacenPedido <= 0) {
                 continue;
+            }
+            if (articuloLibreEsProducto($pdo, $idProducto)) {
+                continue; // articulo libre: sin inventario que regresar
             }
 
             if ($isMysql) {

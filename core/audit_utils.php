@@ -458,6 +458,7 @@ function auditMapaEtiquetasAccion(): array
         'PEDIDO_DOMICILIO_AGENDADO' => 'Pedido a domicilio agendado',
         'VENTA_DESCUENTO_MANUAL' => 'Descuento manual en venta',
         'VENTA_PRECIO_DISTINTO_CATALOGO' => 'Venta con precio distinto al catálogo',
+        'VENTA_ARTICULO_LIBRE' => 'Venta de artículo libre (fuera de catálogo)',
         'CLIENTE_CREADO' => 'Cliente creado',
         'CLIENTE_EDITADO' => 'Cliente editado',
         'CLIENTE_ESTADO_CAMBIADO' => 'Cliente activado / desactivado',

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../core/config.php';
 require_once __DIR__ . '/../core/auth.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 
 requireAuth();
 
@@ -51,7 +52,7 @@ try {
     }
 
     // Obtener detalles con imágenes
-    $sqlItems = "SELECT dp.*, p.nombre, p.nombre_variante, p.sku, p.imagen, p.imagen_url, p.unidad,
+    $sqlItems = "SELECT dp.*, " . articuloLibreSqlNombreLinea($pdo, 'dp', 'p') . " AS nombre, " . articuloLibreSqlVarianteLinea($pdo, 'dp', 'p') . " AS nombre_variante, p.sku, p.imagen, p.imagen_url, p.unidad,
                         COALESCE(
                             (SELECT pi.ruta_archivo
                              FROM producto_imagenes pi

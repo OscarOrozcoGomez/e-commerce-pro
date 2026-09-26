@@ -8,6 +8,7 @@ require_once __DIR__ . '/../core/sale_delivery_mode.php';
 require_once __DIR__ . '/../core/cliente_scope_utils.php';
 require_once __DIR__ . '/../core/oferta_pricing.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 
 header('Content-Type: application/json');
 
@@ -189,6 +190,11 @@ try {
         if ($idProducto <= 0 || $cantidad <= 0 || $precio <= 0) {
             continue;
         }
+        if (articuloLibreEsProducto($pdo, $idProducto)) {
+            // El producto interno de articulo libre solo entra por los campos libre_{i}_*
+            // (con marca/descripcion/costo propios), nunca como producto de catalogo.
+            throw new Exception('El artículo libre debe capturarse con su marca, descripción, costo y precio.');
+        }
 
         $subtotalLineaBase = round($cantidad * $precio, 2);
         if ($descuentoLinea > $subtotalLineaBase) {
@@ -207,9 +213,60 @@ try {
         $descuentoTotal += $descuentoLinea;
     }
 
+    // Articulos libres (fuera de catalogo, p. ej. otras marcas): cada linea trae su propia
+    // marca, descripcion, costo y precio. No llevan inventario ni lotes. Ver
+    // core/articulo_libre_utils.php. Campos: libre_{i}_marca / _descripcion / _costo /
+    // _precio / _cantidad / _descuento.
+    $indicesLibres = [];
+    foreach (array_keys($_POST) as $key) {
+        if (preg_match('/^libre_(\d+)_descripcion$/', (string)$key, $mLibre)) {
+            $indicesLibres[] = (int)$mLibre[1];
+        }
+    }
+    sort($indicesLibres);
+    $hayArticulosLibres = $indicesLibres !== [];
+    $idProductoLibre = null;
+    if ($hayArticulosLibres) {
+        if (!hasPermission('vender_articulo_libre')) {
+            throw new Exception('No tienes permiso para vender artículos libres (fuera de catálogo).');
+        }
+        $idProductoLibre = articuloLibreIdProducto($pdo);
+        if ($idProductoLibre === null
+            || !$columnExists($pdo, 'detalle_pedidos', 'marca_libre')
+            || !$columnExists($pdo, 'detalle_pedidos', 'descripcion_libre')) {
+            throw new Exception('Los artículos libres aún no están habilitados (falta aplicar la migración de base de datos).');
+        }
+    }
+    foreach ($indicesLibres as $iLibre) {
+        $validacionLibre = articuloLibreNormalizarLinea([
+            'marca' => $_POST["libre_{$iLibre}_marca"] ?? '',
+            'descripcion' => $_POST["libre_{$iLibre}_descripcion"] ?? '',
+            'costo' => $_POST["libre_{$iLibre}_costo"] ?? '',
+            'precio' => $_POST["libre_{$iLibre}_precio"] ?? '',
+            'cantidad' => $_POST["libre_{$iLibre}_cantidad"] ?? '',
+            'descuento' => $_POST["libre_{$iLibre}_descuento"] ?? 0,
+        ]);
+        if (!$validacionLibre['ok']) {
+            throw new Exception((string)$validacionLibre['error']);
+        }
+        $lineaLibre = $validacionLibre['linea'];
+        $productos[] = [
+            'id_producto' => $idProductoLibre,
+            'cantidad' => $lineaLibre['cantidad'],
+            'precio_unitario' => $lineaLibre['precio'],
+            'descuento_linea' => $lineaLibre['descuento'],
+            'subtotal_base' => $lineaLibre['subtotal_base'],
+            'subtotal' => $lineaLibre['subtotal'],
+            'libre' => $lineaLibre,
+        ];
+        $subtotal += $lineaLibre['subtotal_base'];
+        $descuentoTotal += $lineaLibre['descuento'];
+    }
+
     if (empty($productos)) {
         throw new Exception('Debe agregar al menos un producto al pedido.');
     }
+    $productosDeCatalogo = array_values(array_filter($productos, static fn(array $p): bool => !isset($p['libre'])));
 
     $subtotal = round($subtotal, 2);
     $descuentoTotal = round($descuentoTotal, 2);
@@ -228,7 +285,7 @@ try {
     // de cobrar, ver modo=plan_lotes arriba), la venta exige confirmar_lotes=1. Sin esto,
     // llamar a este endpoint directo se saltaba el aviso por completo -- el checkbox del
     // modal nunca se mandaba al servidor.
-    $planLotesVenta = loteFetchPlanVentaFEFO($pdo, $productos, $almacenVentaId);
+    $planLotesVenta = $productosDeCatalogo !== [] ? loteFetchPlanVentaFEFO($pdo, $productosDeCatalogo, $almacenVentaId) : [];
     if ($planLotesVenta !== [] && ($_POST['confirmar_lotes'] ?? '') !== '1') {
         throw new Exception('Debes confirmar que verificaste los lotes antes de cobrar.');
     }
@@ -500,8 +557,54 @@ try {
         $auditNotes = [];
         $auditDescuentos = [];
         $auditPreciosDistintos = [];
+        $auditArticulosLibres = [];
 
         foreach ($productos as $producto) {
+            if (isset($producto['libre'])) {
+                // Articulo libre: la linea guarda lo capturado (marca, descripcion, costo,
+                // precio). precio_original = precio: no hay precio de catalogo con que comparar.
+                // Sin inventario, sin lotes, sin movimiento de inventario.
+                $libre = $producto['libre'];
+                $porcentajeDescuentoLibre = $libre['subtotal_base'] > 0 && $libre['descuento'] > 0
+                    ? round(($libre['descuento'] / (float)$libre['subtotal_base']) * 100, 2)
+                    : null;
+                $pdo->prepare(
+                    'INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio_original, precio_unitario, costo_unitario, porcentaje_descuento, monto_descuento, subtotal, marca_libre, descripcion_libre) VALUES (:pedido, :producto, :cantidad, :precio_original, :precio_unitario, :costo_unitario, :porcentaje_descuento, :monto_descuento, :subtotal, :marca_libre, :descripcion_libre)'
+                )->execute([
+                    ':pedido' => $idPedido,
+                    ':producto' => $idProductoLibre,
+                    ':cantidad' => $libre['cantidad'],
+                    ':precio_original' => $libre['precio'],
+                    ':precio_unitario' => $libre['precio'],
+                    ':costo_unitario' => $libre['costo'],
+                    ':porcentaje_descuento' => $porcentajeDescuentoLibre,
+                    ':monto_descuento' => $libre['descuento'],
+                    ':subtotal' => $libre['subtotal'],
+                    ':marca_libre' => $libre['marca'],
+                    ':descripcion_libre' => $libre['descripcion'],
+                ]);
+                $auditArticulosLibres[] = [
+                    'marca' => $libre['marca'],
+                    'descripcion' => $libre['descripcion'],
+                    'cantidad' => $libre['cantidad'],
+                    'costo' => $libre['costo'],
+                    'precio' => $libre['precio'],
+                    'descuento' => $libre['descuento'],
+                    'subtotal' => $libre['subtotal'],
+                    'ganancia' => $libre['ganancia'],
+                ];
+                if ($libre['bajo_costo']) {
+                    $auditNotes[] = sprintf(
+                        '%s x%d: vendido abajo del costo (costo $%.2f c/u, cobrado $%.2f)',
+                        articuloLibreEtiqueta($libre['marca'], $libre['descripcion']),
+                        $libre['cantidad'],
+                        $libre['costo'],
+                        $libre['subtotal']
+                    );
+                }
+                continue;
+            }
+
             $stmtProducto = $pdo->prepare('SELECT nombre, COALESCE(precio_venta, 0) AS precio_venta, COALESCE(precio_costo, 0) AS precio_costo, precio_oferta FROM productos WHERE id_producto = ? LIMIT 1');
             $stmtProducto->execute([$producto['id_producto']]);
             $productoDb = $stmtProducto->fetch(PDO::FETCH_ASSOC) ?: null;
@@ -642,6 +745,19 @@ try {
                 null,
                 ['lineas' => $auditPreciosDistintos],
                 ['severidad' => 'alerta']
+            );
+        }
+        if (!empty($auditArticulosLibres)) {
+            $bajoCosto = array_filter($auditArticulosLibres, static fn(array $l): bool => $l['subtotal'] < round($l['costo'] * $l['cantidad'], 2));
+            logAudit(
+                'VENTA_ARTICULO_LIBRE',
+                'pedidos',
+                $idPedido,
+                "Pedido $numeroPedido | artículo(s) libre(s): "
+                    . implode('; ', array_map(static fn(array $l): string => articuloLibreEtiqueta($l['marca'], $l['descripcion']) . ' x' . $l['cantidad'] . ' costo $' . number_format((float)$l['costo'], 2) . ' precio $' . number_format((float)$l['precio'], 2) . ' ganancia $' . number_format((float)$l['ganancia'], 2), $auditArticulosLibres)),
+                null,
+                ['lineas' => $auditArticulosLibres],
+                $bajoCosto !== [] ? ['severidad' => 'alerta'] : []
             );
         }
         if ($ventaSinInventario) {
