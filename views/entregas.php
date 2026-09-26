@@ -9,6 +9,7 @@ require_once __DIR__ . '/../core/entrega_cambio_utils.php';
 require_once __DIR__ . '/../core/cliente_loyalty_utils.php';
 require_once __DIR__ . '/../core/lote_caducidad_utils.php';
 require_once __DIR__ . '/../core/catalogo_utils.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 
 requireAuth();
 requirePermission('ver_entregas', BASE_URL . 'views/dashboard.php');
@@ -521,7 +522,7 @@ try {
         $idsPedidos = array_values(array_unique(array_map(static fn($row): int => (int)$row['id_pedido'], $entregas)));
         $placeholders = implode(',', array_fill(0, count($idsPedidos), '?'));
         $sqlDetalles = "SELECT dp.id_pedido, dp.id_detalle, dp.id_producto, dp.cantidad, dp.precio_original, dp.precio_unitario, dp.subtotal,
-                               dp.estado_entrega, dp.motivo_rechazo, p.nombre, p.nombre_variante,
+                               dp.estado_entrega, dp.motivo_rechazo, " . articuloLibreSqlNombreLinea($pdo, 'dp', 'p') . " AS nombre, " . articuloLibreSqlVarianteLinea($pdo, 'dp', 'p') . " AS nombre_variante,
                                COALESCE(NULLIF(TRIM(p.imagen), ''), NULLIF(TRIM(p.imagen_url), '')) AS imagen_producto
                         FROM detalle_pedidos dp
                         JOIN productos p ON dp.id_producto = p.id_producto

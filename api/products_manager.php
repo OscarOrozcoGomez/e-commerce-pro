@@ -23,6 +23,7 @@ $usuario = $_SESSION['usuario'];
  * pruebas unitarias sin arrastrar la sesión ni cURL.
  */
 require_once __DIR__ . '/../core/blife_sync_utils.php';
+require_once __DIR__ . '/../core/articulo_libre_utils.php';
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -40,7 +41,8 @@ try {
                     LEFT JOIN producto_categorias pc ON p.id_producto = pc.id_producto
                     LEFT JOIN producto_imagenes pi ON p.id_producto = pi.id_producto
                     LEFT JOIN inventario_almacen ia ON p.id_producto = ia.id_producto AND ia.id_almacen = :id_alm
-                    WHERE p.estado != 'inactivo' 
+                    WHERE p.estado != 'inactivo'
+                      AND p.codigo_barras <> '" . ARTICULO_LIBRE_CODIGO . "'
                     GROUP BY p.id_producto
                     ORDER BY p.nombre";
             $stmt = $pdo->prepare($sql);
